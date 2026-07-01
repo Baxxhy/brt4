@@ -1,0 +1,295 @@
+{
+    "astropy__astropy-12907": [],
+    "astropy__astropy-14182": [],
+    "astropy__astropy-14365": [],
+    "astropy__astropy-14995": [
+        {
+            "name": "test_mask_setter",
+            "file": "astropy/nddata/tests/test_nddata.py",
+            "code_content": "def test_mask_setter():\n    # Since it just changes the _mask attribute everything should work\n    nd = NDData([1, 2, 3])\n    nd.mask = True\n    assert nd.mask\n    nd.mask = False\n    assert not nd.mask\n    # Check that it replaces a mask from init\n    nd = NDData(nd, mask=True)\n    assert nd.mask\n    nd.mask = False\n    assert not nd.mask"
+        },
+        {
+            "name": "test_nddata_init_data_maskedarray",
+            "file": "astropy/nddata/tests/test_nddata.py",
+            "code_content": "def test_nddata_init_data_maskedarray():\n    with NumpyRNGContext(456):\n        NDData(np.random.random((10, 10)), mask=np.random.random((10, 10)) > 0.5)\n\n    # Another test (just copied here)\n    with NumpyRNGContext(12345):\n        a = np.random.randn(100)\n        marr = np.ma.masked_where(a > 0, a)\n    nd = NDData(marr)\n    # check that masks and data match\n    assert_array_equal(nd.mask, marr.mask)\n    assert_array_equal(nd.data, marr.data)\n    # check that they are both by reference\n    marr.mask[10] = ~marr.mask[10]\n    marr.data[11] = 123456789\n    assert_array_equal(nd.mask, marr.mask)\n    assert_array_equal(nd.data, marr.data)\n\n    # or not if we choose copy=True\n    nd = NDData(marr, copy=True)\n    marr.mask[10] = ~marr.mask[10]\n    marr.data[11] = 0\n    assert nd.mask[10] != marr.mask[10]\n    assert nd.data[11] != marr.data[11]"
+        }
+    ],
+    "astropy__astropy-6938": [
+        {
+            "name": "TestCore.test_fix_missing_card_append",
+            "file": "astropy/io/fits/tests/test_core.py",
+            "code_content": "class TestCore(FitsTestCase):\n    def test_fix_missing_card_append(self):\n        hdu = fits.ImageHDU()\n        errs = hdu.req_cards('TESTKW', None, None, 'foo', 'silentfix', [])\n        assert len(errs) == 1\n        assert 'TESTKW' in hdu.header\n        assert hdu.header['TESTKW'] == 'foo'\n        assert hdu.header.cards[-1].keyword == 'TESTKW'"
+        },
+        {
+            "name": "TestCore.test_update_header_card",
+            "file": "astropy/io/fits/tests/test_core.py",
+            "code_content": "class TestCore(FitsTestCase):\n    def test_update_header_card(self):\n        \"\"\"A very basic test for the Header.update method--I'd like to add a\n        few more cases to this at some point.\n        \"\"\"\n\n        header = fits.Header()\n        comment = 'number of bits per data pixel'\n        header['BITPIX'] = (16, comment)\n        assert 'BITPIX' in header\n        assert header['BITPIX'] == 16\n        assert header.comments['BITPIX'] == comment\n\n        header.update(BITPIX=32)\n        assert header['BITPIX'] == 32\n        assert header.comments['BITPIX'] == ''"
+        },
+        {
+            "name": "TestCore.test_extname",
+            "file": "astropy/io/fits/tests/test_core.py",
+            "code_content": "class TestCore(FitsTestCase):\n    def test_extname(self):\n        \"\"\"Test getting/setting the EXTNAME of an HDU.\"\"\"\n\n        h1 = fits.PrimaryHDU()\n        assert h1.name == 'PRIMARY'\n        # Normally a PRIMARY HDU should not have an EXTNAME, though it should\n        # have a default .name attribute\n        assert 'EXTNAME' not in h1.header\n\n        # The current version of the FITS standard does allow PRIMARY HDUs to\n        # have an EXTNAME, however.\n        h1.name = 'NOTREAL'\n        assert h1.name == 'NOTREAL'\n        assert h1.header.get('EXTNAME') == 'NOTREAL'\n\n        # Updating the EXTNAME in the header should update the .name\n        h1.header['EXTNAME'] = 'TOOREAL'\n        assert h1.name == 'TOOREAL'\n\n        # If we delete an EXTNAME keyword from a PRIMARY HDU it should go back\n        # to the default\n        del h1.header['EXTNAME']\n        assert h1.name == 'PRIMARY'\n\n        # For extension HDUs the situation is a bit simpler:\n        h2 = fits.ImageHDU()\n        assert h2.name == ''\n        assert 'EXTNAME' not in h2.header\n        h2.name = 'HELLO'\n        assert h2.name == 'HELLO'\n        assert h2.header.get('EXTNAME') == 'HELLO'\n        h2.header['EXTNAME'] = 'GOODBYE'\n        assert h2.name == 'GOODBYE'"
+        },
+        {
+            "name": "TestCore.test_extver_extlevel",
+            "file": "astropy/io/fits/tests/test_core.py",
+            "code_content": "class TestCore(FitsTestCase):\n    def test_extver_extlevel(self):\n        \"\"\"Test getting/setting the EXTVER and EXTLEVEL of and HDU.\"\"\"\n\n        # EXTVER and EXTNAME work exactly the same; their semantics are, for\n        # now, to be inferred by the user.  Although they should never be less\n        # than 1, the standard does not explicitly forbid any value so long as\n        # it's an integer\n        h1 = fits.PrimaryHDU()\n        assert h1.ver == 1\n        assert h1.level == 1\n        assert 'EXTVER' not in h1.header\n        assert 'EXTLEVEL' not in h1.header\n\n        h1.ver = 2\n        assert h1.header.get('EXTVER') == 2\n        h1.header['EXTVER'] = 3\n        assert h1.ver == 3\n        del h1.header['EXTVER']\n        h1.ver == 1\n\n        h1.level = 2\n        assert h1.header.get('EXTLEVEL') == 2\n        h1.header['EXTLEVEL'] = 3\n        assert h1.level == 3\n        del h1.header['EXTLEVEL']\n        assert h1.level == 1\n\n        pytest.raises(TypeError, setattr, h1, 'ver', 'FOO')\n        pytest.raises(TypeError, setattr, h1, 'level', 'BAR')"
+        },
+        {
+            "name": "TestFitscheck.test_noargs",
+            "file": "astropy/io/fits/tests/test_fitscheck.py",
+            "code_content": "class TestFitscheck(FitsTestCase):\n    def test_noargs(self):\n        with pytest.raises(SystemExit) as e:\n            fitscheck.main(['-h'])\n        assert e.value.code == 0"
+        }
+    ],
+    "astropy__astropy-7746": [],
+    "django__django-10914": [
+        {
+            "name": "FileUploadTests.test_fileupload_getlist",
+            "file": "tests/file_uploads/tests.py",
+            "code_content": "@override_settings(MEDIA_ROOT=MEDIA_ROOT, ROOT_URLCONF='file_uploads.urls', MIDDLEWARE=[])\nclass FileUploadTests(TestCase):\n    def test_fileupload_getlist(self):\n        file = tempfile.NamedTemporaryFile\n        with file() as file1, file() as file2, file() as file2a:\n            file1.write(b'a' * (2 ** 23))\n            file1.seek(0)\n\n            file2.write(b'a' * (2 * 2 ** 18))\n            file2.seek(0)\n\n            file2a.write(b'a' * (5 * 2 ** 20))\n            file2a.seek(0)\n\n            response = self.client.post('/getlist_count/', {\n                'file1': file1,\n                'field1': 'test',\n                'field2': 'test3',\n                'field3': 'test5',\n                'field4': 'test6',\n                'field5': 'test7',\n                'file2': (file2, file2a)\n            })\n            got = response.json()\n            self.assertEqual(got.get('file1'), 1)\n            self.assertEqual(got.get('file2'), 2)"
+        },
+        {
+            "name": "FileUploadTests.test_simple_upload",
+            "file": "tests/file_uploads/tests.py",
+            "code_content": "@override_settings(MEDIA_ROOT=MEDIA_ROOT, ROOT_URLCONF='file_uploads.urls', MIDDLEWARE=[])\nclass FileUploadTests(TestCase):\n    def test_simple_upload(self):\n        with open(__file__, 'rb') as fp:\n            post_data = {\n                'name': 'Ringo',\n                'file_field': fp,\n            }\n            response = self.client.post('/upload/', post_data)\n        self.assertEqual(response.status_code, 200)"
+        },
+        {
+            "name": "FileUploadTests.test_large_upload",
+            "file": "tests/file_uploads/tests.py",
+            "code_content": "@override_settings(MEDIA_ROOT=MEDIA_ROOT, ROOT_URLCONF='file_uploads.urls', MIDDLEWARE=[])\nclass FileUploadTests(TestCase):\n    def test_large_upload(self):\n        file = tempfile.NamedTemporaryFile\n        with file(suffix=\".file1\") as file1, file(suffix=\".file2\") as file2:\n            file1.write(b'a' * (2 ** 21))\n            file1.seek(0)\n\n            file2.write(b'a' * (10 * 2 ** 20))\n            file2.seek(0)\n\n            post_data = {\n                'name': 'Ringo',\n                'file_field1': file1,\n                'file_field2': file2,\n            }\n\n            for key in list(post_data):\n                try:\n                    post_data[key + '_hash'] = hashlib.sha1(post_data[key].read()).hexdigest()\n                    post_data[key].seek(0)\n                except AttributeError:\n                    post_data[key + '_hash'] = hashlib.sha1(post_data[key].encode()).hexdigest()\n\n            response = self.client.post('/verify/', post_data)\n\n            self.assertEqual(response.status_code, 200)"
+        },
+        {
+            "name": "FileUploadTests.test_base64_upload",
+            "file": "tests/file_uploads/tests.py",
+            "code_content": "@override_settings(MEDIA_ROOT=MEDIA_ROOT, ROOT_URLCONF='file_uploads.urls', MIDDLEWARE=[])\nclass FileUploadTests(TestCase):\n    def test_base64_upload(self):\n        self._test_base64_upload(\"This data will be transmitted base64-encoded.\")"
+        },
+        {
+            "name": "FileUploadTests.test_big_base64_upload",
+            "file": "tests/file_uploads/tests.py",
+            "code_content": "@override_settings(MEDIA_ROOT=MEDIA_ROOT, ROOT_URLCONF='file_uploads.urls', MIDDLEWARE=[])\nclass FileUploadTests(TestCase):\n    def test_big_base64_upload(self):\n        self._test_base64_upload(\"Big data\" * 68000)  # > 512Kb"
+        }
+    ],
+    "django__django-10924": [],
+    "django__django-11001": [
+        {
+            "name": "test_order_by_exists",
+            "file": "tests/expressions/tests.py",
+            "code_content": "class BasicExpressionsTests(TestCase):\n    def test_order_by_exists(self):\n        mary = Employee.objects.create(firstname='Mary', lastname='Mustermann', salary=20)\n        mustermanns_by_seniority = Employee.objects.filter(lastname='Mustermann').order_by(\n            # Order by whether the employee is the CEO of a company\n            Exists(Company.objects.filter(ceo=OuterRef('pk'))).desc()\n        )\n        self.assertSequenceEqual(mustermanns_by_seniority, [self.max, mary])"
+        }
+    ],
+    "django__django-11019": [],
+    "django__django-11039": [],
+    "django__django-11049": [],
+    "django__django-11099": [
+        {
+            "name": "test_regex_validator_flags",
+            "file": "tests/validators/tests.py",
+            "code_content": "class TestValidators(SimpleTestCase):\n    def test_regex_validator_flags(self):\n        msg = 'If the flags are set, regex must be a regular expression string.'\n        with self.assertRaisesMessage(TypeError, msg):\n            RegexValidator(re.compile('a'), flags=re.IGNORECASE)"
+        },
+        {
+            "name": "test_validators",
+            "file": "tests/validators/tests.py",
+            "code_content": "class TestValidators(SimpleTestCase):\n    def test_validators(self):\n        for validator, value, expected in TEST_DATA:\n            name = validator.__name__ if isinstance(validator, types.FunctionType) else validator.__class__.__name__\n            exception_expected = expected is not None and issubclass(expected, Exception)\n            with self.subTest(name, value=value):\n                if validator is validate_image_file_extension and not PILLOW_IS_INSTALLED:\n                    self.skipTest('Pillow is required to test validate_image_file_extension.')\n                if exception_expected:\n                    with self.assertRaises(expected):\n                        validator(value)\n                else:\n                    self.assertEqual(expected, validator(value))"
+        },
+        {
+            "name": "test_max_length_validator_message",
+            "file": "tests/validators/tests.py",
+            "code_content": "class TestValidators(SimpleTestCase):\n    def test_max_length_validator_message(self):\n        v = MaxLengthValidator(16, message='\"%(value)s\" has more than %(limit_value)d characters.')\n        with self.assertRaisesMessage(ValidationError, '\"djangoproject.com\" has more than 16 characters.'):\n            v('djangoproject.com')"
+        },
+        {
+            "name": "test_message_list",
+            "file": "tests/validators/tests.py",
+            "code_content": "class TestValidators(SimpleTestCase):\n    def test_message_list(self):\n        v = ValidationError(['First Problem', 'Second Problem'])\n        self.assertEqual(str(v), \"['First Problem', 'Second Problem']\")\n        self.assertEqual(repr(v), \"ValidationError(['First Problem', 'Second Problem'])\")"
+        },
+        {
+            "name": "test_message_dict",
+            "file": "tests/validators/tests.py",
+            "code_content": "class TestValidators(SimpleTestCase):\n    def test_message_dict(self):\n        v = ValidationError({'first': ['First Problem']})\n        self.assertEqual(str(v), \"{'first': ['First Problem']}\")\n        self.assertEqual(repr(v), \"ValidationError({'first': ['First Problem']})\")"
+        }
+    ],
+    "django__django-11133": [],
+    "django__django-11179": [],
+    "django__django-11283": [
+        {
+            "name": "test_create_model",
+            "file": "tests/migrations/test_operations.py",
+            "code_content": "class OperationTests(OperationTestBase):\n    def test_create_model(self):\n        \"\"\"\n        Tests the CreateModel operation.\n        Most other tests use this operation as part of setup, so check failures here first.\n        \"\"\"\n        operation = migrations.CreateModel(\n            \"Pony\",\n            [\n                (\"id\", models.AutoField(primary_key=True)),\n                (\"pink\", models.IntegerField(default=1)),\n            ],\n        )\n        self.assertEqual(operation.describe(), \"Create model Pony\")\n        # Test the state alteration\n        project_state = ProjectState()\n        new_state = project_state.clone()\n        operation.state_forwards(\"test_crmo\", new_state)\n        self.assertEqual(new_state.models[\"test_crmo\", \"pony\"].name, \"Pony\")\n        self.assertEqual(len(new_state.models[\"test_crmo\", \"pony\"].fields), 2)\n        # Test the database alteration\n        self.assertTableNotExists(\"test_crmo_pony\")\n        with connection.schema_editor() as editor:\n            operation.database_forwards(\"test_crmo\", editor, project_state, new_state)\n        self.assertTableExists(\"test_crmo_pony\")\n        # And test reversal\n        with connection.schema_editor() as editor:\n            operation.database_backwards(\"test_crmo\", editor, new_state, project_state)\n        self.assertTableNotExists(\"test_crmo_pony\")\n        # And deconstruction\n        definition = operation.deconstruct()\n        self.assertEqual(definition[0], \"CreateModel\")\n        self.assertEqual(definition[1], [])\n        self.assertEqual(sorted(definition[2]), [\"fields\", \"name\"])\n        # And default manager not in set\n        operation = migrations.CreateModel(\"Foo\", fields=[], managers=[(\"objects\", models.Manager())])\n        definition = operation.deconstruct()\n        self.assertNotIn('managers', definition[2])"
+        },
+        {
+            "name": "test_create_proxy_model",
+            "file": "tests/migrations/test_operations.py",
+            "code_content": "class OperationTests(OperationTestBase):\n    def test_create_proxy_model(self):\n        \"\"\"\n        CreateModel ignores proxy models.\n        \"\"\"\n        project_state = self.set_up_test_model(\"test_crprmo\")\n        # Test the state alteration\n        operation = migrations.CreateModel(\n            \"ProxyPony\",\n            [],\n            options={\"proxy\": True},\n            bases=(\"test_crprmo.Pony\",),\n        )\n        self.assertEqual(operation.describe(), \"Create proxy model ProxyPony\")\n        new_state = project_state.clone()\n        operation.state_forwards(\"test_crprmo\", new_state)\n        self.assertIn((\"test_crprmo\", \"proxypony\"), new_state.models)\n        # Test the database alteration\n        self.assertTableNotExists(\"test_crprmo_proxypony\")\n        self.assertTableExists(\"test_crprmo_pony\")\n        with connection.schema_editor() as editor:\n            operation.database_forwards(\"test_crprmo\", editor, project_state, new_state)\n        self.assertTableNotExists(\"test_crprmo_proxypony\")\n        self.assertTableExists(\"test_crprmo_pony\")\n        # And test reversal\n        with connection.schema_editor() as editor:\n            operation.database_backwards(\"test_crprmo\", editor, new_state, project_state)\n        self.assertTableNotExists(\"test_crprmo_proxypony\")\n        self.assertTableExists(\"test_crprmo_pony\")\n        # And deconstruction\n        definition = operation.deconstruct()\n        self.assertEqual(definition[0], \"CreateModel\")\n        self.assertEqual(definition[1], [])\n        self.assertEqual(sorted(definition[2]), [\"bases\", \"fields\", \"name\", \"options\"])"
+        },
+        {
+            "name": "test_rename_model",
+            "file": "tests/migrations/test_operations.py",
+            "code_content": "class OperationTests(OperationTestBase):\n    def test_rename_model(self):\n        \"\"\"\n        Tests the RenameModel operation.\n        \"\"\"\n        project_state = self.set_up_test_model(\"test_rnmo\", related_model=True)\n        # Test the state alteration\n        operation = migrations.RenameModel(\"Pony\", \"Horse\")\n        self.assertEqual(operation.describe(), \"Rename model Pony to Horse\")\n        # Test initial state and database\n        self.assertIn((\"test_rnmo\", \"pony\"), project_state.models)\n        self.assertNotIn((\"test_rnmo\", \"horse\"), project_state.models)\n        self.assertTableExists(\"test_rnmo_pony\")\n        self.assertTableNotExists(\"test_rnmo_horse\")\n        if connection.features.supports_foreign_keys:\n            self.assertFKExists(\"test_rnmo_rider\", [\"pony_id\"], (\"test_rnmo_pony\", \"id\"))\n            self.assertFKNotExists(\"test_rnmo_rider\", [\"pony_id\"], (\"test_rnmo_horse\", \"id\"))\n        # Migrate forwards\n        new_state = project_state.clone()\n        atomic_rename = connection.features.supports_atomic_references_rename\n        new_state = self.apply_operations(\"test_rnmo\", new_state, [operation], atomic=atomic_rename)\n        # Test new state and database\n        self.assertNotIn((\"test_rnmo\", \"pony\"), new_state.models)\n        self.assertIn((\"test_rnmo\", \"horse\"), new_state.models)\n        # RenameModel also repoints all incoming FKs and M2Ms\n        self.assertEqual(\"test_rnmo.Horse\", new_state.models[\"test_rnmo\", \"rider\"].fields[1][1].remote_field.model)\n        self.assertTableNotExists(\"test_rnmo_pony\")\n        self.assertTableExists(\"test_rnmo_horse\")\n        if connection.features.supports_foreign_keys:\n            self.assertFKNotExists(\"test_rnmo_rider\", [\"pony_id\"], (\"test_rnmo_pony\", \"id\"))\n            self.assertFKExists(\"test_rnmo_rider\", [\"pony_id\"], (\"test_rnmo_horse\", \"id\"))\n        # Migrate backwards\n        original_state = self.unapply_operations(\"test_rnmo\", project_state, [operation], atomic=atomic_rename)\n        # Test original state and database\n        self.assertIn((\"test_rnmo\", \"pony\"), original_state.models)\n        self.assertNotIn((\"test_rnmo\", \"horse\"), original_state.models)\n        self.assertEqual(\"Pony\", original_state.models[\"test_rnmo\", \"rider\"].fields[1][1].remote_field.model)\n        self.assertTableExists(\"test_rnmo_pony\")\n        self.assertTableNotExists(\"test_rnmo_horse\")\n        if connection.features.supports_foreign_keys:\n            self.assertFKExists(\"test_rnmo_rider\", [\"pony_id\"], (\"test_rnmo_pony\", \"id\"))\n            self.assertFKNotExists(\"test_rnmo_rider\", [\"pony_id\"], (\"test_rnmo_horse\", \"id\"))\n        # And deconstruction\n        definition = operation.deconstruct()\n        self.assertEqual(definition[0], \"RenameModel\")\n        self.assertEqual(definition[1], [])\n        self.assertEqual(definition[2], {'old_name': \"Pony\", 'new_name': \"Horse\"})"
+        },
+        {
+            "name": "test_add_field",
+            "file": "tests/migrations/test_operations.py",
+            "code_content": "class OperationTests(OperationTestBase):\n    def test_add_field(self):\n        \"\"\"\n        Tests the AddField operation.\n        \"\"\"\n        # Test the state alteration\n        operation = migrations.AddField(\n            \"Pony\",\n            \"height\",\n            models.FloatField(null=True, default=5),\n        )\n        self.assertEqual(operation.describe(), \"Add field height to Pony\")\n        project_state, new_state = self.make_test_state(\"test_adfl\", operation)\n        self.assertEqual(len(new_state.models[\"test_adfl\", \"pony\"].fields), 4)\n        field = [\n            f for n, f in new_state.models[\"test_adfl\", \"pony\"].fields\n            if n == \"height\"\n        ][0]\n        self.assertEqual(field.default, 5)\n        # Test the database alteration\n        self.assertColumnNotExists(\"test_adfl_pony\", \"height\")\n        with connection.schema_editor() as editor:\n            operation.database_forwards(\"test_adfl\", editor, project_state, new_state)\n        self.assertColumnExists(\"test_adfl_pony\", \"height\")\n        # And test reversal\n        with connection.schema_editor() as editor:\n            operation.database_backwards(\"test_adfl\", editor, new_state, project_state)\n        self.assertColumnNotExists(\"test_adfl_pony\", \"height\")\n        # And deconstruction\n        definition = operation.deconstruct()\n        self.assertEqual(definition[0], \"AddField\")\n        self.assertEqual(definition[1], [])\n        self.assertEqual(sorted(definition[2]), [\"field\", \"model_name\", \"name\"])"
+        },
+        {
+            "name": "test_alter_field",
+            "file": "tests/migrations/test_operations.py",
+            "code_content": "class OperationTests(OperationTestBase):\n    def test_alter_field(self):\n        \"\"\"\n        Tests the AlterField operation.\n        \"\"\"\n        project_state = self.set_up_test_model(\"test_alfl\")\n        # Test the state alteration\n        operation = migrations.AlterField(\"Pony\", \"pink\", models.IntegerField(null=True))\n        self.assertEqual(operation.describe(), \"Alter field pink on Pony\")\n        new_state = project_state.clone()\n        operation.state_forwards(\"test_alfl\", new_state)\n        self.assertIs(project_state.models[\"test_alfl\", \"pony\"].get_field_by_name(\"pink\").null, False)\n        self.assertIs(new_state.models[\"test_alfl\", \"pony\"].get_field_by_name(\"pink\").null, True)\n        # Test the database alteration\n        self.assertColumnNotNull(\"test_alfl_pony\", \"pink\")\n        with connection.schema_editor() as editor:\n            operation.database_forwards(\"test_alfl\", editor, project_state, new_state)\n        self.assertColumnNull(\"test_alfl_pony\", \"pink\")\n        # And test reversal\n        with connection.schema_editor() as editor:\n            operation.database_backwards(\"test_alfl\", editor, new_state, project_state)\n        self.assertColumnNotNull(\"test_alfl_pony\", \"pink\")\n        # And deconstruction\n        definition = operation.deconstruct()\n        self.assertEqual(definition[0], \"AlterField\")\n        self.assertEqual(definition[1], [])\n        self.assertEqual(sorted(definition[2]), [\"field\", \"model_name\", \"name\"])"
+        }
+    ],
+    "django__django-11422": [],
+    "django__django-11564": [],
+    "django__django-11583": [],
+    "django__django-11620": [],
+    "django__django-11630": [
+        {
+            "name": "SchemaTests.test_db_table",
+            "file": "tests/schema/tests.py",
+            "code_content": "class SchemaTests(TransactionTestCase):\n    @isolate_apps('schema')\n    def test_db_table(self):\n        \"\"\"\n        Tests renaming of the table\n        \"\"\"\n        class Author(Model):\n            name = CharField(max_length=255)\n\n            class Meta:\n                app_label = 'schema'\n\n        class Book(Model):\n            author = ForeignKey(Author, CASCADE)\n\n            class Meta:\n                app_label = 'schema'\n\n        # Create the table and one referring it.\n        with connection.schema_editor() as editor:\n            editor.create_model(Author)\n            editor.create_model(Book)\n        # Ensure the table is there to begin with\n        columns = self.column_classes(Author)\n        self.assertEqual(columns['name'][0], \"CharField\")\n        # Alter the table\n        with connection.schema_editor(atomic=connection.features.supports_atomic_references_rename) as editor:\n            editor.alter_db_table(Author, \"schema_author\", \"schema_otherauthor\")\n        # Ensure the table is there afterwards\n        Author._meta.db_table = \"schema_otherauthor\"\n        columns = self.column_classes(Author)\n        self.assertEqual(columns['name'][0], \"CharField\")\n        # Ensure the foreign key reference was updated\n        self.assertForeignKeyExists(Book, \"author_id\", \"schema_otherauthor\")\n        # Alter the table again\n        with connection.schema_editor(atomic=connection.features.supports_atomic_references_rename) as editor:\n            editor.alter_db_table(Author, \"schema_otherauthor\", \"schema_author\")\n        # Ensure the table is still there\n        Author._meta.db_table = \"schema_author\"\n        columns = self.column_classes(Author)\n        self.assertEqual(columns['name'][0], \"CharField\")"
+        },
+        {
+            "name": "SchemaTests.test_rename_table_renames_deferred_sql_references",
+            "file": "tests/schema/tests.py",
+            "code_content": "class SchemaTests(TransactionTestCase):\n    def test_rename_table_renames_deferred_sql_references(self):\n        atomic_rename = connection.features.supports_atomic_references_rename\n        with connection.schema_editor(atomic=atomic_rename) as editor:\n            editor.create_model(Author)\n            editor.create_model(Book)\n            editor.alter_db_table(Author, 'schema_author', 'schema_renamed_author')\n            editor.alter_db_table(Author, 'schema_book', 'schema_renamed_book')\n            self.assertGreater(len(editor.deferred_sql), 0)\n            for statement in editor.deferred_sql:\n                self.assertIs(statement.references_table('schema_author'), False)\n                self.assertIs(statement.references_table('schema_book'), False)"
+        },
+        {
+            "name": "SchemaTests.test_rename_column_renames_deferred_sql_references",
+            "file": "tests/schema/tests.py",
+            "code_content": "class SchemaTests(TransactionTestCase):\n    @unittest.skipIf(connection.vendor == 'sqlite', 'SQLite naively remakes the table on field alteration.')\n    def test_rename_column_renames_deferred_sql_references(self):\n        with connection.schema_editor() as editor:\n            editor.create_model(Author)\n            editor.create_model(Book)\n            old_title = Book._meta.get_field('title')\n            new_title = CharField(max_length=100, db_index=True)\n            new_title.set_attributes_from_name('renamed_title')\n            editor.alter_field(Book, old_title, new_title)\n            old_author = Book._meta.get_field('author')\n            new_author = ForeignKey(Author, CASCADE)\n            new_author.set_attributes_from_name('renamed_author')\n            editor.alter_field(Book, old_author, new_author)\n            self.assertGreater(len(editor.deferred_sql), 0)\n            for statement in editor.deferred_sql:\n                self.assertIs(statement.references_column('book', 'title'), False)\n                self.assertIs(statement.references_column('book', 'author_id'), False)"
+        },
+        {
+            "name": "SchemaTests.test_foreign_key_index_long_names_regression",
+            "file": "tests/schema/tests.py",
+            "code_content": "class SchemaTests(TransactionTestCase):\n    @skipUnlessDBFeature('supports_foreign_keys')\n    def test_foreign_key_index_long_names_regression(self):\n        \"\"\"\n        Regression test for #21497.\n        Only affects databases that supports foreign keys.\n        \"\"\"\n        # Create the table\n        with connection.schema_editor() as editor:\n            editor.create_model(AuthorWithEvenLongerName)\n            editor.create_model(BookWithLongName)\n        # Find the properly shortened column name\n        column_name = connection.ops.quote_name(\"author_foreign_key_with_really_long_field_name_id\")\n        column_name = column_name[1:-1].lower()  # unquote, and, for Oracle, un-upcase\n        # Ensure the table is there and has an index on the column\n        self.assertIn(\n            column_name,\n            self.get_indexes(BookWithLongName._meta.db_table),\n        )"
+        },
+        {
+            "name": "SchemaTests.test_add_foreign_key_long_names",
+            "file": "tests/schema/tests.py",
+            "code_content": "class SchemaTests(TransactionTestCase):\n    @skipUnlessDBFeature('supports_foreign_keys')\n    def test_add_foreign_key_long_names(self):\n        \"\"\"\n        Regression test for #23009.\n        Only affects databases that supports foreign keys.\n        \"\"\"\n        # Create the initial tables\n        with connection.schema_editor() as editor:\n            editor.create_model(AuthorWithEvenLongerName)\n            editor.create_model(BookWithLongName)\n        # Add a second FK, this would fail due to long ref name before the fix\n        new_field = ForeignKey(AuthorWithEvenLongerName, CASCADE, related_name=\"something\")\n        new_field.set_attributes_from_name(\"author_other_really_long_named_i_mean_so_long_fk\")\n        with connection.schema_editor() as editor:\n            editor.add_field(BookWithLongName, new_field)"
+        }
+    ],
+    "django__django-11742": [],
+    "django__django-11797": [
+        {
+            "name": "test_annotate_and_join",
+            "file": "tests/aggregation_regress/tests.py",
+            "code_content": "class AggregationTests(TestCase):\n    def test_annotate_and_join(self):\n        self.assertEqual(\n            Author.objects.annotate(c=Count(\"friends__name\")).exclude(friends__name=\"Joe\").count(),\n            Author.objects.count()\n        )"
+        },
+        {
+            "name": "test_aggregate",
+            "file": "tests/aggregation_regress/tests.py",
+            "code_content": "class AggregationTests(TestCase):\n    def test_aggregate(self):\n        # Ordering requests are ignored\n        self.assertEqual(\n            Author.objects.order_by(\"name\").aggregate(Avg(\"age\")),\n            {\"age__avg\": Approximate(37.444, places=1)}\n        )\n\n        # Implicit ordering is also ignored\n        self.assertEqual(\n            Book.objects.aggregate(Sum(\"pages\")),\n            {\"pages__sum\": 3703},\n        )\n\n        # Baseline results\n        self.assertEqual(\n            Book.objects.aggregate(Sum('pages'), Avg('pages')),\n            {'pages__sum': 3703, 'pages__avg': Approximate(617.166, places=2)}\n        )\n\n        # Empty values query doesn't affect grouping or results\n        self.assertEqual(\n            Book.objects.values().aggregate(Sum('pages'), Avg('pages')),\n            {'pages__sum': 3703, 'pages__avg': Approximate(617.166, places=2)}\n        )\n\n        # Aggregate overrides extra selected column\n        self.assertEqual(\n            Book.objects.extra(select={'price_per_page': 'price / pages'}).aggregate(Sum('pages')),\n            {'pages__sum': 3703}\n        )"
+        },
+        {
+            "name": "test_annotation",
+            "file": "tests/aggregation_regress/tests.py",
+            "code_content": "class AggregationTests(TestCase):\n    def test_annotation(self):\n        # Annotations get combined with extra select clauses\n        obj = Book.objects.annotate(mean_auth_age=Avg(\"authors__age\")).extra(\n            select={\"manufacture_cost\": \"price * .5\"}).get(pk=self.b2.pk)\n        self.assertObjectAttrs(\n            obj,\n            contact_id=self.a3.id,\n            isbn='067232959',\n            mean_auth_age=45.0,\n            name='Sams Teach Yourself Django in 24 Hours',\n            pages=528,\n            price=Decimal(\"23.09\"),\n            pubdate=datetime.date(2008, 3, 3),\n            publisher_id=self.p2.id,\n            rating=3.0\n        )\n        # Different DB backends return different types for the extra select computation\n        self.assertIn(obj.manufacture_cost, (11.545, Decimal('11.545')))\n\n        # Order of the annotate/extra in the query doesn't matter\n        obj = Book.objects.extra(select={'manufacture_cost': 'price * .5'}).annotate(\n            mean_auth_age=Avg('authors__age')).get(pk=self.b2.pk)\n        self.assertObjectAttrs(\n            obj,\n            contact_id=self.a3.id,\n            isbn='067232959',\n            mean_auth_age=45.0,\n            name='Sams Teach Yourself Django in 24 Hours',\n            pages=528,\n            price=Decimal(\"23.09\"),\n            pubdate=datetime.date(2008, 3, 3),\n            publisher_id=self.p2.id,\n            rating=3.0\n        )\n        # Different DB backends return different types for the extra select computation\n        self.assertIn(obj.manufacture_cost, (11.545, Decimal('11.545')))\n\n        # Values queries can be combined with annotate and extra\n        obj = Book.objects.annotate(mean_auth_age=Avg('authors__age')).extra(\n            select={'manufacture_cost': 'price * .5'}).values().get(pk=self.b2.pk)\n        manufacture_cost = obj['manufacture_cost']\n        self.assertIn(manufacture_cost, (11.545, Decimal('11.545')))\n        del obj['manufacture_cost']\n        self.assertEqual(obj, {\n            'id': self.b2.id,\n            'contact_id': self.a3.id,\n            'isbn': '067232959',\n            'mean_auth_age': 45.0,\n            'name': 'Sams Teach Yourself Django in 24 Hours',\n            'pages': 528,\n            'price': Decimal('23.09'),\n            'pubdate': datetime.date(2008, 3, 3),\n            'publisher_id': self.p2.id,\n            'rating': 3.0,\n        })\n\n        # The order of the (empty) values, annotate and extra clauses doesn't\n        # matter\n        obj = Book.objects.values().annotate(mean_auth_age=Avg('authors__age')).extra(\n            select={'manufacture_cost': 'price * .5'}).get(pk=self.b2.pk)\n        manufacture_cost = obj['manufacture_cost']\n        self.assertIn(manufacture_cost, (11.545, Decimal('11.545')))\n        del obj['manufacture_cost']\n        self.assertEqual(obj, {\n            'id': self.b2.id,\n            'contact_id': self.a3.id,\n            'isbn': '067232959',\n            'mean_auth_age': 45.0,\n            'name': 'Sams Teach Yourself Django in 24 Hours',\n            'pages': 528,\n            'price': Decimal('23.09'),\n            'pubdate': datetime.date(2008, 3, 3),\n            'publisher_id': self.p2.id,\n            'rating': 3.0\n        })\n\n        # If the annotation precedes the values clause, it won't be included\n        # unless it is explicitly named\n        obj = Book.objects.annotate(mean_auth_age=Avg('authors__age')).extra(\n            select={'price_per_page': 'price / pages'}).values('name').get(pk=self.b1.pk)\n        self.assertEqual(obj, {\n            \"name\": 'The Definitive Guide to Django: Web Development Done Right',\n        })\n\n        obj = Book.objects.annotate(mean_auth_age=Avg('authors__age')).extra(\n            select={'price_per_page': 'price / pages'}).values('name', 'mean_auth_age').get(pk=self.b1.pk)\n        self.assertEqual(obj, {\n            'mean_auth_age': 34.5,\n            'name': 'The Definitive Guide to Django: Web Development Done Right',\n        })\n\n        # If an annotation isn't included in the values, it can still be used\n        # in a filter\n        qs = Book.objects.annotate(n_authors=Count('authors')).values('name').filter(n_authors__gt=2)\n        self.assertSequenceEqual(\n            qs, [\n                {\"name\": 'Python Web Development with Django'}\n            ],\n        )\n\n        # The annotations are added to values output if values() precedes\n        # annotate()\n        obj = Book.objects.values('name').annotate(mean_auth_age=Avg('authors__age')).extra(\n            select={'price_per_page': 'price / pages'}).get(pk=self.b1.pk)\n        self.assertEqual(obj, {\n            'mean_auth_age': 34.5,\n            'name': 'The Definitive Guide to Django: Web Development Done Right',\n        })\n\n        # All of the objects are getting counted (allow_nulls) and that values\n        # respects the amount of objects\n        self.assertEqual(\n            len(Author.objects.annotate(Avg('friends__age')).values()),\n            9\n        )\n\n        # Consecutive calls to annotate accumulate in the query\n        qs = (\n            Book.objects\n            .values('price')\n            .annotate(oldest=Max('authors__age'))\n            .order_by('oldest', 'price')\n            .annotate(Max('publisher__num_awards'))\n        )\n        self.assertSequenceEqual(\n            qs, [\n                {'price': Decimal(\"30\"), 'oldest': 35, 'publisher__num_awards__max': 3},\n                {'price': Decimal(\"29.69\"), 'oldest': 37, 'publisher__num_awards__max': 7},\n                {'price': Decimal(\"23.09\"), 'oldest': 45, 'publisher__num_awards__max': 1},\n                {'price': Decimal(\"75\"), 'oldest': 57, 'publisher__num_awards__max': 9},\n                {'price': Decimal(\"82.8\"), 'oldest': 57, 'publisher__num_awards__max': 7}\n            ],\n        )"
+        },
+        {
+            "name": "test_aggregate_annotation",
+            "file": "tests/aggregation_regress/tests.py",
+            "code_content": "class AggregationTests(TestCase):\n    def test_aggregate_annotation(self):\n        # Aggregates can be composed over annotations.\n        # The return type is derived from the composed aggregate\n        vals = (\n            Book.objects\n            .all()\n            .annotate(num_authors=Count('authors__id'))\n            .aggregate(Max('pages'), Max('price'), Sum('num_authors'), Avg('num_authors'))\n        )\n        self.assertEqual(vals, {\n            'num_authors__sum': 10,\n            'num_authors__avg': Approximate(1.666, places=2),\n            'pages__max': 1132,\n            'price__max': Decimal(\"82.80\")\n        })\n\n        # Regression for #15624 - Missing SELECT columns when using values, annotate\n        # and aggregate in a single query\n        self.assertEqual(\n            Book.objects.annotate(c=Count('authors')).values('c').aggregate(Max('c')),\n            {'c__max': 3}\n        )"
+        },
+        {
+            "name": "test_conditional_aggregate",
+            "file": "tests/aggregation_regress/tests.py",
+            "code_content": "class AggregationTests(TestCase):\n    def test_conditional_aggregate(self):\n        # Conditional aggregation of a grouped queryset.\n        self.assertEqual(\n            Book.objects.annotate(c=Count('authors')).values('pk').aggregate(test=Sum(\n                Case(When(c__gt=1, then=1), output_field=IntegerField())\n            ))['test'],\n            3\n        )"
+        }
+    ],
+    "django__django-11815": [],
+    "django__django-11848": [
+        {
+            "name": "test_21432",
+            "file": "tests/datetimes/tests.py",
+            "code_content": "class DateTimesTests(TestCase):\n    @override_settings(USE_TZ=True)\n    def test_21432(self):\n        now = timezone.localtime(timezone.now().replace(microsecond=0))\n        Article.objects.create(title=\"First one\", pub_date=now)\n        qs = Article.objects.datetimes('pub_date', 'second')\n        self.assertEqual(qs[0], now)"
+        },
+        {
+            "name": "test_datetimes_returns_available_dates_for_given_scope_and_given_field",
+            "file": "tests/datetimes/tests.py",
+            "code_content": "class DateTimesTests(TestCase):\n    def test_datetimes_returns_available_dates_for_given_scope_and_given_field(self):\n        pub_dates = [\n            datetime.datetime(2005, 7, 28, 12, 15),\n            datetime.datetime(2005, 7, 29, 2, 15),\n            datetime.datetime(2005, 7, 30, 5, 15),\n            datetime.datetime(2005, 7, 31, 19, 15)]\n        for i, pub_date in enumerate(pub_dates):\n            Article(pub_date=pub_date, title='title #{}'.format(i)).save()\n\n        self.assertQuerysetEqual(\n            Article.objects.datetimes('pub_date', 'year'),\n            [\"datetime.datetime(2005, 1, 1, 0, 0)\"])\n        self.assertQuerysetEqual(\n            Article.objects.datetimes('pub_date', 'month'),\n            [\"datetime.datetime(2005, 7, 1, 0, 0)\"])\n        self.assertQuerysetEqual(\n            Article.objects.datetimes('pub_date', 'week'),\n            [\"datetime.datetime(2005, 7, 25, 0, 0)\"])\n        self.assertQuerysetEqual(\n            Article.objects.datetimes('pub_date', 'day'),\n            [\"datetime.datetime(2005, 7, 28, 0, 0)\",\n             \"datetime.datetime(2005, 7, 29, 0, 0)\",\n             \"datetime.datetime(2005, 7, 30, 0, 0)\",\n             \"datetime.datetime(2005, 7, 31, 0, 0)\"])\n        self.assertQuerysetEqual(\n            Article.objects.datetimes('pub_date', 'day', order='ASC'),\n            [\"datetime.datetime(2005, 7, 28, 0, 0)\",\n             \"datetime.datetime(2005, 7, 29, 0, 0)\",\n             \"datetime.datetime(2005, 7, 30, 0, 0)\",\n             \"datetime.datetime(2005, 7, 31, 0, 0)\"])\n        self.assertQuerysetEqual(\n            Article.objects.datetimes('pub_date', 'day', order='DESC'),\n            [\"datetime.datetime(2005, 7, 31, 0, 0)\",\n             \"datetime.datetime(2005, 7, 30, 0, 0)\",\n             \"datetime.datetime(2005, 7, 29, 0, 0)\",\n             \"datetime.datetime(2005, 7, 28, 0, 0)\"])"
+        },
+        {
+            "name": "test_datetimes_has_lazy_iterator",
+            "file": "tests/datetimes/tests.py",
+            "code_content": "class DateTimesTests(TestCase):\n    def test_datetimes_has_lazy_iterator(self):\n        pub_dates = [\n            datetime.datetime(2005, 7, 28, 12, 15),\n            datetime.datetime(2005, 7, 29, 2, 15),\n            datetime.datetime(2005, 7, 30, 5, 15),\n            datetime.datetime(2005, 7, 31, 19, 15)]\n        for i, pub_date in enumerate(pub_dates):\n            Article(pub_date=pub_date, title='title #{}'.format(i)).save()\n        # Use iterator() with datetimes() to return a generator that lazily\n        # requests each result one at a time, to save memory.\n        dates = []\n        with self.assertNumQueries(0):\n            article_datetimes_iterator = Article.objects.datetimes('pub_date', 'day', order='DESC').iterator()\n\n        with self.assertNumQueries(1):\n            for article in article_datetimes_iterator:\n                dates.append(article)\n        self.assertEqual(dates, [\n            datetime.datetime(2005, 7, 31, 0, 0),\n            datetime.datetime(2005, 7, 30, 0, 0),\n            datetime.datetime(2005, 7, 29, 0, 0),\n            datetime.datetime(2005, 7, 28, 0, 0)])"
+        },
+        {
+            "name": "test_related_model_traverse",
+            "file": "tests/datetimes/tests.py",
+            "code_content": "class DateTimesTests(TestCase):\n    def test_related_model_traverse(self):\n        a1 = Article.objects.create(\n            title=\"First one\",\n            pub_date=datetime.datetime(2005, 7, 28, 9, 0, 0),\n        )\n        a2 = Article.objects.create(\n            title=\"Another one\",\n            pub_date=datetime.datetime(2010, 7, 28, 10, 0, 0),\n        )\n        a3 = Article.objects.create(\n            title=\"Third one, in the first day\",\n            pub_date=datetime.datetime(2005, 7, 28, 17, 0, 0),\n        )\n\n        a1.comments.create(\n            text=\"Im the HULK!\",\n            pub_date=datetime.datetime(2005, 7, 28, 9, 30, 0),\n        )\n        a1.comments.create(\n            text=\"HULK SMASH!\",\n            pub_date=datetime.datetime(2005, 7, 29, 1, 30, 0),\n        )\n        a2.comments.create(\n            text=\"LMAO\",\n            pub_date=datetime.datetime(2010, 7, 28, 10, 10, 10),\n        )\n        a3.comments.create(\n            text=\"+1\",\n            pub_date=datetime.datetime(2005, 8, 29, 10, 10, 10),\n        )\n\n        c = Category.objects.create(name=\"serious-news\")\n        c.articles.add(a1, a3)\n\n        self.assertSequenceEqual(\n            Comment.objects.datetimes(\"article__pub_date\", \"year\"), [\n                datetime.datetime(2005, 1, 1),\n                datetime.datetime(2010, 1, 1),\n            ],\n        )\n        self.assertSequenceEqual(\n            Comment.objects.datetimes(\"article__pub_date\", \"month\"), [\n                datetime.datetime(2005, 7, 1),\n                datetime.datetime(2010, 7, 1),\n            ],\n        )\n        self.assertSequenceEqual(\n            Comment.objects.datetimes(\"article__pub_date\", \"week\"), [\n                datetime.datetime(2005, 7, 25),\n                datetime.datetime(2010, 7, 26),\n            ],\n        )\n        self.assertSequenceEqual(\n            Comment.objects.datetimes(\"article__pub_date\", \"day\"), [\n                datetime.datetime(2005, 7, 28),\n                datetime.datetime(2010, 7, 28),\n            ],\n        )\n        self.assertSequenceEqual(\n            Article.objects.datetimes(\"comments__pub_date\", \"day\"), [\n                datetime.datetime(2005, 7, 28),\n                datetime.datetime(2005, 7, 29),\n                datetime.datetime(2005, 8, 29),\n                datetime.datetime(2010, 7, 28),\n            ],\n        )\n        self.assertQuerysetEqual(\n            Article.objects.datetimes(\"comments__approval_date\", \"day\"), []\n        )\n        self.assertSequenceEqual(\n            Category.objects.datetimes(\"articles__pub_date\", \"day\"), [\n                datetime.datetime(2005, 7, 28),\n            ],\n        )"
+        },
+        {
+            "name": "test_datetimes_disallows_date_fields",
+            "file": "tests/datetimes/tests.py",
+            "code_content": "class DateTimesTests(TestCase):\n    def test_datetimes_disallows_date_fields(self):\n        dt = datetime.datetime(2005, 7, 28, 12, 15)\n        Article.objects.create(pub_date=dt, published_on=dt.date(), title=\"Don't put dates into datetime functions!\")\n        with self.assertRaisesMessage(ValueError, \"Cannot truncate DateField 'published_on' to DateTimeField\"):\n            list(Article.objects.datetimes('published_on', 'second'))"
+        }
+    ],
+    "django__django-11905": [],
+    "django__django-11910": [],
+    "django__django-11964": [
+        {
+            "name": "test_textchoices",
+            "file": "tests/model_enums/tests.py",
+            "code_content": "class ChoicesTests(SimpleTestCase):\n    def test_textchoices(self):\n        self.assertEqual(YearInSchool.choices, [\n            ('FR', 'Freshman'), ('SO', 'Sophomore'), ('JR', 'Junior'), ('SR', 'Senior'), ('GR', 'Graduate'),\n        ])\n        self.assertEqual(YearInSchool.labels, ['Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate'])\n        self.assertEqual(YearInSchool.values, ['FR', 'SO', 'JR', 'SR', 'GR'])\n        self.assertEqual(YearInSchool.names, ['FRESHMAN', 'SOPHOMORE', 'JUNIOR', 'SENIOR', 'GRADUATE'])\n\n        self.assertEqual(repr(YearInSchool.FRESHMAN), \"<YearInSchool.FRESHMAN: 'FR'>\")\n        self.assertEqual(YearInSchool.FRESHMAN.label, 'Freshman')\n        self.assertEqual(YearInSchool.FRESHMAN.value, 'FR')\n        self.assertEqual(YearInSchool['FRESHMAN'], YearInSchool.FRESHMAN)\n        self.assertEqual(YearInSchool('FR'), YearInSchool.FRESHMAN)\n\n        self.assertIsInstance(YearInSchool, type(models.Choices))\n        self.assertIsInstance(YearInSchool.FRESHMAN, YearInSchool)\n        self.assertIsInstance(YearInSchool.FRESHMAN.label, Promise)\n        self.assertIsInstance(YearInSchool.FRESHMAN.value, str)"
+        },
+        {
+            "name": "test_integerchoices",
+            "file": "tests/model_enums/tests.py",
+            "code_content": "class ChoicesTests(SimpleTestCase):\n    def test_integerchoices(self):\n        self.assertEqual(Suit.choices, [(1, 'Diamond'), (2, 'Spade'), (3, 'Heart'), (4, 'Club')])\n        self.assertEqual(Suit.labels, ['Diamond', 'Spade', 'Heart', 'Club'])\n        self.assertEqual(Suit.values, [1, 2, 3, 4])\n        self.assertEqual(Suit.names, ['DIAMOND', 'SPADE', 'HEART', 'CLUB'])\n\n        self.assertEqual(repr(Suit.DIAMOND), '<Suit.DIAMOND: 1>')\n        self.assertEqual(Suit.DIAMOND.label, 'Diamond')\n        self.assertEqual(Suit.DIAMOND.value, 1)\n        self.assertEqual(Suit['DIAMOND'], Suit.DIAMOND)\n        self.assertEqual(Suit(1), Suit.DIAMOND)\n\n        self.assertIsInstance(Suit, type(models.Choices))\n        self.assertIsInstance(Suit.DIAMOND, Suit)\n        self.assertIsInstance(Suit.DIAMOND.label, Promise)\n        self.assertIsInstance(Suit.DIAMOND.value, int)"
+        }
+    ],
+    "django__django-11999": [],
+    "django__django-12113": [
+        {
+            "name": "MultiDatabaseTests.test_add_view",
+            "file": "tests/admin_views/test_multidb.py",
+            "code_content": "@override_settings(ROOT_URLCONF=__name__, DATABASE_ROUTERS=['%s.Router' % __name__])\nclass MultiDatabaseTests(TestCase):\n    @mock.patch('django.contrib.admin.options.transaction')\n    def test_add_view(self, mock):\n        for db in connections:\n            with self.subTest(db=db):\n                Router.target_db = db\n                self.client.force_login(self.superusers[db])\n                self.client.post(\n                    reverse('test_adminsite:admin_views_book_add'),\n                    {'name': 'Foobar: 5th edition'},\n                )\n                mock.atomic.assert_called_with(using=db)"
+        },
+        {
+            "name": "MultiDatabaseTests.test_change_view",
+            "file": "tests/admin_views/test_multidb.py",
+            "code_content": "@override_settings(ROOT_URLCONF=__name__, DATABASE_ROUTERS=['%s.Router' % __name__])\nclass MultiDatabaseTests(TestCase):\n    @mock.patch('django.contrib.admin.options.transaction')\n    def test_change_view(self, mock):\n        for db in connections:\n            with self.subTest(db=db):\n                Router.target_db = db\n                self.client.force_login(self.superusers[db])\n                self.client.post(\n                    reverse('test_adminsite:admin_views_book_change', args=[self.test_book_ids[db]]),\n                    {'name': 'Test Book 2: Test more'},\n                )\n                mock.atomic.assert_called_with(using=db)"
+        },
+        {
+            "name": "MultiDatabaseTests.test_delete_view",
+            "file": "tests/admin_views/test_multidb.py",
+            "code_content": "@override_settings(ROOT_URLCONF=__name__, DATABASE_ROUTERS=['%s.Router' % __name__])\nclass MultiDatabaseTests(TestCase):\n    @mock.patch('django.contrib.admin.options.transaction')\n    def test_delete_view(self, mock):\n        for db in connections:\n            with self.subTest(db=db):\n                Router.target_db = db\n                self.client.force_login(self.superusers[db])\n                self.client.post(\n                    reverse('test_adminsite:admin_views_book_delete', args=[self.test_book_ids[db]]),\n                    {'post': 'yes'},\n                )\n                mock.atomic.assert_called_with(using=db)"
+        }
+    ],
+    "django__django-12125": [],
+    "django__django-12184": [],
+    "django__django-12284": [
+        {
+            "name": "test_inherited_does_not_exist_exception",
+            "file": "tests/model_inheritance/tests.py",
+            "code_content": "class ModelInheritanceDataTests(TestCase):\n    def test_inherited_does_not_exist_exception(self):\n        # An ItalianRestaurant which does not exist is also a Place which does\n        # not exist.\n        with self.assertRaises(Place.DoesNotExist):\n            ItalianRestaurant.objects.get(name=\"The Noodle Void\")"
+        },
+        {
+            "name": "test_override_field_with_attr",
+            "file": "tests/model_inheritance/test_abstract_inheritance.py",
+            "code_content": "@isolate_apps('model_inheritance')\nclass AbstractInheritanceTests(SimpleTestCase):\n    def test_override_field_with_attr(self):\n        class AbstractBase(models.Model):\n            first_name = models.CharField(max_length=50)\n            last_name = models.CharField(max_length=50)\n            middle_name = models.CharField(max_length=30)\n            full_name = models.CharField(max_length=150)\n\n            class Meta:\n                abstract = True\n\n        class Descendant(AbstractBase):\n            middle_name = None\n\n            def full_name(self):\n                return self.first_name + self.last_name\n\n        msg = \"Descendant has no field named %r\"\n        with self.assertRaisesMessage(FieldDoesNotExist, msg % 'middle_name'):\n            Descendant._meta.get_field('middle_name')\n\n        with self.assertRaisesMessage(FieldDoesNotExist, msg % 'full_name'):\n            Descendant._meta.get_field('full_name')"
+        },
+        {
+            "name": "test_filter_inherited_model",
+            "file": "tests/model_inheritance/tests.py",
+            "code_content": "class ModelInheritanceDataTests(TestCase):\n    def test_filter_inherited_model(self):\n        self.assertQuerysetEqual(\n            ItalianRestaurant.objects.filter(address=\"1234 W. Ash\"), [\n                \"Ristorante Miron\",\n            ],\n            attrgetter(\"name\")\n        )"
+        },
+        {
+            "name": "test_update_inherited_model",
+            "file": "tests/model_inheritance/tests.py",
+            "code_content": "class ModelInheritanceDataTests(TestCase):\n    def test_update_inherited_model(self):\n        self.italian_restaurant.address = \"1234 W. Elm\"\n        self.italian_restaurant.save()\n        self.assertQuerysetEqual(\n            ItalianRestaurant.objects.filter(address=\"1234 W. Elm\"), [\n                \"Ristorante Miron\",\n            ],\n            attrgetter(\"name\")\n        )"
+        },
+        {
+            "name": "test_related_objects_for_inherited_models",
+            "file": "tests/model_inheritance/tests.py",
+            "code_content": "class ModelInheritanceDataTests(TestCase):\n    def test_related_objects_for_inherited_models(self):\n        # Related objects work just as they normally do.\n        s1 = Supplier.objects.create(name=\"Joe's Chickens\", address=\"123 Sesame St\")\n        s1.customers .set([self.restaurant, self.italian_restaurant])\n        s2 = Supplier.objects.create(name=\"Luigi's Pasta\", address=\"456 Sesame St\")\n        s2.customers.set([self.italian_restaurant])\n\n        # This won't work because the Place we select is not a Restaurant (it's\n        # a Supplier).\n        p = Place.objects.get(name=\"Joe's Chickens\")\n        with self.assertRaises(Restaurant.DoesNotExist):\n            p.restaurant\n\n        self.assertEqual(p.supplier, s1)\n        self.assertQuerysetEqual(\n            self.italian_restaurant.provider.order_by(\"-name\"), [\n                \"Luigi's Pasta\",\n                \"Joe's Chickens\"\n            ],\n            attrgetter(\"name\")\n        )\n        self.assertQuerysetEqual(\n            Restaurant.objects.filter(provider__name__contains=\"Chickens\"), [\n                \"Ristorante Miron\",\n                \"Demon Dogs\",\n            ],\n            attrgetter(\"name\")\n        )\n        self.assertQuerysetEqual(\n            ItalianRestaurant.objects.filter(provider__name__contains=\"Chickens\"), [\n                \"Ristorante Miron\",\n            ],\n            attrgetter(\"name\"),\n        )\n\n        ParkingLot.objects.create(\n            name=\"Main St\", address=\"111 Main St\", main_site=s1\n        )\n        ParkingLot.objects.create(\n            name=\"Well Lit\", address=\"124 Sesame St\", main_site=self.italian_restaurant\n        )\n\n        self.assertEqual(\n            Restaurant.objects.get(lot__name=\"Well Lit\").name,\n            \"Ristorante Miron\"\n        )"
+        }
+    ],
+    "django__django-12286": [],
+    "django__django-12308": [
+        {
+            "name": "ListFiltersTests.test_choicesfieldlistfilter_has_none_choice",
+            "file": "tests/admin_filters/tests.py",
+            "code_content": "class ListFiltersTests(TestCase):\n    def test_choicesfieldlistfilter_has_none_choice(self):\n        \"\"\"\n        The last choice is for the None value.\n        \"\"\"\n        class BookmarkChoicesAdmin(ModelAdmin):\n            list_display = ['none_or_null']\n            list_filter = ['none_or_null']\n\n        modeladmin = BookmarkChoicesAdmin(Bookmark, site)\n        request = self.request_factory.get('/', {})\n        request.user = self.alfred\n        changelist = modeladmin.get_changelist_instance(request)\n        filterspec = changelist.get_filters(request)[0][0]\n        choices = list(filterspec.choices(changelist))\n        self.assertEqual(choices[-1]['display'], 'None')\n        self.assertEqual(choices[-1]['query_string'], '?none_or_null__isnull=True')"
+        }
+    ]
+}
