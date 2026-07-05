@@ -7,7 +7,7 @@ import json
 import re
 from pathlib import Path
 
-from ..runtime.icore_runtime import icore_test_command
+from ..retrieval.icore_runtime import icore_test_command
 from ..core.prompts import PROTOCOL_RECOVERY_SYSTEM_PROMPT, PROTOCOL_RECOVERY_USER_PROMPT
 from ..core.schema import BehaviorTarget, ProtocolRecovery, RetrievedCode, RetrievedTest
 from ..core.utils import extract_json_object, truncate_text, write_text

@@ -9,8 +9,8 @@ from pathlib import Path
 
 from ..core.config import DEFAULT_MAX_TOKENS, DEFAULT_MAX_WORKERS, DEFAULT_TEMPERATURE, DEFAULT_TOP_CODE, DEFAULT_TOP_TESTS
 from ..io.io_utils import build_instance_context, load_issue_data
-from .issue_rewriter import rewrite_issue
-from ..core.llm_client import LLMClient
+from ..issue.issue_rewriter import rewrite_issue
+from ..llm.llm_client import LLMClient
 from ..core.utils import ensure_dir, safe_json_dump
 
 

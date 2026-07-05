@@ -7,8 +7,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ..runtime.executor import run_command_in_conda
-from ..runtime.icore_runtime import first_test_selector, icore_test_command
+from ..execution.executor import run_command_in_conda
+from ..retrieval.icore_runtime import first_test_selector, icore_test_command
 from ..core.prompts import ASSERT_SYNTHESIS_SYSTEM_PROMPT, ASSERT_SYNTHESIS_USER_PROMPT, OBSERVATION_PROBE_SYSTEM_PROMPT, OBSERVATION_PROBE_USER_PROMPT
 from ..core.schema import BehaviorTarget, CandidateTest, ObservationReport
 from ..core.utils import clean_code_block, safe_json_dump, truncate_text, write_text

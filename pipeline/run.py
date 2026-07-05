@@ -20,9 +20,9 @@ from ..core.config import (
     DEFAULT_TOP_CODE,
     DEFAULT_TOP_TESTS,
 )
-from .feedback import run_instance_pipeline
+from ..execution.feedback import run_instance_pipeline
 from ..io.io_utils import build_instance_context, load_issue_data
-from ..core.llm_client import LLMClient
+from ..llm.llm_client import LLMClient
 from ..core.utils import ensure_dir, safe_json_dump
 
 

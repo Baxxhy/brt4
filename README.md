@@ -12,7 +12,7 @@ BRT4 从 issue、iCoRe 已生成的源码/测试检索结果和 buggy 仓库出�
 
 ## 最近结果
 
-保留的 42% 和 40% 正式结果位于 `results/preserved/`。
+历史生成/评测结果通过 `scripts/clean_old_results.sh` 管理：普通旧结果只保留最近 3 个，带 `best`、`bestsofar`、`complete` 标记的结果会进入 `results/archive/legacy_best/`。
 
 ## 新实验输出
 

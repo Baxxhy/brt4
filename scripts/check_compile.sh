@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT=/root/Baxxhy/BugReproduce
-cd "$ROOT"
-mapfile -t files < <(find "$ROOT/brt3" \
-  \( -path '*/results/*' -o -path '*/outputs*' -o -path '*/formal_f2p*' -o -path '*/worktree/*' -o -path '*/__pycache__/*' \) -prune \
-  -o -name '*.py' -type f -print)
-python -m py_compile "${files[@]}"
-echo "compiled ${#files[@]} BRT3 Python files"
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+PROJECT_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+PACKAGE_ROOT=$(cd "$PROJECT_ROOT/.." && pwd)
+cd "$PROJECT_ROOT"
+
+mapfile -t files < <(find . \
+  \( -path './results/*' -o -path './data/*' -o -path './retrieval_results/*' -o -path './__pycache__/*' \) -prune \
+  -o -name '*.py' -type f -print | sort)
+
+cd "$PACKAGE_ROOT"
+python -m py_compile "${files[@]/#/$PROJECT_ROOT/}"
+echo "compiled ${#files[@]} BRT4 Python files"

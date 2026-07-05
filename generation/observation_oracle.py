@@ -7,8 +7,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ..runtime.executor import run_command_in_conda
-from ..runtime.icore_runtime import first_test_selector, icore_test_command
+from ..execution.executor import run_command_in_conda
+from ..retrieval.icore_runtime import first_test_selector, icore_test_command
 from ..core.prompts import (
     OBSERVATION_ORACLE_PROBE_PROMPT,
     OBSERVATION_ORACLE_REBIND_PROMPT,
