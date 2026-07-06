@@ -163,6 +163,11 @@ class CandidateCheckpoint(JsonMixin):
     code_path: str = ""
     score: int = 0
     reason: str = ""
+    oracle_risk: dict[str, Any] = field(default_factory=dict)
+    surrogate_risk: dict[str, Any] = field(default_factory=dict)
+    selector_score_before_risk: int = 0
+    selector_score_after_risk: int = 0
+    selector_penalty_reasons: list[str] = field(default_factory=list)
     execution: dict[str, Any] = field(default_factory=dict)
     verifier: dict[str, Any] = field(default_factory=dict)
     surrogate: dict[str, Any] = field(default_factory=dict)
@@ -253,3 +258,18 @@ class FinalResult(JsonMixin):
     strict_failure_class: str = ""
     oracle_rebound: bool = False
     final_reason: str = ""
+    seed_mode: str = ""
+    selected_seed_index: int = -1
+    seed_attempts_count: int = 0
+    seed_attempts_summary: list[dict[str, Any]] = field(default_factory=list)
+    seed_switch_reasons: list[str] = field(default_factory=list)
+    selected_seed_reason: str = ""
+    final_oracle_risk: dict[str, Any] = field(default_factory=dict)
+    final_surrogate_risk: dict[str, Any] = field(default_factory=dict)
+    candidate_repo_path: str = ""
+    pytest_nodeid: str = ""
+    command: str = ""
+    direct_test_repo_path_hint: str = ""
+    placement_dir: str = ""
+    runner_kind: str = ""
+    selector: str = ""

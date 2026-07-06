@@ -179,6 +179,61 @@ def direct_test_relpath(instance_id: str, generated_dir: str) -> str:
     return os.path.join(test_dir, f"test_brt_{sanitize_instance_id(instance_id)}.py")
 
 
+def runner_parity_info(
+    instance_id: str,
+    generated_dir: str,
+    formal_rel_file: str,
+    formal_selector: str,
+    formal_command: str,
+) -> dict[str, Any]:
+    instance_dir = Path(generated_dir) / instance_id
+    summary_path = instance_dir / "summary.json"
+    host_path = instance_dir / "host_context.json"
+    summary: dict[str, Any] = {}
+    host: dict[str, Any] = {}
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        summary = {}
+    try:
+        host = json.loads(host_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        host = {}
+    generation_path = str(
+        summary.get("candidate_repo_path")
+        or summary.get("direct_test_repo_path_hint")
+        or ""
+    )
+    generation_command = str(
+        summary.get("command") or (summary.get("buggy_execution") or {}).get("command") or ""
+    )
+    generation_selector = str(summary.get("selector") or "")
+    if not generation_selector and "::" in generation_command:
+        generation_selector = generation_command.rsplit("::", 1)[-1].split()[0]
+    warnings: list[str] = []
+    same_dir = (
+        bool(generation_path)
+        and os.path.dirname(generation_path) == os.path.dirname(formal_rel_file)
+    )
+    if generation_path and not same_dir:
+        warnings.append("formal eval writes BRT to a different directory than generation candidate")
+    same_selector = not generation_selector or generation_selector == formal_selector
+    if generation_selector and not same_selector:
+        warnings.append("formal eval selector differs from generation selector")
+    return {
+        "generation_candidate_repo_path": generation_path,
+        "formal_direct_test_repo_path": formal_rel_file,
+        "generation_command": generation_command,
+        "formal_command": formal_command,
+        "generation_selector": generation_selector,
+        "formal_selector": formal_selector,
+        "host_file": host.get("host_file", ""),
+        "same_dir": same_dir,
+        "same_selector": same_selector,
+        "warnings": warnings,
+    }
+
+
 def first_test_selector(code: str) -> str:
     try:
         tree = ast.parse(code)
@@ -305,6 +360,9 @@ def evaluate_one(
     rel_file = direct_test_relpath(instance_id, generated_dir)
     selector = first_test_selector(code)
     command = test_command(issue["repo"], issue["version"], rel_file, selector)
+    runner_parity = runner_parity_info(
+        instance_id, generated_dir, rel_file, selector, command
+    )
     pythonpath = f"{repo_dir}:{repo_dir}/src:{repo_dir}/lib"
     full_command = f"{conda_activate_cmd(env_name)} && export PYTHONPATH={pythonpath}:$PYTHONPATH && {command}"
     setup_full_command = f"{conda_activate_cmd(env_name)} && {setup_command(issue['repo'], issue['version'])}"
@@ -318,6 +376,7 @@ def evaluate_one(
         "direct_test_repo_path": rel_file,
         "selector": selector,
         "test_command": command,
+        "runner_parity": runner_parity,
         "worktree_mode": "generated_instance_worktree" if preserve_build_artifacts else "shared_repo",
     }
     try:

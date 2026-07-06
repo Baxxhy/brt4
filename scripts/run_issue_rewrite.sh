@@ -11,9 +11,9 @@ OUTPUT_DIR=${OUTPUT_DIR:-"$PROJECT_ROOT/results/issue_rewrite/issue_rewrite_${ti
 WORKERS=${WORKERS:-10}
 MODEL=${MODEL:-deepseek-v3}
 TEMPERATURE=${TEMPERATURE:-0.1}
-INSTANCES_PATH=${INSTANCES_PATH:-"$PACKAGE_ROOT/brt2/data/issues/swt276_issues.json"}
-CODE_RETRIEVAL_PATH=${CODE_RETRIEVAL_PATH:-"$PACKAGE_ROOT/iCoRe/retrieval_results/code/code_retrieval_results_gpt.json"}
-TEST_RETRIEVAL_PATH=${TEST_RETRIEVAL_PATH:-"$PACKAGE_ROOT/iCoRe/retrieval_results/test/icore/gpt/related_tests.json"}
+INSTANCES_PATH=${INSTANCES_PATH:-"$PROJECT_ROOT/data/issues/swt276_issues.json"}
+CODE_RETRIEVAL_PATH=${CODE_RETRIEVAL_PATH:-"$PROJECT_ROOT/retrieval_results/code/code_retrieval_results_gpt.json"}
+TEST_RETRIEVAL_PATH=${TEST_RETRIEVAL_PATH:-"$PROJECT_ROOT/retrieval_results/test/icore/gpt/related_tests.json"}
 
 mkdir -p "$OUTPUT_DIR/logs"
 cmd=(

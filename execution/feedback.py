@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import fcntl
+import os
 import shlex
 import shutil
 import subprocess
@@ -34,7 +35,6 @@ from ..retrieval.icore_runtime import (
     first_test_selector,
     make_instance_spec,
 )
-from ..issue.issue_rewriter import rewrite_issue
 from ..generation.oracle import run_observation_probe, synthesize_oracle
 from ..execution.patch_utils import run_surrogate_patch_loop
 from ..core.schema import (
@@ -47,6 +47,50 @@ from ..core.schema import (
 )
 from ..core.utils import ensure_dir, safe_json_dump, write_text
 from ..validation.verifier import verify_buggy_only
+from ..validation.oracle_risk import assess_oracle_risk, assess_surrogate_risk
+
+
+DEFAULT_BEHAVIOR_CACHE_DIRS = [
+    Path(__file__).resolve().parents[1]
+    / "results"
+    / "runs"
+    / "run_brt4_full276_20260705_141938"
+    / "generation",
+    Path(__file__).resolve().parents[1]
+    / "results"
+    / "archive"
+    / "delete_pending_20260706_001747"
+    / "outputs_brt3_flow_276_20260619_151437",
+]
+
+
+def _load_cached_behavior(context: InstanceContext, output_dir: str) -> Any:
+    from ..issue.issue_rewriter import behavior_from_dict
+    from ..core.utils import safe_json_load
+
+    local_path = Path(output_dir) / "behavior_target.json"
+    raw_roots = os.environ.get("BRT4_BEHAVIOR_CACHE_DIR", "")
+    cache_roots = [
+        Path(item)
+        for item in raw_roots.split(os.pathsep)
+        if item.strip()
+    ] or DEFAULT_BEHAVIOR_CACHE_DIRS
+    candidates = [local_path]
+    candidates.extend(
+        root / context.instance_id / "behavior_target.json"
+        for root in cache_roots
+    )
+    for path in candidates:
+        if path.is_file():
+            behavior = behavior_from_dict(context.instance_id, safe_json_load(path))
+            if path != local_path:
+                behavior.save_json(str(local_path))
+            return behavior
+    raise FileNotFoundError(
+        "missing cached behavior_target.json; generation is configured not to "
+        f"rerun issue rewrite for {context.instance_id}. Checked: "
+        + ", ".join(str(path) for path in candidates)
+    )
 
 
 def _run_local(command: str, cwd: str, timeout: int = 300) -> dict[str, Any]:
@@ -110,6 +154,28 @@ def _checkpoint_score(
     return 0, f"non-executable candidate: {execution.status}"
 
 
+def _risk_adjusted_score(
+    base_score: int,
+    oracle_risk: dict[str, Any],
+    surrogate_risk: dict[str, Any],
+) -> tuple[int, list[str]]:
+    penalty = 0
+    reasons: list[str] = []
+    if oracle_risk.get("level") == "high":
+        penalty += 70 if base_score >= 300 else 40
+        reasons.extend(str(item) for item in oracle_risk.get("reasons") or [])
+    elif oracle_risk.get("level") == "medium":
+        penalty += 15
+        reasons.extend(str(item) for item in oracle_risk.get("reasons") or [])
+    if surrogate_risk.get("level") == "high":
+        penalty += 30
+        reasons.extend(str(item) for item in surrogate_risk.get("reasons") or [])
+    elif surrogate_risk.get("level") == "medium":
+        penalty += 10
+        reasons.extend(str(item) for item in surrogate_risk.get("reasons") or [])
+    return max(0, base_score - penalty), list(dict.fromkeys(reasons))
+
+
 def _save_checkpoint(
     output_dir: str,
     attempt_id: int,
@@ -117,17 +183,39 @@ def _save_checkpoint(
     execution: ExecutionResult,
     decision: VerifierDecision,
     dual: DualVersionResult | None,
+    behavior: Any | None = None,
+    issue_text: str = "",
+    retrieved_paths: set[str] | None = None,
 ) -> CandidateCheckpoint:
     checkpoint_dir = ensure_dir(Path(output_dir) / "checkpoints")
     code_path = str(Path(checkpoint_dir) / f"candidate_attempt_{attempt_id}.py")
     write_text(code_path, candidate.code)
     score, reason = _checkpoint_score(execution, decision, dual)
+    oracle_risk = (
+        assess_oracle_risk(
+            candidate.code,
+            behavior,
+            issue_text,
+            execution.stdout + "\n" + execution.stderr,
+        )
+        if behavior is not None
+        else {"level": "low", "reasons": [], "signals": {}}
+    )
+    surrogate_risk = assess_surrogate_risk(dual, oracle_risk, retrieved_paths)
+    adjusted_score, penalty_reasons = _risk_adjusted_score(
+        score, oracle_risk, surrogate_risk
+    )
     checkpoint = CandidateCheckpoint(
         instance_id=candidate.instance_id,
         round_id=attempt_id,
         code_path=code_path,
-        score=score,
+        score=adjusted_score,
         reason=reason,
+        oracle_risk=oracle_risk,
+        surrogate_risk=surrogate_risk,
+        selector_score_before_risk=score,
+        selector_score_after_risk=adjusted_score,
+        selector_penalty_reasons=penalty_reasons,
         execution=execution.to_dict(),
         verifier=decision.to_dict(),
         surrogate=dual.to_dict() if dual else {},
@@ -136,6 +224,93 @@ def _save_checkpoint(
         str(Path(checkpoint_dir) / f"candidate_attempt_{attempt_id}.json")
     )
     return checkpoint
+
+
+def _copy_if_exists(source_dir: Path, target_dir: Path, name: str) -> None:
+    source = source_dir / name
+    if source.exists():
+        target = target_dir / name
+        if target.exists() or target.is_symlink():
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+        if source.is_dir():
+            try:
+                os.symlink(source, target, target_is_directory=True)
+            except OSError:
+                shutil.copytree(source, target, symlinks=True)
+        else:
+            shutil.copy2(source, target)
+
+
+def _best_checkpoint_from_summary(seed_dir: Path) -> dict[str, Any]:
+    ranking_path = seed_dir / "candidate_ranking.json"
+    if not ranking_path.is_file():
+        return {}
+    try:
+        ranking = json.loads(ranking_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    checkpoints = ranking.get("checkpoints")
+    selected = ranking.get("selected_attempt")
+    if not isinstance(checkpoints, list):
+        return {}
+    for item in checkpoints:
+        if isinstance(item, dict) and item.get("round_id") == selected:
+            return item
+    return checkpoints[-1] if checkpoints else {}
+
+
+def _seed_result_score(summary: dict[str, Any], checkpoint: dict[str, Any]) -> int:
+    status = str(summary.get("status") or "")
+    dual = summary.get("dual_version_result") if isinstance(summary.get("dual_version_result"), dict) else {}
+    if status in {"F2P_SUCCESS", "SURROGATE_F2P_SUCCESS"} or dual.get("status") in {"F2P_SUCCESS", "SURROGATE_F2P_SUCCESS"}:
+        return 300
+    if status == "ISSUE_ALIGNED_FAIL" or summary.get("strict_failure_class") == "issue_aligned":
+        return 200
+    if checkpoint:
+        return int(checkpoint.get("score") or 0)
+    buggy = summary.get("buggy_execution") if isinstance(summary.get("buggy_execution"), dict) else {}
+    if buggy.get("returncode") not in {None, 0} and buggy.get("status") not in {"SETUP_ERROR", "SYNTAX_ERROR", "COLLECT_ERROR", "TIMEOUT"}:
+        return 100
+    if buggy.get("returncode") == 0 or status in {"PASS", "BUGGY_PASS"}:
+        return 10
+    return 0
+
+
+def _should_try_next_seed(
+    summary: dict[str, Any],
+    checkpoint: dict[str, Any],
+    has_next: bool,
+) -> tuple[bool, str]:
+    if not has_next:
+        return False, "no next seed"
+    status = str(summary.get("status") or "")
+    dual = summary.get("dual_version_result") if isinstance(summary.get("dual_version_result"), dict) else {}
+    buggy = summary.get("buggy_execution") if isinstance(summary.get("buggy_execution"), dict) else {}
+    verifier = checkpoint.get("verifier") if isinstance(checkpoint.get("verifier"), dict) else {}
+    oracle_rebound = bool(summary.get("oracle_rebound"))
+    if status in {"F2P_SUCCESS", "SURROGATE_F2P_SUCCESS"} or dual.get("status") in {"F2P_SUCCESS", "SURROGATE_F2P_SUCCESS"}:
+        return False, "surrogate success"
+    if status == "ISSUE_ALIGNED_FAIL" or summary.get("strict_failure_class") == "issue_aligned":
+        return False, "verifier accepted issue-aligned buggy failure"
+    if oracle_rebound and buggy.get("returncode") not in {None, 0}:
+        return False, "observation oracle rebound and buggy fails"
+    if status in {"PASS", "BUGGY_PASS"} or dual.get("status") == "BUGGY_PASS":
+        return True, "buggy source passed; trigger likely missed"
+    if status == "UNRELATED_FAIL" or buggy.get("status") == "UNRELATED_FAIL":
+        return True, "buggy failure is unrelated"
+    if status in {"ENV_UNRESOLVED", "SETUP_ERROR", "SYNTAX_ERROR", "COLLECT_ERROR"}:
+        return True, f"seed scaffold remained {status}"
+    if verifier.get("decision") == "repair_trigger":
+        return True, "trigger repair budget exhausted"
+    strict = summary.get("strict_verifier_decision")
+    if strict == "repair_trigger" and summary.get("strict_failure_class") == "target_not_hit":
+        return True, "strict verifier target_hit=false"
+    if int(checkpoint.get("score") or 0) < 100:
+        return True, "best candidate score below executable buggy fail"
+    return False, "current seed is competitive"
 
 
 def _missing_dependency_hint(log: str) -> str:
@@ -321,10 +496,11 @@ def prepare_instance_worktree(
             and "python -m pip install" in setup
             and " -e ." in setup
         ):
-            fallback_setup = setup.replace(
-                "python -m pip install",
-                "python -m pip install --ignore-installed --no-deps",
-                1,
+            fallback_setup = re.sub(
+                r"python -m pip install(?![^&]*--ignore-installed)([^&]*\s-e\s+\.)",
+                r"python -m pip install --ignore-installed --no-deps\1",
+                setup,
+                count=1,
             )
             fallback_result = run_command_in_conda(
                 fallback_setup,
@@ -373,14 +549,228 @@ def run_instance_pipeline(
     enable_seed_mutation: bool = True,
     enable_observation_oracle: bool = True,
     enable_strict_semantic_verifier: bool = True,
+    _adaptive_disabled: bool = False,
+    _forced_seed_index: int | None = None,
+    _prepared_repo_path: str = "",
+    _prepare_meta: dict[str, Any] | None = None,
 ) -> FinalResult:
     ensure_dir(output_dir)
     ensure_dir(Path(output_dir) / "prompts")
     ensure_dir(Path(output_dir) / "responses")
     ensure_dir(Path(output_dir) / "logs")
     try:
+        if (
+            not _adaptive_disabled
+            and not generate_only
+            and enable_protocol_recovery
+            and _forced_seed_index is None
+        ):
+            behavior = _load_cached_behavior(context, output_dir)
+            ranked_tests = rank_related_tests(context.retrieved_tests, behavior)
+            if not ranked_tests:
+                ranked_tests = [select_related_test(context.retrieved_tests, behavior)]
+            ranked_tests = [seed for seed in ranked_tests if seed is not None]
+            seeds_to_try = ranked_tests[:3] or []
+            if not seeds_to_try:
+                return run_instance_pipeline(
+                    context,
+                    llm_client,
+                    output_dir,
+                    conda_env,
+                    timeout,
+                    no_conda,
+                    max_feedback_rounds,
+                    max_env_rounds,
+                    max_brt_rounds,
+                    max_patch_rounds,
+                    validation_mode,
+                    patched_repo_base,
+                    patch_file,
+                    generate_only,
+                    enable_protocol_recovery,
+                    enable_seed_mutation,
+                    enable_observation_oracle,
+                    enable_strict_semantic_verifier,
+                    _adaptive_disabled=True,
+                    _forced_seed_index=None,
+                )
+            prepared_repo_path = ""
+            prepared_meta: dict[str, Any] | None = None
+            if not generate_only:
+                prepared_repo_path, prepared_meta = prepare_instance_worktree(
+                    context, output_dir, conda_env, timeout, no_conda
+                )
+                context.buggy_repo_path = prepared_repo_path
+                safe_json_dump(
+                    prepared_meta,
+                    str(Path(output_dir) / "repo_prepare.json"),
+                )
+                if prepared_meta.get("status") in {
+                    "WORKTREE_ERROR",
+                    "ENV_CREATE_ERROR",
+                    "SETUP_ERROR",
+                }:
+                    result = FinalResult(
+                        instance_id=context.instance_id,
+                        status="SETUP_ERROR",
+                        final_test_path="",
+                        rounds_used=0,
+                        buggy_execution=prepared_meta.get("setup_execution", {}),
+                        dual_version_result={"mode": validation_mode, "status": "SKIPPED"},
+                        behavior_target=behavior.to_dict(),
+                        host_context={},
+                        observation_report={},
+                        notes="repository worktree/setup failed before BRT generation",
+                        protocol_recovery_enabled=enable_protocol_recovery,
+                        seed_mutation_enabled=enable_seed_mutation,
+                        observation_oracle_enabled=enable_observation_oracle,
+                        strict_verifier_enabled=enable_strict_semantic_verifier,
+                        final_reason="repository worktree/setup failed before BRT generation",
+                        seed_mode="adaptive_top3",
+                    )
+                    result.save_json(str(Path(output_dir) / "summary.json"))
+                    return result
+            seed_root = Path(output_dir) / "seed_candidates"
+            ensure_dir(seed_root)
+            attempts: list[dict[str, Any]] = []
+            switch_reasons: list[str] = []
+            best: tuple[int, int, int, Path, dict[str, Any], dict[str, Any]] | None = None
+            for seed_index, seed in enumerate(seeds_to_try):
+                seed_dir = seed_root / f"seed_{seed_index}"
+                ensure_dir(seed_dir)
+                behavior.save_json(str(seed_dir / "behavior_target.json"))
+                seed_context = copy.deepcopy(context)
+                result = run_instance_pipeline(
+                    seed_context,
+                    llm_client,
+                    str(seed_dir),
+                    conda_env,
+                    timeout,
+                    no_conda,
+                    max_feedback_rounds,
+                    max_env_rounds,
+                    max_brt_rounds,
+                    max_patch_rounds,
+                    validation_mode,
+                    patched_repo_base,
+                    patch_file,
+                    generate_only,
+                    enable_protocol_recovery,
+                    enable_seed_mutation,
+                    enable_observation_oracle,
+                    enable_strict_semantic_verifier,
+                    _adaptive_disabled=True,
+                    _forced_seed_index=seed_index,
+                    _prepared_repo_path=prepared_repo_path,
+                    _prepare_meta=prepared_meta,
+                )
+                summary_path = seed_dir / "summary.json"
+                try:
+                    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    summary = result.to_dict()
+                checkpoint = _best_checkpoint_from_summary(seed_dir)
+                score = _seed_result_score(summary, checkpoint)
+                attempt = {
+                    "seed_index": seed_index,
+                    "seed_file": seed.file,
+                    "seed_name": seed.name,
+                    "status": summary.get("status"),
+                    "score": score,
+                    "checkpoint": checkpoint,
+                    "summary_path": str(summary_path),
+                    "final_test_path": str(seed_dir / "final_test.py"),
+                    "oracle_risk": summary.get("final_oracle_risk") or checkpoint.get("oracle_risk") or {},
+                    "surrogate_status": (summary.get("dual_version_result") or {}).get("status")
+                    if isinstance(summary.get("dual_version_result"), dict)
+                    else "",
+                }
+                attempts.append(attempt)
+                order_key = (score, -seed_index, -int(checkpoint.get("round_id") or 0))
+                if best is None or order_key > (best[0], best[1], best[2]):
+                    best = (order_key[0], order_key[1], order_key[2], seed_dir, summary, checkpoint)
+                try_next, reason = _should_try_next_seed(
+                    summary, checkpoint, seed_index < len(seeds_to_try) - 1
+                )
+                attempts[-1]["switch_decision"] = "try_next_seed" if try_next else "stop"
+                attempts[-1]["switch_reason"] = reason
+                if try_next:
+                    switch_reasons.append(f"seed_{seed_index}: {reason}")
+                    continue
+                break
+            assert best is not None
+            _, _, _, selected_dir, selected_summary, selected_checkpoint = best
+            selected_seed_index = int(selected_dir.name.rsplit("_", 1)[-1])
+            for name in (
+                "final_test.py",
+                "summary.json",
+                "host_context.json",
+                "protocol_recovery.json",
+                "candidate_ranking.json",
+                "dual_version_result.json",
+                "repo_prepare.json",
+                "icore_exec_spec.json",
+                "worktree",
+            ):
+                _copy_if_exists(selected_dir, Path(output_dir), name)
+            top_final = Path(output_dir) / "final_test.py"
+            selected_summary.update(
+                {
+                    "final_test_path": str(top_final),
+                    "seed_mode": "adaptive_top3",
+                    "selected_seed_index": selected_seed_index,
+                    "seed_attempts_count": len(attempts),
+                    "seed_attempts_summary": attempts,
+                    "seed_switch_reasons": switch_reasons,
+                    "selected_seed_reason": selected_checkpoint.get("reason")
+                    or selected_summary.get("final_reason")
+                    or "selected by adaptive seed score",
+                    "final_oracle_risk": selected_summary.get("final_oracle_risk")
+                    or selected_checkpoint.get("oracle_risk")
+                    or {},
+                    "final_surrogate_risk": selected_summary.get("final_surrogate_risk")
+                    or selected_checkpoint.get("surrogate_risk")
+                    or {},
+                }
+            )
+            safe_json_dump(attempts, str(Path(output_dir) / "seed_attempts_summary.json"))
+            safe_json_dump(
+                {
+                    "selected_seed_index": selected_seed_index,
+                    "selected_seed_dir": str(selected_dir),
+                    "selected_seed_reason": selected_summary["selected_seed_reason"],
+                },
+                str(Path(output_dir) / "selected_seed_summary.json"),
+            )
+            safe_json_dump(selected_summary, str(Path(output_dir) / "summary.json"))
+            return FinalResult(
+                instance_id=context.instance_id,
+                status=str(selected_summary.get("status") or ""),
+                final_test_path=str(top_final),
+                rounds_used=int(selected_summary.get("rounds_used") or 0),
+                buggy_execution=selected_summary.get("buggy_execution") or {},
+                dual_version_result=selected_summary.get("dual_version_result") or {},
+                behavior_target=selected_summary.get("behavior_target") or behavior.to_dict(),
+                host_context=selected_summary.get("host_context") or {},
+                observation_report=selected_summary.get("observation_report") or {},
+                notes=str(selected_summary.get("notes") or ""),
+                seed_mode="adaptive_top3",
+                selected_seed_index=selected_seed_index,
+                seed_attempts_count=len(attempts),
+                seed_attempts_summary=attempts,
+                seed_switch_reasons=switch_reasons,
+                selected_seed_reason=str(selected_summary.get("selected_seed_reason") or ""),
+                final_oracle_risk=selected_summary.get("final_oracle_risk") or {},
+                final_surrogate_risk=selected_summary.get("final_surrogate_risk") or {},
+                final_reason=str(selected_summary.get("final_reason") or ""),
+            )
         if not generate_only:
-            prepared_repo, prepare_meta = prepare_instance_worktree(context, output_dir, conda_env, timeout, no_conda)
+            if _prepared_repo_path and _prepare_meta is not None:
+                prepared_repo, prepare_meta = _prepared_repo_path, dict(_prepare_meta)
+            else:
+                prepared_repo, prepare_meta = prepare_instance_worktree(
+                    context, output_dir, conda_env, timeout, no_conda
+                )
             context.buggy_repo_path = prepared_repo
             safe_json_dump(prepare_meta, str(Path(output_dir) / "repo_prepare.json"))
             if prepare_meta.get("status") in {
@@ -409,14 +799,7 @@ def run_instance_pipeline(
                 return result
         else:
             safe_json_dump({"status": "SKIPPED", "reason": "generate_only"}, str(Path(output_dir) / "repo_prepare.json"))
-        behavior_path = Path(output_dir) / "behavior_target.json"
-        if behavior_path.exists():
-            from ..issue.issue_rewriter import behavior_from_dict
-            from ..core.utils import safe_json_load
-
-            behavior = behavior_from_dict(context.instance_id, safe_json_load(behavior_path))
-        else:
-            behavior = rewrite_issue(context, llm_client, output_dir)
+        behavior = _load_cached_behavior(context, output_dir)
         behavior.save_json(str(Path(output_dir) / "behavior_target.json"))
         protocol = None
         seed_fallback_used = False
@@ -424,7 +807,10 @@ def run_instance_pipeline(
         ranked_tests = rank_related_tests(context.retrieved_tests, behavior)
         related_test = ranked_tests[0] if ranked_tests else select_related_test(context.retrieved_tests, behavior)
         host = None
-        seeds_to_try = ranked_tests[:3] if enable_protocol_recovery else ([related_test] if related_test else [])
+        if _forced_seed_index is not None and 0 <= _forced_seed_index < len(ranked_tests):
+            seeds_to_try = [ranked_tests[_forced_seed_index]]
+        else:
+            seeds_to_try = ranked_tests[:3] if enable_protocol_recovery else ([related_test] if related_test else [])
         for seed_index, seed in enumerate(seeds_to_try):
             candidate_host = build_host_context(
                 context.instance_id, seed, context.buggy_repo_path, behavior,
@@ -673,6 +1059,9 @@ def run_instance_pipeline(
                     execution,
                     decision,
                     candidate_dual,
+                    behavior,
+                    context.issue_text,
+                    {item.path for item in context.retrieved_code if item.path},
                 )
                 checkpoints.append(checkpoint)
                 if checkpoint.score > best_score:
@@ -819,8 +1208,9 @@ def run_instance_pipeline(
                 safe_json_dump(
                     {
                         "selection_policy": (
-                            "surrogate_f2p > verifier_accept > executable_buggy_fail "
-                            "> buggy_pass > environment_failure; earliest wins ties"
+                            "risk-adjusted: surrogate_f2p > verifier_accept > "
+                            "executable_buggy_fail > buggy_pass > environment_failure; "
+                            "earliest wins ties"
                         ),
                         "selected_attempt": checkpoints[best_index].round_id,
                         "checkpoints": [item.to_dict() for item in checkpoints],
@@ -876,6 +1266,20 @@ def run_instance_pipeline(
             )
             dual.save_json(str(Path(output_dir) / "dual_version_result.json"))
         write_text(str(Path(output_dir) / "final_test.py"), final_code or candidate.code)
+        final_oracle_risk = assess_oracle_risk(
+            final_code or candidate.code,
+            behavior,
+            context.issue_text,
+            (execution.stdout + "\n" + execution.stderr) if execution else "",
+            observation.to_dict() if observation else {},
+        )
+        final_surrogate_risk = assess_surrogate_risk(
+            dual,
+            final_oracle_risk,
+            {item.path for item in context.retrieved_code if item.path},
+        )
+        candidate_selector = first_test_selector(final_code or candidate.code)
+        placement_dir = str(Path(candidate.candidate_repo_path).parent)
         if dual.status in {"F2P_SUCCESS", "SURROGATE_F2P_SUCCESS"}:
             status = dual.status
         elif decision is not None and decision.decision == "accept":
@@ -912,6 +1316,19 @@ def run_instance_pipeline(
             strict_failure_class=strict_result.failure_class if strict_result else "",
             oracle_rebound=oracle_rebound,
             final_reason=decision.reason if decision else "",
+            seed_mode="single_forced_seed" if _forced_seed_index is not None else "single_seed",
+            selected_seed_index=_forced_seed_index if _forced_seed_index is not None else 0,
+            seed_attempts_count=1,
+            seed_attempts_summary=seed_attempts,
+            final_oracle_risk=final_oracle_risk,
+            final_surrogate_risk=final_surrogate_risk,
+            candidate_repo_path=candidate.candidate_repo_path,
+            pytest_nodeid=candidate.pytest_nodeid,
+            command=candidate.command,
+            direct_test_repo_path_hint=candidate.candidate_repo_path,
+            placement_dir=placement_dir,
+            runner_kind=context.repo.split("/")[-1],
+            selector=candidate_selector,
         )
         result.save_json(str(Path(output_dir) / "summary.json"))
         return result

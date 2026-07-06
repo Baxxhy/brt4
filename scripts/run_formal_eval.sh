@@ -13,7 +13,7 @@ if [[ -z "$RUN_DIR" ]]; then
 fi
 RUN_DIR=$(realpath -m "$RUN_DIR")
 REPO_ROOT_BASE=${REPO_ROOT_BASE:-"$PACKAGE_ROOT/swe_repos"}
-INSTANCES_PATH=${INSTANCES_PATH:-"$PACKAGE_ROOT/brt2/data/issues/swt276_issues.json"}
+INSTANCES_PATH=${INSTANCES_PATH:-"$PROJECT_ROOT/data/issues/swt276_issues.json"}
 WORKERS=${WORKERS:-6}
 TIMEOUT=${TIMEOUT:-1800}
 
