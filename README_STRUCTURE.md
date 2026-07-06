@@ -5,8 +5,12 @@ brt4/
   README.md
   README_RUN.md
   README_STRUCTURE.md
+  SELF_CHECK.md
+  __init__.py
   config.py
   run.py
+  run_issue_rewrite.py
+  direct_eval.py
 
   core/          shared schema, config wrappers, prompt constants, utilities
   llm/           LLM client and API pool
@@ -35,9 +39,13 @@ brt4/
     cleanup_manifests/
 ```
 
-Root-level Python files such as `generator.py`, `executor.py`, `llm_client.py`,
-and `issue_rewriter.py` are compatibility wrappers only. The implementation
-lives in the functional packages above.
+The root directory intentionally keeps only README/config files, package
+initialization, root CLI entry points, functional package directories, and
+input/output top-level directories. Legacy root-level compatibility wrappers
+such as `generator.py`, `executor.py`, `llm_client.py`, and `issue_rewriter.py`
+have been removed from the working tree once current code paths no longer
+depended on them. Use package imports such as `brt4.generation.generator`,
+`brt4.execution.executor`, and `brt4.validation.verifier`.
 
 ## Source Mapping
 
@@ -68,6 +76,16 @@ New run outputs go to:
 - `results/smoke/<timestamp>/`
 - `results/logs/<timestamp>/`
 
-Old root-level result directories are cleaned through
-`scripts/clean_old_results.sh`, which writes manifests before deleting or
-archiving anything.
+Historical root-level issue/input snippets live under:
+
+- `data/issues/legacy/`
+
+Historical root-level result directories and logs live under:
+
+- `results/archive/`
+- `results/logs/legacy/`
+
+All cleanup and archival operations must write manifests under
+`results/cleanup_manifests/` before removing or moving files. New runs should
+not write `outputs*`, `formal_f2p*`, `direct_eval*`, logs, pid files, or
+temporary run scripts into the repository root.
