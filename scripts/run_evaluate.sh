@@ -26,6 +26,7 @@ cmd=(
   --output_dir "$RUN_DIR/evaluation/direct_eval"
   --max_workers "$WORKERS"
   --timeout "$TIMEOUT"
+  --use_swebench_lite
   --resume
 )
 

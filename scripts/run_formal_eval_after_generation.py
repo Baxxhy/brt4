@@ -42,6 +42,15 @@ def main() -> int:
     parser.add_argument("--log_path", default="")
     parser.add_argument("--summary_path", default="")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--use_generated_worktrees",
+        action="store_true",
+        help=(
+            "Opt in to evaluating inside generation/<instance>/worktree. "
+            "The default uses the shared repo_root_base checkout, matching "
+            "direct_eval placement and avoiding stale git-worktree locks."
+        ),
+    )
     args = parser.parse_args()
     outputs = Path(args.outputs_dir)
     rows = load_rows(Path(args.dataset_file))
@@ -75,8 +84,9 @@ def main() -> int:
         "--output_dir", str(formal_dir),
         "--max_workers", str(args.max_workers),
         "--timeout", str(args.timeout),
-        "--use_generated_worktrees",
     ]
+    if args.use_generated_worktrees:
+        command.append("--use_generated_worktrees")
     if not args.patch_file and not all(row.get("patch") for row in completed):
         command.append("--use_swebench_lite")
     if args.resume:

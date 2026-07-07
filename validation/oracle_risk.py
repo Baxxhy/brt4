@@ -32,6 +32,7 @@ def assess_oracle_risk(
     issue_text: str = "",
     execution_log: str = "",
     observation_json: dict[str, Any] | None = None,
+    issue_gate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     del observation_json
     reasons: list[str] = []
@@ -91,12 +92,35 @@ def assess_oracle_risk(
     exact_value = bool(re.search(r"assert\s+.+==\s+(['\"].{40,}['\"]|\[[^\]]{40,}\]|\{[^}]{40,}\})", candidate_code, re.S))
     if not_crash and exact_value:
         reasons.append("high: issue mainly asks for no crash but oracle requires exact value/string")
+    channels = [str(item).lower() for item in (issue_gate or {}).get("observable_channels", [])]
+    channel_text = " ".join(channels)
+    uses_allowed_channel = bool(channels) and any(
+        token in candidate_code.lower()
+        for token in channels
+        for token in [token, token.replace(" ", "_")]
+        if len(token) >= 3
+    )
+    if uses_allowed_channel:
+        reasons = [
+            reason
+            for reason in reasons
+            if not (
+                reason.startswith("medium:")
+                and any(token in reason for token in ("exact", "repr", "string", "warning"))
+            )
+        ]
+    if (
+        re.search(r"assert\s+.+(repr|str|query|sql)", candidate_code, re.I)
+        and not any(token in channel_text for token in ("repr", "sql", "query", "public output"))
+    ):
+        reasons.append("medium: exact internal representation is not supported by IssueGate observable channels")
     log_tail = execution_log[-4000:]
     signals.update(
         {
             "assert_count": len(re.findall(r"\bassert\b", candidate_code)),
             "uses_pytest_raises": "pytest.raises" in candidate_code,
             "log_tail_chars": len(log_tail),
+            "issue_gate_observable_match": uses_allowed_channel,
         }
     )
     deduped = list(dict.fromkeys(reasons))

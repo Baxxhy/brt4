@@ -130,6 +130,58 @@ class MutationPlan(JsonMixin):
 
 
 @dataclass
+class IssueGate(JsonMixin):
+    instance_id: str
+    target_apis: list[str] = field(default_factory=list)
+    trigger_condition: str = ""
+    state_variables: list[str] = field(default_factory=list)
+    observable_channels: list[str] = field(default_factory=list)
+    expected_failure_signature: list[str] = field(default_factory=list)
+    forbidden_failures: list[str] = field(default_factory=list)
+    source_evidence: dict[str, list[str]] = field(default_factory=dict)
+    uncertainties: list[str] = field(default_factory=list)
+
+
+@dataclass
+class TestSkeleton(JsonMixin):
+    instance_id: str
+    setup_nodes: list[dict[str, Any]] = field(default_factory=list)
+    action_nodes: list[dict[str, Any]] = field(default_factory=list)
+    oracle_nodes: list[dict[str, Any]] = field(default_factory=list)
+    target_call_nodes: list[dict[str, Any]] = field(default_factory=list)
+    def_use_chain: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    mutable_slice: list[dict[str, Any]] = field(default_factory=list)
+    protected_nodes: list[dict[str, Any]] = field(default_factory=list)
+    parse_ok: bool = False
+    reason: str = ""
+
+
+@dataclass
+class MutationOperator(JsonMixin):
+    name: str
+    cn_name: str = ""
+    description: str = ""
+    applicable: bool = False
+    target_node: str = ""
+    reason: str = ""
+    risk: str = "medium"
+
+
+@dataclass
+class NSGEMOperatorPlan(JsonMixin):
+    instance_id: str
+    selected_operator: str = ""
+    target_node_id: str = ""
+    operator_parameters: dict[str, Any] = field(default_factory=dict)
+    preserve_nodes: list[str] = field(default_factory=list)
+    expected_effect: str = ""
+    risk: str = "medium"
+    reason: str = ""
+    valid: bool = False
+    fallback_reason: str = ""
+
+
+@dataclass
 class StrictVerifierResult(JsonMixin):
     instance_id: str
     decision: str = "reject"
@@ -168,6 +220,21 @@ class CandidateCheckpoint(JsonMixin):
     selector_score_before_risk: int = 0
     selector_score_after_risk: int = 0
     selector_penalty_reasons: list[str] = field(default_factory=list)
+    issue_gate_hit_score: int = 0
+    operator_used: str = ""
+    ast_applied: bool = False
+    fitness_score: int = 0
+    minimality_score: int = 0
+    score_after_ns_gem: int = 0
+    ns_gem_mode: str = ""
+    ns_gem_used_for_initial_plan: bool = False
+    p0_primary_score: int = 0
+    ns_gem_secondary_score: int = 0
+    scoring_policy: str = ""
+    status_tier: int = 0
+    final_rank_key: list[int] = field(default_factory=list)
+    ns_gem_changed_tier: bool = False
+    ns_gem_selection_trace: dict[str, Any] = field(default_factory=dict)
     execution: dict[str, Any] = field(default_factory=dict)
     verifier: dict[str, Any] = field(default_factory=dict)
     surrogate: dict[str, Any] = field(default_factory=dict)
@@ -273,3 +340,33 @@ class FinalResult(JsonMixin):
     placement_dir: str = ""
     runner_kind: str = ""
     selector: str = ""
+    method_version: str = ""
+    issue_gate: dict[str, Any] = field(default_factory=dict)
+    test_skeleton_summary: dict[str, Any] = field(default_factory=dict)
+    operator_applicability_summary: dict[str, Any] = field(default_factory=dict)
+    ns_gem_operator_plan: dict[str, Any] = field(default_factory=dict)
+    ns_gem_ast_applied: bool = False
+    ns_gem_ast_fallback_reason: str = ""
+    runtime_trace_profile: dict[str, Any] = field(default_factory=dict)
+    fitness_score: int = 0
+    fitness_reasons: list[str] = field(default_factory=list)
+    probe_first_oracle_used: bool = False
+    oracle_from_observable_channel: bool = False
+    delta_minimization: dict[str, Any] = field(default_factory=dict)
+    score_after_ns_gem: int = 0
+    ns_gem_selection_reason: str = ""
+    ns_gem_mode: str = ""
+    ns_gem_used_for_initial_plan: bool = False
+    p0_plan_preserved: bool = True
+    ns_gem_operator_hint: str = ""
+    ast_transform_default: str = ""
+    ast_transform_rescue_used: bool = False
+    ast_transform_allowed: bool = False
+    ast_transform_reject_reason: str = ""
+    ast_transform_rollback: bool = False
+    scoring_policy: str = ""
+    p0_primary_score: int = 0
+    ns_gem_secondary_score: int = 0
+    status_tier: int = 0
+    final_rank_key: list[int] = field(default_factory=list)
+    ns_gem_changed_tier: bool = False

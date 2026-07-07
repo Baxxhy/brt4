@@ -23,6 +23,12 @@ from ..generation.generator import (
 from ..context.host_context import build_host_context, rank_related_tests, select_related_test
 from ..context.protocol_recovery import audit_recovered_protocol, recover_test_protocol
 from ..mutation.seed_mutator import build_mutation_plan
+from ..mutation.issue_gate import build_issue_gate
+from ..mutation.skeleton import build_test_skeleton
+from ..mutation.operators import build_operator_applicability, summarize_applicability
+from ..mutation.ns_gem_planner import build_ns_gem_operator_plan
+from ..mutation.ast_transformer import apply_ns_gem_ast_transform
+from ..mutation.minimizer import conservative_delta_minimize
 from ..generation.observation_oracle import rebind_observation_oracle
 from ..validation.strict_semantic_verifier import verify_strict_semantics
 from ..retrieval.icore_runtime import (
@@ -48,6 +54,7 @@ from ..core.schema import (
 from ..core.utils import ensure_dir, safe_json_dump, write_text
 from ..validation.verifier import verify_buggy_only
 from ..validation.oracle_risk import assess_oracle_risk, assess_surrogate_risk
+from ..execution.trace_fitness import compute_trace_fitness
 
 
 DEFAULT_BEHAVIOR_CACHE_DIRS = [
@@ -176,6 +183,27 @@ def _risk_adjusted_score(
     return max(0, base_score - penalty), list(dict.fromkeys(reasons))
 
 
+def _status_tier(
+    execution: ExecutionResult,
+    decision: VerifierDecision,
+    dual: DualVersionResult | None,
+) -> int:
+    if dual and dual.status in {"F2P_SUCCESS", "SURROGATE_F2P_SUCCESS"}:
+        return 1
+    if decision.decision == "accept" and execution.returncode != 0:
+        return 2
+    if execution.returncode != 0 and execution.status not in {
+        "SETUP_ERROR",
+        "SYNTAX_ERROR",
+        "COLLECT_ERROR",
+        "TIMEOUT",
+    }:
+        return 3
+    if execution.returncode == 0 or execution.status in {"PASS", "BUGGY_PASS"}:
+        return 4
+    return 5
+
+
 def _save_checkpoint(
     output_dir: str,
     attempt_id: int,
@@ -186,17 +214,20 @@ def _save_checkpoint(
     behavior: Any | None = None,
     issue_text: str = "",
     retrieved_paths: set[str] | None = None,
+    ns_gem: dict[str, Any] | None = None,
 ) -> CandidateCheckpoint:
     checkpoint_dir = ensure_dir(Path(output_dir) / "checkpoints")
     code_path = str(Path(checkpoint_dir) / f"candidate_attempt_{attempt_id}.py")
     write_text(code_path, candidate.code)
     score, reason = _checkpoint_score(execution, decision, dual)
+    ns_gem = ns_gem or {}
     oracle_risk = (
         assess_oracle_risk(
             candidate.code,
             behavior,
             issue_text,
             execution.stdout + "\n" + execution.stderr,
+            issue_gate=ns_gem.get("issue_gate") if isinstance(ns_gem.get("issue_gate"), dict) else None,
         )
         if behavior is not None
         else {"level": "low", "reasons": [], "signals": {}}
@@ -205,6 +236,17 @@ def _save_checkpoint(
     adjusted_score, penalty_reasons = _risk_adjusted_score(
         score, oracle_risk, surrogate_risk
     )
+    fitness_score = int(ns_gem.get("fitness_score") or 0)
+    ast_applied = bool(ns_gem.get("ast_applied"))
+    minimality_score = int(ns_gem.get("minimality_score") or 0)
+    # P2-safe: preserve the P0 risk-adjusted score as the primary selector.
+    # NS-GEM evidence is recorded as a tie-breaker/diagnostic signal only; it
+    # must not promote PASS/UNRELATED candidates across execution-status tiers.
+    status_tier = _status_tier(execution, decision, dual)
+    ns_secondary = max(-15, min(40, fitness_score)) + max(0, min(10, minimality_score))
+    if ast_applied:
+        ns_secondary += 10
+    final_rank_key = [status_tier, -adjusted_score, -ns_secondary, attempt_id]
     checkpoint = CandidateCheckpoint(
         instance_id=candidate.instance_id,
         round_id=attempt_id,
@@ -216,6 +258,31 @@ def _save_checkpoint(
         selector_score_before_risk=score,
         selector_score_after_risk=adjusted_score,
         selector_penalty_reasons=penalty_reasons,
+        issue_gate_hit_score=int(ns_gem.get("issue_gate_hit_score") or 0),
+        operator_used=str(ns_gem.get("operator_used") or ""),
+        ast_applied=ast_applied,
+        fitness_score=fitness_score,
+        minimality_score=minimality_score,
+        score_after_ns_gem=adjusted_score,
+        ns_gem_mode=str(ns_gem.get("ns_gem_mode") or "diagnostic_only"),
+        ns_gem_used_for_initial_plan=bool(ns_gem.get("ns_gem_used_for_initial_plan")),
+        p0_primary_score=adjusted_score,
+        ns_gem_secondary_score=ns_secondary,
+        scoring_policy="p2_safe_tier_then_nsgem",
+        status_tier=status_tier,
+        final_rank_key=final_rank_key,
+        ns_gem_changed_tier=False,
+        ns_gem_selection_trace={
+            "existing_score_after_risk": adjusted_score,
+            "p0_primary_score": adjusted_score,
+            "ns_gem_secondary_score": ns_secondary,
+            "scoring_policy": "p2_safe_tier_then_nsgem",
+            "status_tier": status_tier,
+            "final_rank_key": final_rank_key,
+            "ns_gem_changed_tier": False,
+            "fitness_reasons": ns_gem.get("fitness_reasons") or [],
+            "next_recommended_operators": ns_gem.get("next_recommended_operators") or [],
+        },
         execution=execution.to_dict(),
         verifier=decision.to_dict(),
         surrogate=dual.to_dict() if dual else {},
@@ -856,6 +923,23 @@ def run_instance_pipeline(
                 protocol.protocol_risks.append(f"协议模型审计失败，保留 AST 恢复结果：{exc}")
             protocol.save_json(str(Path(output_dir) / "protocol_recovery.json"))
         host.save_json(str(Path(output_dir) / "host_context.json"))
+        issue_gate = build_issue_gate(behavior, context.retrieved_code, context.retrieved_tests)
+        issue_gate.save_json(str(Path(output_dir) / "issue_gate.json"))
+        seed_code = related_test.code_content if related_test else host.seed_test_code
+        test_skeleton = build_test_skeleton(
+            context.instance_id,
+            seed_code or "",
+            issue_gate,
+            host,
+        )
+        test_skeleton.save_json(str(Path(output_dir) / "test_skeleton.json"))
+        operators = build_operator_applicability(
+            context.instance_id,
+            issue_gate,
+            test_skeleton,
+            output_dir,
+        )
+        operator_summary = summarize_applicability(operators)
         candidate = None
         execution = None
         decision = None
@@ -873,6 +957,24 @@ def run_instance_pipeline(
         ) if enable_seed_mutation else None
         if initial_plan:
             mutation_plans.append(initial_plan)
+        ns_gem_plan = build_ns_gem_operator_plan(
+            context.instance_id,
+            issue_gate,
+            test_skeleton,
+            operators,
+            llm_client,
+            output_dir,
+        )
+        ns_gem_mode = "diagnostic_only"
+        ns_gem_used_for_initial_plan = False
+        p0_plan_preserved = True
+        ns_gem_operator_hint = ns_gem_plan.selected_operator or ""
+        if initial_plan:
+            # P2-safe: keep the P0 mutation plan untouched for initial
+            # generation. NS-GEM is recorded as diagnostic evidence and may
+            # inform later repair prompts, but it must not preempt a strong P0
+            # candidate path.
+            initial_plan.save_json(str(Path(output_dir) / "mutation_round_0_plan.json"))
         candidate = generate_candidate(
             context.instance_id,
             behavior,
@@ -887,6 +989,18 @@ def run_instance_pipeline(
             protocol=protocol,
             mutation_plan=initial_plan,
         )
+        transformed_code, ast_transform_result = apply_ns_gem_ast_transform(
+            candidate.code,
+            ns_gem_plan,
+            test_skeleton,
+            output_dir,
+            enabled=False,
+        )
+        # P2-safe default: AST transformation is diagnostic-only for the
+        # initial candidate. Rescue usage can be added after a weak-candidate
+        # execution signal, but the initial P0 path must stay byte-for-byte
+        # generator-owned.
+        del transformed_code
         write_text(str(Path(output_dir) / "mutation_round_0_test.py"), candidate.code)
         _refresh_candidate_command(context, candidate)
         if generate_only:
@@ -981,6 +1095,42 @@ def run_instance_pipeline(
                 seed_fallback_used=seed_fallback_used,
                 mutation_ops=[op for plan in mutation_plans for op in plan.mutation_ops],
                 final_reason="environment qualification remained unresolved",
+                method_version="ns_gem_brt_p2_safe",
+                issue_gate=issue_gate.to_dict(),
+                test_skeleton_summary={
+                    "parse_ok": test_skeleton.parse_ok,
+                    "target_call_count": len(test_skeleton.target_call_nodes),
+                    "mutable_slice_count": len(test_skeleton.mutable_slice),
+                    "protected_node_count": len(test_skeleton.protected_nodes),
+                    "reason": test_skeleton.reason,
+                },
+                operator_applicability_summary=operator_summary,
+                ns_gem_operator_plan=ns_gem_plan.to_dict(),
+                ns_gem_ast_applied=bool(ast_transform_result.get("applied")),
+                ns_gem_ast_fallback_reason=str(ast_transform_result.get("fallback_reason") or ""),
+                ns_gem_mode=ns_gem_mode,
+                ns_gem_used_for_initial_plan=ns_gem_used_for_initial_plan,
+                p0_plan_preserved=p0_plan_preserved,
+                ns_gem_operator_hint=ns_gem_operator_hint,
+                ast_transform_default=str(ast_transform_result.get("ast_transform_default") or "disabled"),
+                ast_transform_rescue_used=bool(ast_transform_result.get("ast_transform_rescue_used")),
+                ast_transform_allowed=bool(ast_transform_result.get("ast_transform_allowed")),
+                ast_transform_reject_reason=str(ast_transform_result.get("ast_transform_reject_reason") or ""),
+                ast_transform_rollback=bool(ast_transform_result.get("ast_transform_rollback")),
+                runtime_trace_profile={},
+                fitness_score=0,
+                fitness_reasons=[],
+                probe_first_oracle_used=False,
+                oracle_from_observable_channel=False,
+                delta_minimization={},
+                score_after_ns_gem=0,
+                scoring_policy="p2_safe_tier_then_nsgem",
+                p0_primary_score=0,
+                ns_gem_secondary_score=0,
+                status_tier=5,
+                final_rank_key=[5, 0, 0, 0],
+                ns_gem_changed_tier=False,
+                ns_gem_selection_reason="environment qualification remained unresolved",
             )
             result.save_json(str(Path(output_dir) / "summary.json"))
             return result
@@ -993,6 +1143,7 @@ def run_instance_pipeline(
             max_brt_attempts = 1 + max(0, brt_budget)
             checkpoints: list[CandidateCheckpoint] = []
             best_score = -1
+            best_rank_key: list[int] | None = None
             best_index = -1
             best_candidate = None
             best_execution = None
@@ -1052,6 +1203,37 @@ def run_instance_pipeline(
                             "SKIPPED",
                             "Only buggy source was executed.",
                         )
+                checkpoint_oracle_risk = assess_oracle_risk(
+                    candidate.code,
+                    behavior,
+                    context.issue_text,
+                    execution.stdout + "\n" + execution.stderr,
+                    issue_gate=issue_gate.to_dict(),
+                )
+                trace_profile, fitness_score, fitness_reasons, next_ops = compute_trace_fitness(
+                    candidate.code,
+                    execution,
+                    behavior,
+                    issue_gate,
+                    decision.to_dict(),
+                    checkpoint_oracle_risk,
+                    candidate_dual.status if candidate_dual else "",
+                )
+                safe_json_dump(trace_profile, str(Path(output_dir) / f"runtime_trace_profile_round_{brt_attempt}.json"))
+                provisional_status = (
+                    candidate_dual.status
+                    if candidate_dual and candidate_dual.status in {"F2P_SUCCESS", "SURROGATE_F2P_SUCCESS"}
+                    else "ISSUE_ALIGNED_FAIL"
+                    if decision.decision == "accept"
+                    else execution.status
+                )
+                candidate.code, delta_result = conservative_delta_minimize(
+                    candidate.code,
+                    [plan.mutation_ops[0] for plan in mutation_plans if plan.mutation_ops],
+                    provisional_status,
+                    ns_gem_plan,
+                    output_dir,
+                )
                 checkpoint = _save_checkpoint(
                     output_dir,
                     brt_attempt,
@@ -1062,10 +1244,33 @@ def run_instance_pipeline(
                     behavior,
                     context.issue_text,
                     {item.path for item in context.retrieved_code if item.path},
+                    {
+                        "operator_used": ns_gem_plan.selected_operator,
+                        "ast_applied": bool(ast_transform_result.get("applied")),
+                        "fitness_score": fitness_score,
+                        "fitness_reasons": fitness_reasons,
+                        "next_recommended_operators": next_ops,
+                        "minimality_score": int(delta_result.get("minimality_score") or 0),
+                        "issue_gate_hit_score": 2 if trace_profile.get("target_api_mentioned_in_test") else 0,
+                        "issue_gate": issue_gate.to_dict(),
+                        "ns_gem_mode": ns_gem_mode,
+                        "ns_gem_used_for_initial_plan": ns_gem_used_for_initial_plan,
+                    },
                 )
                 checkpoints.append(checkpoint)
-                if checkpoint.score > best_score:
+                rank_key = checkpoint.final_rank_key or [
+                    checkpoint.status_tier,
+                    -checkpoint.score,
+                    -checkpoint.ns_gem_secondary_score,
+                    checkpoint.round_id,
+                ]
+                if checkpoint.score > best_score or (
+                    checkpoint.score == best_score
+                    and best_rank_key is not None
+                    and rank_key < best_rank_key
+                ):
                     best_score = checkpoint.score
+                    best_rank_key = rank_key
                     best_index = len(checkpoints) - 1
                     best_candidate = copy.deepcopy(candidate)
                     best_execution = copy.deepcopy(execution)
@@ -1272,6 +1477,7 @@ def run_instance_pipeline(
             context.issue_text,
             (execution.stdout + "\n" + execution.stderr) if execution else "",
             observation.to_dict() if observation else {},
+            issue_gate=issue_gate.to_dict(),
         )
         final_surrogate_risk = assess_surrogate_risk(
             dual,
@@ -1322,6 +1528,81 @@ def run_instance_pipeline(
             seed_attempts_summary=seed_attempts,
             final_oracle_risk=final_oracle_risk,
             final_surrogate_risk=final_surrogate_risk,
+            method_version="ns_gem_brt_p2_safe",
+            issue_gate=issue_gate.to_dict(),
+            test_skeleton_summary={
+                "parse_ok": test_skeleton.parse_ok,
+                "target_call_count": len(test_skeleton.target_call_nodes),
+                "mutable_slice_count": len(test_skeleton.mutable_slice),
+                "protected_node_count": len(test_skeleton.protected_nodes),
+                "reason": test_skeleton.reason,
+            },
+            operator_applicability_summary=operator_summary,
+            ns_gem_operator_plan=ns_gem_plan.to_dict(),
+            ns_gem_ast_applied=bool(ast_transform_result.get("applied")),
+            ns_gem_ast_fallback_reason=str(ast_transform_result.get("fallback_reason") or ""),
+            ns_gem_mode=ns_gem_mode,
+            ns_gem_used_for_initial_plan=ns_gem_used_for_initial_plan,
+            p0_plan_preserved=p0_plan_preserved,
+            ns_gem_operator_hint=ns_gem_operator_hint,
+            ast_transform_default=str(ast_transform_result.get("ast_transform_default") or "disabled"),
+            ast_transform_rescue_used=bool(ast_transform_result.get("ast_transform_rescue_used")),
+            ast_transform_allowed=bool(ast_transform_result.get("ast_transform_allowed")),
+            ast_transform_reject_reason=str(ast_transform_result.get("ast_transform_reject_reason") or ""),
+            ast_transform_rollback=bool(ast_transform_result.get("ast_transform_rollback")),
+            runtime_trace_profile=trace_profile if "trace_profile" in locals() else {},
+            fitness_score=int(fitness_score if "fitness_score" in locals() else 0),
+            fitness_reasons=fitness_reasons if "fitness_reasons" in locals() else [],
+            probe_first_oracle_used=bool(oracle_rebound),
+            oracle_from_observable_channel=(
+                bool(issue_gate.observable_channels)
+                and (final_oracle_risk.get("level") in {"low", "medium"})
+            ),
+            delta_minimization=delta_result if "delta_result" in locals() else {},
+            score_after_ns_gem=int(
+                checkpoints[best_index].score
+                if "checkpoints" in locals()
+                and checkpoints
+                and 0 <= best_index < len(checkpoints)
+                else 0
+            ),
+            scoring_policy="p2_safe_tier_then_nsgem",
+            p0_primary_score=int(
+                checkpoints[best_index].p0_primary_score
+                if "checkpoints" in locals()
+                and checkpoints
+                and 0 <= best_index < len(checkpoints)
+                else 0
+            ),
+            ns_gem_secondary_score=int(
+                checkpoints[best_index].ns_gem_secondary_score
+                if "checkpoints" in locals()
+                and checkpoints
+                and 0 <= best_index < len(checkpoints)
+                else 0
+            ),
+            status_tier=int(
+                checkpoints[best_index].status_tier
+                if "checkpoints" in locals()
+                and checkpoints
+                and 0 <= best_index < len(checkpoints)
+                else 0
+            ),
+            final_rank_key=(
+                checkpoints[best_index].final_rank_key
+                if "checkpoints" in locals()
+                and checkpoints
+                and 0 <= best_index < len(checkpoints)
+                else []
+            ),
+            ns_gem_changed_tier=False,
+            ns_gem_selection_reason=(
+                checkpoints[best_index].reason
+                if "checkpoints" in locals()
+                and checkpoints
+                and 0 <= best_index < len(checkpoints)
+                else ""
+            ),
             candidate_repo_path=candidate.candidate_repo_path,
             pytest_nodeid=candidate.pytest_nodeid,
             command=candidate.command,
