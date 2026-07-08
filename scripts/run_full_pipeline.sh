@@ -10,7 +10,9 @@ export RUN_NAME=${RUN_NAME:-"run_${timestamp}"}
 export RUN_DIR=${RUN_DIR:-"$PROJECT_ROOT/results/runs/$RUN_NAME"}
 
 bash "$SCRIPT_DIR/run_generate.sh"
-bash "$SCRIPT_DIR/run_evaluate.sh" "$RUN_DIR"
+if [[ "${RUN_DIRECT_EVAL:-0}" == "1" ]]; then
+  bash "$SCRIPT_DIR/run_evaluate.sh" "$RUN_DIR"
+fi
 bash "$SCRIPT_DIR/run_formal_eval.sh" "$RUN_DIR"
 
 mkdir -p "$RUN_DIR/exports" "$RUN_DIR/logs"
