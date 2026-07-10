@@ -492,7 +492,13 @@ def prepare_instance_worktree(
         setup_log = setup_result.stdout + "\n" + setup_result.stderr
         if (
             setup_result.returncode != 0
-            and "uninstall-no-record-file" in setup_log
+            and (
+                "uninstall-no-record-file" in setup_log
+                or (
+                    "egg-link" in setup_log.lower()
+                    and "does not match installed location" in setup_log.lower()
+                )
+            )
             and "python -m pip install" in setup
             and " -e ." in setup
         ):

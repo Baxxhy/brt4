@@ -12,6 +12,9 @@ if [[ -z "$RUN_DIR" ]]; then
   exit 2
 fi
 RUN_DIR=$(realpath -m "$RUN_DIR")
+RUN_NAME=$(basename "$RUN_DIR")
+BRT4_CONDA_ENV_PREFIX=${BRT4_CONDA_ENV_PREFIX:-"${RUN_NAME}_"}
+export BRT4_CONDA_ENV_PREFIX
 REPO_ROOT_BASE=${REPO_ROOT_BASE:-"$PACKAGE_ROOT/swe_repos"}
 INSTANCES_PATH=${INSTANCES_PATH:-"$PROJECT_ROOT/data/issues/swt276_issues.json"}
 WORKERS=${WORKERS:-6}

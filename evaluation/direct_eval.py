@@ -36,7 +36,8 @@ def env_name_for(issue: dict[str, Any]) -> str:
     repo = issue["repo"]
     version = issue["version"]
     owner, name = repo.split("/")
-    return f"setup_{owner}_{name}__{version}"
+    prefix = str(os.environ.get("BRT4_CONDA_ENV_PREFIX") or "")
+    return f"{prefix}setup_{owner}_{name}__{version}"
 
 
 def resolve_conda_env(env_name: str) -> str:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict, deque
 import json
+import os
 import subprocess
 import threading
 import traceback
@@ -94,7 +95,8 @@ def _default_env_name(issue_row: dict) -> str:
     if not repo or not version or "/" not in repo:
         return ""
     owner, name = repo.split("/", 1)
-    return f"setup_{owner}_{name}__{version}"
+    prefix = str(os.environ.get("BRT4_CONDA_ENV_PREFIX") or "")
+    return f"{prefix}setup_{owner}_{name}__{version}"
 
 
 def _interleave_by_conda_env(

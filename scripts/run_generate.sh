@@ -9,6 +9,8 @@ cd "$PROJECT_ROOT"
 timestamp=$(date +%Y%m%d_%H%M%S)
 RUN_NAME=${RUN_NAME:-"run_${timestamp}"}
 RUN_DIR=${RUN_DIR:-"$PROJECT_ROOT/results/runs/$RUN_NAME"}
+BRT4_CONDA_ENV_PREFIX=${BRT4_CONDA_ENV_PREFIX:-"${RUN_NAME}_"}
+export BRT4_CONDA_ENV_PREFIX
 WORKERS=${WORKERS:-6}
 SEED_WORKERS=${SEED_WORKERS:-$WORKERS}
 MODEL=${MODEL:-deepseek-v3}
@@ -34,7 +36,8 @@ cat > "$RUN_DIR/run_config.json" <<EOF
   "code_retrieval_path": "$CODE_RETRIEVAL_PATH",
   "test_retrieval_path": "$TEST_RETRIEVAL_PATH",
   "repo_root_base": "$REPO_ROOT_BASE",
-  "issue_rewrite_path": "$ISSUE_REWRITE_PATH"
+  "issue_rewrite_path": "$ISSUE_REWRITE_PATH",
+  "conda_env_prefix": "$BRT4_CONDA_ENV_PREFIX"
 }
 EOF
 

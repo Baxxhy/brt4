@@ -102,7 +102,7 @@ def ensure_icore_environment(
     cwd: str,
     timeout: int,
 ) -> dict[str, Any]:
-    lock_path = Path("/tmp") / (
+    lock_path = Path(os.environ.get("TMPDIR") or "/tmp") / (
         "brt3_env_" + re.sub(r"[^A-Za-z0-9_.-]", "_", env_name) + ".lock"
     )
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -137,7 +137,7 @@ def ensure_icore_environment(
 
 
 def env_lock_path(env_name: str, suffix: str) -> Path:
-    return Path("/tmp") / (
+    return Path(os.environ.get("TMPDIR") or "/tmp") / (
         "brt3_env_"
         + re.sub(r"[^A-Za-z0-9_.-]", "_", env_name)
         + f"_{suffix}.lock"
