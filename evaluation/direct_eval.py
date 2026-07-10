@@ -26,23 +26,26 @@ from ..core.utils import ensure_dir, safe_json_dump, sanitize_instance_id
 
 
 CONDA_EXE = os.environ.get("CONDA_EXE", "/root/miniconda3/bin/conda")
+_CONDA_ENV_NAMES_CACHE: list[str] | None = None
 
 
 def conda_activate_cmd(env_name: str) -> str:
     return f'eval "$("{CONDA_EXE}" shell.bash hook)" && conda activate {env_name}'
 
 
-def env_name_for(issue: dict[str, Any]) -> str:
+def env_name_for(issue: dict[str, Any], prefix: str | None = None) -> str:
     repo = issue["repo"]
     version = issue["version"]
     owner, name = repo.split("/")
-    prefix = str(os.environ.get("BRT4_CONDA_ENV_PREFIX") or "")
+    if prefix is None:
+        prefix = str(os.environ.get("BRT4_CONDA_ENV_PREFIX") or "")
     return f"{prefix}setup_{owner}_{name}__{version}"
 
 
-def resolve_conda_env(env_name: str) -> str:
-    if not env_name:
-        return ""
+def _conda_env_names() -> list[str]:
+    global _CONDA_ENV_NAMES_CACHE
+    if _CONDA_ENV_NAMES_CACHE is not None:
+        return _CONDA_ENV_NAMES_CACHE
     names: list[str] = []
     try:
         proc = subprocess.run(
@@ -73,7 +76,15 @@ def resolve_conda_env(env_name: str) -> str:
                     continue
                 names.append(line.split()[0])
         except Exception:
-            return env_name
+            names = []
+    _CONDA_ENV_NAMES_CACHE = names
+    return names
+
+
+def resolve_conda_env(env_name: str) -> str:
+    if not env_name:
+        return ""
+    names = _conda_env_names()
     if env_name in names:
         return env_name
     matches = sorted(name for name in names if name.endswith(env_name))
@@ -82,6 +93,38 @@ def resolve_conda_env(env_name: str) -> str:
             if name.startswith(preferred):
                 return name
     return matches[-1] if matches else env_name
+
+
+def _generated_env_names(instance_id: str, generated_dir: str) -> list[str]:
+    instance_dir = Path(generated_dir) / instance_id
+    candidates: list[str] = []
+    for path in (instance_dir / "repo_prepare.json", instance_dir / "summary.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data.get("env_name"), str):
+            candidates.append(data["env_name"])
+        repo_prepare = data.get("repo_prepare")
+        if isinstance(repo_prepare, dict) and isinstance(repo_prepare.get("env_name"), str):
+            candidates.append(repo_prepare["env_name"])
+    return candidates
+
+
+def resolve_eval_env(issue: dict[str, Any], generated_dir: str) -> str:
+    candidates = [env_name_for(issue)]
+    candidates.extend(_generated_env_names(str(issue["instance_id"]), generated_dir))
+    candidates.append(env_name_for(issue, prefix=""))
+    names = set(_conda_env_names())
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        resolved = resolve_conda_env(candidate)
+        if resolved in names:
+            return resolved
+    return resolve_conda_env(candidates[0])
 
 
 def repo_path(repo_root_base: str, issue: dict[str, Any]) -> str:
@@ -353,7 +396,7 @@ def evaluate_one(
         else repo_path(repo_root_base, issue)
     )
     preserve_build_artifacts = use_generated_worktree and generated_worktree.is_dir()
-    env_name = resolve_conda_env(env_name_for(issue))
+    env_name = resolve_eval_env(issue, generated_dir)
     final_path = Path(generated_dir) / instance_id / "final_test.py"
     if not final_path.exists():
         return {"instance_id": instance_id, "status": "MISSING_GENERATED_TEST", "success": False}
