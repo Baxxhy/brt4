@@ -39,6 +39,8 @@ def main() -> int:
     parser.add_argument("--eval_completed_only", type=parse_bool, default=False)
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--evaluation_dir", default="")
+    parser.add_argument("--eval_clone_root", default="")
+    parser.add_argument("--eval_worktree_root", default="")
     parser.add_argument("--log_path", default="")
     parser.add_argument("--summary_path", default="")
     parser.add_argument("--resume", action="store_true")
@@ -47,7 +49,7 @@ def main() -> int:
         action="store_true",
         help=(
             "Opt in to evaluating inside generation/<instance>/worktree. "
-            "The default uses the shared repo_root_base checkout."
+            "The default creates isolated formal-eval local clones under --eval_clone_root."
         ),
     )
     args = parser.parse_args()
@@ -70,6 +72,16 @@ def main() -> int:
         completed[0]["patch"] = Path(args.patch_file).read_text(encoding="utf-8")
     formal_dir = Path(args.evaluation_dir).resolve() if args.evaluation_dir else outputs / "formal_eval"
     formal_dir.mkdir(parents=True, exist_ok=True)
+    eval_clone_root = (
+        Path(args.eval_clone_root).resolve()
+        if args.eval_clone_root
+        else formal_dir / "eval_clones"
+    )
+    eval_worktree_root = (
+        Path(args.eval_worktree_root).resolve()
+        if args.eval_worktree_root
+        else Path("")
+    )
     log_path = Path(args.log_path).resolve() if args.log_path else ROOT / "brt4/logs/formal_eval.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8", delete=False) as handle:
@@ -83,7 +95,10 @@ def main() -> int:
         "--output_dir", str(formal_dir),
         "--max_workers", str(args.max_workers),
         "--timeout", str(args.timeout),
+        "--eval_clone_root", str(eval_clone_root),
     ]
+    if args.eval_worktree_root:
+        command.extend(["--eval_worktree_root", str(eval_worktree_root)])
     if args.use_generated_worktrees:
         command.append("--use_generated_worktrees")
     if not args.patch_file and not all(row.get("patch") for row in completed):
@@ -127,6 +142,15 @@ def main() -> int:
         "metrics": metrics,
         "formal_categories": normalized,
         "log": str(log_path),
+        "eval_clone_root": str(eval_clone_root),
+        "eval_worktree_root": str(eval_worktree_root) if args.eval_worktree_root else "",
+        "worktree_mode": (
+            "generated_instance_worktree"
+            if args.use_generated_worktrees
+            else "isolated_eval_worktree"
+            if args.eval_worktree_root
+            else "isolated_eval_clone"
+        ),
     }
     summary_path = Path(args.summary_path).resolve() if args.summary_path else outputs / "formal_eval_summary.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)

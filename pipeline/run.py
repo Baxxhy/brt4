@@ -6,7 +6,6 @@ import argparse
 from collections import defaultdict, deque
 import json
 import os
-import subprocess
 import threading
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -25,6 +24,7 @@ from ..execution.feedback import run_instance_pipeline
 from ..io.io_utils import build_instance_context, load_issue_data
 from ..llm.llm_client import LLMClient
 from ..core.utils import ensure_dir, safe_json_dump
+from ..runtime.conda_env_manager import default_env_name
 
 
 _CONDA_ENV_LOCKS: dict[str, threading.Lock] = {}
@@ -90,13 +90,7 @@ def _parse_bool(value: str | bool) -> bool:
 
 
 def _default_env_name(issue_row: dict) -> str:
-    repo = str(issue_row.get("repo") or "")
-    version = str(issue_row.get("version") or "")
-    if not repo or not version or "/" not in repo:
-        return ""
-    owner, name = repo.split("/", 1)
-    prefix = str(os.environ.get("BRT4_CONDA_ENV_PREFIX") or "")
-    return f"{prefix}setup_{owner}_{name}__{version}"
+    return default_env_name(issue_row, prefix=os.environ.get("BRT4_CONDA_ENV_PREFIX"))
 
 
 def _interleave_by_conda_env(
@@ -116,52 +110,6 @@ def _interleave_by_conda_env(
             if buckets[env_name]:
                 scheduled.append(buckets[env_name].popleft())
     return scheduled
-
-
-def _resolve_conda_env(env_name: str) -> str:
-    if not env_name:
-        return ""
-    names: list[str] = []
-    try:
-        proc = subprocess.run(
-            ["conda", "env", "list", "--json"],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=30,
-            check=False,
-        )
-        data = json.loads(proc.stdout or "{}")
-        names = [Path(path).name for path in data.get("envs", [])]
-    except Exception:
-        names = []
-    if not names:
-        try:
-            proc = subprocess.run(
-                ["conda", "env", "list"],
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=30,
-                check=False,
-            )
-            for line in (proc.stdout or "").splitlines():
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                names.append(line.split()[0])
-        except Exception:
-            return env_name
-    matches = sorted(name for name in names if name.endswith(env_name))
-    if env_name in names:
-        return env_name
-    for preferred in ("direct_brt_ecg_we1_", "direct_brt_ecg_we0_"):
-        for name in matches:
-            if name.startswith(preferred):
-                return name
-    if not matches:
-        return env_name
-    return matches[-1]
 
 
 def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dict:
@@ -200,8 +148,6 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
     )
     try:
         conda_env = args.conda_env or _default_env_name(issue_row)
-        if not args.no_conda:
-            conda_env = _resolve_conda_env(conda_env)
         # Editable installs and compiled extensions are environment-global. Two
         # instances sharing an env must not prepare or execute concurrently.
         with _conda_env_lock(conda_env if not args.no_conda else ""):

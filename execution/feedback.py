@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import fcntl
 import os
@@ -48,6 +49,7 @@ from ..core.schema import (
 from ..core.utils import ensure_dir, safe_json_dump, write_text
 from ..validation.verifier import verify_buggy_only
 from ..validation.oracle_risk import assess_oracle_risk, assess_surrogate_risk
+from ..runtime.conda_env_manager import environment_identity_metadata
 
 
 DEFAULT_BEHAVIOR_CACHE_DIRS = [
@@ -447,16 +449,32 @@ def prepare_instance_worktree(
         spec, resolved_env, str(worktree), timeout
     )
     if env_result.get("returncode") != 0:
+        issue_meta = {
+            "instance_id": context.instance_id,
+            "repo": context.repo,
+            "version": version,
+            "base_commit": base_commit,
+            "environment_setup_commit": environment_setup_commit,
+        }
         return str(worktree), {
             "status": "ENV_CREATE_ERROR",
             "source_repo": source_repo,
             "repo_path": str(worktree),
             "base_commit": base_commit,
             "env_name": resolved_env,
+            "environment_identity": environment_identity_metadata(
+                issue_meta,
+                resolved_env,
+                run_id=str(Path(output_dir).parent.name),
+                setup_status="ENV_CREATE_ERROR",
+                setup_script_fingerprint="",
+                source="generation_env_create",
+            ),
             "environment": env_result,
             "worktree": add_result,
         }
     setup = icore_setup_command(spec, str(worktree))
+    setup_fingerprint = hashlib.sha256(setup.encode("utf-8")).hexdigest()
     setup_lock = env_lock_path(resolved_env, "project_setup")
     setup_lock.parent.mkdir(parents=True, exist_ok=True)
     with open(setup_lock, "w", encoding="utf-8") as lock:
@@ -521,6 +539,21 @@ def prepare_instance_worktree(
                 setup = fallback_setup
                 setup_result = fallback_result
     status = "PASS" if setup_result.returncode == 0 else "SETUP_ERROR"
+    issue_meta = {
+        "instance_id": context.instance_id,
+        "repo": context.repo,
+        "version": version,
+        "base_commit": base_commit,
+        "environment_setup_commit": environment_setup_commit,
+    }
+    env_identity = environment_identity_metadata(
+        issue_meta,
+        resolved_env,
+        run_id=str(Path(output_dir).parent.name),
+        setup_status=status,
+        setup_script_fingerprint=setup_fingerprint,
+        source="generation_repo_prepare",
+    )
     return str(worktree), {
         "status": status,
         "source_repo": source_repo,
@@ -528,6 +561,7 @@ def prepare_instance_worktree(
         "base_commit": base_commit,
         "environment_setup_commit": environment_setup_commit,
         "env_name": resolved_env,
+        "environment_identity": env_identity,
         "environment": env_result,
         "worktree": add_result,
         "submodule": submodule_result,

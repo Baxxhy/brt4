@@ -19,21 +19,30 @@ REPO_ROOT_BASE=${REPO_ROOT_BASE:-"$PACKAGE_ROOT/swe_repos"}
 INSTANCES_PATH=${INSTANCES_PATH:-"$PROJECT_ROOT/data/issues/swt276_issues.json"}
 WORKERS=${WORKERS:-6}
 TIMEOUT=${TIMEOUT:-1800}
+EVALUATION_DIR=${EVALUATION_DIR:-"$RUN_DIR/evaluation/formal"}
+SUMMARY_PATH=${SUMMARY_PATH:-"$RUN_DIR/evaluation/formal_eval_summary.json"}
+FORMAL_LOG_PATH=${FORMAL_LOG_PATH:-"$RUN_DIR/logs/formal_eval.log"}
+RESUME=${RESUME:-true}
+EVAL_COMPLETED_ONLY=${EVAL_COMPLETED_ONLY:-false}
+TMPDIR=${TMPDIR:-"$RUN_DIR/tmp/formal_eval"}
+export TMPDIR
 
-mkdir -p "$RUN_DIR/evaluation/formal" "$RUN_DIR/logs"
+mkdir -p "$EVALUATION_DIR" "$RUN_DIR/logs" "$TMPDIR"
 cmd=(
   python "$PROJECT_ROOT/scripts/run_formal_eval_after_generation.py"
   --outputs_dir "$RUN_DIR/generation"
-  --evaluation_dir "$RUN_DIR/evaluation/formal"
-  --summary_path "$RUN_DIR/evaluation/formal_eval_summary.json"
-  --log_path "$RUN_DIR/logs/formal_eval.log"
+  --evaluation_dir "$EVALUATION_DIR"
+  --summary_path "$SUMMARY_PATH"
+  --log_path "$FORMAL_LOG_PATH"
   --dataset_file "$INSTANCES_PATH"
   --repo_root_base "$REPO_ROOT_BASE"
   --max_workers "$WORKERS"
   --timeout "$TIMEOUT"
-  --eval_completed_only false
-  --resume
+  --eval_completed_only "$EVAL_COMPLETED_ONLY"
 )
+if [[ "$RESUME" == "true" || "$RESUME" == "1" || "$RESUME" == "yes" ]]; then
+  cmd+=(--resume)
+fi
 
 printf '%q ' "${cmd[@]}" | tee "$RUN_DIR/logs/formal_eval.command.txt"
 printf '\n' | tee -a "$RUN_DIR/logs/formal_eval.command.txt"

@@ -11,6 +11,8 @@ RUN_NAME=${RUN_NAME:-"run_${timestamp}"}
 RUN_DIR=${RUN_DIR:-"$PROJECT_ROOT/results/runs/$RUN_NAME"}
 BRT4_CONDA_ENV_PREFIX=${BRT4_CONDA_ENV_PREFIX:-"${RUN_NAME}_"}
 export BRT4_CONDA_ENV_PREFIX
+TMPDIR=${TMPDIR:-"$RUN_DIR/tmp/generation"}
+export TMPDIR
 WORKERS=${WORKERS:-6}
 SEED_WORKERS=${SEED_WORKERS:-$WORKERS}
 MODEL=${MODEL:-deepseek-v3}
@@ -23,7 +25,7 @@ REPO_ROOT_BASE=${REPO_ROOT_BASE:-"$PACKAGE_ROOT/swe_repos"}
 ISSUE_REWRITE_PATH=${ISSUE_REWRITE_PATH:-""}
 LIMIT=${LIMIT:-""}
 
-mkdir -p "$RUN_DIR"/{generation,evaluation,exports,logs,tmp}
+mkdir -p "$RUN_DIR"/{generation,evaluation,exports,logs,tmp} "$TMPDIR"
 cat > "$RUN_DIR/run_config.json" <<EOF
 {
   "run_name": "$RUN_NAME",
@@ -37,7 +39,8 @@ cat > "$RUN_DIR/run_config.json" <<EOF
   "test_retrieval_path": "$TEST_RETRIEVAL_PATH",
   "repo_root_base": "$REPO_ROOT_BASE",
   "issue_rewrite_path": "$ISSUE_REWRITE_PATH",
-  "conda_env_prefix": "$BRT4_CONDA_ENV_PREFIX"
+  "conda_env_prefix": "$BRT4_CONDA_ENV_PREFIX",
+  "tmpdir": "$TMPDIR"
 }
 EOF
 

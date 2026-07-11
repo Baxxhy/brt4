@@ -14,6 +14,10 @@ from pathlib import Path
 from typing import Any
 
 from .icore_exec_spec import make_exec_spec
+from ..runtime.conda_env_manager import (
+    conda_env_inventory,
+    default_env_name,
+)
 
 
 CONDA_SH = os.environ.get(
@@ -22,24 +26,11 @@ CONDA_SH = os.environ.get(
 
 
 def env_name_for(repo: str, version: str) -> str:
-    return f"setup_{repo.replace('/', '_')}__{version}"
+    return default_env_name({"repo": repo, "version": version}, prefix=os.environ.get("BRT4_CONDA_ENV_PREFIX"))
 
 
 def conda_env_names() -> set[str]:
-    proc = subprocess.run(
-        ["bash", "-lc", f"source {CONDA_SH} && conda env list"],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    names: set[str] = set()
-    for line in proc.stdout.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        names.add(line.split()[0])
-    return names
+    return set(conda_env_inventory())
 
 
 def conda_env_exists(env_name: str) -> bool:
