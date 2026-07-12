@@ -1,0 +1,137 @@
+instance_id: scikit-learn__scikit-learn-9288
+
+issue_summary: KMeans 聚类算法在 n_jobs=1 和 n_jobs>1 时给出了略微不同的 inertia 结果。
+
+trigger_condition:
+{
+  "text": "使用 KMeans 对生成的数据（例如 make_blobs）进行拟合，设置 random_state 为固定值，并比较 n_jobs=1 与 n_jobs>1（例如 2, 3, 4）时的结果。",
+  "evidence": [
+    "Issue 中的代码示例：`KMeans(n_clusters=10, random_state=2, n_jobs=n_jobs).fit(X)`，其中 n_jobs 从 1 到 4 变化。",
+    "源码片段 1 中 KMeans 类的 __init__ 方法包含 n_jobs 参数。",
+    "源码片段 2 中 fit 方法将 n_jobs 传递给底层的 k_means 函数。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "当 n_jobs=1 时，计算出的 inertia 值与 n_jobs>1 时不同（尽管差异很小）。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 中的实际结果：n_jobs=1 时 inertia 为 17815.004991244623，而 n_jobs=2,3,4 时 inertia 均为 17815.060435554242。",
+    "Issue 描述：'KMeans gives a slightly different result depending on if n_jobs=1 or n_jobs>1'。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "无论 n_jobs 参数设置为 1 还是大于 1，KMeans 的聚类结果（特别是 inertia）应该相同（在数值精度允许的范围内）。",
+  "evidence": [
+    "Issue 中的预期结果部分：'Should expect the clustering result (e.g. the inertia) to be the same regardless of how many jobs are run in parallel.'",
+    "相关测试 4 (test_parallel_train) 展示了并行训练应产生相同结果的期望：'for proba1, proba2 in zip(probas, probas[1:]): assert_array_almost_equal(proba1, proba2)'。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "sklearn.cluster.KMeans",
+    "kind": "class",
+    "source_path": "sklearn/cluster/k_means_.py",
+    "reason": "Issue 直接报告了 KMeans 类在使用不同 n_jobs 时的行为不一致。"
+  },
+  {
+    "name": "KMeans.fit",
+    "kind": "method",
+    "source_path": "sklearn/cluster/k_means_.py",
+    "reason": "Issue 中通过调用 fit 方法触发计算，并获取 inertia_ 属性。"
+  },
+  {
+    "name": "sklearn.datasets.make_blobs",
+    "kind": "function",
+    "source_path": "sklearn/datasets/samples_generator.py",
+    "reason": "Issue 中用于生成测试数据。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "相关测试中通常使用固定的 n_jobs 值（如 1 或 2）。",
+    "target_pattern": "在同一个测试中，使用相同的 random_state 和其他参数，但分别用 n_jobs=1 和 n_jobs>1（如 2）运行 KMeans。",
+    "reason": "Issue 表明，仅改变 n_jobs 参数（其他所有条件相同）就会导致结果差异。",
+    "confidence": "high"
+  },
+  {
+    "slot": "input",
+    "current_pattern": "相关测试可能使用小型或特定构造的数据集。",
+    "target_pattern": "使用类似 Issue 中的方法生成一个中等规模的数据集（如 make_blobs(n_samples=10000)），以确保计算量足以触发潜在的并行/串行路径差异。",
+    "reason": "Issue 使用了 10000 个样本，这可能更容易暴露数值累加或并行任务划分中的细微差异。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "kmeans.inertia_",
+    "reason": "Issue 中观察到的直接差异就是 inertia 值。比较 n_jobs=1 和 n_jobs>1 时的 inertia 值是否相等（在允许的精度范围内）是关键。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "kmeans.labels_",
+    "reason": "inertia 的差异可能源于样本分配到不同簇（labels_）的差异。比较标签数组可以帮助定位问题是否源于分配步骤。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "kmeans.cluster_centers_",
+    "reason": "中心点的最终位置也可能因并行/串行计算路径不同而略有差异，从而导致 inertia 不同。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "对于相同的随机种子和输入数据，KMeans 在 n_jobs=1 和 n_jobs>1 下计算出的 inertia 值应该相等（在较高的数值精度下）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "直接使用 `==` 进行浮点数相等比较，因为可能存在极小的数值误差。",
+    "reason": "Issue 期望结果完全相同，但浮点计算可能引入微小差异。应使用类似 assert_almost_equal 或 assert_array_almost_equal 并指定合理的 decimal 参数（如 decimal=10 或更高）来检查。"
+  },
+  {
+    "assertion_goal": "对于相同的随机种子和输入数据，KMeans 在 n_jobs=1 和 n_jobs>1 下计算出的 cluster_centers_ 应该相等（在较高的数值精度下）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的 repr 字符串或忽略浮点精度。",
+    "reason": "inertia 差异可能源于中心点计算的细微差别。断言中心点相等可以更全面地验证一致性。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "使用 pytest 的 parametrize 或循环来测试多个 n_jobs 值。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "使用固定的 random_state（如 2）来确保实验的可重复性。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要使用 `@if_safe_multiprocessing_with_blas` 装饰器（如 test_k_means_plus_plus_init_2_jobs 中所示）来处理多进程环境问题。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "导致差异的具体代码路径是在距离计算、样本分配、中心点更新还是 inertia 累加环节？",
+  "这种差异是否只在使用 'k-means++' 初始化时出现？还是使用其他初始化方法（如 'random'）也会出现？",
+  "这种差异是否与 algorithm 参数（'full' vs 'elkan'）有关？",
+  "需要多高的数值精度（decimal 参数）来可靠地检测这种差异？Issue 中显示差异在小数点后第 4-5 位。"
+]

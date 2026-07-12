@@ -1,0 +1,367 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Upgrading 2.2>3.0 causes named tuples used as arguments to __range to error.
+Description
+	
+I noticed this while upgrading a project from 2.2 to 3.0.
+This project passes named 2-tuples as arguments to range queryset filters. This works fine on 2.2. On 3.0 it causes the following error: TypeError: __new__() missing 1 required positional argument: 'far'.
+This happens because django.db.models.sql.query.Query.resolve_lookup_value goes into the tuple elements to resolve lookups and then attempts to reconstitute the tuple with the resolved elements.
+When it attempts to construct the new tuple it preserves the type (the named tuple) but it passes a iterator to it's constructor.
+NamedTuples don't have the code path for copying an iterator, and so it errors on insufficient arguments.
+The fix is to * expand the contents of the iterator into the constructor.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/db/models/sql/query.py
+对象名称：Query
+节点类型：class
+父节点：query
+行号范围：136-2351
+代码：
+class Query(BaseExpression):
+    """A single SQL query."""
+    alias_prefix = 'T'
+    subq_aliases = frozenset([alias_prefix])
+    compiler = 'SQLCompiler'
+    def __init__(self, model, where=WhereNode, alias_cols=True):
+    @property
+    def output_field(self):
+    @property
+    def has_select_fields(self):
+    @cached_property
+    def base_table(self):
+    def __str__(self):
+    def sql_with_params(self):
+    def __deepcopy__(self, memo):
+    def get_compiler(self, using=None, connection=None):
+    def get_meta(self):
+    def clone(self):
+    def chain(self, klass=None):
+    def relabeled_clone(self, change_map):
+    def _get_col(self, target, field, alias):
+    def rewrite_cols(self, annotation, col_cnt):
+    def get_aggregation(self, using, added_aggregate_names):
+    def get_count(self, using):
+    def has_filters(self):
+    def exists(self):
+    def has_results(self, using):
+    def explain(self, using, format=None, **options):
+    def combine(self, rhs, connector):
+    def deferred_to_data(self, target, callback):
+    def table_alias(self, table_name, create=False, filtered_relation=None):
+    def ref_alias(self, alias):
+    def unref_alias(self, alias, amount=1):
+    def promote_joins(self, aliases):
+    def demote_joins(self, aliases):
+    def reset_refcounts(self, to_counts):
+    def change_aliases(self, change_map):
+    def bump_prefix(self, outer_query):
+    def get_initial_alias(self):
+    def count_active_tables(self):
+    def join(self, join, reuse=None, reuse_with_filtered_relation=False):
+    def join_parent_model(self, opts, model, alias, seen):
+    def add_annotation(self, annotation, alias, is_summary=False, select=True):
+    def resolve_expression(self, query, *args, **kwargs):
+    def get_external_cols(self):
+    def as_sql(self, compiler, connection):
+    def resolve_lookup_value(self, value, can_reuse, allow_joins):
+    def solve_lookup_type(self, lookup):
+    def check_query_object_type(self, value, opts, field):
+    def check_related_objects(self, field, value, opts):
+    def check_filterable(self, expression):
+    def build_lookup(self, lookups, lhs, rhs):
+    def try_transform(self, lhs, name):
+    def build_filter(self, filter_expr, branch_negated=False, current_negated=False,
+                     can_reuse=None, allow_joins=True, split_subq=True,
+                     reuse_with_filtered_relation=False, check_filterable=True):
+    def add_filter(self, filter_clause):
+    def add_q(self, q_object):
+    def build_where(self, filter_expr):
+    def _add_q(self, q_object, used_aliases, branch_negated=False,
+               current_negated=False, allow_joins=True, split_subq=True,
+               check_filterable=True):
+    def build_filtered_relation_q(self, q_object, reuse, branch_negated=False, current_negated=False):
+    def add_filtered_relation(self, filtered_relation, alias):
+    def names_to_path(self, names, opts, allow_many=True, fail_on_missing=False):
+    def setup_joins(self, names, opts, alias, can_reuse=None, allow_many=True,
+                    reuse_with_filtered_relation=False):
+    def trim_joins(self, targets, joins, path):
+    @classmethod
+    def _gen_cols(cls, exprs):
+    @classmethod
+    def _gen_col_aliases(cls, exprs):
+    def resolve_ref(self, name, allow_joins=True, reuse=None, summarize=False):
+    def split_exclude(self, filter_expr, can_reuse, names_with_path):
+    def set_empty(self):
+    def is_empty(self):
+    def set_limits(self, low=None, high=None):
+    def clear_limits(self):
+    @property
+    def is_sliced(self):
+    def has_limit_one(self):
+    def can_filter(self):
+    def clear_select_clause(self):
+    def clear_select_fields(self):
+    def add_select_col(self, col):
+    def set_select(self, cols):
+    def add_distinct_fields(self, *field_names):
+    def add_fields(self, field_names, allow_m2m=True):
+    def add_ordering(self, *ordering):
+    def clear_ordering(self, force_empty):
+    def set_group_by(self, allow_aliases=True):
+    def add_select_related(self, fields):
+    def add_extra(self, select, select_params, where, params, tables, order_by):
+    def clear_deferred_loading(self):
+    def add_deferred_loading(self, field_names):
+    def add_immediate_loading(self, field_names):
+    def get_loaded_field_names(self):
+    def get_loaded_field_names_cb(self, target, model, fields):
+    def set_annotation_mask(self, names):
+    def append_annotation_mask(self, names):
+    def set_extra_mask(self, names):
+    def set_values(self, fields):
+    @property
+    def annotation_select(self):
+    @property
+    def extra_select(self):
+    def trim_start(self, names_with_path):
+    def is_nullable(self, field):
+
+
+【源码片段 2】
+文件路径：django/db/models/sql/query.py
+对象名称：resolve_lookup_value
+节点类型：class_function
+父节点：Query
+行号范围：1072-1084
+代码：
+    def resolve_lookup_value(self, value, can_reuse, allow_joins):
+        if hasattr(value, 'resolve_expression'):
+            value = value.resolve_expression(
+                self, reuse=can_reuse, allow_joins=allow_joins,
+            )
+        elif isinstance(value, (list, tuple)):
+            # The items of the iterable may be expressions and therefore need
+            # to be resolved independently.
+            return type(value)(
+                self.resolve_lookup_value(sub_value, can_reuse, allow_joins)
+                for sub_value in value
+            )
+        return value
+
+
+【源码片段 3】
+文件路径：django/utils/log.py
+对象名称：filter
+节点类型：class_function
+父节点：CallbackFilter
+行号范围：146-149
+代码：
+    def filter(self, record):
+        if self.callback(record):
+            return 1
+        return 0
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/postgres_tests/test_ranges.py
+测试名称：TestSaveLoad.test_tuple
+测试代码：
+class TestSaveLoad(PostgreSQLTestCase):
+    def test_tuple(self):
+        instance = RangesModel(ints=(0, 10))
+        instance.save()
+        loaded = RangesModel.objects.get()
+        self.assertEqual(NumericRange(0, 10), loaded.ints)
+
+【相关测试 2】
+测试文件：tests/postgres_tests/test_ranges.py
+测试名称：TestQueryingWithRanges.test_f_ranges
+测试代码：
+class TestQueryingWithRanges(PostgreSQLTestCase):
+    def test_f_ranges(self):
+        parent = RangesModel.objects.create(decimals=NumericRange(0, 10))
+        objs = [
+            RangeLookupsModel.objects.create(float=5, parent=parent),
+            RangeLookupsModel.objects.create(float=99, parent=parent),
+        ]
+        self.assertSequenceEqual(
+            RangeLookupsModel.objects.filter(float__contained_by=F('parent__decimals')),
+            [objs[0]]
+        )
+
+【相关测试 3】
+测试文件：tests/postgres_tests/test_ranges.py
+测试名称：test_date_range_contains
+测试代码：
+class TestRangeContainsLookup(PostgreSQLTestCase):
+    def test_date_range_contains(self):
+        filter_args = (
+            self.timestamps[1],
+            (self.dates[1], self.dates[2]),
+            Value(self.dates[0], output_field=DateField()),
+            Func(F('timestamps'), function='lower', output_field=DateField()),
+            F('dates_inner'),
+        )
+        for filter_arg in filter_args:
+            with self.subTest(filter_arg=filter_arg):
+                self.assertCountEqual(
+                    RangesModel.objects.filter(**{'dates__contains': filter_arg}),
+                    [self.obj, self.aware_obj],
+                )
+
+【相关测试 4】
+测试文件：tests/postgres_tests/test_ranges.py
+测试名称：TestQueryingWithRanges.test_integer_range
+测试代码：
+class TestQueryingWithRanges(PostgreSQLTestCase):
+    def test_integer_range(self):
+        objs = [
+            RangeLookupsModel.objects.create(integer=5),
+            RangeLookupsModel.objects.create(integer=99),
+            RangeLookupsModel.objects.create(integer=-1),
+        ]
+        self.assertSequenceEqual(
+            RangeLookupsModel.objects.filter(integer__contained_by=NumericRange(1, 98)),
+            [objs[0]]
+        )
+
+【相关测试 5】
+测试文件：tests/postgres_tests/test_ranges.py
+测试名称：TestQueryingWithRanges.test_biginteger_range
+测试代码：
+class TestQueryingWithRanges(PostgreSQLTestCase):
+    def test_biginteger_range(self):
+        objs = [
+            RangeLookupsModel.objects.create(big_integer=5),
+            RangeLookupsModel.objects.create(big_integer=99),
+            RangeLookupsModel.objects.create(big_integer=-1),
+        ]
+        self.assertSequenceEqual(
+            RangeLookupsModel.objects.filter(big_integer__contained_by=NumericRange(1, 98)),
+            [objs[0]]
+        )
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

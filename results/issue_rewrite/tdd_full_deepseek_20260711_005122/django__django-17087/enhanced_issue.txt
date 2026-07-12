@@ -1,0 +1,136 @@
+instance_id: django__django-17087
+
+issue_summary: 当嵌套类的类方法作为字段默认值时，迁移生成器错误地序列化了该默认值的引用路径。
+
+trigger_condition:
+{
+  "text": "定义一个模型，其中包含一个嵌套类（如 TextChoices），该嵌套类有一个类方法（如 default），并将此方法作为字段（如 ArrayField）的 default 参数值。",
+  "evidence": [
+    "Issue 中给出的 Profile 模型定义，其中 Capability.default 被用作 capabilities 字段的 default 参数。",
+    "相关测试 2 和 4 展示了将枚举类或类作为字段 default 参数的测试模式。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "生成的迁移文件中，default 参数的值被序列化为错误的引用路径（例如 'appname.models.Capability.default'），而不是正确的嵌套类路径（例如 'appname.models.Profile.Capability.default'），导致迁移时出错。",
+  "symptom_type": "serialization_error",
+  "evidence": [
+    "Issue 中描述的迁移代码片段显示 default 参数值为 'appname.models.Capability.default'，并指出这会导致迁移错误。",
+    "相关测试 2 和 4 展示了 MigrationWriter.serialize 对字段 default 值的序列化行为。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "迁移生成器应能正确序列化嵌套类的类方法引用，生成包含完整嵌套路径的默认值字符串，使得迁移能够正常执行。",
+  "evidence": [
+    "Issue 中明确指出正确的值应为 'appname.models.Profile.Capability.default'。",
+    "相关测试 1 和 5 表明框架支持嵌套类的序列化（使用 __qualname__）。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "MigrationWriter.serialize",
+    "kind": "function",
+    "source_path": "django/db/migrations/writer.py",
+    "reason": "Issue 中错误的迁移代码是由迁移序列化过程生成的，该 API 负责将字段（包括其默认值）序列化为字符串。"
+  },
+  {
+    "name": "Field.deconstruct",
+    "kind": "method",
+    "source_path": "django/db/models/fields/__init__.py",
+    "reason": "字段的序列化依赖于其 deconstruct 方法，该方法返回用于重建字段的参数。"
+  },
+  {
+    "name": "ArrayField",
+    "kind": "class",
+    "source_path": "django/contrib/postgres/fields/array.py",
+    "reason": "Issue 中触发缺陷的字段类型是 ArrayField。"
+  },
+  {
+    "name": "models.TextChoices",
+    "kind": "class",
+    "source_path": "django/db/models/enums.py",
+    "reason": "Issue 中嵌套的 Capability 类继承自 TextChoices。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "在相关测试 2 和 4 中，字段的 default 参数是枚举成员（如 TextEnum.B, TextChoices.B）。",
+    "target_pattern": "将字段的 default 参数改为嵌套类的类方法（如 Profile.Capability.default）。",
+    "reason": "Issue 表明当 default 是嵌套类的类方法时，序列化路径会出错。改变这个输入可能触发缺陷路径。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "相关测试中定义的嵌套类通常是顶级测试类的内部类（如 WriterTests.NestedEnum）。",
+    "target_pattern": "定义嵌套类在一个模型类内部（如 class Profile(models.Model): class Capability(...)），模拟 Issue 中的场景。",
+    "reason": "缺陷与模型内部嵌套类的序列化有关，改变嵌套类的定义位置可能影响序列化器对其引用路径的构建。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "serialization",
+    "expression_hint": "MigrationWriter.serialize(field)[0] 返回的字符串，特别是 default=... 部分。",
+    "reason": "Issue 的核心是序列化生成的字符串中 default 的引用路径错误。观察这个字符串可以直接判断缺陷是否被触发。"
+  },
+  {
+    "kind": "exception",
+    "expression_hint": "尝试应用生成的迁移操作（如 AddField）时是否引发异常（如 ImportError, AttributeError）。",
+    "reason": "Issue 提到错误的路径会导致迁移时出错。观察运行时异常可以确认缺陷的最终影响。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "序列化生成的 default 值字符串应包含嵌套类的完整路径（即包含外层模型类名）。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "断言完整的、硬编码的序列化字符串相等，因为模块名（appname）可能变化。",
+    "reason": "Issue 的关键是路径的完整性，而不是具体的应用名。检查子串更稳定。"
+  },
+  {
+    "assertion_goal": "迁移操作应能成功创建，而不会因为错误的默认值引用而立即失败。",
+    "preferred_assertion_style": "not_raises",
+    "avoid": "断言特定的异常消息文本。",
+    "reason": "修复后，序列化应生成有效代码，不会在迁移状态应用或数据库操作时引发 ImportError 等。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 SimpleTestCase 或 TransactionTestCase，并可能需要配置数据库以支持 ArrayField（PostgreSQL）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要定义包含嵌套类和类方法的模型，可能需要在测试中动态创建模型或使用已注册的模型。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要导入 MigrationWriter 和相关模型字段。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "缺陷的确切位置是在 MigrationWriter.serialize、字段的 deconstruct 方法，还是在序列化器（serializer）处理类方法引用的逻辑中？",
+  "除了 ArrayField 和 TextChoices，其他字段类型和嵌套类组合是否也会触发此缺陷？",
+  "修复后的确切序列化输出格式（例如引号、括号）是什么？Issue 只给出了路径示例。"
+]

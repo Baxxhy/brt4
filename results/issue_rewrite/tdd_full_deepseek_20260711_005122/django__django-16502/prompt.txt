@@ -1,0 +1,291 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+After #26052 runserver returns response body for HTTP HEAD requests
+Description
+	
+For compliance with RFC 2616, section 4.3, response bodies must not be returned for HEAD requests.
+In #26052, the stripping of the response bodies was removed from Django in favour of letting the server perform the body removal, since the common servers (gunicorn, mod_wsgi etc) already do so.
+However it appears that runserver does not strip the body, contrary to:
+https://code.djangoproject.com/timeline?from=2016-04-23T20%3A26%3A34-05%3A00&precision=second
+As such, starting in Django 1.10 the responses from runserver for HEAD requests are no longer compliant with the spec. (In certain configurations this also results in "Broken pipe" error messages in runserver output, since compliant user agents expect to be able to terminate the connection after the headers are sent.)
+STR:
+1) mkvirtualenv django-test
+2) pip install 'Django>1.10,<1.11'
+3) django-admin startproject django-test
+4) cd django-test
+5) ./manage.py runserver
+6) In another terminal, run curl -iX HEAD http://127.0.0.1:8000/
+7) Observe response from curl
+Expected:
+HTTP/1.0 200 OK
+Date: Fri, 07 Apr 2017 14:56:39 GMT
+Server: WSGIServer/0.2 CPython/3.4.5
+Content-Type: text/html
+X-Frame-Options: SAMEORIGIN
+Actual:
+HTTP/1.0 200 OK
+Date: Fri, 07 Apr 2017 14:56:39 GMT
+Server: WSGIServer/0.2 CPython/3.4.5
+Content-Type: text/html
+X-Frame-Options: SAMEORIGIN
+<!DOCTYPE html>
+<html lang="en"><head>
+ <meta http-equiv="content-type" content="text/html; charset=utf-8">
+ <meta name="robots" content="NONE,NOARCHIVE"><title>Welcome to Django</title>
+...
+Tested with Python 2.7.13 and 3.4.5.
+Doesn't reproduce under Django 1.9.13.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/contrib/staticfiles/management/commands/runserver.py
+对象名称：runserver
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 2】
+文件路径：django/core/servers/basehttp.py
+对象名称：WSGIServer
+节点类型：class
+父节点：basehttp
+行号范围：67-82
+代码：
+class WSGIServer(simple_server.WSGIServer):
+    """BaseHTTPServer that implements the Python WSGI protocol"""
+    request_queue_size = 10
+    def __init__(self, *args, ipv6=False, allow_reuse_address=True, **kwargs):
+    def handle_error(self, request, client_address):
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/test_client_regress/tests.py
+测试名称：RequestMethodTests.test_head
+测试代码：
+@override_settings(ROOT_URLCONF="test_client_regress.urls")
+class RequestMethodTests(SimpleTestCase):
+    def test_head(self):
+        "Request a view via request method HEAD"
+        response = self.client.head("/request_methods/")
+        self.assertEqual(response.status_code, 200)
+        # A HEAD request doesn't return any content.
+        self.assertNotEqual(response.content, b"request method: HEAD")
+        self.assertEqual(response.content, b"")
+
+【相关测试 2】
+测试文件：tests/servers/tests.py
+测试名称：SingleThreadLiveServerViews.test_closes_connection_with_content_length
+测试代码：
+@override_settings(ROOT_URLCONF="servers.urls")
+class SingleThreadLiveServerViews(SingleThreadLiveServerTestCase):
+    def test_closes_connection_with_content_length(self):
+        """
+        Contrast to
+        LiveServerViews.test_keep_alive_on_connection_with_content_length().
+        Persistent connections require threading server.
+        """
+        conn = HTTPConnection(
+            SingleThreadLiveServerViews.server_thread.host,
+            SingleThreadLiveServerViews.server_thread.port,
+            timeout=1,
+        )
+        try:
+            conn.request("GET", "/example_view/", headers={"Connection": "keep-alive"})
+            response = conn.getresponse()
+            self.assertTrue(response.will_close)
+            self.assertEqual(response.read(), b"example view")
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.getheader("Connection"), "close")
+        finally:
+            conn.close()
+
+【相关测试 3】
+测试文件：tests/servers/test_basehttp.py
+测试名称：WSGIServerTestCase.test_broken_pipe_errors
+测试代码：
+class WSGIServerTestCase(SimpleTestCase):
+    def test_broken_pipe_errors(self):
+        """WSGIServer handles broken pipe errors."""
+        request = WSGIRequest(self.request_factory.get("/").environ)
+        client_address = ("192.168.2.0", 8080)
+        msg = f"- Broken pipe from {client_address}"
+        tests = [
+            BrokenPipeError,
+            ConnectionAbortedError,
+            ConnectionResetError,
+        ]
+        for exception in tests:
+            with self.subTest(exception=exception):
+                try:
+                    server = WSGIServer(("localhost", 0), WSGIRequestHandler)
+                    try:
+                        raise exception()
+                    except Exception:
+                        with captured_stderr() as err:
+                            with self.assertLogs("django.server", "INFO") as cm:
+                                server.handle_error(request, client_address)
+                        self.assertEqual(err.getvalue(), "")
+                        self.assertEqual(cm.records[0].getMessage(), msg)
+                finally:
+                    server.server_close()
+
+【相关测试 4】
+测试文件：tests/test_client/tests.py
+测试名称：RequestFactoryTest.test_request_factory
+测试代码：
+@override_settings(ROOT_URLCONF="test_client.urls")
+class RequestFactoryTest(SimpleTestCase):
+    def test_request_factory(self):
+        """The request factory implements all the HTTP/1.1 methods."""
+        for method_name, view in self.http_methods_and_views:
+            method = getattr(self.request_factory, method_name)
+            request = method("/somewhere/")
+            response = view(request)
+            self.assertEqual(response.status_code, 200)
+
+【相关测试 5】
+测试文件：tests/requests_tests/tests.py
+测试名称：RequestsTests.test_POST_after_body_read
+测试代码：
+class RequestsTests(SimpleTestCase):
+    def test_POST_after_body_read(self):
+        """
+        POST should be populated even if body is read first
+        """
+        payload = FakePayload("name=value")
+        request = WSGIRequest(
+            {
+                "REQUEST_METHOD": "POST",
+                "CONTENT_TYPE": "application/x-www-form-urlencoded",
+                "CONTENT_LENGTH": len(payload),
+                "wsgi.input": payload,
+            }
+        )
+        request.body  # evaluate
+        self.assertEqual(request.POST, {"name": ["value"]})
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

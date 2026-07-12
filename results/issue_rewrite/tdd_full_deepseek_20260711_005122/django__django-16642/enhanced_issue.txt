@@ -1,0 +1,113 @@
+instance_id: django__django-16642
+
+issue_summary: FileResponse 对 .Z 和 .br 扩展名的文件错误地猜测 MIME 类型为 text/html。
+
+trigger_condition:
+{
+  "text": "使用 FileResponse 打开一个具有 .Z 或 .br 扩展名的文件（例如 test.html.Z 或 test.html.br）。",
+  "evidence": [
+    "Issue 描述：'FileResponse(open('test.html.Z', 'rb'))' 和 'FileResponse(open('test.html.br', 'rb'))'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "响应的 Content-Type 头部被错误地设置为 text/html，而不是正确的 MIME 类型。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 描述：'will set the content type as text/html'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "FileResponse 应为 .Z 和 .br 扩展名的文件设置正确的 MIME 类型（例如 application/x-compress 或 application/x-brotli），而不是 text/html。",
+  "evidence": [
+    "相关测试 1 (test_compressed_response) 检查了其他压缩扩展名（如 .tar.gz）的正确 MIME 类型设置。",
+    "相关测试 2 (test_content_type_buffer_named) 和 test_content_type_file 展示了根据文件名猜测 MIME 类型的行为。"
+  ],
+  "confidence": "medium"
+}
+
+target_apis:
+[
+  {
+    "name": "FileResponse",
+    "kind": "class",
+    "source_path": "django/http/response.py",
+    "reason": "Issue 直接报告了 FileResponse 类的行为问题。"
+  },
+  {
+    "name": "FileResponse.__init__",
+    "kind": "method",
+    "source_path": "django/http/response.py",
+    "reason": "创建 FileResponse 对象时触发 MIME 类型猜测。"
+  },
+  {
+    "name": "FileResponse.set_headers",
+    "kind": "method",
+    "source_path": "django/http/response.py",
+    "reason": "源码片段 1 显示 set_headers 方法可能负责设置 Content-Type 等头部。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "test_compressed_response 中使用 .tar.gz 等扩展名。",
+    "target_pattern": "使用 .Z 或 .br 扩展名（例如 test.html.Z 或 test.html.br）。",
+    "reason": "Issue 表明 .Z 和 .br 扩展名触发了错误的 MIME 类型猜测。",
+    "confidence": "high"
+  },
+  {
+    "slot": "input",
+    "current_pattern": "test_content_type_file 中使用 __file__（.py 扩展名）。",
+    "target_pattern": "使用具有 .Z 或 .br 扩展名的文件路径。",
+    "reason": "将输入文件扩展名从已知类型（.py）变异为问题扩展名（.Z/.br）可能触发缺陷路径。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "response.headers['Content-Type']",
+    "reason": "Issue 的核心错误是 Content-Type 头部值不正确，直接观察此值可以判断是否触发缺陷。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证 FileResponse 对 .Z 或 .br 文件设置的 Content-Type 不是 text/html，而应是其他值（如 application/x-compress 或 application/x-brotli）。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言完整的、具体的 MIME 类型字符串，因为正确的 MIME 类型可能不确定。避免断言与 .Z/.br 无关的其他头部。",
+    "reason": "Issue 明确指出当前错误是设置为 text/html，因此断言不是 text/html 是稳定且与 Issue 对齐的。修复后的正确 MIME 类型可能需要在后续确认。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 tempfile.NamedTemporaryFile 或类似方法创建具有 .Z 或 .br 扩展名的临时文件。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试应继承自 SimpleTestCase（如 FileResponseTests）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  ".Z 和 .br 文件正确的 MIME 类型标准值是什么（例如 application/x-compress, application/x-brotli 等）。",
+  "缺陷是否仅存在于特定文件名模式（如 test.html.Z）中，还是所有 .Z/.br 文件。",
+  "MIME 类型猜测逻辑的确切位置和实现细节。",
+  "修复后，对于纯 .Z 或 .br 文件（没有 .html. 前缀）的行为预期。"
+]

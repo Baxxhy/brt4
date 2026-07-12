@@ -1,0 +1,160 @@
+```json
+{
+    "issue_summary": "在自定义 Admin Site 中，当模型包含 ForeignKey 字段且该字段被列为 readonly_fields 时，生成的链接 URL 错误地使用了默认的 /admin/ 前缀，而不是自定义的 /custom-admin/ 前缀。",
+    "trigger_condition": {
+        "text": "在自定义 Admin Site 中查看或编辑一个模型，该模型包含一个被列为 readonly_fields 的 ForeignKey 字段。",
+        "evidence": ["Issue 描述：'When a model containing a ForeignKey field is viewed (or edited) in a custom Admin Site, and that ForeignKey field is listed in readonly_fields...'"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "为 readonly ForeignKey 字段生成的链接 URL 使用了默认的 /admin/... 路径，而不是自定义的 /custom-admin/... 路径。",
+        "symptom_type": "wrong_return",
+        "evidence": ["Issue 描述：'the url generated for the link is /admin/... instead of /custom-admin/....'"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "在自定义 Admin Site 中，为 readonly ForeignKey 字段生成的链接 URL 应使用自定义 Admin Site 的命名空间（如 /custom-admin/...）。",
+        "evidence": ["Issue 中修复建议：'url = reverse(url_name, args=[quote(remote_obj.pk)], current_app=self.model_admin.admin_site.name)'", "相关源码片段 5 中 response_add 方法使用了 current_app=self.admin_site.name 来生成 URL。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "django.contrib.admin.helpers.get_admin_url",
+            "kind": "function",
+            "source_path": "",
+            "reason": "Issue 明确指出问题可能出在 django.contrib.admin.helpers.get_admin_url 函数中。"
+        },
+        {
+            "name": "django.contrib.admin.options.ModelAdmin.response_add",
+            "kind": "method",
+            "source_path": "django/contrib/admin/options.py",
+            "reason": "Issue 提到 response_add 方法正确使用了 current_app 参数，可作为正确行为的参考。"
+        },
+        {
+            "name": "django.contrib.admin.models.LogEntry.get_admin_url",
+            "kind": "method",
+            "source_path": "django/contrib/admin/models.py",
+            "reason": "检索出的相关源码片段 1 展示了另一个 get_admin_url 方法，但其上下文不同，可能用于对比。"
+        },
+        {
+            "name": "django.urls.reverse",
+            "kind": "function",
+            "source_path": "",
+            "reason": "生成 URL 的核心函数，Issue 中修复建议围绕其 current_app 参数展开。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/contrib/admin/helpers.py",
+            "object": "get_admin_url",
+            "lines": "",
+            "reason": "Issue 描述中直接引用并指出了问题所在行：'url = reverse(url_name, args=[quote(remote_obj.pk)])' 缺少 current_app 参数。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "ReadonlyTest.test_readonly_foreignkey_links",
+            "test_file": "tests/admin_views/tests.py",
+            "why_relevant": "该测试专门验证了在默认 Admin Site 中，readonly ForeignKey 字段是否被正确渲染为链接。它包含了 ForeignKey、readonly_fields 和 URL 生成的核心元素。",
+            "reusable_parts": ["测试类装饰器 @override_settings(ROOT_URLCONF='admin_views.urls')", "创建包含 ForeignKey 的模型实例（Chapter, Language, ReadOnlyRelatedField）", "使用 self.client.get 访问 change 视图", "使用 reverse 生成期望的 URL", "使用 assertContains 检查响应中是否包含正确的链接 HTML 片段。"],
+            "possible_gap": "该测试在默认 Admin Site（'admin:'）下运行，没有使用自定义 Admin Site（如 'admin2:' 或 'custom-admin:'）。它没有测试 current_app 参数在 URL 生成中的作用。"
+        },
+        {
+            "test_name": "CustomModelAdminTest.test_custom_admin_site_view",
+            "test_file": "tests/admin_views/tests.py",
+            "why_relevant": "该测试使用了自定义 Admin Site（'admin2:'），展示了如何为自定义站点编写测试和访问其视图。",
+            "reusable_parts": ["使用 reverse('admin2:my_view') 访问自定义站点的 URL", "self.client.force_login 登录"],
+            "possible_gap": "该测试访问的是一个自定义视图（'my_view'），而不是一个模型的 change 视图，也没有涉及 readonly ForeignKey 字段。"
+        },
+        {
+            "test_name": "CustomAdminSiteTests.test_use_custom_admin_site",
+            "test_file": "tests/admin_default_site/tests.py",
+            "why_relevant": "该测试验证了自定义 Admin Site 配置是否生效，提供了设置自定义站点的上下文。",
+            "reusable_parts": ["@override_settings 配置 INSTALLED_APPS 以使用自定义 AdminSite 配置"],
+            "possible_gap": "这是一个简单的配置检查测试，不涉及具体的视图、模型或 URL 生成。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "config",
+            "current_pattern": "相关测试 1 在默认 Admin Site（'admin:'）下运行。",
+            "target_pattern": "将测试配置为在自定义 Admin Site（如 'admin2:'）下运行，并确保该站点用于模型的管理界面。",
+            "reason": "Issue 的核心触发条件是使用自定义 Admin Site。将测试环境从默认站点切换到自定义站点是触发缺陷路径的关键。",
+            "confidence": "high"
+        },
+        {
+            "slot": "object_state",
+            "current_pattern": "相关测试 1 中，ForeignKey 字段（如 user, language）在模型 ReadOnlyRelatedField 中，但测试未明确说明这些字段是否在 ModelAdmin 的 readonly_fields 列表中（根据测试名称推断是）。",
+            "target_pattern": "确保被测试的 ModelAdmin 明确将相关的 ForeignKey 字段包含在 readonly_fields 列表中。",
+            "reason": "Issue 明确指出 bug 发生在 ForeignKey 字段被列为 readonly_fields 时。需要确保测试模型的管理配置与此一致。",
+            "confidence": "high"
+        },
+        {
+            "slot": "call_chain",
+            "current_pattern": "相关测试 1 中，期望的 URL 是使用 reverse('admin:auth_user_change', ...) 和 reverse('admin:admin_views_language_change', ...) 手动生成的。",
+            "target_pattern": "在自定义站点下，期望的 URL 应使用自定义站点的命名空间，如 reverse('admin2:auth_user_change', ...)。测试的断言需要比较实际响应中生成的链接 URL 是否与此匹配。",
+            "reason": "缺陷表现为生成的 URL 命名空间错误。测试需要验证在自定义站点上下文中，自动生成的链接 URL 是否使用了正确的命名空间。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "return_value",
+            "expression_hint": "在访问自定义 Admin Site 中模型的 change 视图后，检查 HTTP 响应内容中为 readonly ForeignKey 字段生成的 <a href=\"...\"> 标签的 href 属性值。",
+            "reason": "错误现象直接体现在最终渲染的 HTML 链接的 URL 上。观察这个 URL 是否包含了正确的自定义站点前缀。"
+        },
+        {
+            "kind": "config",
+            "expression_hint": "测试运行时所使用的 Admin Site 实例（例如，通过 ModelAdmin.admin_site 或 reverse 的 current_app 参数）。",
+            "reason": "需要确认测试确实运行在自定义 Admin Site 的上下文中，这是触发问题的前提。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "验证在自定义 Admin Site 的 change 视图中，为 readonly ForeignKey 字段生成的链接 URL 使用了自定义站点的命名空间（例如包含 '/admin2/' 或相应的路径）。",
+            "preferred_assertion_style": "contains_fragment",
+            "avoid": "避免断言完整的、硬编码的 HTML 字符串，因为其他部分（如 CSS 类）可能变化。避免断言完整的 URL 路径，因为对象 ID 是动态的。",
+            "reason": "Issue 关注的是 URL 前缀的错误。断言响应中包含一个使用正确前缀的 URL 片段是稳定且直接针对问题的。"
+        },
+        {
+            "assertion_goal": "验证生成的 URL 是有效的，并且指向正确模型对象的 change 页面。",
+            "preferred_assertion_style": "before_after_relation",
+            "avoid": "避免仅检查 URL 字符串格式而不验证其功能。",
+            "reason": "除了前缀正确，链接还应能实际导航到目标对象。可以通过反向解析期望的 URL 并与响应中的 URL 进行比较来增强断言。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要一个自定义的 AdminSite 类，并在 URL 配置中将其挂载到与默认 'admin/' 不同的路径下（例如 'admin2/'）。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要一个包含 ForeignKey 字段的 Django 模型，以及对应的 ModelAdmin，并将该 ForeignKey 字段列入 readonly_fields。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要创建测试数据，包括主模型实例和其 ForeignKey 关联的远程对象实例。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "测试可能需要继承自 django.test.TestCase 以使用数据库和客户端。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要使用 @override_settings(ROOT_URLCONF=...) 来指定包含自定义 Admin Site URL 的 URL 配置模块。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "Issue 中提到的具体问题函数 `django.contrib.admin.helpers.get_admin_url` 的确切签名和上下文未在提供的源码片段中给出，需要后续确认。",
+        "自定义 Admin Site 的 name 属性（用于 current_app）是如何设置和传递的，在测试中需要如何准确模拟。",
+        "除了 helpers.get_admin_url，是否还有其他生成 readonly ForeignKey 链接的代码路径存在同样问题。",
+        "Issue 提交者提出的修复方案（添加 current_app=self.model_admin.admin_site.name）是否完整且无副作用。"
+    ]
+}
+```

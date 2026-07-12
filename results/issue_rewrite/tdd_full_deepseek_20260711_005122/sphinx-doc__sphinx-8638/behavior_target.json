@@ -1,0 +1,315 @@
+{
+  "instance_id": "sphinx-doc__sphinx-8638",
+  "issue_summary": "Sphinx autodoc 在生成文档时，错误地将类实例变量链接到项目中同名的其他变量（如全局变量或其他类的变量）。",
+  "trigger_condition": {
+    "text": "使用 autodoc（特别是通过 apidoc）为类实例变量生成文档时，项目中存在同名的其他变量（如全局变量或其他类的变量）。",
+    "evidence": [
+      "Issue 描述：'If a global variable ... exists, and inside a class you decide to document a variable of the same name, the document of the instance variable will link to the other occurence of a variable under the same name.'",
+      "Issue 描述：'This can even occur across subpackages and even across other classes of those subpackages'"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "类实例变量的文档被错误地链接到项目中其他同名的变量上，导致不相关的变量之间出现超链接。",
+    "symptom_type": "unknown",
+    "evidence": [
+      "Issue 描述：'the document of the instance variable will link to the other occurence of a variable under the same name.'",
+      "Issue 截图显示了一个变量名被链接到另一个位置。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "类实例变量的文档不应自动链接到项目中其他同名的变量；它们应该被视为独立的实体，除非用户显式添加引用。",
+    "evidence": [
+      "Issue 描述：'That the class variable documentation not be linked to any other. It is unreasonable to expect these to be in any way related whatsoever.'",
+      "Issue 描述：'If they *happen* to be, the user can decide to document it as such with a simple reference to the other variable'"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "sphinx.ext.autodoc",
+      "kind": "module",
+      "source_path": "",
+      "reason": "Issue 核心是关于 autodoc 扩展错误地生成链接。"
+    },
+    {
+      "name": "sphinx.ext.intersphinx",
+      "kind": "module",
+      "source_path": "sphinx/ext/intersphinx.py",
+      "reason": "iCoRe 检索出的相关源码片段包含此文件，可能与跨项目引用链接有关。"
+    },
+    {
+      "name": "sphinx.ext.apidoc",
+      "kind": "module",
+      "source_path": "sphinx/ext/apidoc.py",
+      "reason": "Issue 提到通过 apidoc 使用 autodoc，且 iCoRe 检索出的相关源码片段包含此文件。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sphinx/ext/autodoc.py",
+      "object": "",
+      "lines": "",
+      "reason": "Issue 核心是关于 autodoc 扩展的错误链接行为，但 iCoRe 未提供其源码片段。"
+    },
+    {
+      "path": "sphinx/ext/intersphinx.py",
+      "object": "",
+      "lines": "",
+      "reason": "iCoRe 检索出的相关源码片段包含此文件，可能与链接解析逻辑有关。"
+    },
+    {
+      "path": "sphinx/ext/apidoc.py",
+      "object": "",
+      "lines": "",
+      "reason": "Issue 提到通过 apidoc 使用 autodoc，且 iCoRe 检索出的相关源码片段包含此文件。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_name_conflict",
+      "test_file": "tests/test_ext_autodoc.py",
+      "why_relevant": "该测试涉及名称冲突（name_conflict），与 Issue 中同名变量错误链接的问题直接相关。",
+      "reusable_parts": [
+        "@pytest.mark.sphinx('html', testroot='ext-autodoc') fixture",
+        "do_autodoc 辅助函数调用",
+        "assert list(actual) == ... 的断言风格"
+      ],
+      "possible_gap": "该测试检查的是类文档输出是否正确，但没有验证生成的文档中是否存在错误的超链接。"
+    },
+    {
+      "test_name": "test_autoattribute_instance_variable",
+      "test_file": "tests/test_ext_autodoc_autoattribute.py",
+      "why_relevant": "该测试专门针对实例变量（instance_variable）的 autoattribute 文档生成。",
+      "reusable_parts": [
+        "@pytest.mark.sphinx('html', testroot='ext-autodoc') fixture",
+        "do_autodoc 辅助函数调用",
+        "assert list(actual) == ... 的断言风格"
+      ],
+      "possible_gap": "该测试只验证了单个实例变量的文档输出格式，没有设置同名全局变量或其他类变量来触发错误链接。"
+    },
+    {
+      "test_name": "test_autodoc_typed_instance_variables",
+      "test_file": "tests/test_ext_autodoc.py",
+      "why_relevant": "该测试生成了包含类实例变量和全局变量的模块文档，其中存在同名变量（如 attr1, attr2, attr3）。",
+      "reusable_parts": [
+        "@pytest.mark.sphinx('html', testroot='ext-autodoc') fixture",
+        "do_autodoc 辅助函数调用",
+        "options 字典配置",
+        "assert list(actual) == ... 的断言风格"
+      ],
+      "possible_gap": "该测试验证了输出格式，但没有检查这些同名变量之间是否产生了错误的超链接。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试通常针对单个模块或类，没有特意创建跨包或跨类的同名变量。",
+      "target_pattern": "创建包含同名变量的多个模块或类（例如，一个全局变量和一个类实例变量同名），并使用 autodoc 生成文档。",
+      "reason": "Issue 表明错误链接发生在同名变量之间，即使它们位于不同的作用域或包中。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "测试使用标准的 'html' 构建器和 'ext-autodoc' testroot。",
+      "target_pattern": "可能需要启用或配置特定的扩展（如 intersphinx）或调整引用解析的启发式规则。",
+      "reason": "Issue 提到链接行为有时随机发生，可能与引用启发式规则有关。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "file_output",
+      "expression_hint": "生成的 HTML 或 RST 文档中，实例变量名称是否被包裹在超链接标签（如 <a>）或引用指令（如 :ref:）中。",
+      "reason": "错误链接的直接表现是在输出文档中出现了不该有的超链接。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "do_autodoc 返回的 actual 列表，检查其中是否包含指向其他变量的引用指令（如 :py:data:）。",
+      "reason": "autodoc 生成的中间 RST 输出可能已经包含了错误的交叉引用。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证为类实例变量生成的文档输出中，其名称没有被自动链接到其他同名变量。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "避免断言完整的输出字符串相等，因为输出格式可能因 Sphinx 版本而异。",
+      "reason": "Issue 的核心是“不应有链接”，因此断言输出中不包含链接片段（如特定的引用标记）是稳定且对齐的。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 @pytest.mark.sphinx fixture 和 'ext-autodoc' testroot 来构建 Sphinx 应用。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要创建自定义的测试源文件（Python 模块），其中定义具有同名变量的类和全局变量。",
+      "source": "inference",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "触发错误链接的确切条件（如变量类型、作用域、包结构）尚不完全明确，Issue 描述其有时随机发生。",
+    "错误链接是由 autodoc 内部逻辑、intersphinx 还是其他扩展引起的尚不确定。",
+    "修复后正确的输出格式（无链接）的具体 RST/HTML 表示是什么尚不清楚。"
+  ],
+  "raw": {
+    "issue_summary": "Sphinx autodoc 在生成文档时，错误地将类实例变量链接到项目中同名的其他变量（如全局变量或其他类的变量）。",
+    "trigger_condition": {
+      "text": "使用 autodoc（特别是通过 apidoc）为类实例变量生成文档时，项目中存在同名的其他变量（如全局变量或其他类的变量）。",
+      "evidence": [
+        "Issue 描述：'If a global variable ... exists, and inside a class you decide to document a variable of the same name, the document of the instance variable will link to the other occurence of a variable under the same name.'",
+        "Issue 描述：'This can even occur across subpackages and even across other classes of those subpackages'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "类实例变量的文档被错误地链接到项目中其他同名的变量上，导致不相关的变量之间出现超链接。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述：'the document of the instance variable will link to the other occurence of a variable under the same name.'",
+        "Issue 截图显示了一个变量名被链接到另一个位置。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "类实例变量的文档不应自动链接到项目中其他同名的变量；它们应该被视为独立的实体，除非用户显式添加引用。",
+      "evidence": [
+        "Issue 描述：'That the class variable documentation not be linked to any other. It is unreasonable to expect these to be in any way related whatsoever.'",
+        "Issue 描述：'If they *happen* to be, the user can decide to document it as such with a simple reference to the other variable'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sphinx.ext.autodoc",
+        "kind": "module",
+        "source_path": "",
+        "reason": "Issue 核心是关于 autodoc 扩展错误地生成链接。"
+      },
+      {
+        "name": "sphinx.ext.intersphinx",
+        "kind": "module",
+        "source_path": "sphinx/ext/intersphinx.py",
+        "reason": "iCoRe 检索出的相关源码片段包含此文件，可能与跨项目引用链接有关。"
+      },
+      {
+        "name": "sphinx.ext.apidoc",
+        "kind": "module",
+        "source_path": "sphinx/ext/apidoc.py",
+        "reason": "Issue 提到通过 apidoc 使用 autodoc，且 iCoRe 检索出的相关源码片段包含此文件。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sphinx/ext/autodoc.py",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 核心是关于 autodoc 扩展的错误链接行为，但 iCoRe 未提供其源码片段。"
+      },
+      {
+        "path": "sphinx/ext/intersphinx.py",
+        "object": "",
+        "lines": "",
+        "reason": "iCoRe 检索出的相关源码片段包含此文件，可能与链接解析逻辑有关。"
+      },
+      {
+        "path": "sphinx/ext/apidoc.py",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 提到通过 apidoc 使用 autodoc，且 iCoRe 检索出的相关源码片段包含此文件。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_name_conflict",
+        "test_file": "tests/test_ext_autodoc.py",
+        "why_relevant": "该测试涉及名称冲突（name_conflict），与 Issue 中同名变量错误链接的问题直接相关。",
+        "reusable_parts": [
+          "@pytest.mark.sphinx('html', testroot='ext-autodoc') fixture",
+          "do_autodoc 辅助函数调用",
+          "assert list(actual) == ... 的断言风格"
+        ],
+        "possible_gap": "该测试检查的是类文档输出是否正确，但没有验证生成的文档中是否存在错误的超链接。"
+      },
+      {
+        "test_name": "test_autoattribute_instance_variable",
+        "test_file": "tests/test_ext_autodoc_autoattribute.py",
+        "why_relevant": "该测试专门针对实例变量（instance_variable）的 autoattribute 文档生成。",
+        "reusable_parts": [
+          "@pytest.mark.sphinx('html', testroot='ext-autodoc') fixture",
+          "do_autodoc 辅助函数调用",
+          "assert list(actual) == ... 的断言风格"
+        ],
+        "possible_gap": "该测试只验证了单个实例变量的文档输出格式，没有设置同名全局变量或其他类变量来触发错误链接。"
+      },
+      {
+        "test_name": "test_autodoc_typed_instance_variables",
+        "test_file": "tests/test_ext_autodoc.py",
+        "why_relevant": "该测试生成了包含类实例变量和全局变量的模块文档，其中存在同名变量（如 attr1, attr2, attr3）。",
+        "reusable_parts": [
+          "@pytest.mark.sphinx('html', testroot='ext-autodoc') fixture",
+          "do_autodoc 辅助函数调用",
+          "options 字典配置",
+          "assert list(actual) == ... 的断言风格"
+        ],
+        "possible_gap": "该测试验证了输出格式，但没有检查这些同名变量之间是否产生了错误的超链接。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试通常针对单个模块或类，没有特意创建跨包或跨类的同名变量。",
+        "target_pattern": "创建包含同名变量的多个模块或类（例如，一个全局变量和一个类实例变量同名），并使用 autodoc 生成文档。",
+        "reason": "Issue 表明错误链接发生在同名变量之间，即使它们位于不同的作用域或包中。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试使用标准的 'html' 构建器和 'ext-autodoc' testroot。",
+        "target_pattern": "可能需要启用或配置特定的扩展（如 intersphinx）或调整引用解析的启发式规则。",
+        "reason": "Issue 提到链接行为有时随机发生，可能与引用启发式规则有关。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "生成的 HTML 或 RST 文档中，实例变量名称是否被包裹在超链接标签（如 <a>）或引用指令（如 :ref:）中。",
+        "reason": "错误链接的直接表现是在输出文档中出现了不该有的超链接。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "do_autodoc 返回的 actual 列表，检查其中是否包含指向其他变量的引用指令（如 :py:data:）。",
+        "reason": "autodoc 生成的中间 RST 输出可能已经包含了错误的交叉引用。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证为类实例变量生成的文档输出中，其名称没有被自动链接到其他同名变量。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言完整的输出字符串相等，因为输出格式可能因 Sphinx 版本而异。",
+        "reason": "Issue 的核心是“不应有链接”，因此断言输出中不包含链接片段（如特定的引用标记）是稳定且对齐的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 @pytest.mark.sphinx fixture 和 'ext-autodoc' testroot 来构建 Sphinx 应用。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建自定义的测试源文件（Python 模块），其中定义具有同名变量的类和全局变量。",
+        "source": "inference",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "触发错误链接的确切条件（如变量类型、作用域、包结构）尚不完全明确，Issue 描述其有时随机发生。",
+      "错误链接是由 autodoc 内部逻辑、intersphinx 还是其他扩展引起的尚不确定。",
+      "修复后正确的输出格式（无链接）的具体 RST/HTML 表示是什么尚不清楚。"
+    ]
+  }
+}

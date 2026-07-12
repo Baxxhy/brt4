@@ -1,0 +1,119 @@
+instance_id: sphinx-doc__sphinx-9698
+
+issue_summary: 使用 `:property:` 选项的 `py:method` 指令错误地生成了带括号的索引条目。
+
+trigger_condition:
+{
+  "text": "在 reStructuredText 文档中使用 `:property:` 选项的 `py:method` 指令，例如 `.. py:method:: Foo.bar\n   :property:`。",
+  "evidence": [
+    "Issue 的 'How to Reproduce' 部分提供了示例代码。",
+    "相关测试 1 中包含了 `:property:` 选项的 `py:method` 指令用例。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "生成的索引条目错误地包含了括号，例如 'meth5() (Class property)'，而属性索引条目不应有括号。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 描述指出索引条目带有括号，而它不应该有。",
+    "相关测试 1 中 `:property:` 选项对应的索引条目断言为 `'meth5() (Class property)'`，这展示了当前错误行为。",
+    "Issue 的截图显示了带括号的索引条目。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "使用 `:property:` 选项的 `py:method` 指令应生成不带括号的索引条目，类似于 `py:property` 指令的行为。",
+  "evidence": [
+    "Issue 的 'Expected behavior' 部分明确指出属性索引条目不应有括号。",
+    "相关测试 2 中 `py:property` 指令生成的索引条目断言为 `'prop1 (Class property)'`，没有括号，展示了期望行为。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "sphinx.domains.rst",
+    "kind": "module",
+    "source_path": "sphinx/domains/rst.py",
+    "reason": "iCoRe 检索出的相关源码指向此文件，它可能包含处理 `py:method` 指令和 `:property:` 选项的逻辑。"
+  },
+  {
+    "name": "restructuredtext.parse",
+    "kind": "function",
+    "source_path": "",
+    "reason": "相关测试中用于解析 reStructuredText 文本，是触发索引条目生成的关键步骤。"
+  },
+  {
+    "name": "app.env.get_domain('py')",
+    "kind": "method",
+    "source_path": "",
+    "reason": "相关测试中用于获取 Python 域对象，以检查生成的索引条目是否正确注册。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相关测试 1 中 `:property:` 选项的 `py:method` 指令用例断言了带括号的索引条目。",
+    "target_pattern": "将断言改为期望的不带括号的索引条目格式，例如从 `'meth5() (Class property)'` 改为 `'meth5 (Class property)'`。",
+    "reason": "Issue 明确指出属性索引条目不应有括号，因此需要变异断言以匹配期望行为。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "addnodes.index 节点的 entries 字段，特别是条目的描述字符串。",
+    "reason": "Issue 的核心是索引条目的描述字符串错误地包含了括号，观察此表达式可以直接判断缺陷是否被触发。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "domain.objects 字典中对应条目的值，特别是对象类型。",
+    "reason": "相关测试检查 domain.objects 中注册的对象类型，`py:method` 与 `:property:` 选项可能被错误地注册为 'method' 而非 'property'，这可能影响索引生成。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证使用 `:property:` 选项的 `py:method` 指令生成的索引条目描述字符串不包含括号。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "避免断言完整的索引条目字符串，因为具体格式（如空格、标签）可能变化。",
+    "reason": "Issue 的核心是括号的存在与否，而非整个字符串的精确匹配，因此检查不包含 '()' 更稳定。"
+  },
+  {
+    "assertion_goal": "验证使用 `:property:` 选项的 `py:method` 指令在 domain.objects 中可能被正确注册为 'property' 类型（如果这是根本原因）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言与索引生成无关的其他对象属性。",
+    "reason": "如果对象类型错误导致括号问题，断言正确的类型可以确保修复。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "使用 app fixture（Sphinx 测试应用）来构建文档和检查索引条目。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要导入 restructuredtext、addnodes 和相关断言工具（如 assert_node）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "缺陷的确切源码位置和根本原因未知（例如，是在索引条目生成时还是对象注册时）。",
+  "使用 `:property:` 选项的 `py:method` 指令是否应在 domain.objects 中注册为 'property' 类型，或者这无关紧要。",
+  "除了括号问题，索引条目的其他部分（如标签、格式）是否也应与 `py:property` 指令完全一致。"
+]

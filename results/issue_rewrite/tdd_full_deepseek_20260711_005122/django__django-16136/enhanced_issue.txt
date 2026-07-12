@@ -1,0 +1,149 @@
+instance_id: django__django-16136
+
+issue_summary: 当异步视图类只定义了部分异步方法时，对未定义的方法（如GET）的请求会导致 HttpResponseNotAllowed 对象无法被 await，引发 TypeError。
+
+trigger_condition:
+{
+  "text": "定义一个继承自 django.views.View 的类，该类只包含一个异步方法（如 async post），而不包含其他方法（如 get）。然后对该视图发起一个不被允许的 HTTP 方法请求（如 GET 请求）。",
+  "evidence": [
+    "Issue 描述：'When defining a simple View subclass with only an async \"post\" method, GET requests to this view cause the following exception'",
+    "Issue 提供的复现代码：class Demo(View): async def post(self, request): ...",
+    "源码片段 2 显示 View 类包含 http_method_names 列表，其中包括 'get', 'post' 等方法。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "服务器返回 500 错误，抛出 TypeError: object HttpResponseNotAllowed can't be used in 'await' expression。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中的异常堆栈：'TypeError: object HttpResponseNotAllowed can't be used in 'await' expression'",
+    "Issue 中的日志：'Internal Server Error: /demo'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "对不支持 HTTP 方法的请求，视图应正常返回一个 405 Method Not Allowed 的 HttpResponseNotAllowed 响应，而不引发 TypeError 异常。",
+  "evidence": [
+    "源码片段 1 显示 HttpResponseNotAllowed 的 status_code 为 405，表明其设计目的是返回方法不允许的响应。",
+    "Issue 标题和描述暗示 HttpResponseNotAllowed 应该能被正确处理，而不是在 await 表达式中出错。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "django.views.View",
+    "kind": "class",
+    "source_path": "django/views/generic/base.py",
+    "reason": "Issue 中出错的视图继承自此类，且问题与视图的异步方法分发和 http_method_not_allowed 处理相关。"
+  },
+  {
+    "name": "django.views.View.as_view",
+    "kind": "method",
+    "source_path": "django/views/generic/base.py",
+    "reason": "Issue 中通过 Demo.as_view() 创建视图，源码片段 4 显示 as_view 方法负责创建视图函数并处理异步标记。"
+  },
+  {
+    "name": "django.views.View.http_method_not_allowed",
+    "kind": "method",
+    "source_path": "django/views/generic/base.py",
+    "reason": "当请求方法不被允许时，View.dispatch 会调用此方法，它返回 HttpResponseNotAllowed 对象。"
+  },
+  {
+    "name": "django.http.response.HttpResponseNotAllowed",
+    "kind": "class",
+    "source_path": "django/http/response.py",
+    "reason": "异常信息直接指向此对象无法被 await，它是导致 TypeError 的直接来源。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "相关测试 1 中，MixedView 同时定义了同步 get 和异步 post 方法。",
+    "target_pattern": "定义一个视图类，只包含一个异步方法（如 async post），不定义其他方法（如 get）。",
+    "reason": "Issue 明确指出，只有当视图类'only an async \"post\" method'时，GET 请求会触发 bug。混合方法在测试 1 中会导致配置错误，而单一异步方法可能绕过该检查但导致运行时错误。",
+    "confidence": "high"
+  },
+  {
+    "slot": "input",
+    "current_pattern": "相关测试 2 中，对 '/async_regular/' 发起 GET 请求。",
+    "target_pattern": "对只定义了异步 post 方法的视图，发起一个不被允许的 HTTP 方法请求（如 GET）。",
+    "reason": "触发 bug 的条件是向不支持该方法的异步视图发起请求，这将导致 dispatch 调用 http_method_not_allowed 并返回 HttpResponseNotAllowed。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "相关测试 2 和 3 使用 await self.async_client.get 发起异步请求。",
+    "target_pattern": "使用异步测试客户端（async_client）发起请求，并 await 响应，以进入异步请求处理路径。",
+    "reason": "Issue 的堆栈跟踪显示错误发生在 asgiref/sync.py 的异步包装器中，表明请求是通过异步路径处理的。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "在调用 await self.async_client.get(url) 时捕获的异常。",
+    "reason": "Issue 的核心错误是 TypeError，观测是否抛出此异常是判断 bug 是否触发的直接方式。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "请求的响应对象（如果未抛出异常），检查其类型和 status_code。",
+    "reason": "在修复后，期望的 behavior 是返回一个 HttpResponseNotAllowed 实例，其 status_code 应为 405。"
+  },
+  {
+    "kind": "type",
+    "expression_hint": "视图类实例的 view_is_async 属性，或 as_view() 返回的函数的 _is_coroutine 标记。",
+    "reason": "这有助于理解视图是否被标记为异步，这可能影响错误的发生。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "对不支持方法的请求，不应抛出 TypeError，而应返回一个 HttpResponseNotAllowed 响应。",
+    "preferred_assertion_style": "isinstance",
+    "avoid": "断言完整的异常消息字符串，因为消息可能微调。避免断言与错误无关的响应内容。",
+    "reason": "修复的目标是使 HttpResponseNotAllowed 能在异步上下文中正常工作。使用 isinstance 检查返回的对象类型是稳定且与 Issue 核心相关的断言。"
+  },
+  {
+    "assertion_goal": "返回的 HttpResponseNotAllowed 响应应具有正确的状态码 405。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言 HttpResponseNotAllowed 对象的完整 repr 或内部属性。",
+    "reason": "状态码 405 是 HttpResponseNotAllowed 的固有属性，是验证其功能正确的关键指标。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 SimpleTestCase 或 TestCase 作为测试基类，并利用其提供的 async_client。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要通过 @override_settings(ROOT_URLCONF=...) 来配置包含问题视图的 URLconf。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试方法本身可能需要是异步的（async def）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "是否所有只包含单一异步方法的视图类都会触发此 bug，还是需要特定条件（如特定的 Django 版本、Python 版本）？",
+  "bug 的确切位置是在 View.http_method_not_allowed 方法中，还是在 as_view() 创建的包装函数中，亦或是在 asgiref/sync.py 的异步适配器中？",
+  "修复后，对于混合同步/异步方法的视图，as_view() 是否仍会提前抛出 ImproperlyConfigured 错误？"
+]

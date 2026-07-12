@@ -1,0 +1,506 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Accessing UserAdmin via to_field leads to link to PasswordResetForm being broken (404)
+Description
+	 
+		(last modified by Simon Kern)
+	 
+Accessing the UserAdmin via another model's Admin that has a reference to User (with to_field set, e.g., to_field="uuid") leads to the UserAdmin being accessed via an url that looks similar to this one:
+.../user/22222222-3333-4444-5555-666677778888/change/?_to_field=uuid
+However the underlying form looks like this: 
+Code highlighting:
+class UserChangeForm(forms.ModelForm):
+	password = ReadOnlyPasswordHashField(
+		label=_("Password"),
+		help_text=_(
+			"Raw passwords are not stored, so there is no way to see this "
+			"user’s password, but you can change the password using "
+			'<a href="{}">this form</a>.'
+		),
+	)
+	...
+	...
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		password = self.fields.get("password")
+		if password:
+			password.help_text = password.help_text.format("../password/")
+	...
+	...
+This results in the link to the PasswordResetForm being wrong and thus ending up in a 404. If we drop the assumption that UserAdmin is always accessed via its pk, then we're good to go. It's as simple as replacing password.help_text = password.help_text.format("../password/") with password.help_text = password.help_text.format(f"../../{self.instance.pk}/password/")
+I've opened a pull request on GitHub for this Ticket, please see:
+​PR
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/contrib/auth/admin.py
+对象名称：UserAdmin
+节点类型：class
+父节点：admin
+行号范围：44-230
+代码：
+class UserAdmin(admin.ModelAdmin):
+    add_form_template = "admin/auth/user/add_form.html"
+    change_user_password_template = None
+    fieldsets = (
+        (None, {"fields": ("username", "password")}),
+        (_("Personal info"), {"fields": ("first_name", "last_name", "email")}),
+        (
+            _("Permissions"),
+            {
+                "fields": (
+                    "is_active",
+                    "is_staff",
+                    "is_superuser",
+                    "groups",
+                    "user_permissions",
+                ),
+            },
+        ),
+        (_("Important dates"), {"fields": ("last_login", "date_joined")}),
+    )
+    add_fieldsets = (
+        (
+            None,
+            {
+                "classes": ("wide",),
+                "fields": ("username", "password1", "password2"),
+            },
+        ),
+    )
+    form = UserChangeForm
+    add_form = UserCreationForm
+    change_password_form = AdminPasswordChangeForm
+    list_display = ("username", "email", "first_name", "last_name", "is_staff")
+    list_filter = ("is_staff", "is_superuser", "is_active", "groups")
+    search_fields = ("username", "first_name", "last_name", "email")
+    ordering = ("username",)
+    filter_horizontal = (
+        "groups",
+        "user_permissions",
+    )
+    def get_fieldsets(self, request, obj=None):
+    def get_form(self, request, obj=None, **kwargs):
+    def get_urls(self):
+    def lookup_allowed(self, lookup, value):
+    @sensitive_post_parameters_m
+    @csrf_protect_m
+    def add_view(self, request, form_url="", extra_context=None):
+    def _add_view(self, request, form_url="", extra_context=None):
+    @sensitive_post_parameters_m
+    def user_change_password(self, request, id, form_url=""):
+    def response_add(self, request, obj, post_url_continue=None):
+
+
+【源码片段 2】
+文件路径：django/contrib/auth/forms.py
+对象名称：UserChangeForm
+节点类型：class
+父节点：forms
+行号范围：147-171
+代码：
+class UserChangeForm(forms.ModelForm):
+    password = ReadOnlyPasswordHashField(
+        label=_("Password"),
+        help_text=_(
+            "Raw passwords are not stored, so there is no way to see this "
+            "user’s password, but you can change the password using "
+            '<a href="{}">this form</a>.'
+        ),
+    )
+    def __init__(self, *args, **kwargs):
+
+
+【源码片段 3】
+文件路径：django/forms/models.py
+对象名称：ModelForm
+节点类型：class
+父节点：models
+行号范围：552-553
+代码：
+class ModelForm(BaseModelForm, metaclass=ModelFormMetaclass):
+
+
+【源码片段 4】
+文件路径：django/contrib/auth/forms.py
+对象名称：ReadOnlyPasswordHashField
+节点类型：class
+父节点：forms
+行号范围：63-69
+代码：
+class ReadOnlyPasswordHashField(forms.Field):
+    widget = ReadOnlyPasswordHashWidget
+    def __init__(self, *args, **kwargs):
+
+
+【源码片段 5】
+文件路径：django/contrib/auth/forms.py
+对象名称：__init__
+节点类型：class_function
+父节点：ReadOnlyPasswordHashField
+行号范围：66-69
+代码：
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("required", False)
+        kwargs.setdefault("disabled", True)
+        super().__init__(*args, **kwargs)
+
+
+【源码片段 6】
+文件路径：django/utils/dateformat.py
+对象名称：format
+节点类型：class_function
+父节点：Formatter
+行号范围：39-51
+代码：
+    def format(self, formatstr):
+        pieces = []
+        for i, piece in enumerate(re_formatchars.split(str(formatstr))):
+            if i % 2:
+                if type(self.data) is datetime.date and hasattr(TimeFormat, piece):
+                    raise TypeError(
+                        "The format for date objects may not contain "
+                        "time-related format specifiers (found '%s')." % piece
+                    )
+                pieces.append(str(getattr(self, piece)()))
+            elif piece:
+                pieces.append(re_escaped.sub(r"\1", piece))
+        return "".join(pieces)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/auth_tests/test_views.py
+测试名称：ChangelistTests.test_user_change_password
+测试代码：
+@override_settings(ROOT_URLCONF="auth_tests.urls_admin")
+class ChangelistTests(AuthViewsTestCase):
+    def test_user_change_password(self):
+        user_change_url = reverse(
+            "auth_test_admin:auth_user_change", args=(self.admin.pk,)
+        )
+        password_change_url = reverse(
+            "auth_test_admin:auth_user_password_change", args=(self.admin.pk,)
+        )
+
+        response = self.client.get(user_change_url)
+        # Test the link inside password field help_text.
+        rel_link = re.search(
+            r'you can change the password using <a href="([^"]*)">this form</a>',
+            response.content.decode(),
+        )[1]
+        self.assertEqual(urljoin(user_change_url, rel_link), password_change_url)
+
+        response = self.client.post(
+            password_change_url,
+            {
+                "password1": "password1",
+                "password2": "password1",
+            },
+        )
+        self.assertRedirects(response, user_change_url)
+        row = LogEntry.objects.latest("id")
+        self.assertEqual(row.get_change_message(), "Changed password.")
+        self.logout()
+        self.login(password="password1")
+
+【相关测试 2】
+测试文件：tests/auth_tests/test_views.py
+测试名称：UUIDUserTests.test_admin_password_change
+测试代码：
+@override_settings(
+    AUTH_USER_MODEL="auth_tests.UUIDUser",
+    ROOT_URLCONF="auth_tests.urls_custom_user_admin",
+)
+class UUIDUserTests(TestCase):
+    def test_admin_password_change(self):
+        u = UUIDUser.objects.create_superuser(
+            username="uuid", email="foo@bar.com", password="test"
+        )
+        self.assertTrue(self.client.login(username="uuid", password="test"))
+
+        user_change_url = reverse(
+            "custom_user_admin:auth_tests_uuiduser_change", args=(u.pk,)
+        )
+        response = self.client.get(user_change_url)
+        self.assertEqual(response.status_code, 200)
+
+        password_change_url = reverse(
+            "custom_user_admin:auth_user_password_change", args=(u.pk,)
+        )
+        response = self.client.get(password_change_url)
+        # The action attribute is omitted.
+        self.assertContains(response, '<form method="post" id="uuiduser_form">')
+
+        # A LogEntry is created with pk=1 which breaks a FK constraint on MySQL
+        with connection.constraint_checks_disabled():
+            response = self.client.post(
+                password_change_url,
+                {
+                    "password1": "password1",
+                    "password2": "password1",
+                },
+            )
+        self.assertRedirects(response, user_change_url)
+        row = LogEntry.objects.latest("id")
+        self.assertEqual(row.user_id, 1)  # hardcoded in CustomUserAdmin.log_change()
+        self.assertEqual(row.object_id, str(u.pk))
+        self.assertEqual(row.get_change_message(), "Changed password.")
+
+        # The LogEntry.user column isn't altered to a UUID type so it's set to
+        # an integer manually in CustomUserAdmin to avoid an error. To avoid a
+        # constraint error, delete the entry before constraints are checked
+        # after the test.
+        row.delete()
+
+【相关测试 3】
+测试文件：tests/admin_views/tests.py
+测试名称：AdminViewBasicTest.test_hide_change_password
+测试代码：
+class AdminViewBasicTest(AdminViewBasicTestCase):
+    def test_hide_change_password(self):
+        """
+        Tests if the "change password" link in the admin is hidden if the User
+        does not have a usable password set.
+        (against 9bea85795705d015cdadc82c68b99196a8554f5c)
+        """
+        user = User.objects.get(username="super")
+        user.set_unusable_password()
+        user.save()
+        self.client.force_login(user)
+        response = self.client.get(reverse("admin:index"))
+        self.assertNotContains(
+            response,
+            reverse("admin:password_change"),
+            msg_prefix=(
+                'The "change password" link should not be displayed if a user does not '
+                "have a usable password."
+            ),
+        )
+
+【相关测试 4】
+测试文件：tests/admin_views/tests.py
+测试名称：AdminSearchTest.test_with_fk_to_field
+测试代码：
+@override_settings(ROOT_URLCONF="admin_views.urls")
+class AdminSearchTest(TestCase):
+    def test_with_fk_to_field(self):
+        """
+        The to_field GET parameter is preserved when a search is performed.
+        Refs #10918.
+        """
+        response = self.client.get(
+            reverse("admin:auth_user_changelist") + "?q=joe&%s=id" % TO_FIELD_VAR
+        )
+        self.assertContains(response, "\n1 user\n")
+        self.assertContains(
+            response,
+            '<input type="hidden" name="%s" value="id">' % TO_FIELD_VAR,
+            html=True,
+        )
+
+【相关测试 5】
+测试文件：tests/admin_views/tests.py
+测试名称：AdminViewBasicTest.test_disallowed_to_field
+测试代码：
+class AdminViewBasicTest(AdminViewBasicTestCase):
+    def test_disallowed_to_field(self):
+        url = reverse("admin:admin_views_section_changelist")
+        with self.assertLogs("django.security.DisallowedModelAdminToField", "ERROR"):
+            response = self.client.get(url, {TO_FIELD_VAR: "missing_field"})
+        self.assertEqual(response.status_code, 400)
+
+        # Specifying a field that is not referred by any other model registered
+        # to this admin site should raise an exception.
+        with self.assertLogs("django.security.DisallowedModelAdminToField", "ERROR"):
+            response = self.client.get(
+                reverse("admin:admin_views_section_changelist"), {TO_FIELD_VAR: "name"}
+            )
+        self.assertEqual(response.status_code, 400)
+
+        # Primary key should always be allowed, even if the referenced model
+        # isn't registered.
+        response = self.client.get(
+            reverse("admin:admin_views_notreferenced_changelist"), {TO_FIELD_VAR: "id"}
+        )
+        self.assertEqual(response.status_code, 200)
+
+        # Specifying a field referenced by another model though a m2m should be
+        # allowed.
+        response = self.client.get(
+            reverse("admin:admin_views_recipe_changelist"), {TO_FIELD_VAR: "rname"}
+        )
+        self.assertEqual(response.status_code, 200)
+
+        # Specifying a field referenced through a reverse m2m relationship
+        # should be allowed.
+        response = self.client.get(
+            reverse("admin:admin_views_ingredient_changelist"), {TO_FIELD_VAR: "iname"}
+        )
+        self.assertEqual(response.status_code, 200)
+
+        # Specifying a field that is not referred by any other model directly
+        # registered to this admin site but registered through inheritance
+        # should be allowed.
+        response = self.client.get(
+            reverse("admin:admin_views_referencedbyparent_changelist"),
+            {TO_FIELD_VAR: "name"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        # Specifying a field that is only referred to by a inline of a
+        # registered model should be allowed.
+        response = self.client.get(
+            reverse("admin:admin_views_referencedbyinline_changelist"),
+            {TO_FIELD_VAR: "name"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        # #25622 - Specifying a field of a model only referred by a generic
+        # relation should raise DisallowedModelAdminToField.
+        url = reverse("admin:admin_views_referencedbygenrel_changelist")
+        with self.assertLogs("django.security.DisallowedModelAdminToField", "ERROR"):
+            response = self.client.get(url, {TO_FIELD_VAR: "object_id"})
+        self.assertEqual(response.status_code, 400)
+
+        # We also want to prevent the add, change, and delete views from
+        # leaking a disallowed field value.
+        with self.assertLogs("django.security.DisallowedModelAdminToField", "ERROR"):
+            response = self.client.post(
+                reverse("admin:admin_views_section_add"), {TO_FIELD_VAR: "name"}
+            )
+        self.assertEqual(response.status_code, 400)
+
+        section = Section.objects.create()
+        url = reverse("admin:admin_views_section_change", args=(section.pk,))
+        with self.assertLogs("django.security.DisallowedModelAdminToField", "ERROR"):
+            response = self.client.post(url, {TO_FIELD_VAR: "name"})
+        self.assertEqual(response.status_code, 400)
+
+        url = reverse("admin:admin_views_section_delete", args=(section.pk,))
+        with self.assertLogs("django.security.DisallowedModelAdminToField", "ERROR"):
+            response = self.client.post(url, {TO_FIELD_VAR: "name"})
+        self.assertEqual(response.status_code, 400)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

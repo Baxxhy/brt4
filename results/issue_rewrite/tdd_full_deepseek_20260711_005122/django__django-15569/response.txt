@@ -1,0 +1,135 @@
+{
+  "issue_summary": "RegisterLookupMixin._unregister_lookup() 方法在注销查找时没有清除查找缓存。",
+  "trigger_condition": {
+    "text": "调用 RegisterLookupMixin._unregister_lookup() 方法注销一个已注册的查找。",
+    "evidence": ["Issue 描述指出 _unregister_lookup 方法没有清除缓存，而 register_lookup 方法会清除缓存。", "源码片段 2 显示 _unregister_lookup 方法只删除了 cls.class_lookups[lookup_name]，没有调用 _clear_cached_lookups()。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "注销查找后，缓存可能仍然包含已注销的查找，导致后续的 get_lookup 或 get_lookups 返回过时或不正确的查找对象。",
+    "symptom_type": "state_not_updated",
+    "evidence": ["Issue 描述指出缓存没有被清除，这与 register_lookup 的行为不一致。", "相关测试 2 (test_lookups_caching) 表明注册查找会清除缓存，暗示注销也应该如此。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "调用 _unregister_lookup() 注销一个查找后，相关的查找缓存应该被清除，以确保后续的查找获取反映最新的注册状态。",
+    "evidence": ["Issue 描述指出缓存应该被清除，就像在 register_lookup 方法中一样。", "源码片段 3 显示 register_lookup 在注册后会调用 cls._clear_cached_lookups()。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "RegisterLookupMixin._unregister_lookup",
+      "kind": "method",
+      "source_path": "django/db/models/query_utils.py",
+      "reason": "这是 Issue 报告的直接缺陷方法。"
+    },
+    {
+      "name": "RegisterLookupMixin._clear_cached_lookups",
+      "kind": "method",
+      "source_path": "django/db/models/query_utils.py",
+      "reason": "这是应该被 _unregister_lookup 调用以清除缓存的方法。"
+    },
+    {
+      "name": "RegisterLookupMixin.get_lookups",
+      "kind": "method",
+      "source_path": "django/db/models/query_utils.py",
+      "reason": "其缓存可能因 _unregister_lookup 未清除而变得过时。"
+    },
+    {
+      "name": "register_lookup",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试中使用了这个上下文管理器来注册查找，可能用于构造测试场景。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/query_utils.py",
+      "object": "RegisterLookupMixin._unregister_lookup",
+      "lines": "212-219",
+      "reason": "Issue 明确指出该方法没有清除缓存，而对应的 register_lookup 方法会清除。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_lookups_caching",
+      "test_file": "tests/custom_lookups/tests.py",
+      "why_relevant": "它直接测试了查找注册对缓存的影响，并使用了 register_lookup 上下文管理器。",
+      "reusable_parts": ["使用 register_lookup 上下文管理器", "检查缓存是否被清除的断言模式 (assertIn/assertNotIn)", "对 field.get_lookups() 的调用"],
+      "possible_gap": "它只测试了注册（register）时的缓存清除，没有测试注销（unregister）时的缓存清除。"
+    },
+    {
+      "test_name": "test_foreignobject_lookup_registration",
+      "test_file": "tests/custom_lookups/tests.py",
+      "why_relevant": "它测试了使用 register_lookup 上下文管理器注册和注销查找后的行为。",
+      "reusable_parts": ["使用 register_lookup 上下文管理器", "调用 field.get_lookup() 来验证查找是否可用"],
+      "possible_gap": "它没有显式检查缓存状态，而是检查查找的可用性。"
+    },
+    {
+      "test_name": "test_func_unique_constraint_lookups",
+      "test_file": "tests/schema/tests.py",
+      "why_relevant": "Issue 提到这个测试需要做微小改动以适应修复，说明它可能涉及查找的注册/注销。",
+      "reusable_parts": ["使用 register_lookup 上下文管理器", "数据库约束和模式编辑的测试设置"],
+      "possible_gap": "它是一个更高级别的模式测试，可能不直接暴露底层的缓存问题。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "call_chain",
+      "current_pattern": "在相似测试中，通常使用 `with register_lookup(...):` 来注册查找，并在上下文结束后自动注销。",
+      "target_pattern": "直接调用 `_unregister_lookup` 方法，而不是依赖上下文管理器的自动注销。",
+      "reason": "Issue 的缺陷在于 `_unregister_lookup` 方法本身，直接调用它可以更精确地触发问题。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试通常在注册后立即检查缓存或查找可用性。",
+      "target_pattern": "在注销查找后，检查缓存或查找可用性。",
+      "reason": "为了观察注销后缓存是否被正确清除。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "cache",
+      "expression_hint": "在调用 _unregister_lookup 前后，检查 RegisterLookupMixin.get_lookups.cache_info() 或 field.get_lookups() 的内容。",
+      "reason": "Issue 的核心是缓存未清除，观察缓存状态可以直接验证问题。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "在注销查找后，调用 field.get_lookup('lookup_name') 的返回值。",
+      "reason": "如果缓存未清除，可能仍然返回已注销的查找对象；如果已清除，应返回 None 或引发异常。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "断言在注销查找后，该查找不再出现在 get_lookups() 的结果中。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "断言完整的缓存字典相等，因为其他查找可能同时存在。",
+      "reason": "这直接验证了注销操作的效果，并且不依赖于具体的缓存实现细节。"
+    },
+    {
+      "assertion_goal": "断言在注销查找后，get_lookup('lookup_name') 返回 None 或引发适当的异常（如果预期如此）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言具体的异常消息文本。",
+      "reason": "这验证了查找在功能上不再可用，是更稳定的行为断言。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要一个继承自 RegisterLookupMixin 的类（例如一个模型字段）和一个自定义的查找类。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能需要在 TestCase 或 TransactionTestCase 中运行。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "Issue 中提到的 test_func_unique_constraint_lookups 测试具体需要做哪些‘微小改动’？",
+    "_clear_cached_lookups() 方法的确切实现和影响范围是什么？",
+    "在修复后，_unregister_lookup 是否应该在任何情况下都调用 _clear_cached_lookups，还是只在特定条件下？"
+  ]
+}

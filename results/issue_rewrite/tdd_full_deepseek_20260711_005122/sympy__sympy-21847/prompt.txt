@@ -1,0 +1,601 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+itermonomials returns incorrect monomials when using min_degrees argument
+`itermonomials` returns incorrect monomials when using optional `min_degrees` argument
+
+For example, the following code introduces three symbolic variables and generates monomials with max and min degree of 3:
+
+
+```
+import sympy as sp
+from sympy.polys.orderings import monomial_key
+
+x1, x2, x3 = sp.symbols('x1, x2, x3')
+states = [x1, x2, x3]
+max_degrees = 3
+min_degrees = 3
+monomials = sorted(sp.itermonomials(states, max_degrees, min_degrees=min_degrees), 
+                   key=monomial_key('grlex', states))
+print(monomials)
+```
+The code returns `[x3**3, x2**3, x1**3]`, when it _should_ also return monomials such as `x1*x2**2, x2*x3**2, etc...` that also have total degree of 3. This behaviour is inconsistent with the documentation that states that 
+
+> A generator of all monomials `monom` is returned, such that either `min_degree <= total_degree(monom) <= max_degree`...
+
+The monomials are also missing when `max_degrees` is increased above `min_degrees`.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/polys/monomials.py
+对象名称：itermonomials
+节点类型：top-level function
+父节点：monomials
+行号范围：15-152
+代码：
+def itermonomials(variables, max_degrees, min_degrees=None):
+    r"""
+    ``max_degrees`` and ``min_degrees`` are either both integers or both lists.
+    Unless otherwise specified, ``min_degrees`` is either ``0`` or
+    ``[0, ..., 0]``.
+
+    A generator of all monomials ``monom`` is returned, such that
+    either
+    ``min_degree <= total_degree(monom) <= max_degree``,
+    or
+    ``min_degrees[i] <= degree_list(monom)[i] <= max_degrees[i]``,
+    for all ``i``.
+
+    Case I. ``max_degrees`` and ``min_degrees`` are both integers
+    =============================================================
+
+    Given a set of variables $V$ and a min_degree $N$ and a max_degree $M$
+    generate a set of monomials of degree less than or equal to $N$ and greater
+    than or equal to $M$. The total number of monomials in commutative
+    variables is huge and is given by the following formula if $M = 0$:
+
+        .. math::
+            \frac{(\#V + N)!}{\#V! N!}
+
+    For example if we would like to generate a dense polynomial of
+    a total degree $N = 50$ and $M = 0$, which is the worst case, in 5
+    variables, assuming that exponents and all of coefficients are 32-bit long
+    and stored in an array we would need almost 80 GiB of memory! Fortunately
+    most polynomials, that we will encounter, are sparse.
+
+    Consider monomials in commutative variables $x$ and $y$
+    and non-commutative variables $a$ and $b$::
+
+        >>> from sympy import symbols
+        >>> from sympy.polys.monomials import itermonomials
+        >>> from sympy.polys.orderings import monomial_key
+        >>> from sympy.abc import x, y
+
+        >>> sorted(itermonomials([x, y], 2), key=monomial_key('grlex', [y, x]))
+        [1, x, y, x**2, x*y, y**2]
+
+        >>> sorted(itermonomials([x, y], 3), key=monomial_key('grlex', [y, x]))
+        [1, x, y, x**2, x*y, y**2, x**3, x**2*y, x*y**2, y**3]
+
+        >>> a, b = symbols('a, b', commutative=False)
+        >>> set(itermonomials([a, b, x], 2))
+        {1, a, a**2, b, b**2, x, x**2, a*b, b*a, x*a, x*b}
+
+        >>> sorted(itermonomials([x, y], 2, 1), key=monomial_key('grlex', [y, x]))
+        [x, y, x**2, x*y, y**2]
+
+    Case II. ``max_degrees`` and ``min_degrees`` are both lists
+    ===========================================================
+
+    If ``max_degrees = [d_1, ..., d_n]`` and
+    ``min_degrees = [e_1, ..., e_n]``, the number of monomials generated
+    is:
+
+    .. math::
+        (d_1 - e_1 + 1) (d_2 - e_2 + 1) \cdots (d_n - e_n + 1)
+
+    Let us generate all monomials ``monom`` in variables $x$ and $y$
+    such that ``[1, 2][i] <= degree_list(monom)[i] <= [2, 4][i]``,
+    ``i = 0, 1`` ::
+
+        >>> from sympy import symbols
+        >>> from sympy.polys.monomials import itermonomials
+        >>> from sympy.polys.orderings import monomial_key
+        >>> from sympy.abc import x, y
+
+        >>> sorted(itermonomials([x, y], [2, 4], [1, 2]), reverse=True, key=monomial_key('lex', [x, y]))
+        [x**2*y**4, x**2*y**3, x**2*y**2, x*y**4, x*y**3, x*y**2]
+    """
+    n = len(variables)
+    if is_sequence(max_degrees):
+        if len(max_degrees) != n:
+            raise ValueError('Argument sizes do not match')
+        if min_degrees is None:
+            min_degrees = [0]*n
+        elif not is_sequence(min_degrees):
+            raise ValueError('min_degrees is not a list')
+        else:
+            if len(min_degrees) != n:
+                raise ValueError('Argument sizes do not match')
+            if any(i < 0 for i in min_degrees):
+                raise ValueError("min_degrees can't contain negative numbers")
+        total_degree = False
+    else:
+        max_degree = max_degrees
+        if max_degree < 0:
+            raise ValueError("max_degrees can't be negative")
+        if min_degrees is None:
+            min_degree = 0
+        else:
+            if min_degrees < 0:
+                raise ValueError("min_degrees can't be negative")
+            min_degree = min_degrees
+        total_degree = True
+    if total_degree:
+        if min_degree > max_degree:
+            return
+        if not variables or max_degree == 0:
+            yield S.One
+            return
+        # Force to list in case of passed tuple or other incompatible collection
+        variables = list(variables) + [S.One]
+        if all(variable.is_commutative for variable in variables):
+            monomials_list_comm = []
+            for item in combinations_with_replacement(variables, max_degree):
+                powers = dict()
+                for variable in variables:
+                    powers[variable] = 0
+                for variable in item:
+                    if variable != 1:
+                        powers[variable] += 1
+                if max(powers.values()) >= min_degree:
+                    monomials_list_comm.append(Mul(*item))
+            yield from set(monomials_list_comm)
+        else:
+            monomials_list_non_comm = []
+            for item in product(variables, repeat=max_degree):
+                powers = dict()
+                for variable in variables:
+                    powers[variable] = 0
+                for variable in item:
+                    if variable != 1:
+                        powers[variable] += 1
+                if max(powers.values()) >= min_degree:
+                    monomials_list_non_comm.append(Mul(*item))
+            yield from set(monomials_list_non_comm)
+    else:
+        if any(min_degrees[i] > max_degrees[i] for i in range(n)):
+            raise ValueError('min_degrees[i] must be <= max_degrees[i] for all i')
+        power_lists = []
+        for var, min_d, max_d in zip(variables, min_degrees, max_degrees):
+            power_lists.append([var**i for i in range(min_d, max_d + 1)])
+        for powers in product(*power_lists):
+            yield Mul(*powers)
+
+
+【源码片段 2】
+文件路径：sympy/polys/orderings.py
+对象名称：monomial_key
+节点类型：top-level function
+父节点：orderings
+行号范围：200-241
+代码：
+def monomial_key(order=None, gens=None):
+    """
+    Return a function defining admissible order on monomials.
+
+    The result of a call to :func:`monomial_key` is a function which should
+    be used as a key to :func:`sorted` built-in function, to provide order
+    in a set of monomials of the same length.
+
+    Currently supported monomial orderings are:
+
+    1. lex       - lexicographic order (default)
+    2. grlex     - graded lexicographic order
+    3. grevlex   - reversed graded lexicographic order
+    4. ilex, igrlex, igrevlex - the corresponding inverse orders
+
+    If the ``order`` input argument is not a string but has ``__call__``
+    attribute, then it will pass through with an assumption that the
+    callable object defines an admissible order on monomials.
+
+    If the ``gens`` input argument contains a list of generators, the
+    resulting key function can be used to sort SymPy ``Expr`` objects.
+
+    """
+    if order is None:
+        order = lex
+
+    if isinstance(order, Symbol):
+        order = str(order)
+
+    if isinstance(order, str):
+        try:
+            order = _monomial_key[order]
+        except KeyError:
+            raise ValueError("supported monomial orderings are 'lex', 'grlex' and 'grevlex', got %r" % order)
+    if hasattr(order, '__call__'):
+        if gens is not None:
+            def _order(expr):
+                return order(expr.as_poly(*gens).degree_list())
+            return _order
+        return order
+    else:
+        raise ValueError("monomial ordering specification must be a string or a callable, got %s" % order)
+
+
+【源码片段 3】
+文件路径：sympy/polys/orderings.py
+对象名称：grlex
+节点类型：global_var
+父节点：orderings
+行号范围：185-185
+代码：
+grlex = GradedLexOrder()
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/polys/tests/test_monomials.py
+测试名称：test_monomials
+测试代码：
+def test_monomials():
+
+    # total_degree tests
+    assert set(itermonomials([], 0)) == {S.One}
+    assert set(itermonomials([], 1)) == {S.One}
+    assert set(itermonomials([], 2)) == {S.One}
+
+    assert set(itermonomials([], 0, 0)) == {S.One}
+    assert set(itermonomials([], 1, 0)) == {S.One}
+    assert set(itermonomials([], 2, 0)) == {S.One}
+
+    raises(StopIteration, lambda: next(itermonomials([], 0, 1)))
+    raises(StopIteration, lambda: next(itermonomials([], 0, 2)))
+    raises(StopIteration, lambda: next(itermonomials([], 0, 3)))
+
+    assert set(itermonomials([], 0, 1)) == set()
+    assert set(itermonomials([], 0, 2)) == set()
+    assert set(itermonomials([], 0, 3)) == set()
+
+    raises(ValueError, lambda: set(itermonomials([], -1)))
+    raises(ValueError, lambda: set(itermonomials([x], -1)))
+    raises(ValueError, lambda: set(itermonomials([x, y], -1)))
+
+    assert set(itermonomials([x], 0)) == {S.One}
+    assert set(itermonomials([x], 1)) == {S.One, x}
+    assert set(itermonomials([x], 2)) == {S.One, x, x**2}
+    assert set(itermonomials([x], 3)) == {S.One, x, x**2, x**3}
+
+    assert set(itermonomials([x, y], 0)) == {S.One}
+    assert set(itermonomials([x, y], 1)) == {S.One, x, y}
+    assert set(itermonomials([x, y], 2)) == {S.One, x, y, x**2, y**2, x*y}
+    assert set(itermonomials([x, y], 3)) == \
+            {S.One, x, y, x**2, x**3, y**2, y**3, x*y, x*y**2, y*x**2}
+
+    i, j, k = symbols('i j k', commutative=False)
+    assert set(itermonomials([i, j, k], 0)) == {S.One}
+    assert set(itermonomials([i, j, k], 1)) == {S.One, i, j, k}
+    assert set(itermonomials([i, j, k], 2)) == \
+           {S.One, i, j, k, i**2, j**2, k**2, i*j, i*k, j*i, j*k, k*i, k*j}
+
+    assert set(itermonomials([i, j, k], 3)) == \
+            {S.One, i, j, k, i**2, j**2, k**2, i*j, i*k, j*i, j*k, k*i, k*j,
+                    i**3, j**3, k**3,
+                    i**2 * j, i**2 * k, j * i**2, k * i**2,
+                    j**2 * i, j**2 * k, i * j**2, k * j**2,
+                    k**2 * i, k**2 * j, i * k**2, j * k**2,
+                    i*j*i, i*k*i, j*i*j, j*k*j, k*i*k, k*j*k,
+                    i*j*k, i*k*j, j*i*k, j*k*i, k*i*j, k*j*i,
+            }
+
+    assert set(itermonomials([x, i, j], 0)) == {S.One}
+    assert set(itermonomials([x, i, j], 1)) == {S.One, x, i, j}
+    assert set(itermonomials([x, i, j], 2)) == {S.One, x, i, j, x*i, x*j, i*j, j*i, x**2, i**2, j**2}
+    assert set(itermonomials([x, i, j], 3)) == \
+            {S.One, x, i, j, x*i, x*j, i*j, j*i, x**2, i**2, j**2,
+                            x**3, i**3, j**3,
+                            x**2 * i, x**2 * j,
+                            x * i**2, j * i**2, i**2 * j, i*j*i,
+                            x * j**2, i * j**2, j**2 * i, j*i*j,
+                            x * i * j, x * j * i
+            }
+
+    # degree_list tests
+    assert set(itermonomials([], [])) == {S.One}
+
+    raises(ValueError, lambda: set(itermonomials([], [0])))
+    raises(ValueError, lambda: set(itermonomials([], [1])))
+    raises(ValueError, lambda: set(itermonomials([], [2])))
+
+    raises(ValueError, lambda: set(itermonomials([x], [1], [])))
+    raises(ValueError, lambda: set(itermonomials([x], [1, 2], [])))
+    raises(ValueError, lambda: set(itermonomials([x], [1, 2, 3], [])))
+
+    raises(ValueError, lambda: set(itermonomials([x], [], [1])))
+    raises(ValueError, lambda: set(itermonomials([x], [], [1, 2])))
+    raises(ValueError, lambda: set(itermonomials([x], [], [1, 2, 3])))
+
+    raises(ValueError, lambda: set(itermonomials([x, y], [1, 2], [1, 2, 3])))
+    raises(ValueError, lambda: set(itermonomials([x, y, z], [1, 2, 3], [0, 1])))
+
+    raises(ValueError, lambda: set(itermonomials([x], [1], [-1])))
+    raises(ValueError, lambda: set(itermonomials([x, y], [1, 2], [1, -1])))
+
+    raises(ValueError, lambda: set(itermonomials([], [], 1)))
+    raises(ValueError, lambda: set(itermonomials([], [], 2)))
+    raises(ValueError, lambda: set(itermonomials([], [], 3)))
+
+    raises(ValueError, lambda: set(itermonomials([x, y], [0, 1], [1, 2])))
+    raises(ValueError, lambda: set(itermonomials([x, y, z], [0, 0, 3], [0, 1, 2])))
+
+    assert set(itermonomials([x], [0])) == {S.One}
+    assert set(itermonomials([x], [1])) == {S.One, x}
+    assert set(itermonomials([x], [2])) == {S.One, x, x**2}
+    assert set(itermonomials([x], [3])) == {S.One, x, x**2, x**3}
+
+    assert set(itermonomials([x], [3], [1])) == {x, x**3, x**2}
+    assert set(itermonomials([x], [3], [2])) == {x**3, x**2}
+
+    assert set(itermonomials([x, y], [0, 0])) == {S.One}
+    assert set(itermonomials([x, y], [0, 1])) == {S.One, y}
+    assert set(itermonomials([x, y], [0, 2])) == {S.One, y, y**2}
+    assert set(itermonomials([x, y], [0, 2], [0, 1])) == {y, y**2}
+    assert set(itermonomials([x, y], [0, 2], [0, 2])) == {y**2}
+
+    assert set(itermonomials([x, y], [1, 0])) == {S.One, x}
+    assert set(itermonomials([x, y], [1, 1])) == {S.One, x, y, x*y}
+    assert set(itermonomials([x, y], [1, 2])) == {S.One, x, y, x*y, y**2, x*y**2}
+    assert set(itermonomials([x, y], [1, 2], [1, 1])) == {x*y, x*y**2}
+    assert set(itermonomials([x, y], [1, 2], [1, 2])) == {x*y**2}
+
+    assert set(itermonomials([x, y], [2, 0])) == {S.One, x, x**2}
+    assert set(itermonomials([x, y], [2, 1])) == {S.One, x, y, x*y, x**2, x**2*y}
+    assert set(itermonomials([x, y], [2, 2])) == \
+            {S.One, y**2, x*y**2, x, x*y, x**2, x**2*y**2, y, x**2*y}
+
+    i, j, k = symbols('i j k', commutative=False)
+    assert set(itermonomials([i, j, k], [0, 0, 0])) == {S.One}
+    assert set(itermonomials([i, j, k], [0, 0, 1])) == {1, k}
+    assert set(itermonomials([i, j, k], [0, 1, 0])) == {1, j}
+    assert set(itermonomials([i, j, k], [1, 0, 0])) == {i, 1}
+    assert set(itermonomials([i, j, k], [0, 0, 2])) == {k**2, 1, k}
+    assert set(itermonomials([i, j, k], [0, 2, 0])) == {1, j, j**2}
+    assert set(itermonomials([i, j, k], [2, 0, 0])) == {i, 1, i**2}
+    assert set(itermonomials([i, j, k], [1, 1, 1])) == {1, k, j, j*k, i*k, i, i*j, i*j*k}
+    assert set(itermonomials([i, j, k], [2, 2, 2])) == \
+            {1, k, i**2*k**2, j*k, j**2, i, i*k, j*k**2, i*j**2*k**2,
+                    i**2*j, i**2*j**2, k**2, j**2*k, i*j**2*k,
+                    j**2*k**2, i*j, i**2*k, i**2*j**2*k, j, i**2*j*k,
+                    i*j**2, i*k**2, i*j*k, i**2*j**2*k**2, i*j*k**2, i**2, i**2*j*k**2
+            }
+
+    assert set(itermonomials([x, j, k], [0, 0, 0])) == {S.One}
+    assert set(itermonomials([x, j, k], [0, 0, 1])) == {1, k}
+    assert set(itermonomials([x, j, k], [0, 1, 0])) == {1, j}
+    assert set(itermonomials([x, j, k], [1, 0, 0])) == {x, 1}
+    assert set(itermonomials([x, j, k], [0, 0, 2])) == {k**2, 1, k}
+    assert set(itermonomials([x, j, k], [0, 2, 0])) == {1, j, j**2}
+    assert set(itermonomials([x, j, k], [2, 0, 0])) == {x, 1, x**2}
+    assert set(itermonomials([x, j, k], [1, 1, 1])) == {1, k, j, j*k, x*k, x, x*j, x*j*k}
+    assert set(itermonomials([x, j, k], [2, 2, 2])) == \
+            {1, k, x**2*k**2, j*k, j**2, x, x*k, j*k**2, x*j**2*k**2,
+                    x**2*j, x**2*j**2, k**2, j**2*k, x*j**2*k,
+                    j**2*k**2, x*j, x**2*k, x**2*j**2*k, j, x**2*j*k,
+                    x*j**2, x*k**2, x*j*k, x**2*j**2*k**2, x*j*k**2, x**2, x**2*j*k**2
+            }
+
+【相关测试 2】
+测试文件：sympy/polys/tests/test_polytools.py
+测试名称：test_Poly_monoms
+测试代码：
+def test_Poly_monoms():
+    assert Poly(0, x).monoms() == [(0,)]
+    assert Poly(1, x).monoms() == [(0,)]
+
+    assert Poly(2*x + 1, x).monoms() == [(1,), (0,)]
+
+    assert Poly(7*x**2 + 2*x + 1, x).monoms() == [(2,), (1,), (0,)]
+    assert Poly(7*x**4 + 2*x + 1, x).monoms() == [(4,), (1,), (0,)]
+
+    assert Poly(x*y**7 + 2*x**2*y**3).monoms('lex') == [(2, 3), (1, 7)]
+    assert Poly(x*y**7 + 2*x**2*y**3).monoms('grlex') == [(1, 7), (2, 3)]
+
+【相关测试 3】
+测试文件：sympy/polys/tests/test_polytools.py
+测试名称：test_Poly_total_degree
+测试代码：
+def test_Poly_total_degree():
+    assert Poly(x**2*y + x**3*z**2 + 1).total_degree() == 5
+    assert Poly(x**2 + z**3).total_degree() == 3
+    assert Poly(x*y*z + z**4).total_degree() == 4
+    assert Poly(x**3 + x + 1).total_degree() == 3
+
+    assert total_degree(x*y + z**3) == 3
+    assert total_degree(x*y + z**3, x, y) == 2
+    assert total_degree(1) == 0
+    assert total_degree(Poly(y**2 + x**3 + z**4)) == 4
+    assert total_degree(Poly(y**2 + x**3 + z**4, x)) == 3
+    assert total_degree(Poly(y**2 + x**3 + z**4, x), z) == 4
+    assert total_degree(Poly(x**9 + x*z*y + x**3*z**2 + z**7,x), z) == 7
+
+【相关测试 4】
+测试文件：sympy/polys/tests/test_polytools.py
+测试名称：test_Poly_degree
+测试代码：
+def test_Poly_degree():
+    assert Poly(0, x).degree() is -oo
+    assert Poly(1, x).degree() == 0
+    assert Poly(x, x).degree() == 1
+
+    assert Poly(0, x).degree(gen=0) is -oo
+    assert Poly(1, x).degree(gen=0) == 0
+    assert Poly(x, x).degree(gen=0) == 1
+
+    assert Poly(0, x).degree(gen=x) is -oo
+    assert Poly(1, x).degree(gen=x) == 0
+    assert Poly(x, x).degree(gen=x) == 1
+
+    assert Poly(0, x).degree(gen='x') is -oo
+    assert Poly(1, x).degree(gen='x') == 0
+    assert Poly(x, x).degree(gen='x') == 1
+
+    raises(PolynomialError, lambda: Poly(1, x).degree(gen=1))
+    raises(PolynomialError, lambda: Poly(1, x).degree(gen=y))
+    raises(PolynomialError, lambda: Poly(1, x).degree(gen='y'))
+
+    assert Poly(1, x, y).degree() == 0
+    assert Poly(2*y, x, y).degree() == 0
+    assert Poly(x*y, x, y).degree() == 1
+
+    assert Poly(1, x, y).degree(gen=x) == 0
+    assert Poly(2*y, x, y).degree(gen=x) == 0
+    assert Poly(x*y, x, y).degree(gen=x) == 1
+
+    assert Poly(1, x, y).degree(gen=y) == 0
+    assert Poly(2*y, x, y).degree(gen=y) == 1
+    assert Poly(x*y, x, y).degree(gen=y) == 1
+
+    assert degree(0, x) is -oo
+    assert degree(1, x) == 0
+    assert degree(x, x) == 1
+
+    assert degree(x*y**2, x) == 1
+    assert degree(x*y**2, y) == 2
+    assert degree(x*y**2, z) == 0
+
+    assert degree(pi) == 1
+
+    raises(TypeError, lambda: degree(y**2 + x**3))
+    raises(TypeError, lambda: degree(y**2 + x**3, 1))
+    raises(PolynomialError, lambda: degree(x, 1.1))
+    raises(PolynomialError, lambda: degree(x**2/(x**3 + 1), x))
+
+    assert degree(Poly(0,x),z) is -oo
+    assert degree(Poly(1,x),z) == 0
+    assert degree(Poly(x**2+y**3,y)) == 3
+    assert degree(Poly(y**2 + x**3, y, x), 1) == 3
+    assert degree(Poly(y**2 + x**3, x), z) == 0
+    assert degree(Poly(y**2 + x**3 + z**4, x), z) == 4
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

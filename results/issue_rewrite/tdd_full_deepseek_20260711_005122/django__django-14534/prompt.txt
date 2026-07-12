@@ -1,0 +1,405 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+BoundWidget.id_for_label ignores id set by ChoiceWidget.options
+Description
+	
+If you look at the implementation of BoundField.subwidgets
+class BoundField:
+	...
+	def subwidgets(self):
+		id_ = self.field.widget.attrs.get('id') or self.auto_id
+		attrs = {'id': id_} if id_ else {}
+		attrs = self.build_widget_attrs(attrs)
+		return [
+			BoundWidget(self.field.widget, widget, self.form.renderer)
+			for widget in self.field.widget.subwidgets(self.html_name, self.value(), attrs=attrs)
+		]
+one sees that self.field.widget.subwidgets(self.html_name, self.value(), attrs=attrs) returns a dict and assigns it to widget. Now widget['attrs']['id'] contains the "id" we would like to use when rendering the label of our CheckboxSelectMultiple.
+However BoundWidget.id_for_label() is implemented as
+class BoundWidget:
+	...
+	def id_for_label(self):
+		return 'id_%s_%s' % (self.data['name'], self.data['index'])
+ignoring the id available through self.data['attrs']['id']. This re-implementation for rendering the "id" is confusing and presumably not intended. Nobody has probably realized that so far, because rarely the auto_id-argument is overridden when initializing a form. If however we do, one would assume that the method BoundWidget.id_for_label renders that string as specified through the auto_id format-string.
+By changing the code from above to
+class BoundWidget:
+	...
+	def id_for_label(self):
+		return self.data['attrs']['id']
+that function behaves as expected.
+Please note that this error only occurs when rendering the subwidgets of a widget of type CheckboxSelectMultiple. This has nothing to do with the method BoundField.id_for_label().
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/forms/boundfield.py
+对象名称：BoundWidget
+节点类型：class
+父节点：boundfield
+行号范围：247-284
+代码：
+class BoundWidget:
+    """
+    A container class used for iterating over widgets. This is useful for
+    widgets that have choices. For example, the following can be used in a
+    template:
+
+    {% for radio in myform.beatles %}
+      <label for="{{ radio.id_for_label }}">
+        {{ radio.choice_label }}
+        <span class="radio">{{ radio.tag }}</span>
+      </label>
+    {% endfor %}
+    """
+    def __init__(self, parent_widget, data, renderer):
+    def __str__(self):
+    def tag(self, wrap_label=False):
+    @property
+    def template_name(self):
+    @property
+    def id_for_label(self):
+    @property
+    def choice_label(self):
+
+
+【源码片段 2】
+文件路径：django/forms/boundfield.py
+对象名称：id_for_label
+节点类型：class_function
+父节点：BoundWidget
+行号范围：279-280
+代码：
+    def id_for_label(self):
+        return 'id_%s_%s' % (self.data['name'], self.data['index'])
+
+
+【源码片段 3】
+文件路径：django/forms/boundfield.py
+对象名称：BoundField
+节点类型：class
+父节点：boundfield
+行号范围：15-243
+代码：
+class BoundField:
+    "A Field plus data"
+    def __init__(self, form, field, name):
+    def __str__(self):
+    @cached_property
+    def subwidgets(self):
+    def __bool__(self):
+    def __iter__(self):
+    def __len__(self):
+    def __getitem__(self, idx):
+    @property
+    def errors(self):
+    def as_widget(self, widget=None, attrs=None, only_initial=False):
+    def as_text(self, attrs=None, **kwargs):
+    def as_textarea(self, attrs=None, **kwargs):
+    def as_hidden(self, attrs=None, **kwargs):
+    @property
+    def data(self):
+    def value(self):
+    def _has_changed(self):
+    def label_tag(self, contents=None, attrs=None, label_suffix=None):
+    def css_classes(self, extra_classes=None):
+    @property
+    def is_hidden(self):
+    @property
+    def auto_id(self):
+    @property
+    def id_for_label(self):
+    @cached_property
+    def initial(self):
+    def build_widget_attrs(self, attrs, widget=None):
+    @property
+    def widget_type(self):
+
+
+【源码片段 4】
+文件路径：django/forms/boundfield.py
+对象名称：subwidgets
+节点类型：class_function
+父节点：BoundField
+行号范围：37-51
+代码：
+    def subwidgets(self):
+        """
+        Most widgets yield a single subwidget, but others like RadioSelect and
+        CheckboxSelectMultiple produce one subwidget for each choice.
+
+        This property is cached so that only one database query occurs when
+        rendering ModelChoiceFields.
+        """
+        id_ = self.field.widget.attrs.get('id') or self.auto_id
+        attrs = {'id': id_} if id_ else {}
+        attrs = self.build_widget_attrs(attrs)
+        return [
+            BoundWidget(self.field.widget, widget, self.form.renderer)
+            for widget in self.field.widget.subwidgets(self.html_name, self.value(), attrs=attrs)
+        ]
+
+
+【源码片段 5】
+文件路径：django/forms/boundfield.py
+对象名称：id_for_label
+节点类型：class_function
+父节点：BoundField
+行号范围：218-226
+代码：
+    def id_for_label(self):
+        """
+        Wrapper around the field widget's `id_for_label` method.
+        Useful, for example, for focusing on this field regardless of whether
+        it has a single widget or a MultiWidget.
+        """
+        widget = self.field.widget
+        id_ = widget.attrs.get('id') or self.auto_id
+        return widget.id_for_label(id_)
+
+
+【源码片段 6】
+文件路径：django/forms/widgets.py
+对象名称：CheckboxSelectMultiple
+节点类型：class
+父节点：widgets
+行号范围：776-790
+代码：
+class CheckboxSelectMultiple(RadioSelect):
+    allow_multiple_selected = True
+    input_type = 'checkbox'
+    template_name = 'django/forms/widgets/checkbox_select.html'
+    option_template_name = 'django/forms/widgets/checkbox_option.html'
+    def use_required_attribute(self, initial):
+    def value_omitted_from_data(self, data, files, name):
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/forms_tests/widget_tests/test_checkboxselectmultiple.py
+测试名称：CheckboxSelectMultipleTest.test_separate_ids
+测试代码：
+class CheckboxSelectMultipleTest(WidgetTest):
+    def test_separate_ids(self):
+        """
+        Each input gets a separate ID.
+        """
+        choices = [('a', 'A'), ('b', 'B'), ('c', 'C')]
+        html = """
+        <ul id="abc">
+        <li>
+        <label for="abc_0"><input checked type="checkbox" name="letters" value="a" id="abc_0"> A</label>
+        </li>
+        <li><label for="abc_1"><input type="checkbox" name="letters" value="b" id="abc_1"> B</label></li>
+        <li>
+        <label for="abc_2"><input checked type="checkbox" name="letters" value="c" id="abc_2"> C</label>
+        </li>
+        </ul>
+        """
+        self.check_html(self.widget(choices=choices), 'letters', ['a', 'c'], attrs={'id': 'abc'}, html=html)
+
+【相关测试 2】
+测试文件：tests/forms_tests/widget_tests/test_checkboxselectmultiple.py
+测试名称：CheckboxSelectMultipleTest.test_separate_ids_constructor
+测试代码：
+class CheckboxSelectMultipleTest(WidgetTest):
+    def test_separate_ids_constructor(self):
+        """
+        Each input gets a separate ID when the ID is passed to the constructor.
+        """
+        widget = CheckboxSelectMultiple(attrs={'id': 'abc'}, choices=[('a', 'A'), ('b', 'B'), ('c', 'C')])
+        html = """
+        <ul id="abc">
+        <li>
+        <label for="abc_0"><input checked type="checkbox" name="letters" value="a" id="abc_0"> A</label>
+        </li>
+        <li><label for="abc_1"><input type="checkbox" name="letters" value="b" id="abc_1"> B</label></li>
+        <li>
+        <label for="abc_2"><input checked type="checkbox" name="letters" value="c" id="abc_2"> C</label>
+        </li>
+        </ul>
+        """
+        self.check_html(widget, 'letters', ['a', 'c'], html=html)
+
+【相关测试 3】
+测试文件：tests/forms_tests/tests/test_forms.py
+测试名称：FormsTestCase.test_checkbox_auto_id
+测试代码：
+class FormsTestCase(SimpleTestCase):
+    def test_checkbox_auto_id(self):
+        # Regarding auto_id, CheckboxSelectMultiple is a special case. Each checkbox
+        # gets a distinct ID, formed by appending an underscore plus the checkbox's
+        # zero-based index.
+        class SongForm(Form):
+            name = CharField()
+            composers = MultipleChoiceField(
+                choices=[('J', 'John Lennon'), ('P', 'Paul McCartney')],
+                widget=CheckboxSelectMultiple,
+            )
+
+        f = SongForm(auto_id='%s_id')
+        self.assertHTMLEqual(
+            str(f['composers']),
+            """<ul id="composers_id">
+<li><label for="composers_id_0">
+<input type="checkbox" name="composers" value="J" id="composers_id_0"> John Lennon</label></li>
+<li><label for="composers_id_1">
+<input type="checkbox" name="composers" value="P" id="composers_id_1"> Paul McCartney</label></li>
+</ul>"""
+        )
+
+【相关测试 4】
+测试文件：tests/forms_tests/tests/test_forms.py
+测试名称：FormsTestCase.test_boundfield_id_for_label_override_by_attrs
+测试代码：
+class FormsTestCase(SimpleTestCase):
+    def test_boundfield_id_for_label_override_by_attrs(self):
+        """
+        If an id is provided in `Widget.attrs`, it overrides the generated ID,
+        unless it is `None`.
+        """
+        class SomeForm(Form):
+            field = CharField(widget=TextInput(attrs={'id': 'myCustomID'}))
+            field_none = CharField(widget=TextInput(attrs={'id': None}))
+
+        form = SomeForm()
+        self.assertEqual(form['field'].id_for_label, 'myCustomID')
+        self.assertEqual(form['field_none'].id_for_label, 'id_field_none')
+
+【相关测试 5】
+测试文件：tests/forms_tests/widget_tests/test_checkboxselectmultiple.py
+测试名称：CheckboxSelectMultipleTest.test_label
+测试代码：
+class CheckboxSelectMultipleTest(WidgetTest):
+    def test_label(self):
+        """
+        CheckboxSelectMultiple doesn't contain 'for="field_0"' in the <label>
+        because clicking that would toggle the first checkbox.
+        """
+        class TestForm(forms.Form):
+            f = forms.MultipleChoiceField(widget=CheckboxSelectMultiple)
+
+        bound_field = TestForm()['f']
+        self.assertEqual(bound_field.field.widget.id_for_label('id'), '')
+        self.assertEqual(bound_field.label_tag(), '<label>F:</label>')
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

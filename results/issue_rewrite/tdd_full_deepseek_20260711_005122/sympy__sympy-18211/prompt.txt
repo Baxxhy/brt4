@@ -1,0 +1,485 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+`solveset` raises `NotImplementedError` instead of returning `ConditionSet`
+The problem is
+```julia
+In [10]: Eq(n*cos(n) - 3*sin(n), 0).as_set()                                                                                                                  
+---------------------------------------------------------------------------
+NotImplementedError
+```
+Here `solveset` raises `NotImplementedError` but probably a `ConditionSet` should be returned by `solveset` instead. The obvious result of `as_set()` here is
+```julia
+In [11]: ConditionSet(n, Eq(n*cos(n) - 3*sin(n), 0), Reals)                                                                                                   
+Out[11]: {n | n ∊ ℝ ∧ n⋅cos(n) - 3⋅sin(n) = 0}
+```
+
+_Originally posted by @oscarbenjamin in https://github.com/sympy/sympy/pull/17771_
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/solvers/solveset.py
+对象名称：solveset
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 2】
+文件路径：sympy/logic/boolalg.py
+对象名称：as_set
+节点类型：class_function
+父节点：Boolean
+行号范围：124-163
+代码：
+    def as_set(self):
+        """
+        Rewrites Boolean expression in terms of real sets.
+
+        Examples
+        ========
+
+        >>> from sympy import Symbol, Eq, Or, And
+        >>> x = Symbol('x', real=True)
+        >>> Eq(x, 0).as_set()
+        FiniteSet(0)
+        >>> (x > 0).as_set()
+        Interval.open(0, oo)
+        >>> And(-2 < x, x < 2).as_set()
+        Interval.open(-2, 2)
+        >>> Or(x < -2, 2 < x).as_set()
+        Union(Interval.open(-oo, -2), Interval.open(2, oo))
+
+        """
+        from sympy.calculus.util import periodicity
+        from sympy.core.relational import Relational
+        free = self.free_symbols
+        if len(free) == 1:
+            x = free.pop()
+            reps = {}
+            for r in self.atoms(Relational):
+                if periodicity(r, x) not in (0, None):
+                    s = r._eval_as_set()
+                    if s in (S.EmptySet, S.UniversalSet, S.Reals):
+                        reps[r] = s.as_relational(x)
+                        continue
+                    raise NotImplementedError(filldedent('''
+                        as_set is not implemented for relationals
+                        with periodic solutions
+                        '''))
+            return self.subs(reps)._eval_as_set()
+        else:
+            raise NotImplementedError("Sorry, as_set has not yet been"
+                                      " implemented for multivariate"
+                                      " expressions")
+
+
+【源码片段 3】
+文件路径：sympy/sets/conditionset.py
+对象名称：ConditionSet
+节点类型：class
+父节点：conditionset
+行号范围：21-265
+代码：
+class ConditionSet(Set):
+    """
+    Set of elements which satisfies a given condition.
+
+    {x | condition(x) is True for x in S}
+
+    Examples
+    ========
+
+    >>> from sympy import Symbol, S, ConditionSet, pi, Eq, sin, Interval
+    >>> from sympy.abc import x, y, z
+
+    >>> sin_sols = ConditionSet(x, Eq(sin(x), 0), Interval(0, 2*pi))
+    >>> 2*pi in sin_sols
+    True
+    >>> pi/2 in sin_sols
+    False
+    >>> 3*pi in sin_sols
+    False
+    >>> 5 in ConditionSet(x, x**2 > 4, S.Reals)
+    True
+
+    If the value is not in the base set, the result is false:
+
+    >>> 5 in ConditionSet(x, x**2 > 4, Interval(2, 4))
+    False
+
+    Notes
+    =====
+
+    Symbols with assumptions should be avoided or else the
+    condition may evaluate without consideration of the set:
+
+    >>> n = Symbol('n', negative=True)
+    >>> cond = (n > 0); cond
+    False
+    >>> ConditionSet(n, cond, S.Integers)
+    EmptySet
+
+    In addition, substitution of a dummy symbol can only be
+    done with a generic symbol with matching commutativity
+    or else a symbol that has identical assumptions. If the
+    base set contains the dummy symbol it is logically distinct
+    and will be the target of substitution.
+
+    >>> c = ConditionSet(x, x < 1, {x, z})
+    >>> c.subs(x, y)
+    ConditionSet(x, x < 1, FiniteSet(y, z))
+
+    A second substitution is needed to change the dummy symbol, too:
+
+    >>> _.subs(x, y)
+    ConditionSet(y, y < 1, FiniteSet(y, z))
+
+    And trying to replace the dummy symbol with anything but a symbol
+    is ignored: the only change possible will be in the base set:
+
+    >>> ConditionSet(y, y < 1, {y, z}).subs(y, 1)
+    ConditionSet(y, y < 1, FiniteSet(z))
+    >>> _.subs(y, 1)
+    ConditionSet(y, y < 1, FiniteSet(z))
+
+    Notes
+    =====
+
+    If no base set is specified, the universal set is implied:
+
+    >>> ConditionSet(x, x < 1).base_set
+    UniversalSet
+
+    Although expressions other than symbols may be used, this
+    is discouraged and will raise an error if the expression
+    is not found in the condition:
+
+    >>> ConditionSet(x + 1, x + 1 < 1, S.Integers)
+    ConditionSet(x + 1, x + 1 < 1, Integers)
+
+    >>> ConditionSet(x + 1, x < 1, S.Integers)
+    Traceback (most recent call last):
+    ...
+    ValueError: non-symbol dummy not recognized in condition
+
+    Although the name is usually respected, it must be replaced if
+    the base set is another ConditionSet and the dummy symbol
+    and appears as a free symbol in the base set and the dummy symbol
+    of the base set appears as a free symbol in the condition:
+
+    >>> ConditionSet(x, x < y, ConditionSet(y, x + y < 2, S.Integers))
+    ConditionSet(lambda, (lambda < y) & (lambda + x < 2), Integers)
+
+    The best way to do anything with the dummy symbol is to access
+    it with the sym property.
+
+    >>> _.subs(_.sym, Symbol('_x'))
+    ConditionSet(_x, (_x < y) & (_x + x < 2), Integers)
+    """
+    def __new__(cls, sym, condition, base_set=S.UniversalSet):
+    sym = property(lambda self: self.args[0])
+    condition = property(lambda self: self.args[1])
+    base_set = property(lambda self: self.args[2])
+    @property
+    def free_symbols(self):
+    def _contains(self, other):
+    def as_relational(self, other):
+    def _eval_subs(self, old, new):
+    def dummy_eq(self, other, symbol=None):
+
+
+【源码片段 4】
+文件路径：sympy/core/relational.py
+对象名称：Eq
+节点类型：global_var
+父节点：relational
+行号范围：675-675
+代码：
+Eq = Equality
+
+
+【源码片段 5】
+文件路径：sympy/sets/__init__.py
+对象名称：Reals
+节点类型：global_var
+父节点：__init__
+行号范围：10-10
+代码：
+Reals = S.Reals
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/solvers/tests/test_solveset.py
+测试名称：test_conditionset
+测试代码：
+def test_conditionset():
+    assert solveset(Eq(sin(x)**2 + cos(x)**2, 1), x, domain=S.Reals) == \
+        ConditionSet(x, True, S.Reals)
+
+    assert solveset(Eq(x**2 + x*sin(x), 1), x, domain=S.Reals
+        ) == ConditionSet(x, Eq(x**2 + x*sin(x) - 1, 0), S.Reals)
+
+    assert solveset(Eq(-I*(exp(I*x) - exp(-I*x))/2, 1), x
+        ) == imageset(Lambda(n, 2*n*pi + pi/2), S.Integers)
+
+    assert solveset(x + sin(x) > 1, x, domain=S.Reals
+        ) == ConditionSet(x, x + sin(x) > 1, S.Reals)
+
+    assert solveset(Eq(sin(Abs(x)), x), x, domain=S.Reals
+        ) == ConditionSet(x, Eq(-x + sin(Abs(x)), 0), S.Reals)
+
+    assert solveset(y**x-z, x, S.Reals) == \
+        ConditionSet(x, Eq(y**x - z, 0), S.Reals)
+
+【相关测试 2】
+测试文件：sympy/solvers/tests/test_solveset.py
+测试名称：test_nonlinsolve_conditionset
+测试代码：
+def test_nonlinsolve_conditionset():
+    # when solveset failed to solve all the eq
+    # return conditionset
+    f = Function('f')
+    f1 = f(x) - pi/2
+    f2 = f(y) - pi*Rational(3, 2)
+    intermediate_system = Eq(2*f(x) - pi, 0) & Eq(2*f(y) - 3*pi, 0)
+    symbols = Tuple(x, y)
+    soln = ConditionSet(
+        symbols,
+        intermediate_system,
+        S.Complexes**2)
+    assert nonlinsolve([f1, f2], [x, y]) == soln
+
+【相关测试 3】
+测试文件：sympy/sets/tests/test_conditionset.py
+测试名称：test_CondSet
+测试代码：
+def test_CondSet():
+    sin_sols_principal = ConditionSet(x, Eq(sin(x), 0),
+                                      Interval(0, 2*pi, False, True))
+    assert pi in sin_sols_principal
+    assert pi/2 not in sin_sols_principal
+    assert 3*pi not in sin_sols_principal
+    assert 5 in ConditionSet(x, x**2 > 4, S.Reals)
+    assert 1 not in ConditionSet(x, x**2 > 4, S.Reals)
+    # in this case, 0 is not part of the base set so
+    # it can't be in any subset selected by the condition
+    assert 0 not in ConditionSet(x, y > 5, Interval(1, 7))
+    # since 'in' requires a true/false, the following raises
+    # an error because the given value provides no information
+    # for the condition to evaluate (since the condition does
+    # not depend on the dummy symbol): the result is `y > 5`.
+    # In this case, ConditionSet is just acting like
+    # Piecewise((Interval(1, 7), y > 5), (S.EmptySet, True)).
+    raises(TypeError, lambda: 6 in ConditionSet(x, y > 5, Interval(1, 7)))
+
+    assert isinstance(ConditionSet(x, x < 1, {x, y}).base_set, FiniteSet)
+    raises(TypeError, lambda: ConditionSet(x, x + 1, {x, y}))
+    raises(TypeError, lambda: ConditionSet(x, x, 1))
+
+    I = S.Integers
+    C = ConditionSet
+    assert C(x, x < 1, C(x, x < 2, I)
+        ) == C(x, (x < 1) & (x < 2), I)
+    assert C(y, y < 1, C(x, y < 2, I)
+        ) == C(x, (x < 1) & (y < 2), I)
+    assert C(y, y < 1, C(x, x < 2, I)
+        ) == C(y, (y < 1) & (y < 2), I)
+    assert C(y, y < 1, C(x, y < x, I)
+        ) == C(x, (x < 1) & (y < x), I)
+    assert C(y, x < 1, C(x, y < x, I)
+        ) == C(L, (x < 1) & (y < L), I)
+    c = C(y, x < 1, C(x, L < y, I))
+    assert c == C(c.sym, (L < y) & (x < 1), I)
+    assert c.sym not in (x, y, L)
+    c = C(y, x < 1, C(x, y < x, FiniteSet(L)))
+    assert c == C(L, And(x < 1, y < L), FiniteSet(L))
+
+【相关测试 4】
+测试文件：sympy/logic/tests/test_boolalg.py
+测试名称：test_bool_as_set
+测试代码：
+def test_bool_as_set():
+    assert ITE(y <= 0, False, y >= 1).as_set() == Interval(1, oo)
+    assert And(x <= 2, x >= -2).as_set() == Interval(-2, 2)
+    assert Or(x >= 2, x <= -2).as_set() == Interval(-oo, -2) + Interval(2, oo)
+    assert Not(x > 2).as_set() == Interval(-oo, 2)
+    # issue 10240
+    assert Not(And(x > 2, x < 3)).as_set() == \
+        Union(Interval(-oo, 2), Interval(3, oo))
+    assert true.as_set() == S.UniversalSet
+    assert false.as_set() == EmptySet()
+    assert x.as_set() == S.UniversalSet
+    assert And(Or(x < 1, x > 3), x < 2).as_set() == Interval.open(-oo, 1)
+    assert And(x < 1, sin(x) < 3).as_set() == (x < 1).as_set()
+    raises(NotImplementedError, lambda: (sin(x) < 1).as_set())
+
+【相关测试 5】
+测试文件：sympy/sets/tests/test_conditionset.py
+测试名称：test_subs_CondSet
+测试代码：
+def test_subs_CondSet():
+    s = FiniteSet(z, y)
+    c = ConditionSet(x, x < 2, s)
+    # you can only replace sym with a symbol that is not in
+    # the free symbols
+    assert c.subs(x, 1) == c
+    assert c.subs(x, y) == ConditionSet(y, y < 2, s)
+
+    # double subs needed to change dummy if the base set
+    # also contains the dummy
+    orig = ConditionSet(y, y < 2, s)
+    base = orig.subs(y, w)
+    and_dummy = base.subs(y, w)
+    assert base == ConditionSet(y, y < 2, {w, z})
+    assert and_dummy == ConditionSet(w, w < 2, {w, z})
+
+    assert c.subs(x, w) == ConditionSet(w, w < 2, s)
+    assert ConditionSet(x, x < y, s
+        ).subs(y, w) == ConditionSet(x, x < w, s.subs(y, w))
+    # if the user uses assumptions that cause the condition
+    # to evaluate, that can't be helped from SymPy's end
+    n = Symbol('n', negative=True)
+    assert ConditionSet(n, 0 < n, S.Integers) is S.EmptySet
+    p = Symbol('p', positive=True)
+    assert ConditionSet(n, n < y, S.Integers
+        ).subs(n, x) == ConditionSet(x, x < y, S.Integers)
+    nc = Symbol('nc', commutative=False)
+    raises(ValueError, lambda: ConditionSet(
+        x, x < p, S.Integers).subs(x, nc))
+    raises(ValueError, lambda: ConditionSet(
+        x, x < p, S.Integers).subs(x, n))
+    raises(ValueError, lambda: ConditionSet(
+        x + 1, x < 1, S.Integers))
+    raises(ValueError, lambda: ConditionSet(
+        x + 1, x < 1, s))
+    assert ConditionSet(
+        n, n < x, Interval(0, oo)).subs(x, p) == Interval(0, oo)
+    assert ConditionSet(
+        n, n < x, Interval(-oo, 0)).subs(x, p) == S.EmptySet
+    assert ConditionSet(f(x), f(x) < 1, {w, z}
+        ).subs(f(x), y) == ConditionSet(y, y < 1, {w, z})
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

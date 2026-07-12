@@ -1,0 +1,483 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+[Bug]: ax.bar raises for all-nan data on matplotlib 3.6.1 
+### Bug summary
+
+`ax.bar` raises an exception in 3.6.1 when passed only nan data. This irrevocably breaks seaborn's histogram function (which draws and then removes a "phantom" bar to trip the color cycle).
+
+### Code for reproduction
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+f, ax = plt.subplots()
+ax.bar([np.nan], [np.nan])
+```
+
+
+### Actual outcome
+
+```python-traceback
+---------------------------------------------------------------------------
+StopIteration                             Traceback (most recent call last)
+Cell In [1], line 4
+      2 import matplotlib.pyplot as plt
+      3 f, ax = plt.subplots()
+----> 4 ax.bar([np.nan], [np.nan])[0].get_x()
+
+File ~/miniconda/envs/py310/lib/python3.10/site-packages/matplotlib/__init__.py:1423, in _preprocess_data.<locals>.inner(ax, data, *args, **kwargs)
+   1420 @functools.wraps(func)
+   1421 def inner(ax, *args, data=None, **kwargs):
+   1422     if data is None:
+-> 1423         return func(ax, *map(sanitize_sequence, args), **kwargs)
+   1425     bound = new_sig.bind(ax, *args, **kwargs)
+   1426     auto_label = (bound.arguments.get(label_namer)
+   1427                   or bound.kwargs.get(label_namer))
+
+File ~/miniconda/envs/py310/lib/python3.10/site-packages/matplotlib/axes/_axes.py:2373, in Axes.bar(self, x, height, width, bottom, align, **kwargs)
+   2371 x0 = x
+   2372 x = np.asarray(self.convert_xunits(x))
+-> 2373 width = self._convert_dx(width, x0, x, self.convert_xunits)
+   2374 if xerr is not None:
+   2375     xerr = self._convert_dx(xerr, x0, x, self.convert_xunits)
+
+File ~/miniconda/envs/py310/lib/python3.10/site-packages/matplotlib/axes/_axes.py:2182, in Axes._convert_dx(dx, x0, xconv, convert)
+   2170 try:
+   2171     # attempt to add the width to x0; this works for
+   2172     # datetime+timedelta, for instance
+   (...)
+   2179     # removes the units from unit packages like `pint` that
+   2180     # wrap numpy arrays.
+   2181     try:
+-> 2182         x0 = cbook._safe_first_finite(x0)
+   2183     except (TypeError, IndexError, KeyError):
+   2184         pass
+
+File ~/miniconda/envs/py310/lib/python3.10/site-packages/matplotlib/cbook/__init__.py:1749, in _safe_first_finite(obj, skip_nonfinite)
+   1746     raise RuntimeError("matplotlib does not "
+   1747                        "support generators as input")
+   1748 else:
+-> 1749     return next(val for val in obj if safe_isfinite(val))
+
+StopIteration: 
+```
+
+### Expected outcome
+
+On 3.6.0 this returns a `BarCollection` with one Rectangle, having `nan` for `x` and `height`.
+
+### Additional information
+
+I assume it's related to this bullet in the release notes:
+
+- Fix barplot being empty when first element is NaN
+
+But I don't know the context for it to investigate further (could these link to PRs?)
+
+Further debugging:
+
+```python
+ax.bar([np.nan], [0])  # Raises
+ax.bar([0], [np.nan])  # Works
+```
+
+So it's about the x position specifically.
+
+### Operating system
+
+Macos
+
+### Matplotlib Version
+
+3.6.1
+
+### Matplotlib Backend
+
+_No response_
+
+### Python version
+
+_No response_
+
+### Jupyter version
+
+_No response_
+
+### Installation
+
+pip
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：lib/mpl_toolkits/mplot3d/axes3d.py
+对象名称：bar
+节点类型：class_function
+父节点：Axes3D
+行号范围：2383-2434
+代码：
+    def bar(self, left, height, zs=0, zdir='z', *args, **kwargs):
+        """
+        Add 2D bar(s).
+
+        Parameters
+        ----------
+        left : 1D array-like
+            The x coordinates of the left sides of the bars.
+        height : 1D array-like
+            The height of the bars.
+        zs : float or 1D array-like
+            Z coordinate of bars; if a single value is specified, it will be
+            used for all bars.
+        zdir : {'x', 'y', 'z'}, default: 'z'
+            When plotting 2D data, the direction to use as z ('x', 'y' or 'z').
+        data : indexable object, optional
+            DATA_PARAMETER_PLACEHOLDER
+        **kwargs
+            Other arguments are forwarded to `matplotlib.axes.Axes.bar`.
+
+        Returns
+        -------
+        mpl_toolkits.mplot3d.art3d.Patch3DCollection
+        """
+        had_data = self.has_data()
+
+        patches = super().bar(left, height, *args, **kwargs)
+
+        zs = np.broadcast_to(zs, len(left))
+
+        verts = []
+        verts_zs = []
+        for p, z in zip(patches, zs):
+            vs = art3d._get_patch_verts(p)
+            verts += vs.tolist()
+            verts_zs += [z] * len(vs)
+            art3d.patch_2d_to_3d(p, z, zdir)
+            if 'alpha' in kwargs:
+                p.set_alpha(kwargs['alpha'])
+
+        if len(verts) > 0:
+            # the following has to be skipped if verts is empty
+            # NOTE: Bugs could still occur if len(verts) > 0,
+            #       but the "2nd dimension" is empty.
+            xs, ys = zip(*verts)
+        else:
+            xs, ys = [], []
+
+        xs, ys, verts_zs = art3d.juggle_axes(xs, ys, verts_zs, zdir)
+        self.auto_scale_xyz(xs, ys, verts_zs, had_data)
+
+        return patches
+
+
+【源码片段 2】
+文件路径：lib/matplotlib/cbook/__init__.py
+对象名称：_safe_first_finite
+节点类型：top-level function
+父节点：__init__
+行号范围：1709-1749
+代码：
+def _safe_first_finite(obj, *, skip_nonfinite=True):
+    """
+    Return the first non-None (and optionally finite) element in *obj*.
+
+    This is a method for internal use.
+
+    This is an type-independent way of obtaining the first non-None element,
+    supporting both index access and the iterator protocol.
+    The first non-None element will be obtained when skip_none is True.
+    """
+    def safe_isfinite(val):
+        if val is None:
+            return False
+        try:
+            return np.isfinite(val) if np.isscalar(val) else True
+        except TypeError:
+            # This is something that numpy can not make heads or tails
+            # of, assume "finite"
+            return True
+    if skip_nonfinite is False:
+        if isinstance(obj, collections.abc.Iterator):
+            # needed to accept `array.flat` as input.
+            # np.flatiter reports as an instance of collections.Iterator
+            # but can still be indexed via [].
+            # This has the side effect of re-setting the iterator, but
+            # that is acceptable.
+            try:
+                return obj[0]
+            except TypeError:
+                pass
+            raise RuntimeError("matplotlib does not support generators "
+                               "as input")
+        return next(iter(obj))
+    elif isinstance(obj, np.flatiter):
+        # TODO do the finite filtering on this
+        return obj[0]
+    elif isinstance(obj, collections.abc.Iterator):
+        raise RuntimeError("matplotlib does not "
+                           "support generators as input")
+    else:
+        return next(val for val in obj if safe_isfinite(val))
+
+
+【源码片段 3】
+文件路径：lib/matplotlib/patches.py
+对象名称：Rectangle
+节点类型：class
+父节点：patches
+行号范围：663-879
+代码：
+class Rectangle(Patch):
+    """
+    A rectangle defined via an anchor point *xy* and its *width* and *height*.
+
+    The rectangle extends from ``xy[0]`` to ``xy[0] + width`` in x-direction
+    and from ``xy[1]`` to ``xy[1] + height`` in y-direction. ::
+
+      :                +------------------+
+      :                |                  |
+      :              height               |
+      :                |                  |
+      :               (xy)---- width -----+
+
+    One may picture *xy* as the bottom left corner, but which corner *xy* is
+    actually depends on the direction of the axis and the sign of *width*
+    and *height*; e.g. *xy* would be the bottom right corner if the x-axis
+    was inverted or if *width* was negative.
+    """
+    def __str__(self):
+    @_docstring.dedent_interpd
+    @_api.make_keyword_only("3.6", name="angle")
+    def __init__(self, xy, width, height, angle=0.0, *,
+                 rotation_point='xy', **kwargs):
+    def get_path(self):
+    def _convert_units(self):
+    def get_patch_transform(self):
+    @property
+    def rotation_point(self):
+    @rotation_point.setter
+    def rotation_point(self, value):
+    def get_x(self):
+    def get_y(self):
+    def get_xy(self):
+    def get_corners(self):
+    def get_center(self):
+    def get_width(self):
+    def get_height(self):
+    def get_angle(self):
+    def set_x(self, x):
+    def set_y(self, y):
+    def set_angle(self, angle):
+    def set_xy(self, xy):
+    def set_width(self, w):
+    def set_height(self, h):
+    def set_bounds(self, *args):
+    def get_bbox(self):
+    xy = property(get_xy, set_xy)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：lib/matplotlib/tests/test_axes.py
+测试名称：test_bar_leading_nan
+测试代码：
+def test_bar_leading_nan():
+
+    barx = np.arange(3, dtype=float)
+    barheights = np.array([0.5, 1.5, 2.0])
+    barstarts = np.array([0.77]*3)
+
+    barx[0] = np.NaN
+
+    fig, ax = plt.subplots()
+
+    bars = ax.bar(barx, barheights, bottom=barstarts)
+
+    hbars = ax.barh(barx, barheights, left=barstarts)
+
+    for bar_set in (bars, hbars):
+        # the first bar should have a nan in the location
+        nanful, *rest = bar_set
+        assert (~np.isfinite(nanful.xy)).any()
+        assert np.isfinite(nanful.get_width())
+        for b in rest:
+            assert np.isfinite(b.xy).all()
+            assert np.isfinite(b.get_width())
+
+【相关测试 2】
+测试文件：lib/matplotlib/tests/test_axes.py
+测试名称：test_nan_bar_values
+测试代码：
+def test_nan_bar_values():
+    fig, ax = plt.subplots()
+    ax.bar([0, 1], [np.nan, 4])
+
+【相关测试 3】
+测试文件：lib/matplotlib/tests/test_axes.py
+测试名称：test_nan_barlabels
+测试代码：
+def test_nan_barlabels():
+    fig, ax = plt.subplots()
+    bars = ax.bar([1, 2, 3], [np.nan, 1, 2], yerr=[0.2, 0.4, 0.6])
+    labels = ax.bar_label(bars)
+    assert [l.get_text() for l in labels] == ['', '1', '2']
+    assert np.allclose(ax.get_ylim(), (0.0, 3.0))
+
+    fig, ax = plt.subplots()
+    bars = ax.bar([1, 2, 3], [0, 1, 2], yerr=[0.2, np.nan, 0.6])
+    labels = ax.bar_label(bars)
+    assert [l.get_text() for l in labels] == ['0', '1', '2']
+    assert np.allclose(ax.get_ylim(), (-0.5, 3.0))
+
+    fig, ax = plt.subplots()
+    bars = ax.bar([1, 2, 3], [np.nan, 1, 2], yerr=[np.nan, np.nan, 0.6])
+    labels = ax.bar_label(bars)
+    assert [l.get_text() for l in labels] == ['', '1', '2']
+    assert np.allclose(ax.get_ylim(), (0.0, 3.0))
+
+【相关测试 4】
+测试文件：lib/matplotlib/tests/test_axes.py
+测试名称：test_bar_label_nan_ydata
+测试代码：
+def test_bar_label_nan_ydata():
+    ax = plt.gca()
+    bars = ax.bar([2, 3], [np.nan, 1])
+    labels = ax.bar_label(bars)
+    assert [l.get_text() for l in labels] == ['', '1']
+    assert labels[0].xy == (2, 0)
+    assert labels[0].get_va() == 'bottom'
+
+【相关测试 5】
+测试文件：lib/matplotlib/tests/test_axes.py
+测试名称：test_bar_label_nan_ydata_inverted
+测试代码：
+def test_bar_label_nan_ydata_inverted():
+    ax = plt.gca()
+    ax.yaxis_inverted()
+    bars = ax.bar([2, 3], [np.nan, 1])
+    labels = ax.bar_label(bars)
+    assert [l.get_text() for l in labels] == ['', '1']
+    assert labels[0].xy == (2, 0)
+    assert labels[0].get_va() == 'bottom'
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

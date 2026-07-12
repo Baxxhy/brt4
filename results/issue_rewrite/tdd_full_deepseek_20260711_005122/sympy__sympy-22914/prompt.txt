@@ -1,0 +1,467 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+PythonCodePrinter doesn't support Min and Max
+We can't generate python code for the sympy function Min and Max.
+
+For example:
+```
+from sympy import symbols, Min, pycode
+a, b = symbols("a b")
+c = Min(a,b)
+print(pycode(c))
+```
+the output is:
+
+```
+  # Not supported in Python:
+  # Min
+Min(a, b)
+```
+
+Similar to issue #16669, we should add following methods to PythonCodePrinter:
+
+```
+def _print_Min(self, expr):
+    return "min({})".format(", ".join(self._print(arg) for arg in expr.args))
+
+
+def _print_Max(self, expr):
+    return "max({})".format(", ".join(self._print(arg) for arg in expr.args))
+
+``` 
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/printing/pycode.py
+对象名称：PythonCodePrinter
+节点类型：class
+父节点：pycode
+行号范围：425-471
+代码：
+class PythonCodePrinter(AbstractPythonCodePrinter):
+
+    def _print_sign(self, e):
+    def _print_Not(self, expr):
+    def _print_Indexed(self, expr):
+    def _print_Pow(self, expr, rational=False):
+    def _print_Rational(self, expr):
+    def _print_Half(self, expr):
+    def _print_frac(self, expr):
+    def _print_Symbol(self, expr):
+
+    _print_lowergamma = CodePrinter._print_not_supported
+    _print_uppergamma = CodePrinter._print_not_supported
+    _print_fresnelc = CodePrinter._print_not_supported
+    _print_fresnels = CodePrinter._print_not_supported
+
+
+【源码片段 2】
+文件路径：sympy/printing/c.py
+对象名称：_print_Min
+节点类型：class_function
+父节点：C89CodePrinter
+行号范围：432-443
+代码：
+    def _print_Min(self, expr):
+        if "Min" in self.known_functions:
+            return self._print_Function(expr)
+        def inner_print_min(args): # The more natural abstraction of creating
+            if len(args) == 1:     # and printing smaller Min objects is slow
+                return self._print(args[0]) # when there are many arguments.
+            half = len(args) // 2
+            return "((%(a)s < %(b)s) ? %(a)s : %(b)s)" % {
+                'a': inner_print_min(args[:half]),
+                'b': inner_print_min(args[half:])
+            }
+        return inner_print_min(expr.args)
+
+
+【源码片段 3】
+文件路径：sympy/printing/c.py
+对象名称：_print_Max
+节点类型：class_function
+父节点：C89CodePrinter
+行号范围：419-430
+代码：
+    def _print_Max(self, expr):
+        if "Max" in self.known_functions:
+            return self._print_Function(expr)
+        def inner_print_max(args): # The more natural abstraction of creating
+            if len(args) == 1:     # and printing smaller Max objects is slow
+                return self._print(args[0]) # when there are many arguments.
+            half = len(args) // 2
+            return "((%(a)s > %(b)s) ? %(a)s : %(b)s)" % {
+                'a': inner_print_max(args[:half]),
+                'b': inner_print_max(args[half:])
+            }
+        return inner_print_max(expr.args)
+
+
+【源码片段 4】
+文件路径：sympy/functions/elementary/miscellaneous.py
+对象名称：Min
+节点类型：class
+父节点：miscellaneous
+行号范围：806-866
+代码：
+class Min(MinMaxBase, Application):
+    """
+    Return, if possible, the minimum value of the list.
+    It is named ``Min`` and not ``min`` to avoid conflicts
+    with the built-in function ``min``.
+
+    Examples
+    ========
+
+    >>> from sympy import Min, Symbol, oo
+    >>> from sympy.abc import x, y
+    >>> p = Symbol('p', positive=True)
+    >>> n = Symbol('n', negative=True)
+
+    >>> Min(x, -2)
+    Min(-2, x)
+    >>> Min(x, -2).subs(x, 3)
+    -2
+    >>> Min(p, -3)
+    -3
+    >>> Min(x, y)
+    Min(x, y)
+    >>> Min(n, 8, p, -7, p, oo)
+    Min(-7, n)
+
+    See Also
+    ========
+
+    Max : find maximum values
+    """
+    zero = S.NegativeInfinity
+    identity = S.Infinity
+    def fdiff( self, argindex ):
+    def _eval_rewrite_as_Heaviside(self, *args, **kwargs):
+    def _eval_rewrite_as_Piecewise(self, *args, **kwargs):
+    def _eval_is_positive(self):
+    def _eval_is_nonnegative(self):
+    def _eval_is_negative(self):
+
+
+【源码片段 5】
+文件路径：sympy/functions/elementary/miscellaneous.py
+对象名称：Max
+节点类型：class
+父节点：miscellaneous
+行号范围：688-803
+代码：
+class Max(MinMaxBase, Application):
+    r"""
+    Return, if possible, the maximum value of the list.
+
+    When number of arguments is equal one, then
+    return this argument.
+
+    When number of arguments is equal two, then
+    return, if possible, the value from (a, b) that is $\ge$ the other.
+
+    In common case, when the length of list greater than 2, the task
+    is more complicated. Return only the arguments, which are greater
+    than others, if it is possible to determine directional relation.
+
+    If is not possible to determine such a relation, return a partially
+    evaluated result.
+
+    Assumptions are used to make the decision too.
+
+    Also, only comparable arguments are permitted.
+
+    It is named ``Max`` and not ``max`` to avoid conflicts
+    with the built-in function ``max``.
+
+
+    Examples
+    ========
+
+    >>> from sympy import Max, Symbol, oo
+    >>> from sympy.abc import x, y, z
+    >>> p = Symbol('p', positive=True)
+    >>> n = Symbol('n', negative=True)
+
+    >>> Max(x, -2)
+    Max(-2, x)
+    >>> Max(x, -2).subs(x, 3)
+    3
+    >>> Max(p, -2)
+    p
+    >>> Max(x, y)
+    Max(x, y)
+    >>> Max(x, y) == Max(y, x)
+    True
+    >>> Max(x, Max(y, z))
+    Max(x, y, z)
+    >>> Max(n, 8, p, 7, -oo)
+    Max(8, p)
+    >>> Max (1, x, oo)
+    oo
+
+    * Algorithm
+
+    The task can be considered as searching of supremums in the
+    directed complete partial orders [1]_.
+
+    The source values are sequentially allocated by the isolated subsets
+    in which supremums are searched and result as Max arguments.
+
+    If the resulted supremum is single, then it is returned.
+
+    The isolated subsets are the sets of values which are only the comparable
+    with each other in the current set. E.g. natural numbers are comparable with
+    each other, but not comparable with the `x` symbol. Another example: the
+    symbol `x` with negative assumption is comparable with a natural number.
+
+    Also there are "least" elements, which are comparable with all others,
+    and have a zero property (maximum or minimum for all elements).
+    For example, in case of $\infty$, the allocation operation is terminated
+    and only this value is returned.
+
+    Assumption:
+       - if $A > B > C$ then $A > C$
+       - if $A = B$ then $B$ can be removed
+
+    References
+    ==========
+
+    .. [1] https://en.wikipedia.org/wiki/Directed_complete_partial_order
+    .. [2] https://en.wikipedia.org/wiki/Lattice_%28order%29
+
+    See Also
+    ========
+
+    Min : find minimum values
+    """
+    zero = S.Infinity
+    identity = S.NegativeInfinity
+    def fdiff( self, argindex ):
+    def _eval_rewrite_as_Heaviside(self, *args, **kwargs):
+    def _eval_rewrite_as_Piecewise(self, *args, **kwargs):
+    def _eval_is_positive(self):
+    def _eval_is_nonnegative(self):
+    def _eval_is_negative(self):
+
+
+【源码片段 6】
+文件路径：sympy/printing/pycode.py
+对象名称：pycode
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/printing/tests/test_pycode.py
+测试名称：test_PythonCodePrinter
+测试代码：
+def test_PythonCodePrinter():
+    prntr = PythonCodePrinter()
+
+    assert not prntr.module_imports
+
+    assert prntr.doprint(x**y) == 'x**y'
+    assert prntr.doprint(Mod(x, 2)) == 'x % 2'
+    assert prntr.doprint(-Mod(x, y)) == '-(x % y)'
+    assert prntr.doprint(Mod(-x, y)) == '(-x) % y'
+    assert prntr.doprint(And(x, y)) == 'x and y'
+    assert prntr.doprint(Or(x, y)) == 'x or y'
+    assert not prntr.module_imports
+
+    assert prntr.doprint(pi) == 'math.pi'
+    assert prntr.module_imports == {'math': {'pi'}}
+
+    assert prntr.doprint(x**Rational(1, 2)) == 'math.sqrt(x)'
+    assert prntr.doprint(sqrt(x)) == 'math.sqrt(x)'
+    assert prntr.module_imports == {'math': {'pi', 'sqrt'}}
+
+    assert prntr.doprint(acos(x)) == 'math.acos(x)'
+    assert prntr.doprint(Assignment(x, 2)) == 'x = 2'
+    assert prntr.doprint(Piecewise((1, Eq(x, 0)),
+                        (2, x>6))) == '((1) if (x == 0) else (2) if (x > 6) else None)'
+    assert prntr.doprint(Piecewise((2, Le(x, 0)),
+                        (3, Gt(x, 0)), evaluate=False)) == '((2) if (x <= 0) else'\
+                                                        ' (3) if (x > 0) else None)'
+    assert prntr.doprint(sign(x)) == '(0.0 if x == 0 else math.copysign(1, x))'
+    assert prntr.doprint(p[0, 1]) == 'p[0, 1]'
+    assert prntr.doprint(KroneckerDelta(x,y)) == '(1 if x == y else 0)'
+
+    assert prntr.doprint((2,3)) == "(2, 3)"
+    assert prntr.doprint([2,3]) == "[2, 3]"
+
+【相关测试 2】
+测试文件：sympy/utilities/tests/test_lambdify.py
+测试名称：test_Min_Max
+测试代码：
+def test_Min_Max():
+    # see gh-10375
+    assert lambdify((x, y, z), Min(x, y, z))(1, 2, 3) == 1
+    assert lambdify((x, y, z), Max(x, y, z))(1, 2, 3) == 3
+
+【相关测试 3】
+测试文件：sympy/printing/tests/test_c.py
+测试名称：test_ccode_Max_Min
+测试代码：
+def test_ccode_Max_Min():
+    assert ccode(Max(x, 0), standard='C89') == '((0 > x) ? 0 : x)'
+    assert ccode(Max(x, 0), standard='C99') == 'fmax(0, x)'
+    assert ccode(Min(x, 0, sqrt(x)), standard='c89') == (
+        '((0 < ((x < sqrt(x)) ? x : sqrt(x))) ? 0 : ((x < sqrt(x)) ? x : sqrt(x)))'
+    )
+
+【相关测试 4】
+测试文件：sympy/printing/tests/test_cxx.py
+测试名称：test_CXX98CodePrinter
+测试代码：
+def test_CXX98CodePrinter():
+    assert CXX98CodePrinter().doprint(Max(x, 3)) in ('std::max(x, 3)', 'std::max(3, x)')
+    assert CXX98CodePrinter().doprint(Min(x, 3, sqrt(x))) == 'std::min(3, std::min(x, std::sqrt(x)))'
+    cxx98printer = CXX98CodePrinter()
+    assert cxx98printer.language == 'C++'
+    assert cxx98printer.standard == 'C++98'
+    assert 'template' in cxx98printer.reserved_words
+    assert 'alignas' not in cxx98printer.reserved_words
+
+【相关测试 5】
+测试文件：sympy/printing/tests/test_mathml.py
+测试名称：test_print_MinMax
+测试代码：
+def test_print_MinMax():
+    assert mpp.doprint(Min(x, y)) == \
+        '<mrow><mo>min</mo><mfenced><mi>x</mi><mi>y</mi></mfenced></mrow>'
+    assert mpp.doprint(Min(x, 2, x**3)) == \
+        '<mrow><mo>min</mo><mfenced><mn>2</mn><mi>x</mi><msup><mi>x</mi>'\
+        '<mn>3</mn></msup></mfenced></mrow>'
+    assert mpp.doprint(Max(x, y)) == \
+        '<mrow><mo>max</mo><mfenced><mi>x</mi><mi>y</mi></mfenced></mrow>'
+    assert mpp.doprint(Max(x, 2, x**3)) == \
+        '<mrow><mo>max</mo><mfenced><mn>2</mn><mi>x</mi><msup><mi>x</mi>'\
+        '<mn>3</mn></msup></mfenced></mrow>'
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

@@ -1,0 +1,94 @@
+instance_id: django__django-14539
+
+issue_summary: urlize() 函数在处理包含 HTML 转义字符和尾部标点的字符串时，错误地重复了转义字符，导致链接文本不正确。
+
+trigger_condition:
+{
+  "text": "调用 urlize() 函数，输入文本包含一个 URL，该 URL 的查询参数部分包含 HTML 转义字符（如 '<' 转义为 '&lt;'），并且该 URL 后面紧跟标点符号（如 '!'）。",
+  "evidence": [
+    "Issue 示例：urlize('Search for google.com/?q=1&lt! and see.')",
+    "源码显示 urlize 函数处理包含 '.' 或 ':' 的单词，并调用 trim_punctuation 处理标点。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "生成的链接文本中，HTML 转义字符被错误地重复，例如 '&lt' 变成了 '&ltlt'。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 中给出的实际输出：'Search for <a href=\"http://google.com/?q=1%3C\">google.com/?q=1&lt</a>lt! and see.'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "urlize() 函数应正确处理 HTML 转义字符和尾部标点，生成的链接文本应正确包含转义字符，且尾部标点应被正确剥离并放置在链接标签之外。",
+  "evidence": [
+    "Issue 中给出的期望输出：'Search for <a href=\"http://google.com/?q=1%3C\">google.com/?q=1&lt</a>! and see.'",
+    "源码注释说明函数应处理尾部标点。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "urlize",
+    "kind": "function",
+    "source_path": "django/utils/html.py",
+    "reason": "Issue 直接报告此函数在处理特定输入时行为不正确。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试 test_exclamation_marks 中的输入，如 'Search for google.com/?q=! and see.'",
+    "target_pattern": "输入包含 URL 查询参数中的 HTML 转义字符，如 'Search for google.com/?q=1&lt! and see.'",
+    "reason": "Issue 表明，当 URL 查询参数包含 '&lt' 等转义字符且后跟标点时，会触发错误。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "urlize() 函数的返回值，特别是链接标签内的文本部分。",
+    "reason": "错误症状直接体现在返回的字符串中，即链接文本是否错误地重复了转义字符。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证 urlize() 函数的输出中，链接文本（<a>标签内的部分）正确包含了 HTML 转义字符 '&lt'，且尾部标点 '!' 在链接标签之外。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "避免对整个输出字符串进行完全相等断言，因为 URL 编码等细节可能变化。",
+    "reason": "Issue 的核心是链接文本内容的正确性，而非整个输出字符串的每个字符。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "使用 SimpleTestCase 作为测试基类，从 django.test 导入。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要从 django.utils.html 导入 urlize 函数。",
+    "source": "retrieved_source",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "trim_punctuation 函数内部处理转义字符和标点的具体逻辑缺陷点。",
+  "除了 '&lt;' 之外，其他 HTML 转义字符（如 '&gt;', '&amp;'）是否也会触发类似问题。",
+  "autoescape 参数的不同设置是否会影响该缺陷的表现。"
+]

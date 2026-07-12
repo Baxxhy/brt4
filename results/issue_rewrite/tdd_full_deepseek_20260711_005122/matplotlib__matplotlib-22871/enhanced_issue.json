@@ -1,0 +1,311 @@
+{
+  "instance_id": "matplotlib__matplotlib-22871",
+  "issue_summary": "当绘制少于12个月且x轴不包含一月时，ConciseDateFormatter的偏移量中不显示年份。",
+  "trigger_condition": {
+    "text": "使用ConciseDateFormatter和AutoDateLocator绘制时间序列，时间范围少于一年（<12个月）且x轴不包含一月（January）。",
+    "evidence": [
+      "Issue描述：'When I plot < 1 year and January is not included in the x-axis, the year doesn't show up anywhere.'",
+      "Issue代码：时间从2021年2月14日开始，持续199天（少于一年）。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "x轴右侧的偏移量（offset）字符串中不包含年份'2021'。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue描述：'the year doesn't show up anywhere.'",
+      "Expected outcome: 'I expect the year \"2021\" to show in the offset, to the right of the x-axis'",
+      "Issue截图显示偏移量区域没有年份。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当绘制少于一年的数据时，即使x轴不包含一月，年份信息也应出现在偏移量字符串中。",
+    "evidence": [
+      "Issue描述：'I expect the year \"2021\" to show in the offset, to the right of the x-axis'"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "matplotlib.dates.ConciseDateFormatter",
+      "kind": "class",
+      "source_path": "lib/matplotlib/dates.py",
+      "reason": "Issue直接涉及此日期格式化器，其get_offset方法返回的偏移量字符串缺少年份。"
+    },
+    {
+      "name": "matplotlib.dates.AutoDateLocator",
+      "kind": "class",
+      "source_path": "lib/matplotlib/dates.py",
+      "reason": "Issue代码中与ConciseDateFormatter一起使用，用于确定刻度位置，可能影响格式化器对时间范围的判断。"
+    },
+    {
+      "name": "matplotlib.axis.Axis.set_major_locator",
+      "kind": "method",
+      "source_path": "lib/matplotlib/axis.py",
+      "reason": "Issue代码中用于设置坐标轴的主要刻度定位器。"
+    },
+    {
+      "name": "matplotlib.axis.Axis.set_major_formatter",
+      "kind": "method",
+      "source_path": "lib/matplotlib/axis.py",
+      "reason": "Issue代码中用于设置坐标轴的主要刻度格式化器。"
+    },
+    {
+      "name": "ConciseDateFormatter.get_offset",
+      "kind": "method",
+      "source_path": "lib/matplotlib/dates.py",
+      "reason": "相关测试中用于获取偏移量字符串并进行断言，是观察错误现象的关键API。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "lib/matplotlib/dates.py",
+      "object": "ConciseDateFormatter.get_offset",
+      "lines": "",
+      "reason": "偏移量字符串由此方法生成，其逻辑可能未正确处理'少于一年且不包含一月'场景下的年份显示。"
+    },
+    {
+      "path": "lib/matplotlib/dates.py",
+      "object": "ConciseDateFormatter.__init__",
+      "lines": "",
+      "reason": "初始化时的offset_formats参数可能影响不同时间范围下的偏移量格式选择。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_concise_formatter_show_offset",
+      "test_file": "lib/matplotlib/tests/test_dates.py",
+      "why_relevant": "该测试直接验证ConciseDateFormatter.get_offset()在不同时间增量下的返回值，与Issue观察偏移量字符串的行为高度相关。",
+      "reusable_parts": [
+        "测试结构：创建图形和坐标轴，设置AutoDateLocator和ConciseDateFormatter，绘制数据，调用fig.canvas.draw()，断言formatter.get_offset()。",
+        "导入：matplotlib.pyplot as plt, matplotlib.dates as mdates, datetime。"
+      ],
+      "possible_gap": "现有测试用例的时间增量（从1997-01-01开始）可能未覆盖'少于一年且不包含一月'的特定场景（如从二月开始）。"
+    },
+    {
+      "test_name": "test_concise_formatter",
+      "test_file": "lib/matplotlib/tests/test_dates.py",
+      "why_relevant": "测试了ConciseDateFormatter在不同时间范围下的刻度标签行为，包含'weeks=52'（一年）的场景，接近Issue条件。",
+      "reusable_parts": [
+        "辅助函数_create_auto_date_locator的封装模式。",
+        "使用datetime.timedelta定义时间范围。",
+        "通过fig.canvas.draw()触发渲染，然后获取标签文本。"
+      ],
+      "possible_gap": "主要断言刻度标签字符串列表，未直接断言偏移量字符串。且'weeks=52'的测试结果中偏移量为空字符串（''），与Issue期望显示年份不符。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试中，时间范围通常从1月1日（1997-01-01）开始。",
+      "target_pattern": "时间范围应从非一月的日期开始（例如2月14日），且跨度少于一年（例如199天）。",
+      "reason": "Issue明确指出当'January is not included in the x-axis'且'plot < 1 year'时触发bug。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "测试中通常使用默认的offset_formats参数。",
+      "target_pattern": "保持使用默认的offset_formats参数，以复现原始问题。",
+      "reason": "Issue代码未自定义offset_formats，使用的是默认值。需要观察默认配置下的行为。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "formatter.get_offset()",
+      "reason": "Issue的核心是偏移量字符串中缺少年份。直接观察此方法的返回值是判断问题是否触发的关键。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "ax.xaxis.get_offset_text().get_text()",
+      "reason": "这是获取坐标轴上实际显示的偏移量文本的另一种方式，可与formatter.get_offset()结果交叉验证。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "[st.get_text() for st in ax.get_xticklabels()]",
+      "reason": "观察主要刻度标签的文本，有助于理解AutoDateLocator选择的时间间隔和ConciseDateFormatter应用的格式，这可能与偏移量计算相关。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "偏移量字符串应包含年份'2021'。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的、具体的偏移量字符串相等，因为格式可能因区域设置等因素变化。",
+      "reason": "Issue的期望是年份'2021'出现，不要求整个字符串完全匹配某个特定格式。使用片段包含断言更稳定。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要创建matplotlib图形(fig)和坐标轴(ax)，并调用fig.canvas.draw()以确保格式化器和定位器完成计算。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "使用datetime模块构造具体的时间数据点。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "ConciseDateFormatter内部决定是否以及如何在偏移量中显示年份的确切逻辑和条件。",
+    "AutoDateLocator选择的刻度间隔如何影响ConciseDateFormatter对'年份显示必要性'的判断。",
+    "除了'少于一年且不包含一月'，是否还有其他边界条件会导致年份缺失。"
+  ],
+  "raw": {
+    "issue_summary": "当绘制少于12个月且x轴不包含一月时，ConciseDateFormatter的偏移量中不显示年份。",
+    "trigger_condition": {
+      "text": "使用ConciseDateFormatter和AutoDateLocator绘制时间序列，时间范围少于一年（<12个月）且x轴不包含一月（January）。",
+      "evidence": [
+        "Issue描述：'When I plot < 1 year and January is not included in the x-axis, the year doesn't show up anywhere.'",
+        "Issue代码：时间从2021年2月14日开始，持续199天（少于一年）。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "x轴右侧的偏移量（offset）字符串中不包含年份'2021'。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue描述：'the year doesn't show up anywhere.'",
+        "Expected outcome: 'I expect the year \"2021\" to show in the offset, to the right of the x-axis'",
+        "Issue截图显示偏移量区域没有年份。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当绘制少于一年的数据时，即使x轴不包含一月，年份信息也应出现在偏移量字符串中。",
+      "evidence": [
+        "Issue描述：'I expect the year \"2021\" to show in the offset, to the right of the x-axis'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "matplotlib.dates.ConciseDateFormatter",
+        "kind": "class",
+        "source_path": "lib/matplotlib/dates.py",
+        "reason": "Issue直接涉及此日期格式化器，其get_offset方法返回的偏移量字符串缺少年份。"
+      },
+      {
+        "name": "matplotlib.dates.AutoDateLocator",
+        "kind": "class",
+        "source_path": "lib/matplotlib/dates.py",
+        "reason": "Issue代码中与ConciseDateFormatter一起使用，用于确定刻度位置，可能影响格式化器对时间范围的判断。"
+      },
+      {
+        "name": "matplotlib.axis.Axis.set_major_locator",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axis.py",
+        "reason": "Issue代码中用于设置坐标轴的主要刻度定位器。"
+      },
+      {
+        "name": "matplotlib.axis.Axis.set_major_formatter",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axis.py",
+        "reason": "Issue代码中用于设置坐标轴的主要刻度格式化器。"
+      },
+      {
+        "name": "ConciseDateFormatter.get_offset",
+        "kind": "method",
+        "source_path": "lib/matplotlib/dates.py",
+        "reason": "相关测试中用于获取偏移量字符串并进行断言，是观察错误现象的关键API。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/dates.py",
+        "object": "ConciseDateFormatter.get_offset",
+        "lines": "",
+        "reason": "偏移量字符串由此方法生成，其逻辑可能未正确处理'少于一年且不包含一月'场景下的年份显示。"
+      },
+      {
+        "path": "lib/matplotlib/dates.py",
+        "object": "ConciseDateFormatter.__init__",
+        "lines": "",
+        "reason": "初始化时的offset_formats参数可能影响不同时间范围下的偏移量格式选择。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_concise_formatter_show_offset",
+        "test_file": "lib/matplotlib/tests/test_dates.py",
+        "why_relevant": "该测试直接验证ConciseDateFormatter.get_offset()在不同时间增量下的返回值，与Issue观察偏移量字符串的行为高度相关。",
+        "reusable_parts": [
+          "测试结构：创建图形和坐标轴，设置AutoDateLocator和ConciseDateFormatter，绘制数据，调用fig.canvas.draw()，断言formatter.get_offset()。",
+          "导入：matplotlib.pyplot as plt, matplotlib.dates as mdates, datetime。"
+        ],
+        "possible_gap": "现有测试用例的时间增量（从1997-01-01开始）可能未覆盖'少于一年且不包含一月'的特定场景（如从二月开始）。"
+      },
+      {
+        "test_name": "test_concise_formatter",
+        "test_file": "lib/matplotlib/tests/test_dates.py",
+        "why_relevant": "测试了ConciseDateFormatter在不同时间范围下的刻度标签行为，包含'weeks=52'（一年）的场景，接近Issue条件。",
+        "reusable_parts": [
+          "辅助函数_create_auto_date_locator的封装模式。",
+          "使用datetime.timedelta定义时间范围。",
+          "通过fig.canvas.draw()触发渲染，然后获取标签文本。"
+        ],
+        "possible_gap": "主要断言刻度标签字符串列表，未直接断言偏移量字符串。且'weeks=52'的测试结果中偏移量为空字符串（''），与Issue期望显示年份不符。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中，时间范围通常从1月1日（1997-01-01）开始。",
+        "target_pattern": "时间范围应从非一月的日期开始（例如2月14日），且跨度少于一年（例如199天）。",
+        "reason": "Issue明确指出当'January is not included in the x-axis'且'plot < 1 year'时触发bug。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试中通常使用默认的offset_formats参数。",
+        "target_pattern": "保持使用默认的offset_formats参数，以复现原始问题。",
+        "reason": "Issue代码未自定义offset_formats，使用的是默认值。需要观察默认配置下的行为。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "formatter.get_offset()",
+        "reason": "Issue的核心是偏移量字符串中缺少年份。直接观察此方法的返回值是判断问题是否触发的关键。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "ax.xaxis.get_offset_text().get_text()",
+        "reason": "这是获取坐标轴上实际显示的偏移量文本的另一种方式，可与formatter.get_offset()结果交叉验证。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "[st.get_text() for st in ax.get_xticklabels()]",
+        "reason": "观察主要刻度标签的文本，有助于理解AutoDateLocator选择的时间间隔和ConciseDateFormatter应用的格式，这可能与偏移量计算相关。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "偏移量字符串应包含年份'2021'。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、具体的偏移量字符串相等，因为格式可能因区域设置等因素变化。",
+        "reason": "Issue的期望是年份'2021'出现，不要求整个字符串完全匹配某个特定格式。使用片段包含断言更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要创建matplotlib图形(fig)和坐标轴(ax)，并调用fig.canvas.draw()以确保格式化器和定位器完成计算。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用datetime模块构造具体的时间数据点。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "ConciseDateFormatter内部决定是否以及如何在偏移量中显示年份的确切逻辑和条件。",
+      "AutoDateLocator选择的刻度间隔如何影响ConciseDateFormatter对'年份显示必要性'的判断。",
+      "除了'少于一年且不包含一月'，是否还有其他边界条件会导致年份缺失。"
+    ]
+  }
+}

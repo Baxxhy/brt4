@@ -1,0 +1,313 @@
+{
+  "instance_id": "django__django-11477",
+  "issue_summary": "translate_url() 在 URL 模式的可选命名组缺失时生成错误的 URL。",
+  "trigger_condition": {
+    "text": "调用 translate_url() 函数，传入一个 URL，该 URL 对应的路由模式包含可选命名参数，但当前匹配结果中该参数缺失。",
+    "evidence": [
+      "Issue 描述：'translate_url() creates an incorrect URL when optional named groups are missing in the URL pattern'",
+      "源码片段 1 显示 translate_url 函数使用 match.args 和 match.kwargs 进行反向解析。"
+    ],
+    "confidence": "medium"
+  },
+  "error_symptom": {
+    "text": "translate_url() 返回一个不正确的 URL（可能是错误的路径或引发 NoReverseMatch 异常）。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 描述：'creates an incorrect URL'",
+      "相关测试 4 展示了 translate_url 的正常使用和预期返回。"
+    ],
+    "confidence": "medium"
+  },
+  "expected_behavior": {
+    "text": "translate_url() 应能正确处理包含可选命名组的路由，即使该参数在匹配结果中缺失，也应生成正确的翻译后 URL 或返回原始 URL。",
+    "evidence": [
+      "Issue 描述暗示这是一个需要修复的缺陷，因此预期行为是函数能正确处理这种情况。",
+      "源码片段 1 的文档字符串说明函数应返回翻译后的版本或原始 URL。"
+    ],
+    "confidence": "medium"
+  },
+  "target_apis": [
+    {
+      "name": "translate_url",
+      "kind": "function",
+      "source_path": "django/urls/base.py",
+      "reason": "Issue 直接报告此函数的问题。"
+    },
+    {
+      "name": "reverse",
+      "kind": "function",
+      "source_path": "",
+      "reason": "translate_url 内部调用 reverse 进行反向解析，其行为受 match.args 和 match.kwargs 影响。"
+    },
+    {
+      "name": "resolve",
+      "kind": "function",
+      "source_path": "",
+      "reason": "translate_url 内部调用 resolve 来获取 match 对象，其中包含 args 和 kwargs。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/urls/base.py",
+      "object": "translate_url",
+      "lines": "160-180",
+      "reason": "Issue 直接指向此函数，且其内部逻辑（使用 match.args/kwargs 调用 reverse）是处理可选参数的关键。"
+    },
+    {
+      "path": "django/urls/resolvers.py",
+      "object": "URLPattern",
+      "lines": "315-363",
+      "reason": "URLPattern 的 resolve 方法生成 match 对象，其 args/kwargs 属性可能未正确处理可选命名组缺失的情况。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "URLTranslationTests.test_translate_url_utility",
+      "test_file": "tests/i18n/patterns/tests.py",
+      "why_relevant": "这是直接测试 translate_url 函数的测试，提供了调用该函数的基本模式、设置（translation.override）和断言方式。",
+      "reusable_parts": [
+        "imports",
+        "translation.override context",
+        "translate_url call pattern",
+        "assertEqual assertion style"
+      ],
+      "possible_gap": "当前测试用例可能没有覆盖 URL 模式包含可选命名组且该组缺失的场景。"
+    },
+    {
+      "test_name": "URLPatternReverse.test_urlpattern_reverse",
+      "test_file": "tests/urlpatterns_reverse/tests.py",
+      "why_relevant": "它测试了 reverse 函数在各种参数组合下的行为，包括处理 NoReverseMatch 异常，这与 translate_url 内部调用 reverse 相关。",
+      "reusable_parts": [
+        "reverse call with args/kwargs",
+        "try-except NoReverseMatch pattern",
+        "subTest usage"
+      ],
+      "possible_gap": "它不直接测试 translate_url，且可能不涉及 i18n 上下文或可选命名组。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试 4 中，translate_url 的输入是完整匹配的路径（如 '/en/users/'）。",
+      "target_pattern": "输入一个 URL，其对应的路由模式包含可选命名组，但当前路径未提供该组的值（例如，模式为 'page/(?P<slug>\\w+)/?'，输入为 '/page/'）。",
+      "reason": "Issue 指出当可选参数缺失时会出现问题，因此需要构造此类输入来触发缺陷路径。",
+      "confidence": "medium"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "相关测试 4 中，translate_url 使用 match.args 和 match.kwargs（通过 resolve 内部生成）调用 reverse。",
+      "target_pattern": "使 match.kwargs 不包含可选命名组的键，或者 match.args 的长度与必需参数不匹配。",
+      "reason": "translate_url 直接将 match.args/kwargs 传给 reverse，如果它们未正确反映可选组缺失的状态，可能导致 reverse 失败或生成错误 URL。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "translate_url(...) 的返回值（字符串）。",
+      "reason": "Issue 的核心是返回了不正确的 URL，因此直接观察返回值是关键。"
+    },
+    {
+      "kind": "exception",
+      "expression_hint": "在 translate_url 内部调用 reverse(...) 时是否引发 NoReverseMatch 异常。",
+      "reason": "如果可选参数处理不当，reverse 调用可能失败，导致 translate_url 返回原始 URL（这可能不是预期行为）。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "match.args 和 match.kwargs 的内容（在 translate_url 内部）。",
+      "reason": "这些值决定了反向解析的输入，观察它们有助于理解缺陷根源。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "translate_url 对于包含可选命名组且该组缺失的 URL，应返回一个语义正确的翻译后 URL（或至少不是明显错误的 URL）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的、硬编码的 URL 字符串，因为具体路径可能随配置变化。",
+      "reason": "Issue 是关于生成“不正确”的 URL，因此断言返回的 URL 符合某种正确性（例如，以正确的语言代码开头，或能再次被 resolve）更稳定。"
+    },
+    {
+      "assertion_goal": "translate_url 不应因为可选参数缺失而引发未处理的异常（如 NoReverseMatch 传播出来）。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "避免断言特定的异常消息文本。",
+      "reason": "函数设计应优雅处理缺失参数的情况，要么成功翻译，要么返回原始 URL。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 @override_settings(ROOT_URLCONF=...) 来配置包含可选命名组 URL 模式的路由配置。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要使用 translation.override 来设置和切换语言环境，因为 translate_url 依赖 i18n 模式。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要继承自 SimpleTestCase 或 URLTestCaseBase 以获得 Django 测试工具支持。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "可选命名组在 Django URL 模式中的确切语法和匹配行为（例如，使用 '?' 量词或 default_kwargs）。",
+    "缺陷的具体表现：是返回了错误的 URL 字符串，还是静默地返回了原始 URL，或是抛出了异常？",
+    "修复后的正确 URL 应该是什么样子（例如，是否应该完全省略可选部分）？"
+  ],
+  "raw": {
+    "issue_summary": "translate_url() 在 URL 模式的可选命名组缺失时生成错误的 URL。",
+    "trigger_condition": {
+      "text": "调用 translate_url() 函数，传入一个 URL，该 URL 对应的路由模式包含可选命名参数，但当前匹配结果中该参数缺失。",
+      "evidence": [
+        "Issue 描述：'translate_url() creates an incorrect URL when optional named groups are missing in the URL pattern'",
+        "源码片段 1 显示 translate_url 函数使用 match.args 和 match.kwargs 进行反向解析。"
+      ],
+      "confidence": "medium"
+    },
+    "error_symptom": {
+      "text": "translate_url() 返回一个不正确的 URL（可能是错误的路径或引发 NoReverseMatch 异常）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'creates an incorrect URL'",
+        "相关测试 4 展示了 translate_url 的正常使用和预期返回。"
+      ],
+      "confidence": "medium"
+    },
+    "expected_behavior": {
+      "text": "translate_url() 应能正确处理包含可选命名组的路由，即使该参数在匹配结果中缺失，也应生成正确的翻译后 URL 或返回原始 URL。",
+      "evidence": [
+        "Issue 描述暗示这是一个需要修复的缺陷，因此预期行为是函数能正确处理这种情况。",
+        "源码片段 1 的文档字符串说明函数应返回翻译后的版本或原始 URL。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "translate_url",
+        "kind": "function",
+        "source_path": "django/urls/base.py",
+        "reason": "Issue 直接报告此函数的问题。"
+      },
+      {
+        "name": "reverse",
+        "kind": "function",
+        "source_path": "",
+        "reason": "translate_url 内部调用 reverse 进行反向解析，其行为受 match.args 和 match.kwargs 影响。"
+      },
+      {
+        "name": "resolve",
+        "kind": "function",
+        "source_path": "",
+        "reason": "translate_url 内部调用 resolve 来获取 match 对象，其中包含 args 和 kwargs。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/urls/base.py",
+        "object": "translate_url",
+        "lines": "160-180",
+        "reason": "Issue 直接指向此函数，且其内部逻辑（使用 match.args/kwargs 调用 reverse）是处理可选参数的关键。"
+      },
+      {
+        "path": "django/urls/resolvers.py",
+        "object": "URLPattern",
+        "lines": "315-363",
+        "reason": "URLPattern 的 resolve 方法生成 match 对象，其 args/kwargs 属性可能未正确处理可选命名组缺失的情况。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "URLTranslationTests.test_translate_url_utility",
+        "test_file": "tests/i18n/patterns/tests.py",
+        "why_relevant": "这是直接测试 translate_url 函数的测试，提供了调用该函数的基本模式、设置（translation.override）和断言方式。",
+        "reusable_parts": [
+          "imports",
+          "translation.override context",
+          "translate_url call pattern",
+          "assertEqual assertion style"
+        ],
+        "possible_gap": "当前测试用例可能没有覆盖 URL 模式包含可选命名组且该组缺失的场景。"
+      },
+      {
+        "test_name": "URLPatternReverse.test_urlpattern_reverse",
+        "test_file": "tests/urlpatterns_reverse/tests.py",
+        "why_relevant": "它测试了 reverse 函数在各种参数组合下的行为，包括处理 NoReverseMatch 异常，这与 translate_url 内部调用 reverse 相关。",
+        "reusable_parts": [
+          "reverse call with args/kwargs",
+          "try-except NoReverseMatch pattern",
+          "subTest usage"
+        ],
+        "possible_gap": "它不直接测试 translate_url，且可能不涉及 i18n 上下文或可选命名组。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 4 中，translate_url 的输入是完整匹配的路径（如 '/en/users/'）。",
+        "target_pattern": "输入一个 URL，其对应的路由模式包含可选命名组，但当前路径未提供该组的值（例如，模式为 'page/(?P<slug>\\w+)/?'，输入为 '/page/'）。",
+        "reason": "Issue 指出当可选参数缺失时会出现问题，因此需要构造此类输入来触发缺陷路径。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 4 中，translate_url 使用 match.args 和 match.kwargs（通过 resolve 内部生成）调用 reverse。",
+        "target_pattern": "使 match.kwargs 不包含可选命名组的键，或者 match.args 的长度与必需参数不匹配。",
+        "reason": "translate_url 直接将 match.args/kwargs 传给 reverse，如果它们未正确反映可选组缺失的状态，可能导致 reverse 失败或生成错误 URL。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "translate_url(...) 的返回值（字符串）。",
+        "reason": "Issue 的核心是返回了不正确的 URL，因此直接观察返回值是关键。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "在 translate_url 内部调用 reverse(...) 时是否引发 NoReverseMatch 异常。",
+        "reason": "如果可选参数处理不当，reverse 调用可能失败，导致 translate_url 返回原始 URL（这可能不是预期行为）。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "match.args 和 match.kwargs 的内容（在 translate_url 内部）。",
+        "reason": "这些值决定了反向解析的输入，观察它们有助于理解缺陷根源。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "translate_url 对于包含可选命名组且该组缺失的 URL，应返回一个语义正确的翻译后 URL（或至少不是明显错误的 URL）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、硬编码的 URL 字符串，因为具体路径可能随配置变化。",
+        "reason": "Issue 是关于生成“不正确”的 URL，因此断言返回的 URL 符合某种正确性（例如，以正确的语言代码开头，或能再次被 resolve）更稳定。"
+      },
+      {
+        "assertion_goal": "translate_url 不应因为可选参数缺失而引发未处理的异常（如 NoReverseMatch 传播出来）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言特定的异常消息文本。",
+        "reason": "函数设计应优雅处理缺失参数的情况，要么成功翻译，要么返回原始 URL。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 @override_settings(ROOT_URLCONF=...) 来配置包含可选命名组 URL 模式的路由配置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 translation.override 来设置和切换语言环境，因为 translate_url 依赖 i18n 模式。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要继承自 SimpleTestCase 或 URLTestCaseBase 以获得 Django 测试工具支持。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "可选命名组在 Django URL 模式中的确切语法和匹配行为（例如，使用 '?' 量词或 default_kwargs）。",
+      "缺陷的具体表现：是返回了错误的 URL 字符串，还是静默地返回了原始 URL，或是抛出了异常？",
+      "修复后的正确 URL 应该是什么样子（例如，是否应该完全省略可选部分）？"
+    ]
+  }
+}

@@ -1,0 +1,135 @@
+```json
+{
+    "issue_summary": "POSIX 版本的 locks.py 中 lock() 和 unlock() 函数错误地检查 fcntl.flock 的返回值，导致总是返回 False。",
+    "trigger_condition": {
+        "text": "在支持 fcntl 的系统上，调用 django.core.files.locks.lock() 或 unlock() 函数，并使用非阻塞标志 LOCK_NB。",
+        "evidence": ["Issue 描述中提到 'Anyone interested in using the non-blocking (i.e. locks.LOCKS_NB) requires a valid return value to know if they have successfully acquired the lock.'"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "lock() 和 unlock() 函数总是返回 False，即使操作成功。",
+        "symptom_type": "wrong_return",
+        "evidence": ["Issue 描述中提到 'The code attempts to return True to indicate success or failure acquiring a lock, but instead it always returns False.'"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "lock() 和 unlock() 函数在成功时应返回 True，在失败时应返回 False。",
+        "evidence": ["Issue 描述中提供的补丁代码在成功时返回 True，在捕获 OSError 时返回 False。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "django.core.files.locks.lock",
+            "kind": "function",
+            "source_path": "django/core/files/locks.py",
+            "reason": "Issue 直接指出了该函数的实现错误。"
+        },
+        {
+            "name": "django.core.files.locks.unlock",
+            "kind": "function",
+            "source_path": "django/core/files/locks.py",
+            "reason": "Issue 直接指出了该函数的实现错误。"
+        },
+        {
+            "name": "fcntl.flock",
+            "kind": "function",
+            "source_path": "",
+            "reason": "Issue 指出 bug 源于对 fcntl.flock 返回值的错误处理。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/core/files/locks.py",
+            "object": "lock",
+            "lines": "",
+            "reason": "Issue 描述和补丁指向了 lock 函数中 `ret == 0` 的错误检查。"
+        },
+        {
+            "path": "django/core/files/locks.py",
+            "object": "unlock",
+            "lines": "",
+            "reason": "Issue 描述和补丁指向了 unlock 函数中 `ret == 0` 的错误检查。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "LocMemCacheTests.test_locking_on_pickle",
+            "test_file": "tests/cache/tests.py",
+            "why_relevant": "该测试涉及缓存锁定机制，可能与文件锁有相似的测试模式。",
+            "reusable_parts": ["TestCase 结构", "assertFalse 断言风格", "使用锁的上下文"],
+            "possible_gap": "该测试测试的是缓存锁，而非 django.core.files.locks 模块中的文件锁。"
+        },
+        {
+            "test_name": "SelectForUpdateTests.test_raw_lock_not_available",
+            "test_file": "tests/select_for_update/tests.py",
+            "why_relevant": "该测试直接测试了数据库锁的获取失败场景，涉及锁的语义和返回值检查。",
+            "reusable_parts": ["多线程测试模式", "锁获取失败时的异常处理", "assertIsInstance 断言"],
+            "possible_gap": "该测试测试的是数据库锁，而非文件锁，且关注的是异常而非返回值。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "argument",
+            "current_pattern": "相关测试中没有直接调用 django.core.files.locks.lock/unlock 的模式。",
+            "target_pattern": "构造一个调用 lock(f, flags) 的场景，其中 flags 包含 fcntl.LOCK_NB。",
+            "reason": "Issue 明确指出非阻塞锁需要正确的返回值。",
+            "confidence": "high"
+        },
+        {
+            "slot": "call_chain",
+            "current_pattern": "相关测试中可能使用其他类型的锁（如数据库锁）。",
+            "target_pattern": "调用链应改为调用 django.core.files.locks.lock 和 unlock。",
+            "reason": "缺陷位于特定的文件锁 API 中。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "return_value",
+            "expression_hint": "lock(f, flags) 的返回值",
+            "reason": "Issue 的核心是返回值错误，观察返回值是判断缺陷是否触发的直接方式。"
+        },
+        {
+            "kind": "exception",
+            "expression_hint": "调用 fcntl.flock 时是否抛出 OSError",
+            "reason": "根据 Issue，fcntl.flock 在失败时抛出 OSError，这是决定应返回 True 还是 False 的关键。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "验证在锁获取成功时，lock() 返回 True。",
+            "preferred_assertion_style": "equals",
+            "avoid": "断言完整的异常消息或与锁状态无关的文件属性。",
+            "reason": "Issue 的核心是返回值语义错误，直接断言返回值是最稳定的方式。"
+        },
+        {
+            "assertion_goal": "验证在锁获取失败时，lock() 返回 False。",
+            "preferred_assertion_style": "equals",
+            "avoid": "依赖特定的 OSError 错误码或消息。",
+            "reason": "Issue 描述表明失败时应返回 False，这是修复后的预期行为。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要一个支持 fcntl 的操作系统环境（如 Linux/macOS）来运行测试。",
+            "source": "inference",
+            "confidence": "high"
+        },
+        {
+            "hint": "可能需要创建一个临时文件作为锁的目标。",
+            "source": "inference",
+            "confidence": "medium"
+        },
+        {
+            "hint": "可能需要使用 unittest.TestCase 作为测试基类。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "如何可靠地模拟 fcntl.flock 成功和失败的场景，以测试 lock() 返回 True 和 False 的两种情况。",
+        "django.core.files.locks 模块中 _fd(f) 辅助函数的具体行为和对输入的要求。",
+        "现有的测试套件中是否存在直接测试 django.core.files.locks.lock/unlock 的测试用例。"
+    ]
+}
+```

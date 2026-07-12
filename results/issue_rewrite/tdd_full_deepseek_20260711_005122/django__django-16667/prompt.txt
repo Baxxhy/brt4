@@ -1,0 +1,440 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+SelectDateWidget can crash with OverflowError.
+Description
+	
+Given a relatively common view like this:
+from django import forms
+from django.forms import SelectDateWidget
+from django.http import HttpResponse
+class ReproForm(forms.Form):
+	 my_date = forms.DateField(widget=SelectDateWidget())
+def repro_view(request):
+	 form = ReproForm(request.GET) # for ease of reproducibility
+	 if form.is_valid():
+		 return HttpResponse("ok")
+	 else:
+		 return HttpResponse("not ok")
+# urls.py
+urlpatterns = [path('repro/', views.repro_view, name='repro')]
+A user can trigger a server crash, reproducible by running locally and visiting ​http://127.0.0.1:8000/repro/?my_date_day=1&my_date_month=1&my_date_year=1234567821345678, which results in
+[...] - ERROR - django.request: Internal Server Error: /repro/
+Traceback (most recent call last):
+[...]
+ File "[...]/site-packages/django/forms/widgets.py", line 1160, in value_from_datadict
+	date_value = datetime.date(int(y), int(m), int(d))
+OverflowError: signed integer is greater than maximum
+This can be triggered similarly for a post request.
+The issue happens as part of the validation logic run in form.is_valid, specifically, when calling the SelectDateWidget.value_from_datadict, where the user-controlled value is converted into a date without guarding against a possible OverflowError.
+Specifically, y, m and d are user controlled, and the code does this:
+ date_value = datetime.date(int(y), int(m), int(d)) 
+When large integers (larger than sys.maxsize) are supplied to date's constructor it will throw an OverflowError:
+>>> import datetime, sys
+>>> datetime.date(sys.maxsize+1, 3, 4)
+Traceback (most recent call last):
+ File "<stdin>", line 1, in <module>
+OverflowError: Python int too large to convert to C long
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/forms/widgets.py
+对象名称：SelectDateWidget
+节点类型：class
+父节点：widgets
+行号范围：1010-1171
+代码：
+class SelectDateWidget(Widget):
+    """
+    A widget that splits date input into three <select> boxes.
+
+    This also serves as an example of a Widget that has more than one HTML
+    element and hence implements value_from_datadict.
+    """
+    none_value = ("", "---")
+    month_field = "%s_month"
+    day_field = "%s_day"
+    year_field = "%s_year"
+    template_name = "django/forms/widgets/select_date.html"
+    input_type = "select"
+    select_widget = Select
+    date_re = _lazy_re_compile(r"(\d{4}|0)-(\d\d?)-(\d\d?)$")
+    use_fieldset = True
+    def __init__(self, attrs=None, years=None, months=None, empty_label=None):
+    def get_context(self, name, value, attrs):
+    def format_value(self, value):
+    @staticmethod
+    def _parse_date_fmt():
+    def id_for_label(self, id_):
+    def value_from_datadict(self, data, files, name):
+    def value_omitted_from_data(self, data, files, name):
+
+
+【源码片段 2】
+文件路径：django/forms/widgets.py
+对象名称：value_from_datadict
+节点类型：class_function
+父节点：SelectDateWidget
+行号范围：1149-1165
+代码：
+    def value_from_datadict(self, data, files, name):
+        y = data.get(self.year_field % name)
+        m = data.get(self.month_field % name)
+        d = data.get(self.day_field % name)
+        if y == m == d == "":
+            return None
+        if y is not None and m is not None and d is not None:
+            input_format = get_format("DATE_INPUT_FORMATS")[0]
+            input_format = formats.sanitize_strftime_format(input_format)
+            try:
+                date_value = datetime.date(int(y), int(m), int(d))
+            except ValueError:
+                # Return pseudo-ISO dates with zeros for any unselected values,
+                # e.g. '2017-0-23'.
+                return "%s-%s-%s" % (y or 0, m or 0, d or 0)
+            return date_value.strftime(input_format)
+        return data.get(name)
+
+
+【源码片段 3】
+文件路径：django/template/defaultfilters.py
+对象名称：date
+节点类型：top-level function
+父节点：defaultfilters
+行号范围：767-777
+代码：
+def date(value, arg=None):
+    """Format a date according to the given format."""
+    if value in (None, ""):
+        return ""
+    try:
+        return formats.date_format(value, arg)
+    except AttributeError:
+        try:
+            return format(value, arg)
+        except AttributeError:
+            return ""
+
+
+【源码片段 4】
+文件路径：django/forms/fields.py
+对象名称：DateField
+节点类型：class
+父节点：fields
+行号范围：464-485
+代码：
+class DateField(BaseTemporalField):
+    widget = DateInput
+    input_formats = formats.get_format_lazy("DATE_INPUT_FORMATS")
+    default_error_messages = {
+        "invalid": _("Enter a valid date."),
+    }
+    def to_python(self, value):
+    def strptime(self, value, format):
+
+
+【源码片段 5】
+文件路径：django/forms/forms.py
+对象名称：is_valid
+节点类型：class_function
+父节点：BaseForm
+行号范围：195-197
+代码：
+    def is_valid(self):
+        """Return True if the form has no errors, or False otherwise."""
+        return self.is_bound and not self.errors
+
+
+【源码片段 6】
+文件路径：django/forms/forms.py
+对象名称：Form
+节点类型：class
+父节点：forms
+行号范围：427-428
+代码：
+class Form(BaseForm, metaclass=DeclarativeFieldsMetaclass):
+    "A collection of Fields, plus their associated data."
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/forms_tests/widget_tests/test_selectdatewidget.py
+测试名称：SelectDateWidgetTest.test_value_from_datadict
+测试代码：
+class SelectDateWidgetTest(WidgetTest):
+    def test_value_from_datadict(self):
+        tests = [
+            (("2000", "12", "1"), "2000-12-01"),
+            (("", "12", "1"), "0-12-1"),
+            (("2000", "", "1"), "2000-0-1"),
+            (("2000", "12", ""), "2000-12-0"),
+            (("", "", "", ""), None),
+            ((None, "12", "1"), None),
+            (("2000", None, "1"), None),
+            (("2000", "12", None), None),
+        ]
+        for values, expected in tests:
+            with self.subTest(values=values):
+                data = {}
+                for field_name, value in zip(("year", "month", "day"), values):
+                    if value is not None:
+                        data["field_%s" % field_name] = value
+                self.assertEqual(
+                    self.widget.value_from_datadict(data, {}, "field"), expected
+                )
+
+【相关测试 2】
+测试文件：tests/forms_tests/widget_tests/test_selectdatewidget.py
+测试名称：SelectDateWidgetTest.test_render_invalid_date
+测试代码：
+class SelectDateWidgetTest(WidgetTest):
+    def test_render_invalid_date(self):
+        """
+        Invalid dates should still render the failed date.
+        """
+        self.check_html(
+            self.widget,
+            "mydate",
+            "2010-02-31",
+            html=(
+                """
+            <select name="mydate_month" id="id_mydate_month">
+                <option value="">---</option>
+                <option value="1">January</option>
+                <option value="2" selected>February</option>
+                <option value="3">March</option>
+                <option value="4">April</option>
+                <option value="5">May</option>
+                <option value="6">June</option>
+                <option value="7">July</option>
+                <option value="8">August</option>
+                <option value="9">September</option>
+                <option value="10">October</option>
+                <option value="11">November</option>
+                <option value="12">December</option>
+            </select>
+
+            <select name="mydate_day" id="id_mydate_day">
+                <option value="">---</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="8">8</option>
+                <option value="9">9</option>
+                <option value="10">10</option>
+                <option value="11">11</option>
+                <option value="12">12</option>
+                <option value="13">13</option>
+                <option value="14">14</option>
+                <option value="15">15</option>
+                <option value="16">16</option>
+                <option value="17">17</option>
+                <option value="18">18</option>
+                <option value="19">19</option>
+                <option value="20">20</option>
+                <option value="21">21</option>
+                <option value="22">22</option>
+                <option value="23">23</option>
+                <option value="24">24</option>
+                <option value="25">25</option>
+                <option value="26">26</option>
+                <option value="27">27</option>
+                <option value="28">28</option>
+                <option value="29">29</option>
+                <option value="30">30</option>
+                <option value="31" selected>31</option>
+            </select>
+
+            <select name="mydate_year" id="id_mydate_year">
+                <option value="">---</option>
+                <option value="2007">2007</option>
+                <option value="2008">2008</option>
+                <option value="2009">2009</option>
+                <option value="2010" selected>2010</option>
+                <option value="2011">2011</option>
+                <option value="2012">2012</option>
+                <option value="2013">2013</option>
+                <option value="2014">2014</option>
+                <option value="2015">2015</option>
+                <option value="2016">2016</option>
+            </select>
+            """
+            ),
+        )
+
+【相关测试 3】
+测试文件：tests/forms_tests/widget_tests/test_multiwidget.py
+测试名称：MultiWidgetTest.test_value_from_datadict_subwidgets_name
+测试代码：
+class MultiWidgetTest(WidgetTest):
+    def test_value_from_datadict_subwidgets_name(self):
+        widget = MultiWidget(widgets={"x": TextInput(), "": TextInput()})
+        tests = [
+            ({}, [None, None]),
+            ({"field": "x"}, [None, "x"]),
+            ({"field_x": "y"}, ["y", None]),
+            ({"field": "x", "field_x": "y"}, ["y", "x"]),
+        ]
+        for data, expected in tests:
+            with self.subTest(data):
+                self.assertEqual(
+                    widget.value_from_datadict(data, {}, "field"),
+                    expected,
+                )
+
+【相关测试 4】
+测试文件：tests/auth_tests/test_views.py
+测试名称：PasswordResetTest.test_confirm_overflow_user
+测试代码：
+class PasswordResetTest(AuthViewsTestCase):
+    def test_confirm_overflow_user(self):
+        # A base36 user id that overflows int returns a 200 response.
+        response = self.client.get("/reset/zzzzzzzzzzzzz/1-1/")
+        self.assertContains(response, "The password reset link was invalid")
+
+【相关测试 5】
+测试文件：tests/forms_tests/widget_tests/test_selectdatewidget.py
+测试名称：SelectDateWidgetTest.test_value_omitted_from_data
+测试代码：
+class SelectDateWidgetTest(WidgetTest):
+    def test_value_omitted_from_data(self):
+        self.assertIs(self.widget.value_omitted_from_data({}, {}, "field"), True)
+        self.assertIs(
+            self.widget.value_omitted_from_data({"field_month": "12"}, {}, "field"),
+            False,
+        )
+        self.assertIs(
+            self.widget.value_omitted_from_data({"field_year": "2000"}, {}, "field"),
+            False,
+        )
+        self.assertIs(
+            self.widget.value_omitted_from_data({"field_day": "1"}, {}, "field"), False
+        )
+        data = {"field_day": "1", "field_month": "12", "field_year": "2000"}
+        self.assertIs(self.widget.value_omitted_from_data(data, {}, "field"), False)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

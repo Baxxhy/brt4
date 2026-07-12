@@ -1,0 +1,130 @@
+instance_id: django__django-16454
+
+issue_summary: Django 管理命令的子解析器在缺少必需参数时抛出堆栈跟踪而非用户友好的使用信息。
+
+trigger_condition:
+{
+  "text": "调用一个定义了子解析器的管理命令，并为该子解析器提供子命令，但缺少该子命令的必需参数。",
+  "evidence": [
+    "Issue 中示例：调用 `./manage.py cheeses create` 但缺少 `name` 参数。",
+    "Issue 描述：'Missing arguments to subparsers thus end as stack traces on the CLI, rather than human-facing usage messages.'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "程序抛出 `CommandError` 异常，并伴随堆栈跟踪，而不是格式化的使用信息。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中错误输出：'django.core.management.base.CommandError: Error: the following arguments are required: name'",
+    "源码片段 4 定义了 `CommandError` 类。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "子解析器在缺少必需参数时，应像主解析器一样，输出格式化的、面向用户的使用信息，而不是抛出堆栈跟踪。",
+  "evidence": [
+    "Issue 中对比：主解析器缺少参数时输出 'usage: manage.py cheeses ...' 和 'error: the following arguments are required: {create}'。",
+    "Issue 描述：'improve error formatting' 和 'human-facing usage messages'。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "django.core.management.base.CommandParser",
+    "kind": "class",
+    "source_path": "django/core/management/base.py",
+    "reason": "Issue 指出 `CommandParser` 是 `argparse.ArgumentParser` 的子类，用于改进错误格式化，但子解析器未继承这些改进。"
+  },
+  {
+    "name": "add_subparsers",
+    "kind": "method",
+    "source_path": "",
+    "reason": "Issue 提到子解析器是通过 `parser.add_subparsers().add_parser()` 创建的。"
+  },
+  {
+    "name": "django.core.management.base.BaseCommand.add_arguments",
+    "kind": "method",
+    "source_path": "django/core/management/base.py",
+    "reason": "Issue 示例和源码片段 2 显示，管理命令通过覆盖此方法来添加参数和子解析器。"
+  },
+  {
+    "name": "django.core.management.call_command",
+    "kind": "function",
+    "source_path": "",
+    "reason": "相关测试代码中均使用此函数来调用管理命令，是触发缺陷的入口。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "相关测试中，调用子命令时提供了所有必需的参数（例如 `'foo', 12`）。",
+    "target_pattern": "调用子命令时，故意遗漏该子命令的一个必需参数。",
+    "reason": "Issue 表明，当子命令缺少必需参数时，错误格式化会失效，导致堆栈跟踪。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "测试中直接调用 `call_command('subparser', 'foo', 12, ...)`。",
+    "target_pattern": "调用 `call_command('subparser', 'create')`（根据 Issue 示例），但不提供子命令 `create` 的 `name` 参数。",
+    "reason": "这直接对应 Issue 中描述的触发条件：提供子命令但缺少其参数。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用 `management.call_command(...)` 时捕获的异常对象及其 `args` 或 `message` 属性。",
+    "reason": "Issue 的核心是错误信息格式。需要观察抛出的 `CommandError` 是否包含堆栈跟踪信息（bug）还是格式化的使用信息（预期）。"
+  },
+  {
+    "kind": "file_output",
+    "expression_hint": "如果使用 `stderr` 参数调用 `call_command`，可以观察输出到 stderr 的字符串。",
+    "reason": "错误信息通常会输出到 stderr。可以观察输出内容是简洁的 'usage' 信息还是冗长的堆栈跟踪。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证当子命令缺少必需参数时，抛出的 `CommandError` 异常信息是格式化的、面向用户的使用信息，而不是包含堆栈跟踪的原始错误。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "断言完整的异常信息字符串，因为具体措辞可能随版本变化。避免断言不包含任何 'File' 或 'Traceback' 字样，因为错误信息本身可能包含这些词。",
+    "reason": "Issue 强调错误信息应该是 'human-facing usage messages'。断言信息中包含 'usage:' 或 'error:' 等关键片段，且不包含典型的 Python 堆栈跟踪行（如 'File \"...\"'），可以更稳定地验证格式化是否生效。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要 `@override_settings` 来包含自定义命令所在的 app（如 'user_commands'）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要继承自 `SimpleTestCase` 或类似的 Django 测试基类。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要导入 `django.core.management` 和 `django.test` 相关模块。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "具体是 `CommandParser` 的哪些初始化参数（`missing_args_message`, `called_from_command_line` 等）需要被复制到子解析器中。",
+  "修复后，错误信息的确切格式和完整字符串是什么。",
+  "除了 `add_subparsers`，是否还有其他相关的方法或代码位置需要修改。"
+]

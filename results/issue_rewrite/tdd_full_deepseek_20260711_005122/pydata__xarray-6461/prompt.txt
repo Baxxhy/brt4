@@ -1,0 +1,748 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+xr.where with scalar as second argument fails with keep_attrs=True
+### What happened?
+
+``` python
+import xarray as xr
+
+xr.where(xr.DataArray([1, 2, 3]) > 0, 1, 0)
+```
+
+fails with
+
+```
+   1809 if keep_attrs is True:
+   1810     # keep the attributes of x, the second parameter, by default to
+   1811     # be consistent with the `where` method of `DataArray` and `Dataset`
+-> 1812     keep_attrs = lambda attrs, context: attrs[1]
+   1814 # alignment for three arguments is complicated, so don't support it yet
+   1815 return apply_ufunc(
+   1816     duck_array_ops.where,
+   1817     cond,
+   (...)
+   1823     keep_attrs=keep_attrs,
+   1824 )
+
+IndexError: list index out of range
+```
+
+The workaround is to pass `keep_attrs=False`
+
+### What did you expect to happen?
+
+_No response_
+
+### Minimal Complete Verifiable Example
+
+_No response_
+
+### Relevant log output
+
+_No response_
+
+### Anything else we need to know?
+
+_No response_
+
+### Environment
+
+xarray 2022.3.0
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：xarray/core/duck_array_ops.py
+对象名称：where
+节点类型：top-level function
+父节点：duck_array_ops
+行号范围：266-268
+代码：
+def where(condition, x, y):
+    """Three argument where() with better dtype promotion rules."""
+    return _where(condition, *as_shared_dtype([x, y]))
+
+
+【源码片段 2】
+文件路径：xarray/core/dataarray.py
+对象名称：DataArray
+节点类型：class
+父节点：dataarray
+行号范围：207-4904
+代码：
+class DataArray(
+    AbstractArray, DataWithCoords, DataArrayArithmetic, DataArrayReductions
+):
+    AbstractArray, DataWithCoords, DataArrayArithmetic, DataArrayReductions
+):
+    """N-dimensional array with labeled coordinates and dimensions.
+
+    DataArray provides a wrapper around numpy ndarrays that uses
+    labeled dimensions and coordinates to support metadata aware
+    operations. The API is similar to that for the pandas Series or
+    DataFrame, but DataArray objects can have any number of dimensions,
+    and their contents have fixed data types.
+
+    Additional features over raw numpy arrays:
+
+    - Apply operations over dimensions by name: ``x.sum('time')``.
+    - Select or assign values by integer location (like numpy):
+      ``x[:10]`` or by label (like pandas): ``x.loc['2014-01-01']`` or
+      ``x.sel(time='2014-01-01')``.
+    - Mathematical operations (e.g., ``x - y``) vectorize across
+      multiple dimensions (known in numpy as "broadcasting") based on
+      dimension names, regardless of their original order.
+    - Keep track of arbitrary metadata in the form of a Python
+      dictionary: ``x.attrs``
+    - Convert to a pandas Series: ``x.to_series()``.
+
+    Getting items from or doing mathematical operations with a
+    DataArray always returns another DataArray.
+
+    Parameters
+    ----------
+    data : array_like
+        Values for this array. Must be an ``numpy.ndarray``, ndarray
+        like, or castable to an ``ndarray``. If a self-described xarray
+        or pandas object, attempts are made to use this array's
+        metadata to fill in other unspecified arguments. A view of the
+        array's data is used instead of a copy if possible.
+    coords : sequence or dict of array_like, optional
+        Coordinates (tick labels) to use for indexing along each
+        dimension. The following notations are accepted:
+
+        - mapping {dimension name: array-like}
+        - sequence of tuples that are valid arguments for
+          ``xarray.Variable()``
+          - (dims, data)
+          - (dims, data, attrs)
+          - (dims, data, attrs, encoding)
+
+        Additionally, it is possible to define a coord whose name
+        does not match the dimension name, or a coord based on multiple
+        dimensions, with one of the following notations:
+
+        - mapping {coord name: DataArray}
+        - mapping {coord name: Variable}
+        - mapping {coord name: (dimension name, array-like)}
+        - mapping {coord name: (tuple of dimension names, array-like)}
+
+    dims : hashable or sequence of hashable, optional
+        Name(s) of the data dimension(s). Must be either a hashable
+        (only for 1D data) or a sequence of hashables with length equal
+        to the number of dimensions. If this argument is omitted,
+        dimension names are taken from ``coords`` (if possible) and
+        otherwise default to ``['dim_0', ... 'dim_n']``.
+    name : str or None, optional
+        Name of this array.
+    attrs : dict_like or None, optional
+        Attributes to assign to the new instance. By default, an empty
+        attribute dictionary is initialized.
+
+    Examples
+    --------
+    Create data:
+
+    >>> np.random.seed(0)
+    >>> temperature = 15 + 8 * np.random.randn(2, 2, 3)
+    >>> lon = [[-99.83, -99.32], [-99.79, -99.23]]
+    >>> lat = [[42.25, 42.21], [42.63, 42.59]]
+    >>> time = pd.date_range("2014-09-06", periods=3)
+    >>> reference_time = pd.Timestamp("2014-09-05")
+
+    Initialize a dataarray with multiple dimensions:
+
+    >>> da = xr.DataArray(
+    ...     data=temperature,
+    ...     dims=["x", "y", "time"],
+    ...     coords=dict(
+    ...         lon=(["x", "y"], lon),
+    ...         lat=(["x", "y"], lat),
+    ...         time=time,
+    ...         reference_time=reference_time,
+    ...     ),
+    ...     attrs=dict(
+    ...         description="Ambient temperature.",
+    ...         units="degC",
+    ...     ),
+    ... )
+    >>> da
+    <xarray.DataArray (x: 2, y: 2, time: 3)>
+    array([[[29.11241877, 18.20125767, 22.82990387],
+            [32.92714559, 29.94046392,  7.18177696]],
+    <BLANKLINE>
+           [[22.60070734, 13.78914233, 14.17424919],
+            [18.28478802, 16.15234857, 26.63418806]]])
+    Coordinates:
+        lon             (x, y) float64 -99.83 -99.32 -99.79 -99.23
+        lat             (x, y) float64 42.25 42.21 42.63 42.59
+      * time            (time) datetime64[ns] 2014-09-06 2014-09-07 2014-09-08
+        reference_time  datetime64[ns] 2014-09-05
+    Dimensions without coordinates: x, y
+    Attributes:
+        description:  Ambient temperature.
+        units:        degC
+
+    Find out where the coldest temperature was:
+
+    >>> da.isel(da.argmin(...))
+    <xarray.DataArray ()>
+    array(7.18177696)
+    Coordinates:
+        lon             float64 -99.32
+        lat             float64 42.21
+        time            datetime64[ns] 2014-09-08
+        reference_time  datetime64[ns] 2014-09-05
+    Attributes:
+        description:  Ambient temperature.
+    __slots__ = (
+        "_cache",
+        "_coords",
+        "_close",
+        "_indexes",
+        "_name",
+        "_variable",
+        "__weakref__",
+    )
+    _groupby_cls = groupby.DataArrayGroupBy
+    _rolling_cls = rolling.DataArrayRolling
+    _coarsen_cls = rolling.DataArrayCoarsen
+    _resample_cls = resample.DataArrayResample
+    _weighted_cls = weighted.DataArrayWeighted
+    dt = utils.UncachedAccessor(CombinedDatetimelikeAccessor)
+    def __init__(
+        self,
+        data: Any = dtypes.NA,
+        coords: Sequence[tuple] | Mapping[Any, Any] | None = None,
+        dims: Hashable | Sequence[Hashable] | None = None,
+        name: Hashable = None,
+        attrs: Mapping = None,
+        indexes: dict[Hashable, Index] = None,
+        fastpath: bool = False,
+    ):
+    @classmethod
+    def _construct_direct(
+        cls,
+        variable: Variable,
+        coords: dict[Any, Variable],
+        name: Hashable,
+        indexes: dict[Hashable, Index],
+    ) -> DataArray:
+    def _replace(
+        self: T_DataArray,
+        variable: Variable = None,
+        coords=None,
+        name: Hashable | None | Default = _default,
+        indexes=None,
+    ) -> T_DataArray:
+    def _replace_maybe_drop_dims(
+        self, variable: Variable, name: Hashable | None | Default = _default
+    ) -> DataArray:
+    def _overwrite_indexes(
+        self,
+        indexes: Mapping[Any, Index],
+        coords: Mapping[Any, Variable] = None,
+        drop_coords: list[Hashable] = None,
+        rename_dims: Mapping[Any, Any] = None,
+    ) -> DataArray:
+    def _to_temp_dataset(self) -> Dataset:
+    def _from_temp_dataset(
+        self, dataset: Dataset, name: Hashable | None | Default = _default
+    ) -> DataArray:
+    def _to_dataset_split(self, dim: Hashable) -> Dataset:
+    def _to_dataset_whole(
+        self, name: Hashable = None, shallow_copy: bool = True
+    ) -> Dataset:
+    def to_dataset(
+        self,
+        dim: Hashable = None,
+        *,
+        name: Hashable = None,
+        promote_attrs: bool = False,
+    ) -> Dataset:
+    @property
+    def name(self) -> Hashable | None:
+    @name.setter
+    def name(self, value: Hashable | None) -> None:
+    @property
+    def variable(self) -> Variable:
+    @property
+    def dtype(self) -> np.dtype:
+    @property
+    def shape(self) -> tuple[int, ...]:
+    @property
+    def size(self) -> int:
+    @property
+    def nbytes(self) -> int:
+    @property
+    def ndim(self) -> int:
+    def __len__(self) -> int:
+    @property
+    def data(self) -> Any:
+    @data.setter
+    def data(self, value: Any) -> None:
+    @property
+    def values(self) -> np.ndarray:
+    @values.setter
+    def values(self, value: Any) -> None:
+    def to_numpy(self) -> np.ndarray:
+    def as_numpy(self: T_DataArray) -> T_DataArray:
+    @property
+    def _in_memory(self) -> bool:
+    def to_index(self) -> pd.Index:
+    @property
+    def dims(self) -> tuple[Hashable, ...]:
+    @dims.setter
+    def dims(self, value):
+    def _item_key_to_dict(self, key: Any) -> Mapping[Hashable, Any]:
+    def _getitem_coord(self, key):
+    def __getitem__(self, key: Any) -> DataArray:
+    def __setitem__(self, key: Any, value: Any) -> None:
+    def __delitem__(self, key: Any) -> None:
+    @property
+    def _attr_sources(self) -> Iterable[Mapping[Hashable, Any]]:
+    @property
+    def _item_sources(self) -> Iterable[Mapping[Hashable, Any]]:
+    def __contains__(self, key: Any) -> bool:
+    @property
+    def loc(self) -> _LocIndexer:
+    @property
+    def attrs(self) -> dict[Any, Any]:
+    @attrs.setter
+    def attrs(self, value: Mapping[Any, Any]) -> None:
+    @property
+    def encoding(self) -> dict[
+...[TRUNCATED]...
+ype of array wrapped by dask array. Passed on to
+        :py:func:`dask.array.apply_gufunc`. ``meta`` should be given in the
+        ``dask_gufunc_kwargs`` parameter . It will be removed as direct parameter
+        a future version.
+
+    Returns
+    -------
+    Single value or tuple of Dataset, DataArray, Variable, dask.array.Array or
+    numpy.ndarray, the first type on that list to appear on an input.
+
+    Notes
+    -----
+    This function is designed for the more common case where ``func`` can work on numpy
+    arrays. If ``func`` needs to manipulate a whole xarray object subset to each block
+    it is possible to use :py:func:`xarray.map_blocks`.
+
+    Note that due to the overhead :py:func:`xarray.map_blocks` is considerably slower than ``apply_ufunc``.
+
+    Examples
+    --------
+    Calculate the vector magnitude of two arguments:
+
+    >>> def magnitude(a, b):
+    ...     func = lambda x, y: np.sqrt(x**2 + y**2)
+    ...     return xr.apply_ufunc(func, a, b)
+    ...
+
+    You can now apply ``magnitude()`` to :py:class:`DataArray` and :py:class:`Dataset`
+    objects, with automatically preserved dimensions and coordinates, e.g.,
+
+    >>> array = xr.DataArray([1, 2, 3], coords=[("x", [0.1, 0.2, 0.3])])
+    >>> magnitude(array, -array)
+    <xarray.DataArray (x: 3)>
+    array([1.41421356, 2.82842712, 4.24264069])
+    Coordinates:
+      * x        (x) float64 0.1 0.2 0.3
+
+    Plain scalars, numpy arrays and a mix of these with xarray objects is also
+    supported:
+
+    >>> magnitude(3, 4)
+    5.0
+    >>> magnitude(3, np.array([0, 4]))
+    array([3., 5.])
+    >>> magnitude(array, 0)
+    <xarray.DataArray (x: 3)>
+    array([1., 2., 3.])
+    Coordinates:
+      * x        (x) float64 0.1 0.2 0.3
+
+    Other examples of how you could use ``apply_ufunc`` to write functions to
+    (very nearly) replicate existing xarray functionality:
+
+    Compute the mean (``.mean``) over one dimension:
+
+    >>> def mean(obj, dim):
+    ...     # note: apply always moves core dimensions to the end
+    ...     return apply_ufunc(
+    ...         np.mean, obj, input_core_dims=[[dim]], kwargs={"axis": -1}
+    ...     )
+    ...
+
+    Inner product over a specific dimension (like :py:func:`dot`):
+
+    >>> def _inner(x, y):
+    ...     result = np.matmul(x[..., np.newaxis, :], y[..., :, np.newaxis])
+    ...     return result[..., 0, 0]
+    ...
+    >>> def inner_product(a, b, dim):
+    ...     return apply_ufunc(_inner, a, b, input_core_dims=[[dim], [dim]])
+    ...
+
+    Stack objects along a new dimension (like :py:func:`concat`):
+
+    >>> def stack(objects, dim, new_coord):
+    ...     # note: this version does not stack coordinates
+    ...     func = lambda *x: np.stack(x, axis=-1)
+    ...     result = apply_ufunc(
+    ...         func,
+    ...         *objects,
+    ...         output_core_dims=[[dim]],
+    ...         join="outer",
+    ...         dataset_fill_value=np.nan
+    ...     )
+    ...     result[dim] = new_coord
+    ...     return result
+    ...
+
+    If your function is not vectorized but can be applied only to core
+    dimensions, you can use ``vectorize=True`` to turn into a vectorized
+    function. This wraps :py:func:`numpy.vectorize`, so the operation isn't
+    terribly fast. Here we'll use it to calculate the distance between
+    empirical samples from two probability distributions, using a scipy
+    function that needs to be applied to vectors:
+
+    >>> import scipy.stats
+    >>> def earth_mover_distance(first_samples, second_samples, dim="ensemble"):
+    ...     return apply_ufunc(
+    ...         scipy.stats.wasserstein_distance,
+    ...         first_samples,
+    ...         second_samples,
+    ...         input_core_dims=[[dim], [dim]],
+    ...         vectorize=True,
+    ...     )
+    ...
+
+    Most of NumPy's builtin functions already broadcast their inputs
+    appropriately for use in ``apply_ufunc``. You may find helper functions such as
+    :py:func:`numpy.broadcast_arrays` helpful in writing your function. ``apply_ufunc`` also
+    works well with :py:func:`numba.vectorize` and :py:func:`numba.guvectorize`.
+
+    See Also
+    --------
+    numpy.broadcast_arrays
+    numba.vectorize
+    numba.guvectorize
+    dask.array.apply_gufunc
+    xarray.map_blocks
+    :ref:`dask.automatic-parallelization`
+        User guide describing :py:func:`apply_ufunc` and :py:func:`map_blocks`.
+
+    References
+    ----------
+    .. [1] https://numpy.org/doc/stable/reference/ufuncs.html
+    .. [2] https://numpy.org/doc/stable/reference/c-api/generalized-ufuncs.html
+    """
+    from .dataarray import DataArray
+    from .groupby import GroupBy
+    from .variable import Variable
+
+    if input_core_dims is None:
+        input_core_dims = ((),) * (len(args))
+    elif len(input_core_dims) != len(args):
+        raise ValueError(
+            f"input_core_dims must be None or a tuple with the length same to "
+            f"the number of arguments. "
+            f"Given {len(input_core_dims)} input_core_dims: {input_core_dims}, "
+            f" but number of args is {len(args)}."
+        )
+
+    if kwargs is None:
+        kwargs = {}
+
+    signature = _UFuncSignature(input_core_dims, output_core_dims)
+
+    if exclude_dims:
+        if not isinstance(exclude_dims, set):
+            raise TypeError(
+                f"Expected exclude_dims to be a 'set'. Received '{type(exclude_dims).__name__}' instead."
+            )
+        if not exclude_dims <= signature.all_core_dims:
+            raise ValueError(
+                f"each dimension in `exclude_dims` must also be a "
+                f"core dimension in the function signature. "
+                f"Please make {(exclude_dims - signature.all_core_dims)} a core dimension"
+            )
+
+    # handle dask_gufunc_kwargs
+    if dask == "parallelized":
+        if dask_gufunc_kwargs is None:
+            dask_gufunc_kwargs = {}
+        else:
+            dask_gufunc_kwargs = dask_gufunc_kwargs.copy()
+        # todo: remove warnings after deprecation cycle
+        if meta is not None:
+            warnings.warn(
+                "``meta`` should be given in the ``dask_gufunc_kwargs`` parameter."
+                " It will be removed as direct parameter in a future version.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            dask_gufunc_kwargs.setdefault("meta", meta)
+        if output_sizes is not None:
+            warnings.warn(
+                "``output_sizes`` should be given in the ``dask_gufunc_kwargs`` "
+                "parameter. It will be removed as direct parameter in a future "
+                "version.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            dask_gufunc_kwargs.setdefault("output_sizes", output_sizes)
+
+    if kwargs:
+        func = functools.partial(func, **kwargs)
+
+    if keep_attrs is None:
+        keep_attrs = _get_keep_attrs(default=False)
+
+    if isinstance(keep_attrs, bool):
+        keep_attrs = "override" if keep_attrs else "drop"
+
+    variables_vfunc = functools.partial(
+        apply_variable_ufunc,
+        func,
+        signature=signature,
+        exclude_dims=exclude_dims,
+        keep_attrs=keep_attrs,
+        dask=dask,
+        vectorize=vectorize,
+        output_dtypes=output_dtypes,
+        dask_gufunc_kwargs=dask_gufunc_kwargs,
+    )
+
+    # feed groupby-apply_ufunc through apply_groupby_func
+    if any(isinstance(a, GroupBy) for a in args):
+        this_apply = functools.partial(
+            apply_ufunc,
+            func,
+            input_core_dims=input_core_dims,
+            output_core_dims=output_core_dims,
+            exclude_dims=exclude_dims,
+            join=join,
+            dataset_join=dataset_join,
+            dataset_fill_value=dataset_fill_value,
+            keep_attrs=keep_attrs,
+            dask=dask,
+            vectorize=vectorize,
+            output_dtypes=output_dtypes,
+            dask_gufunc_kwargs=dask_gufunc_kwargs,
+        )
+        return apply_groupby_func(this_apply, *args)
+    # feed datasets apply_variable_ufunc through apply_dataset_vfunc
+    elif any(is_dict_like(a) for a in args):
+        return apply_dataset_vfunc(
+            variables_vfunc,
+            *args,
+            signature=signature,
+            join=join,
+            exclude_dims=exclude_dims,
+            dataset_join=dataset_join,
+            fill_value=dataset_fill_value,
+            keep_attrs=keep_attrs,
+        )
+    # feed DataArray apply_variable_ufunc through apply_dataarray_vfunc
+    elif any(isinstance(a, DataArray) for a in args):
+        return apply_dataarray_vfunc(
+            variables_vfunc,
+            *args,
+            signature=signature,
+            join=join,
+            exclude_dims=exclude_dims,
+            keep_attrs=keep_attrs,
+        )
+    # feed Variables directly through apply_variable_ufunc
+    elif any(isinstance(a, Variable) for a in args):
+        return variables_vfunc(*args)
+    else:
+        # feed anything else through apply_array_ufunc
+        return apply_array_ufunc(func, *args, dask=dask)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：xarray/tests/test_computation.py
+测试名称：test_where_attrs
+测试代码：
+def test_where_attrs() -> None:
+    cond = xr.DataArray([True, False], dims="x", attrs={"attr": "cond"})
+    x = xr.DataArray([1, 1], dims="x", attrs={"attr": "x"})
+    y = xr.DataArray([0, 0], dims="x", attrs={"attr": "y"})
+    actual = xr.where(cond, x, y, keep_attrs=True)
+    expected = xr.DataArray([1, 0], dims="x", attrs={"attr": "x"})
+    assert_identical(expected, actual)
+
+【相关测试 2】
+测试文件：xarray/tests/test_computation.py
+测试名称：test_where
+测试代码：
+def test_where() -> None:
+    cond = xr.DataArray([True, False], dims="x")
+    actual = xr.where(cond, 1, 0)
+    expected = xr.DataArray([1, 0], dims="x")
+    assert_identical(expected, actual)
+
+【相关测试 3】
+测试文件：xarray/tests/test_computation.py
+测试名称：test_keep_attrs
+测试代码：
+def test_keep_attrs() -> None:
+    def add(a, b, keep_attrs):
+        if keep_attrs:
+            return apply_ufunc(operator.add, a, b, keep_attrs=keep_attrs)
+        else:
+            return apply_ufunc(operator.add, a, b)
+
+    a = xr.DataArray([0, 1], [("x", [0, 1])])
+    a.attrs["attr"] = "da"
+    a["x"].attrs["attr"] = "da_coord"
+    b = xr.DataArray([1, 2], [("x", [0, 1])])
+
+    actual = add(a, b, keep_attrs=False)
+    assert not actual.attrs
+    actual = add(a, b, keep_attrs=True)
+    assert_identical(actual.attrs, a.attrs)
+    assert_identical(actual["x"].attrs, a["x"].attrs)
+
+    actual = add(a.variable, b.variable, keep_attrs=False)
+    assert not actual.attrs
+    actual = add(a.variable, b.variable, keep_attrs=True)
+    assert_identical(actual.attrs, a.attrs)
+
+    ds_a = xr.Dataset({"x": [0, 1]})
+    ds_a.attrs["attr"] = "ds"
+    ds_a.x.attrs["attr"] = "da"
+    ds_b = xr.Dataset({"x": [0, 1]})
+
+    actual = add(ds_a, ds_b, keep_attrs=False)
+    assert not actual.attrs
+    actual = add(ds_a, ds_b, keep_attrs=True)
+    assert_identical(actual.attrs, ds_a.attrs)
+    assert_identical(actual.x.attrs, ds_a.x.attrs)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

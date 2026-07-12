@@ -1,0 +1,312 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Use simplified paths for deconstruct of expressions
+Description
+	
+Previously F() deconstructed to: django.db.models.expressions.F(). But since it can also be imported from django.db.models, ​PR #14047 changed it to deconstruct to django.db.models.F(). This simplifies generated migration code where it will be referenced only as from django.db import models / models.F().
+As Mariusz pointed out on the PR, the same technique can be applied to other expressions, further simplifying generated migrations.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/db/models/expressions.py
+对象名称：F
+节点类型：class
+父节点：expressions
+行号范围：582-609
+代码：
+class F(Combinable):
+    """An object capable of resolving references to existing query objects."""
+    def __init__(self, name):
+    def __repr__(self):
+    def resolve_expression(self, query=None, allow_joins=True, reuse=None,
+                           summarize=False, for_save=False):
+    def asc(self, **kwargs):
+    def desc(self, **kwargs):
+    def __eq__(self, other):
+    def __hash__(self):
+
+
+【源码片段 2】
+文件路径：django/db/models/fields/__init__.py
+对象名称：deconstruct
+节点类型：class_function
+父节点：Field
+行号范围：417-506
+代码：
+    def deconstruct(self):
+        """
+        Return enough information to recreate the field as a 4-tuple:
+
+         * The name of the field on the model, if contribute_to_class() has
+           been run.
+         * The import path of the field, including the class, e.g.
+           django.db.models.IntegerField. This should be the most portable
+           version, so less specific may be better.
+         * A list of positional arguments.
+         * A dict of keyword arguments.
+
+        Note that the positional or keyword arguments must contain values of
+        the following types (including inner values of collection types):
+
+         * None, bool, str, int, float, complex, set, frozenset, list, tuple,
+           dict
+         * UUID
+         * datetime.datetime (naive), datetime.date
+         * top-level classes, top-level functions - will be referenced by their
+           full import path
+         * Storage instances - these have their own deconstruct() method
+
+        This is because the values here must be serialized into a text format
+        (possibly new Python code, possibly JSON) and these are the only types
+        with encoding handlers defined.
+
+        There's no need to return the exact way the field was instantiated this
+        time, just ensure that the resulting field is the same - prefer keyword
+        arguments over positional ones, and omit parameters with their default
+        values.
+        """
+        # Short-form way of fetching all the default parameters
+        keywords = {}
+        possibles = {
+            "verbose_name": None,
+            "primary_key": False,
+            "max_length": None,
+            "unique": False,
+            "blank": False,
+            "null": False,
+            "db_index": False,
+            "default": NOT_PROVIDED,
+            "editable": True,
+            "serialize": True,
+            "unique_for_date": None,
+            "unique_for_month": None,
+            "unique_for_year": None,
+            "choices": None,
+            "help_text": '',
+            "db_column": None,
+            "db_tablespace": None,
+            "auto_created": False,
+            "validators": [],
+            "error_messages": None,
+        }
+        attr_overrides = {
+            "unique": "_unique",
+            "error_messages": "_error_messages",
+            "validators": "_validators",
+            "verbose_name": "_verbose_name",
+            "db_tablespace": "_db_tablespace",
+        }
+        equals_comparison = {"choices", "validators"}
+        for name, default in possibles.items():
+            value = getattr(self, attr_overrides.get(name, name))
+            # Unroll anything iterable for choices into a concrete list
+            if name == "choices" and isinstance(value, collections.abc.Iterable):
+                value = list(value)
+            # Do correct kind of comparison
+            if name in equals_comparison:
+                if value != default:
+                    keywords[name] = value
+            else:
+                if value is not default:
+                    keywords[name] = value
+        # Work out path - we shorten it for known Django core fields
+        path = "%s.%s" % (self.__class__.__module__, self.__class__.__qualname__)
+        if path.startswith("django.db.models.fields.related"):
+            path = path.replace("django.db.models.fields.related", "django.db.models")
+        elif path.startswith("django.db.models.fields.files"):
+            path = path.replace("django.db.models.fields.files", "django.db.models")
+        elif path.startswith('django.db.models.fields.json'):
+            path = path.replace('django.db.models.fields.json', 'django.db.models')
+        elif path.startswith("django.db.models.fields.proxy"):
+            path = path.replace("django.db.models.fields.proxy", "django.db.models")
+        elif path.startswith("django.db.models.fields"):
+            path = path.replace("django.db.models.fields", "django.db.models")
+        # Return basic info - other fields should override this.
+        return (self.name, path, [], keywords)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/expressions/tests.py
+测试名称：FTests.test_deconstruct
+测试代码：
+class FTests(SimpleTestCase):
+    def test_deconstruct(self):
+        f = F('name')
+        path, args, kwargs = f.deconstruct()
+        self.assertEqual(path, 'django.db.models.F')
+        self.assertEqual(args, (f.name,))
+        self.assertEqual(kwargs, {})
+
+【相关测试 2】
+测试文件：tests/expressions/tests.py
+测试名称：ValueTests.test_deconstruct_output_field
+测试代码：
+class ValueTests(TestCase):
+    def test_deconstruct_output_field(self):
+        value = Value('name', output_field=CharField())
+        path, args, kwargs = value.deconstruct()
+        self.assertEqual(path, 'django.db.models.expressions.Value')
+        self.assertEqual(args, (value.value,))
+        self.assertEqual(len(kwargs), 1)
+        self.assertEqual(kwargs['output_field'].deconstruct(), CharField().deconstruct())
+
+【相关测试 3】
+测试文件：tests/constraints/tests.py
+测试名称：UniqueConstraintTests.test_deconstruction_with_expressions
+测试代码：
+class UniqueConstraintTests(TestCase):
+    def test_deconstruction_with_expressions(self):
+        name = 'unique_fields'
+        constraint = models.UniqueConstraint(Lower('title'), name=name)
+        path, args, kwargs = constraint.deconstruct()
+        self.assertEqual(path, 'django.db.models.UniqueConstraint')
+        self.assertEqual(args, (Lower('title'),))
+        self.assertEqual(kwargs, {'name': name})
+
+【相关测试 4】
+测试文件：tests/model_indexes/tests.py
+测试名称：SimpleIndexesTests.test_deconstruct_with_condition
+测试代码：
+class SimpleIndexesTests(SimpleTestCase):
+    def test_deconstruct_with_condition(self):
+        index = models.Index(
+            name='big_book_index',
+            fields=['title'],
+            condition=models.Q(pages__gt=400),
+        )
+        index.set_name_with_model(Book)
+        path, args, kwargs = index.deconstruct()
+        self.assertEqual(path, 'django.db.models.Index')
+        self.assertEqual(args, ())
+        self.assertEqual(
+            kwargs,
+            {
+                'fields': ['title'],
+                'name': 'model_index_title_196f42_idx',
+                'condition': models.Q(pages__gt=400),
+            }
+        )
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

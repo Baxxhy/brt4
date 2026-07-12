@@ -1,0 +1,155 @@
+```json
+{
+    "issue_summary": "使用 usetex=True 时，datetime 轴的间距在 matplotlib 3.4 中变得不清晰，相比 3.3 版本有所退化。",
+    "trigger_condition": {
+        "text": "设置 matplotlib.rcParams['text.usetex'] = True，创建一个包含 datetime 轴的图形，并保存为图像。",
+        "evidence": ["Issue 中的代码设置了 text.usetex = True 并绘制了 datetime 轴", "相关测试 test_date_formatter_usetex 和 test_concise_formatter_usetex 都涉及 usetex=True 和日期格式化"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "生成的图像中 datetime 轴的标签间距（spacing）不清晰，视觉效果比 3.3 版本差。",
+        "symptom_type": "unknown",
+        "evidence": ["Issue 中提供了 3.3.4 和 3.4.3 版本的对比图像，并描述为 'spacing ... is unclear'"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "使用 usetex=True 时，datetime 轴的标签间距应保持清晰，与 3.3 版本在 TeX 格式下的效果一致。",
+        "evidence": ["Issue 中期望 'The ideal case would be to have the spacing from version 3.3 in a tex format.'"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "matplotlib.rcParams",
+            "kind": "module",
+            "source_path": "",
+            "reason": "用于设置 text.usetex = True 的全局配置。"
+        },
+        {
+            "name": "plt.subplots",
+            "kind": "function",
+            "source_path": "lib/matplotlib/pyplot.py",
+            "reason": "Issue 代码中用于创建图形和坐标轴。"
+        },
+        {
+            "name": "ax.plot",
+            "kind": "method",
+            "source_path": "lib/matplotlib/pyplot.py",
+            "reason": "Issue 代码中用于绘制 datetime 数据。"
+        },
+        {
+            "name": "plt.savefig",
+            "kind": "function",
+            "source_path": "lib/matplotlib/pyplot.py",
+            "reason": "Issue 代码中用于保存图像以观察效果。"
+        },
+        {
+            "name": "mdates.AutoDateFormatter",
+            "kind": "class",
+            "source_path": "",
+            "reason": "相关测试中用于格式化日期，并接受 usetex 参数。"
+        },
+        {
+            "name": "mdates.ConciseDateFormatter",
+            "kind": "class",
+            "source_path": "",
+            "reason": "相关测试中用于格式化日期，并接受 usetex 参数。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "lib/matplotlib/dates.py",
+            "object": "AutoDateFormatter 或 ConciseDateFormatter 相关方法",
+            "lines": "",
+            "reason": "Issue 涉及 datetime 轴的格式化，且相关测试表明这些格式化器在 usetex=True 时被测试。"
+        },
+        {
+            "path": "lib/matplotlib/axis.py",
+            "object": "Axis tick label 渲染相关方法",
+            "lines": "",
+            "reason": "间距问题可能与 tick label 的布局和渲染逻辑有关，尤其是在 TeX 模式下。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_date_formatter_usetex",
+            "test_file": "lib/matplotlib/tests/test_dates.py",
+            "why_relevant": "直接测试了 AutoDateFormatter 在 usetex=True 时的行为，涉及日期格式化和 TeX 渲染。",
+            "reusable_parts": ["imports (datetime, mdates)", "使用 usetex=True 创建格式化器", "assert 风格"],
+            "possible_gap": "该测试只验证了格式化后的字符串内容，没有验证渲染后的视觉间距（spacing）。"
+        },
+        {
+            "test_name": "test_concise_formatter_usetex",
+            "test_file": "lib/matplotlib/tests/test_dates.py",
+            "why_relevant": "测试了 ConciseDateFormatter 在 usetex=True 时的行为，同样涉及日期和 TeX。",
+            "reusable_parts": ["imports (datetime, mdates)", "使用 usetex=True 创建格式化器", "assert 风格"],
+            "possible_gap": "同样只验证字符串内容，不涉及图形渲染和视觉输出。"
+        },
+        {
+            "test_name": "test_usetex",
+            "test_file": "lib/matplotlib/tests/test_usetex.py",
+            "why_relevant": "测试了 usetex=True 时的文本渲染，使用了 image_comparison 进行视觉比较。",
+            "reusable_parts": ["设置 rcParams['text.usetex'] = True", "使用 plt.subplots", "image_comparison 装饰器"],
+            "possible_gap": "该测试使用静态文本，不涉及 datetime 轴。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "config",
+            "current_pattern": "相关测试中直接设置 usetex=True 作为参数传递给格式化器。",
+            "target_pattern": "通过 matplotlib.rcParams['text.usetex'] = True 全局设置，并创建包含 datetime 轴的图形。",
+            "reason": "Issue 的触发方式是通过全局 rcParams 设置，并涉及图形渲染，而不仅仅是格式化器单元测试。",
+            "confidence": "high"
+        },
+        {
+            "slot": "input",
+            "current_pattern": "相关测试中使用 datetime.timedelta 创建日期范围，并直接调用格式化器。",
+            "target_pattern": "使用 pandas.date_range 创建 datetime 数据，并通过 ax.plot 绘制。",
+            "reason": "Issue 的复现代码使用了 pandas 日期范围和绘图 API，这可能涉及不同的代码路径。",
+            "confidence": "medium"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "file_output",
+            "expression_hint": "保存的图像文件（如 PNG），或渲染后的图形 canvas 状态。",
+            "reason": "Issue 的核心是视觉间距问题，需要通过观察渲染输出才能判断。"
+        },
+        {
+            "kind": "state",
+            "expression_hint": "坐标轴 tick label 的位置、边界框（bbox）或布局信息。",
+            "reason": "间距问题可能反映在 tick label 的布局数据上。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "验证使用 usetex=True 时，datetime 轴的 tick label 布局（如位置、间距）与某个基线（如 3.3 版本行为）一致或可接受。",
+            "preferred_assertion_style": "before_after_relation",
+            "avoid": "直接断言完整的图像像素或完整的布局坐标数值，因为这些可能因环境而异。",
+            "reason": "Issue 是关于视觉间距的退化，断言应关注布局属性（如间距、重叠）的相对关系或阈值比较。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要设置 matplotlib 后端为非交互式（如 'Agg'）以进行图像保存和比较。",
+            "source": "inference",
+            "confidence": "high"
+        },
+        {
+            "hint": "可能需要使用 image_comparison 装饰器或类似的基线图像比较机制。",
+            "source": "retrieved_test",
+            "confidence": "medium"
+        },
+        {
+            "hint": "需要安装或模拟 LaTeX 环境，因为 usetex=True 依赖外部 TeX 系统。",
+            "source": "inference",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "导致间距不清晰的具体原因是什么（例如，标签宽度计算错误、TeX 渲染引擎交互问题、布局算法变更）？",
+        "是否所有 datetime 轴类型（如 AutoDateFormatter, ConciseDateFormatter）都受影响？",
+        "除了间距，是否还有其他视觉属性（如对齐、字体）也发生了变化？",
+        "修复后的具体正确行为（如精确的间距数值）是什么？"
+    ]
+}
+```

@@ -1,0 +1,154 @@
+```json
+{
+    "issue_summary": "使用多个 FilteredRelation 对同一关系应用不同过滤器时，只有第一个 JOIN 被生成，其他被忽略。",
+    "trigger_condition": {
+        "text": "在 QuerySet.alias() 或 annotate() 中，对同一关系路径（如 'myrelation__nested'）创建多个 FilteredRelation 对象，每个对象使用不同的 Q 条件。",
+        "evidence": ["Issue 中用户代码：qs.alias(relation_zone=FilteredRelation('myrelation__nested', condition=Q(...)), relation_all=FilteredRelation('myrelation__nested', condition=Q(...)))", "Issue 描述：'when using multiple FilteredRelation with the same relation (myrelation__nested) it actually just generates a single SQL JOIN'"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "生成的 SQL 查询只包含一个 JOIN 子句（对应第一个 FilteredRelation），后续对同一关系的 FilteredRelation 被忽略，导致后续字段引用（如 F('relation_all__price')）可能为 NULL 或引用错误数据。",
+        "symptom_type": "wrong_sql",
+        "evidence": ["Issue 中用户描述：'if inspecting the raw SQL) and ignores the other. So in this case if I do print(str(qs.query)) I would only see a join for relation_zone. Not for relation_all.'"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "每个 FilteredRelation 应生成独立的 JOIN 子句（或等效的 SQL 结构），使得不同条件能独立过滤同一关系，从而在后续 Case/When 或字段引用中正确区分。",
+        "evidence": ["Issue 中用户意图：'to ensure that it use the zone level one (if exist) and fall back on \"All\" if zone do not exist.' 这需要两个独立的 JOIN 逻辑。", "相关测试 2 展示了为不同关系（'reservation' 和 'rental_session'）使用 FilteredRelation 并期望独立工作。"],
+        "confidence": "medium"
+    },
+    "target_apis": [
+        {
+            "name": "FilteredRelation",
+            "kind": "class",
+            "source_path": "django/db/models/query_utils.py",
+            "reason": "Issue 直接关于 FilteredRelation 类的使用和潜在缺陷。"
+        },
+        {
+            "name": "QuerySet.alias",
+            "kind": "method",
+            "source_path": "django/db/models/query.py",
+            "reason": "Issue 中触发场景使用了 alias() 方法添加 FilteredRelation。"
+        },
+        {
+            "name": "Case",
+            "kind": "class",
+            "source_path": "django/db/models/expressions.py",
+            "reason": "Issue 中用户试图结合 FilteredRelation 和 Case/When 实现条件逻辑。"
+        },
+        {
+            "name": "When",
+            "kind": "class",
+            "source_path": "django/db/models/expressions.py",
+            "reason": "与 Case 一起使用，依赖 FilteredRelation 产生的字段。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/db/models/query_utils.py",
+            "object": "FilteredRelation",
+            "lines": "301-340",
+            "reason": "FilteredRelation 负责生成 JOIN 的 ON 子句，多个同名关系可能被错误地合并或去重。"
+        },
+        {
+            "path": "django/db/models/sql/query.py",
+            "object": "Query",
+            "lines": "",
+            "reason": "Query 类负责构建最终的 SQL，可能在对 JOIN 或别名进行去重时，错误地将基于同一关系路径的 FilteredRelation 视为重复。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "FilteredRelationTests.test_select_related_multiple",
+            "test_file": "tests/filtered_relation/tests.py",
+            "why_relevant": "测试了在同一 QuerySet 中使用多个 FilteredRelation（虽然针对不同关系 'author' 和 'editor'）。",
+            "reusable_parts": ["FilteredRelation 的基本使用模式", "annotate() 与 select_related() 的组合", "assertQuerysetEqual 断言风格"],
+            "possible_gap": "测试中的 FilteredRelation 针对的是不同的关系路径，没有测试对同一关系路径使用多个 FilteredRelation。"
+        },
+        {
+            "test_name": "FilteredRelationAggregationTests.test_aggregate",
+            "test_file": "tests/filtered_relation/tests.py",
+            "why_relevant": "测试了在同一 QuerySet 中使用多个 FilteredRelation（针对不同关系 'reservation' 和 'rental_session'）并验证聚合结果。",
+            "reusable_parts": ["使用 FilteredRelation 与 Q 条件", "多个 .annotate() 调用", "结合 filter() 和 distinct()", "使用 assertSequenceEqual 验证值"],
+            "possible_gap": "同样，FilteredRelation 应用于不同关系，没有测试同一关系路径。"
+        },
+        {
+            "test_name": "FilteredRelationTests.test_nested_chained_relations",
+            "test_file": "tests/filtered_relation/tests.py",
+            "why_relevant": "测试了嵌套关系和链式关系在 FilteredRelation 中的使用，涉及较复杂的关系路径。",
+            "reusable_parts": ["嵌套关系路径（如 'my_books__preferred_by_authors'）的使用", "在 annotate() 后使用 F() 引用别名字段", "order_by() 和断言"],
+            "possible_gap": "没有对同一基础关系路径（如 'book'）创建多个具有不同条件的 FilteredRelation。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "input",
+            "current_pattern": "相关测试中对不同关系路径使用 FilteredRelation（例如 'author' 和 'editor'，或 'reservation' 和 'rental_session'）。",
+            "target_pattern": "对同一关系路径（如 'myrelation__nested' 或 'book'）创建多个 FilteredRelation，每个使用不同的 Q 条件。",
+            "reason": "Issue 表明缺陷仅在多个 FilteredRelation 指向同一关系路径时触发。",
+            "confidence": "high"
+        },
+        {
+            "slot": "call_chain",
+            "current_pattern": "在 .annotate() 中直接使用 FilteredRelation，或通过 .alias() 间接使用。",
+            "target_pattern": "使用 .alias() 定义多个 FilteredRelation 别名，然后在后续 .annotate() 中通过 F() 引用这些别名字段，并结合 Case/When。",
+            "reason": "Issue 中的使用模式是 .alias() 后接 .annotate() 和 Case/When，这可能是触发特定代码路径的条件。",
+            "confidence": "medium"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "sql",
+            "expression_hint": "str(qs.query) 或 qs.query.sql_with_params()",
+            "reason": "Issue 中通过检查原始 SQL 发现 JOIN 缺失，这是最直接的错误现象。"
+        },
+        {
+            "kind": "return_value",
+            "expression_hint": "qs.values('price_zone', 'price_final', 'relation_all__price') 或遍历 qs 检查相关字段值",
+            "reason": "可以验证由于 JOIN 缺失，'relation_all__price' 是否始终为 NULL 或引用错误数据，导致 Case/When 逻辑失效。"
+        },
+        {
+            "kind": "state",
+            "expression_hint": "qs.query.alias_map 或 qs.query.join_map 在构建过程中的状态",
+            "reason": "可以观察 Query 对象内部是否正确地创建了多个别名或 JOIN 条目。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "生成的 SQL 应包含多个 JOIN 子句（或等效结构），分别对应每个 FilteredRelation 的条件。",
+            "preferred_assertion_style": "contains_fragment",
+            "avoid": "完整的 SQL 字符串相等断言，因为表名、别名可能动态生成。",
+            "reason": "Issue 的核心是 SQL 结构错误，检查 JOIN 关键词和 ON 条件片段的出现次数更稳定。"
+        },
+        {
+            "assertion_goal": "当数据满足不同 FilteredRelation 条件时，通过 Case/When 计算出的字段值应符合预期（例如，优先使用 zone 级别的 price，不存在时回退到 all 级别的 price）。",
+            "preferred_assertion_style": "equals",
+            "avoid": "仅断言查询集非空或计数，这无法验证 JOIN 逻辑的正确性。",
+            "reason": "这直接验证了用户用例的功能正确性，而不仅仅是 SQL 结构。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要 Django TestCase 和数据库支持，可能涉及定义具有嵌套关系的模型（如 MyModel -> MyRelation -> Nested），并在 Nested 中设置 is_all 和 zone 字段。",
+            "source": "issue",
+            "confidence": "high"
+        },
+        {
+            "hint": "测试数据需要创建满足不同 FilteredRelation 条件的记录（例如，一条 is_all=True 的 Nested 记录，一条 zone 匹配的 Nested 记录）。",
+            "source": "issue",
+            "confidence": "high"
+        },
+        {
+            "hint": "可以参考 tests/filtered_relation/tests.py 中的现有测试类（如 FilteredRelationTests）和其 setUp 方法中的模型定义和数据创建模式。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "缺陷的确切位置是在 FilteredRelation 的 resolve_expression/as_sql 中，还是在 Query 构建 JOIN 的更高层逻辑中。",
+        "当多个 FilteredRelation 条件部分重叠时，预期的 SQL 行为是什么（例如，是否应生成多个 LEFT JOIN 还是其他结构）。",
+        "除了 .alias()，在 .annotate() 中直接使用多个 FilteredRelation 是否也会触发同样的问题。",
+        "这是否是设计上的限制（但 Issue 提问者质疑了这一点）。"
+    ]
+}
+```

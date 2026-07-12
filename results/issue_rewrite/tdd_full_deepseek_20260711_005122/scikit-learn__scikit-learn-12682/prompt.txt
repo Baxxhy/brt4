@@ -1,0 +1,460 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+`SparseCoder` doesn't expose `max_iter` for `Lasso`
+`SparseCoder` uses `Lasso` if the algorithm is set to `lasso_cd`. It sets some of the `Lasso`'s parameters, but not `max_iter`, and that by default is 1000. This results in a warning in `examples/decomposition/plot_sparse_coding.py` complaining that the estimator has not converged.
+
+I guess there should be a way for the user to specify other parameters of the estimator used in `SparseCoder` other than the ones provided in the `SparseCoder.__init__` right now.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sklearn/decomposition/dict_learning.py
+对象名称：SparseCoder
+节点类型：class
+父节点：dict_learning
+行号范围：916-1019
+代码：
+class SparseCoder(BaseEstimator, SparseCodingMixin):
+    """Sparse coding
+
+    Finds a sparse representation of data against a fixed, precomputed
+    dictionary.
+
+    Each row of the result is the solution to a sparse coding problem.
+    The goal is to find a sparse array `code` such that::
+
+        X ~= code * dictionary
+
+    Read more in the :ref:`User Guide <SparseCoder>`.
+
+    Parameters
+    ----------
+    dictionary : array, [n_components, n_features]
+        The dictionary atoms used for sparse coding. Lines are assumed to be
+        normalized to unit norm.
+
+    transform_algorithm : {'lasso_lars', 'lasso_cd', 'lars', 'omp', \
+    'threshold'}
+        Algorithm used to transform the data:
+        lars: uses the least angle regression method (linear_model.lars_path)
+        lasso_lars: uses Lars to compute the Lasso solution
+        lasso_cd: uses the coordinate descent method to compute the
+        Lasso solution (linear_model.Lasso). lasso_lars will be faster if
+        the estimated components are sparse.
+        omp: uses orthogonal matching pursuit to estimate the sparse solution
+        threshold: squashes to zero all coefficients less than alpha from
+        the projection ``dictionary * X'``
+
+    transform_n_nonzero_coefs : int, ``0.1 * n_features`` by default
+        Number of nonzero coefficients to target in each column of the
+        solution. This is only used by `algorithm='lars'` and `algorithm='omp'`
+        and is overridden by `alpha` in the `omp` case.
+
+    transform_alpha : float, 1. by default
+        If `algorithm='lasso_lars'` or `algorithm='lasso_cd'`, `alpha` is the
+        penalty applied to the L1 norm.
+        If `algorithm='threshold'`, `alpha` is the absolute value of the
+        threshold below which coefficients will be squashed to zero.
+        If `algorithm='omp'`, `alpha` is the tolerance parameter: the value of
+        the reconstruction error targeted. In this case, it overrides
+        `n_nonzero_coefs`.
+
+    split_sign : bool, False by default
+        Whether to split the sparse feature vector into the concatenation of
+        its negative part and its positive part. This can improve the
+        performance of downstream classifiers.
+
+    n_jobs : int or None, optional (default=None)
+        Number of parallel jobs to run.
+        ``None`` means 1 unless in a :obj:`joblib.parallel_backend` context.
+        ``-1`` means using all processors. See :term:`Glossary <n_jobs>`
+        for more details.
+
+    positive_code : bool
+        Whether to enforce positivity when finding the code.
+
+        .. versionadded:: 0.20
+
+    Attributes
+    ----------
+    components_ : array, [n_components, n_features]
+        The unchanged dictionary atoms
+
+    See also
+    --------
+    DictionaryLearning
+    MiniBatchDictionaryLearning
+    SparsePCA
+    MiniBatchSparsePCA
+    sparse_encode
+    _required_parameters = ["dictionary"]
+    def __init__(self, dictionary, transform_algorithm='omp',
+                 transform_n_nonzero_coefs=None, transform_alpha=None,
+                 split_sign=False, n_jobs=None, positive_code=False):
+    def fit(self, X, y=None):
+
+
+【源码片段 2】
+文件路径：sklearn/decomposition/dict_learning.py
+对象名称：__init__
+节点类型：class_function
+父节点：SparseCoder
+行号范围：992-1000
+代码：
+    def __init__(self, dictionary, transform_algorithm='omp',
+                 transform_n_nonzero_coefs=None, transform_alpha=None,
+                 split_sign=False, n_jobs=None, positive_code=False):
+        self._set_sparse_coding_params(dictionary.shape[0],
+                                       transform_algorithm,
+                                       transform_n_nonzero_coefs,
+                                       transform_alpha, split_sign, n_jobs,
+                                       positive_code)
+        self.components_ = dictionary
+
+
+【源码片段 3】
+文件路径：sklearn/linear_model/coordinate_descent.py
+对象名称：Lasso
+节点类型：class
+父节点：coordinate_descent
+行号范围：799-927
+代码：
+class Lasso(ElasticNet):
+    """Linear Model trained with L1 prior as regularizer (aka the Lasso)
+
+    The optimization objective for Lasso is::
+
+        (1 / (2 * n_samples)) * ||y - Xw||^2_2 + alpha * ||w||_1
+
+    Technically the Lasso model is optimizing the same objective function as
+    the Elastic Net with ``l1_ratio=1.0`` (no L2 penalty).
+
+    Read more in the :ref:`User Guide <lasso>`.
+
+    Parameters
+    ----------
+    alpha : float, optional
+        Constant that multiplies the L1 term. Defaults to 1.0.
+        ``alpha = 0`` is equivalent to an ordinary least square, solved
+        by the :class:`LinearRegression` object. For numerical
+        reasons, using ``alpha = 0`` with the ``Lasso`` object is not advised.
+        Given this, you should use the :class:`LinearRegression` object.
+
+    fit_intercept : boolean, optional, default True
+        Whether to calculate the intercept for this model. If set
+        to False, no intercept will be used in calculations
+        (e.g. data is expected to be already centered).
+
+    normalize : boolean, optional, default False
+        This parameter is ignored when ``fit_intercept`` is set to False.
+        If True, the regressors X will be normalized before regression by
+        subtracting the mean and dividing by the l2-norm.
+        If you wish to standardize, please use
+        :class:`sklearn.preprocessing.StandardScaler` before calling ``fit``
+        on an estimator with ``normalize=False``.
+
+    precompute : True | False | array-like, default=False
+        Whether to use a precomputed Gram matrix to speed up
+        calculations. If set to ``'auto'`` let us decide. The Gram
+        matrix can also be passed as argument. For sparse input
+        this option is always ``True`` to preserve sparsity.
+
+    copy_X : boolean, optional, default True
+        If ``True``, X will be copied; else, it may be overwritten.
+
+    max_iter : int, optional
+        The maximum number of iterations
+
+    tol : float, optional
+        The tolerance for the optimization: if the updates are
+        smaller than ``tol``, the optimization code checks the
+        dual gap for optimality and continues until it is smaller
+        than ``tol``.
+
+    warm_start : bool, optional
+        When set to True, reuse the solution of the previous call to fit as
+        initialization, otherwise, just erase the previous solution.
+        See :term:`the Glossary <warm_start>`.
+
+    positive : bool, optional
+        When set to ``True``, forces the coefficients to be positive.
+
+    random_state : int, RandomState instance or None, optional, default None
+        The seed of the pseudo random number generator that selects a random
+        feature to update.  If int, random_state is the seed used by the random
+        number generator; If RandomState instance, random_state is the random
+        number generator; If None, the random number generator is the
+        RandomState instance used by `np.random`. Used when ``selection`` ==
+        'random'.
+
+    selection : str, default 'cyclic'
+        If set to 'random', a random coefficient is updated every iteration
+        rather than looping over features sequentially by default. This
+        (setting to 'random') often leads to significantly faster convergence
+        especially when tol is higher than 1e-4.
+
+    Attributes
+    ----------
+    coef_ : array, shape (n_features,) | (n_targets, n_features)
+        parameter vector (w in the cost function formula)
+
+    sparse_coef_ : scipy.sparse matrix, shape (n_features, 1) | \
+            (n_targets, n_features)
+        ``sparse_coef_`` is a readonly property derived from ``coef_``
+
+    intercept_ : float | array, shape (n_targets,)
+        independent term in decision function.
+
+    n_iter_ : int | array-like, shape (n_targets,)
+        number of iterations run by the coordinate descent solver to reach
+        the specified tolerance.
+
+    Examples
+    --------
+    >>> from sklearn import linear_model
+    >>> clf = linear_model.Lasso(alpha=0.1)
+    >>> clf.fit([[0,0], [1, 1], [2, 2]], [0, 1, 2])
+    Lasso(alpha=0.1)
+    >>> print(clf.coef_)
+    [0.85 0.  ]
+    >>> print(clf.intercept_)
+    0.15...
+
+    See also
+    --------
+    lars_path
+    lasso_path
+    LassoLars
+    LassoCV
+    LassoLarsCV
+    sklearn.decomposition.sparse_encode
+
+    Notes
+    -----
+    The algorithm used to fit the model is coordinate descent.
+
+    To avoid unnecessary memory duplication the X argument of the fit method
+    should be directly passed as a Fortran-contiguous numpy array.
+    path = staticmethod(enet_path)
+    def __init__(self, alpha=1.0, fit_intercept=True, normalize=False,
+                 precompute=False, copy_X=True, max_iter=1000,
+                 tol=1e-4, warm_start=False, positive=False,
+                 random_state=None, selection='cyclic'):
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sklearn/decomposition/tests/test_dict_learning.py
+测试名称：test_sparse_coder_estimator
+测试代码：
+def test_sparse_coder_estimator():
+    n_components = 12
+    rng = np.random.RandomState(0)
+    V = rng.randn(n_components, n_features)  # random init
+    V /= np.sum(V ** 2, axis=1)[:, np.newaxis]
+    code = SparseCoder(dictionary=V, transform_algorithm='lasso_lars',
+                       transform_alpha=0.001).transform(X)
+    assert not np.all(code == 0)
+    assert_less(np.sqrt(np.sum((np.dot(code, V) - X) ** 2)), 0.1)
+
+【相关测试 2】
+测试文件：sklearn/decomposition/tests/test_dict_learning.py
+测试名称：test_sparse_coder_parallel_mmap
+测试代码：
+def test_sparse_coder_parallel_mmap():
+    # Non-regression test for:
+    # https://github.com/scikit-learn/scikit-learn/issues/5956
+    # Test that SparseCoder does not error by passing reading only
+    # arrays to child processes
+
+    rng = np.random.RandomState(777)
+    n_components, n_features = 40, 64
+    init_dict = rng.rand(n_components, n_features)
+    # Ensure that `data` is >2M. Joblib memory maps arrays
+    # if they are larger than 1MB. The 4 accounts for float32
+    # data type
+    n_samples = int(2e6) // (4 * n_features)
+    data = np.random.rand(n_samples, n_features).astype(np.float32)
+
+    sc = SparseCoder(init_dict, transform_algorithm='omp', n_jobs=2)
+    sc.fit_transform(data)
+
+【相关测试 3】
+测试文件：sklearn/linear_model/tests/test_coordinate_descent.py
+测试名称：test_convergence_warnings
+测试代码：
+def test_convergence_warnings():
+    random_state = np.random.RandomState(0)
+    X = random_state.standard_normal((1000, 500))
+    y = random_state.standard_normal((1000, 3))
+
+    # check that the model fails to converge
+    with pytest.warns(ConvergenceWarning):
+        MultiTaskElasticNet(max_iter=1, tol=0).fit(X, y)
+
+    # check that the model converges w/o warnings
+    with pytest.warns(None) as record:
+        MultiTaskElasticNet(max_iter=1000).fit(X, y)
+
+    assert not record.list
+
+【相关测试 4】
+测试文件：sklearn/linear_model/tests/test_coordinate_descent.py
+测试名称：test_sparse_input_convergence_warning
+测试代码：
+def test_sparse_input_convergence_warning():
+    X, y, _, _ = build_dataset(n_samples=1000, n_features=500)
+
+    with pytest.warns(ConvergenceWarning):
+        ElasticNet(max_iter=1, tol=0).fit(
+            sparse.csr_matrix(X, dtype=np.float32), y)
+
+    # check that the model converges w/o warnings
+    with pytest.warns(None) as record:
+        Lasso(max_iter=1000).fit(sparse.csr_matrix(X, dtype=np.float32), y)
+
+    assert not record.list
+
+【相关测试 5】
+测试文件：sklearn/linear_model/tests/test_logistic.py
+测试名称：test_max_iter
+测试代码：
+def test_max_iter():
+    # Test that the maximum number of iteration is reached
+    X, y_bin = iris.data, iris.target.copy()
+    y_bin[y_bin == 2] = 0
+
+    solvers = ['newton-cg', 'liblinear', 'sag', 'saga', 'lbfgs']
+
+    for max_iter in range(1, 5):
+        for solver in solvers:
+            for multi_class in ['ovr', 'multinomial']:
+                if solver == 'liblinear' and multi_class == 'multinomial':
+                    continue
+                lr = LogisticRegression(max_iter=max_iter, tol=1e-15,
+                                        multi_class=multi_class,
+                                        random_state=0, solver=solver)
+                assert_warns(ConvergenceWarning, lr.fit, X, y_bin)
+                assert_equal(lr.n_iter_[0], max_iter)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

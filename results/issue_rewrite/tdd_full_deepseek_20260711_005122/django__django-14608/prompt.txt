@@ -1,0 +1,306 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Add `nonform` CSS class for non form errors in FormSets
+Description
+	 
+		(last modified by Ties Jan Hefting)
+	 
+Forms add the nonfield CSS class for non field errors in ErrorList instances. This is documented in a section on ​rendering form error messages. Similarly, in FormSets I'd expect to see the nonform CSS class added for non form errors. This would allow a custom ErrorList to make a distinction in form field errors, non field errors (forms) and non form errors (FormSets) when rendering error messages. Therefore I'd suggest to add this nonform CSS class and document it for developers to use.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/contrib/admin/helpers.py
+对象名称：non_form_errors
+节点类型：class_function
+父节点：InlineAdminFormSet
+行号范围：348-349
+代码：
+    def non_form_errors(self):
+        return self.formset.non_form_errors
+
+
+【源码片段 2】
+文件路径：django/forms/utils.py
+对象名称：ErrorList
+节点类型：class
+父节点：utils
+行号范围：80-151
+代码：
+class ErrorList(UserList, list):
+    """
+    A collection of errors that knows how to display itself in various formats.
+    """
+    def __init__(self, initlist=None, error_class=None):
+    def as_data(self):
+    def copy(self):
+    def get_json_data(self, escape_html=False):
+    def as_json(self, escape_html=False):
+    def as_ul(self):
+    def as_text(self):
+    def __str__(self):
+    def __repr__(self):
+    def __contains__(self, item):
+    def __eq__(self, other):
+    def __getitem__(self, i):
+    def __reduce_ex__(self, *args, **kwargs):
+
+
+【源码片段 3】
+文件路径：django/forms/utils.py
+对象名称：__contains__
+节点类型：class_function
+父节点：ErrorList
+行号范围：132-133
+代码：
+    def __contains__(self, item):
+        return item in list(self)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/forms_tests/tests/test_formsets.py
+测试名称：FormsFormsetTestCase.test_non_form_errors
+测试代码：
+class FormsFormsetTestCase(SimpleTestCase):
+    def test_non_form_errors(self):
+        data = {
+            'drinks-TOTAL_FORMS': '2',  # the number of forms rendered
+            'drinks-INITIAL_FORMS': '0',  # the number of forms with initial data
+            'drinks-MIN_NUM_FORMS': '0',  # min number of forms
+            'drinks-MAX_NUM_FORMS': '0',  # max number of forms
+            'drinks-0-name': 'Gin and Tonic',
+            'drinks-1-name': 'Gin and Tonic',
+        }
+        formset = FavoriteDrinksFormSet(data, prefix='drinks')
+        self.assertFalse(formset.is_valid())
+        self.assertEqual(formset.non_form_errors(), ['You may only specify a drink once.'])
+
+【相关测试 2】
+测试文件：tests/forms_tests/tests/test_forms.py
+测试名称：FormsTestCase.test_error_list_with_non_field_errors_has_correct_class
+测试代码：
+class FormsTestCase(SimpleTestCase):
+    def test_error_list_with_non_field_errors_has_correct_class(self):
+        class Person(Form):
+            first_name = CharField()
+            last_name = CharField()
+
+            def clean(self):
+                raise ValidationError('Generic validation error')
+
+        p = Person({'first_name': 'John', 'last_name': 'Lennon'})
+        self.assertHTMLEqual(
+            str(p.non_field_errors()),
+            '<ul class="errorlist nonfield"><li>Generic validation error</li></ul>'
+        )
+        self.assertHTMLEqual(
+            p.as_ul(),
+            """<li>
+<ul class="errorlist nonfield"><li>Generic validation error</li></ul></li>
+<li><label for="id_first_name">First name:</label>
+<input id="id_first_name" name="first_name" type="text" value="John" required></li>
+<li><label for="id_last_name">Last name:</label>
+<input id="id_last_name" name="last_name" type="text" value="Lennon" required></li>"""
+        )
+        self.assertHTMLEqual(
+            p.non_field_errors().as_text(),
+            '* Generic validation error'
+        )
+        self.assertHTMLEqual(
+            p.as_p(),
+            """<ul class="errorlist nonfield"><li>Generic validation error</li></ul>
+<p><label for="id_first_name">First name:</label>
+<input id="id_first_name" name="first_name" type="text" value="John" required></p>
+<p><label for="id_last_name">Last name:</label>
+<input id="id_last_name" name="last_name" type="text" value="Lennon" required></p>"""
+        )
+        self.assertHTMLEqual(
+            p.as_table(),
+            """<tr><td colspan="2"><ul class="errorlist nonfield"><li>Generic validation error</li></ul></td></tr>
+<tr><th><label for="id_first_name">First name:</label></th><td>
+<input id="id_first_name" name="first_name" type="text" value="John" required></td></tr>
+<tr><th><label for="id_last_name">Last name:</label></th><td>
+<input id="id_last_name" name="last_name" type="text" value="Lennon" required></td></tr>"""
+        )
+
+【相关测试 3】
+测试文件：tests/forms_tests/tests/test_formsets.py
+测试名称：FormsFormsetTestCase.test_non_form_errors_run_full_clean
+测试代码：
+class FormsFormsetTestCase(SimpleTestCase):
+    def test_non_form_errors_run_full_clean(self):
+        """
+        If non_form_errors() is called without calling is_valid() first,
+        it should ensure that full_clean() is called.
+        """
+        class BaseCustomFormSet(BaseFormSet):
+            def clean(self):
+                raise ValidationError("This is a non-form error")
+
+        ChoiceFormSet = formset_factory(Choice, formset=BaseCustomFormSet)
+        data = {
+            'choices-TOTAL_FORMS': '1',
+            'choices-INITIAL_FORMS': '0',
+        }
+        formset = ChoiceFormSet(data, auto_id=False, prefix='choices')
+        self.assertIsInstance(formset.non_form_errors(), ErrorList)
+        self.assertEqual(list(formset.non_form_errors()), ['This is a non-form error'])
+
+【相关测试 4】
+测试文件：tests/forms_tests/tests/test_formsets.py
+测试名称：FormsFormsetTestCase.test_formset_total_error_count_with_non_form_errors
+测试代码：
+class FormsFormsetTestCase(SimpleTestCase):
+    def test_formset_total_error_count_with_non_form_errors(self):
+        data = {
+            'choices-TOTAL_FORMS': '2',  # the number of forms rendered
+            'choices-INITIAL_FORMS': '0',  # the number of forms with initial data
+            'choices-MAX_NUM_FORMS': '2',  # max number of forms - should be ignored
+            'choices-0-choice': 'Zero',
+            'choices-0-votes': '0',
+            'choices-1-choice': 'One',
+            'choices-1-votes': '1',
+        }
+        ChoiceFormSet = formset_factory(Choice, extra=1, max_num=1, validate_max=True)
+        formset = ChoiceFormSet(data, auto_id=False, prefix='choices')
+        self.assertEqual(formset.total_error_count(), 1)
+        data['choices-1-votes'] = ''
+        formset = ChoiceFormSet(data, auto_id=False, prefix='choices')
+        self.assertEqual(formset.total_error_count(), 2)
+
+【相关测试 5】
+测试文件：tests/forms_tests/tests/test_formsets.py
+测试名称：FormsetAsTagTests.test_as_ul
+测试代码：
+class FormsetAsTagTests(SimpleTestCase):
+    def test_as_ul(self):
+        self.assertHTMLEqual(
+            self.formset.as_ul(),
+            self.management_form_html + (
+                '<li>Choice: <input type="text" name="choices-0-choice" value="Calexico"></li>'
+                '<li>Votes: <input type="number" name="choices-0-votes" value="100"></li>'
+            )
+        )
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

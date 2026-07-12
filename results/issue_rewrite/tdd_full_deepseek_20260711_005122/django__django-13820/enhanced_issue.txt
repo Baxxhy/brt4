@@ -1,0 +1,143 @@
+instance_id: django__django-13820
+
+issue_summary: MigrationLoader 错误地将没有 __file__ 属性的非命名空间包当作命名空间包处理，导致在冻结 Python 环境中无法加载迁移文件。
+
+trigger_condition:
+{
+  "text": "当 Django 应用运行在冻结的 Python 环境（如 PyInstaller、cx_Freeze）中，且该环境默认不设置包的 __file__ 属性时，尝试加载该应用的迁移。",
+  "evidence": [
+    "Issue 描述：\"frozen Python environments (such as those mentioned in #30950) that do not set __file__ on regular packages by default.\"",
+    "Issue 描述：\"The current implementation ... skips searching for migrations in a module m if getattr(m, '__file__', None) is false.\"",
+    "源码片段 2 第 85-86 行：if getattr(module, '__file__', None) is None: self.unmigrated_apps.add(app_config.label)"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "MigrationLoader.load_disk() 方法将没有 __file__ 属性的非命名空间包应用错误地添加到 unmigrated_apps 集合中，导致其迁移文件不被加载。",
+  "symptom_type": "state_not_updated",
+  "evidence": [
+    "Issue 描述：\"Django will learn how to find existing migrations.\" 暗示当前无法找到。",
+    "源码片段 2 第 85-86 行：当 __file__ 为 None 时，应用被添加到 unmigrated_apps。",
+    "相关测试 1 展示了命名空间包被忽略的行为，但 Issue 指出非命名空间包也被错误地忽略了。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "MigrationLoader 应该能够正确识别并加载那些没有 __file__ 属性但确实是普通包（即 __path__ 是 list 类型）的应用的迁移文件。",
+  "evidence": [
+    "Issue 描述：\"I propose to augment getattr(m, '__file__', None) with and isinstance(m.__path__, list).\"",
+    "Issue 描述：\"The only change for frozen environments is that Django will learn how to find existing migrations.\"",
+    "Python 文档引用：\"__file__ is optional.\" 和 \"Namespace packages do not use an ordinary list for their __path__ attribute.\""
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "django.db.migrations.loader.MigrationLoader.load_disk",
+    "kind": "method",
+    "source_path": "django/db/migrations/loader.py",
+    "reason": "这是加载磁盘迁移的核心方法，其中包含了对 __file__ 属性的检查逻辑。"
+  },
+  {
+    "name": "django.db.migrations.loader.MigrationLoader",
+    "kind": "class",
+    "source_path": "django/db/migrations/loader.py",
+    "reason": "Issue 的核心是关于 MigrationLoader 类的行为。"
+  },
+  {
+    "name": "import_module",
+    "kind": "function",
+    "source_path": "",
+    "reason": "用于导入迁移模块，其返回的模块对象属性（__file__, __path__）是检查的关键。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "相关测试中使用 override_settings 指向一个普通的、包含 __file__ 的迁移模块包。",
+    "target_pattern": "配置应指向一个在冻结环境中模拟的迁移模块，该模块被导入后，其 __file__ 属性为 None，但 __path__ 属性存在且是 list 类型（表明是普通包，非命名空间包）。",
+    "reason": "Issue 的触发条件是模块缺少 __file__ 但 __path__ 是 list。需要变异测试配置来模拟这种环境，以触发有缺陷的检查逻辑。",
+    "confidence": "high"
+  },
+  {
+    "slot": "mock",
+    "current_pattern": "测试直接导入真实的迁移模块。",
+    "target_pattern": "在导入迁移模块后，使用 mock 或猴子补丁将 module.__file__ 设置为 None，同时确保 module.__path__ 存在且是 list。",
+    "reason": "为了在测试中精确复现冻结环境的条件，需要控制导入模块的属性，模拟 __file__ 缺失但 __path__ 为普通列表的状态。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "state",
+    "expression_hint": "loader.unmigrated_apps",
+    "reason": "当前有缺陷的逻辑会将没有 __file__ 的普通包应用错误地添加到 unmigrated_apps。观测这个集合可以判断应用是否被错误地标记为“未迁移”。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "loader.disk_migrations",
+    "reason": "修复后，目标应用的迁移应该出现在 disk_migrations 中。观测这个字典可以验证迁移是否被成功加载。"
+  },
+  {
+    "kind": "type",
+    "expression_hint": "type(getattr(module, '__path__', None))",
+    "reason": "Issue 的核心区分标准是 __path__ 是否为 list 类型。观测这个类型可以确认测试是否成功模拟了非命名空间包的条件。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "对于没有 __file__ 但 __path__ 是 list 的迁移模块包，其应用标签不应出现在 loader.unmigrated_apps 中。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言完整的 unmigrated_apps 集合等于某个固定值，因为其他应用可能影响结果。",
+    "reason": "这直接对应 Issue 描述的错误：应用被错误地标记为未迁移。修复后，该应用应被正确处理，因此不应在 unmigrated_apps 中。"
+  },
+  {
+    "assertion_goal": "对于没有 __file__ 但 __path__ 是 list 的迁移模块包，其迁移应被成功加载到 loader.disk_migrations 中。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "断言 disk_migrations 的完整字典结构，只关注目标应用和迁移的存在性。",
+    "reason": "修复的最终目标是让迁移能够被找到和加载。断言迁移存在于 disk_migrations 中验证了功能的正确性。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 override_settings 来配置一个自定义的迁移模块路径。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要创建一个临时的 Python 包（目录）作为迁移模块，或者使用 sys.modules 技巧来模拟模块。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  },
+  {
+    "hint": "可能需要使用 unittest.mock 来修改已导入模块的 __file__ 属性。",
+    "source": "inference",
+    "confidence": "medium"
+  },
+  {
+    "hint": "测试类应继承自合适的 TestCase（如 django.test.TestCase 或 MigrationTestBase）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "如何在不实际使用 PyInstaller 等工具的情况下，在单元测试中稳定地模拟一个 __file__ 为 None 但 __path__ 为 list 的已导入模块对象。",
+  "除了 __file__ 和 __path__ 检查外，MigrationLoader.load_disk 中是否还有其他逻辑会阻止此类迁移的加载。",
+  "在真实的冻结环境中，迁移模块的 __path__ 是否总是 list 类型，或者是否有其他边缘情况。"
+]

@@ -1,0 +1,317 @@
+{
+  "instance_id": "matplotlib__matplotlib-26291",
+  "issue_summary": "使用 inset_axes 创建子图时，在特定条件下会因 renderer 为 None 而抛出 AttributeError。",
+  "trigger_condition": {
+    "text": "调用 inset_axes 创建子图后，尝试显示或保存图形（触发渲染流程）。",
+    "evidence": [
+      "Issue 中的复现代码：`axins = inset_axes(ax, width=1.3, height=0.9)` 后调用 `plt.show()`。",
+      "源码片段 1 显示 inset_axes 返回一个由 AnchoredSizeLocator 定位的轴对象。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "AttributeError: 'NoneType' object has no attribute '_get_renderer'。",
+    "symptom_type": "exception",
+    "evidence": [
+      "Issue 中的错误堆栈显示在 offsetbox.py 的 get_window_extent 方法中，`renderer = self.figure._get_renderer()` 因 self.figure 为 None 而失败。",
+      "堆栈跟踪指向 _tight_bbox.adjust_bbox 调用了 locator(ax, None)，其中 renderer 参数为 None。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "inset_axes 应能成功创建并定位子图，在图形渲染时不应因 renderer 缺失而崩溃。",
+    "evidence": [
+      "Issue 描述期望在第一个子图的右上角添加一个空框。",
+      "相关测试 1 和 2 展示了 inset_axes 在各种参数下能正常工作并绘制。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "inset_axes",
+      "kind": "function",
+      "source_path": "lib/mpl_toolkits/axes_grid1/inset_locator.py",
+      "reason": "Issue 直接报告调用此函数时出错。"
+    },
+    {
+      "name": "AnchoredLocatorBase.__call__",
+      "kind": "method",
+      "source_path": "lib/mpl_toolkits/axes_grid1/inset_locator.py",
+      "reason": "错误堆栈中显示此方法被调用，且其调用了 get_window_extent。"
+    },
+    {
+      "name": "OffsetBox.get_window_extent",
+      "kind": "method",
+      "source_path": "lib/matplotlib/offsetbox.py",
+      "reason": "错误直接发生在此方法中，它试图访问 self.figure._get_renderer()。"
+    },
+    {
+      "name": "_tight_bbox.adjust_bbox",
+      "kind": "function",
+      "source_path": "lib/matplotlib/_tight_bbox.py",
+      "reason": "堆栈显示此函数调用了 locator(ax, None)，触发了后续错误。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "lib/mpl_toolkits/axes_grid1/inset_locator.py",
+      "object": "AnchoredLocatorBase.__call__",
+      "lines": "71-77",
+      "reason": "此方法在 renderer 为 None 时被调用（来自 adjust_bbox），并调用了 get_window_extent(renderer)。"
+    },
+    {
+      "path": "lib/matplotlib/offsetbox.py",
+      "object": "OffsetBox.get_window_extent",
+      "lines": "395-404",
+      "reason": "此方法在 renderer 为 None 时尝试访问 self.figure，而 self.figure 可能为 None，导致 AttributeError。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_inset_axes_complete",
+      "test_file": "lib/mpl_toolkits/axes_grid1/tests/test_axes_grid1.py",
+      "why_relevant": "此测试直接调用了 inset_axes 并验证其位置，包含多种参数组合，且调用了 fig.canvas.draw() 触发渲染。",
+      "reusable_parts": [
+        "imports (plt, inset_axes)",
+        "fig, ax = plt.subplots(...) 设置",
+        "ins = inset_axes(...) 调用",
+        "fig.canvas.draw()",
+        "assert_array_almost_equal 断言风格"
+      ],
+      "possible_gap": "该测试在调用 draw 前显式设置了 fig.subplots_adjust，且可能没有模拟 Issue 中触发 _tight_bbox.adjust_bbox 的保存/显示场景。"
+    },
+    {
+      "test_name": "test_inset_axes",
+      "test_file": "lib/mpl_toolkits/axes_grid1/tests/test_axes_grid1.py",
+      "why_relevant": "此测试也调用了 inset_axes 并进行了图像比较，展示了典型用法。",
+      "reusable_parts": [
+        "imports",
+        "fig, ax = plt.subplots(...)",
+        "axins = inset_axes(...)",
+        "图像绘制和设置"
+      ],
+      "possible_gap": "这是一个图像比较测试，可能不直接触发 adjust_bbox 路径，且依赖于后端渲染。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "call_chain",
+      "current_pattern": "相似测试中通常先创建图形和轴，然后调用 inset_axes，最后可能调用 fig.canvas.draw() 或 fig.savefig()。",
+      "target_pattern": "在调用 inset_axes 后，不显式调整图形布局，直接尝试显示（plt.show()）或保存图形（fig.savefig()），这可能触发 _tight_bbox.adjust_bbox 路径。",
+      "reason": "Issue 中的错误发生在 plt.show() 过程中，堆栈显示 adjust_bbox 被调用，且传入了 None renderer。",
+      "confidence": "medium"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "测试可能使用默认后端或非交互式后端。",
+      "target_pattern": "使用 Issue 中提到的 'module://matplotlib_inline.backend_inline' 后端，或在保存图形时指定 bbox_inches='tight'。",
+      "reason": "Issue 发生在特定后端下，且 adjust_bbox 通常在保存图形并指定 bbox_inches 时被调用。",
+      "confidence": "low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "是否抛出 AttributeError 且错误信息包含 '_get_renderer'。",
+      "reason": "这是 Issue 中观察到的直接错误症状。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "inset_axes 返回对象的 .figure 属性在创建后和渲染前的状态。",
+      "reason": "错误源于 self.figure 为 None，观察其何时/为何被设置可能有助于定位问题。"
+    },
+    {
+      "kind": "call_chain",
+      "expression_hint": "_tight_bbox.adjust_bbox 是否被调用，以及调用时传入的 renderer 参数。",
+      "reason": "堆栈显示 adjust_bbox 调用了 locator(ax, None)，这是触发错误的起点。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "调用 inset_axes 并随后触发图形渲染（如 show 或 savefig）不应抛出 AttributeError。",
+      "preferred_assertion_style": "raises",
+      "avoid": "避免断言具体的图形输出像素或精确位置，除非与错误无关。",
+      "reason": "Issue 的核心是异常，因此断言不抛出特定异常是直接且稳定的验证方式。修复后，此断言应改为不抛出异常。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要创建图形和轴对象作为父轴，然后调用 inset_axes。",
+      "source": "issue|retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要模拟图形保存或显示操作以触发渲染路径。",
+      "source": "issue|inference",
+      "confidence": "medium"
+    },
+    {
+      "hint": "考虑使用 pytest 和 matplotlib.testing 的设施。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "导致 self.figure 为 None 的确切条件是什么？是 inset_axes 创建时未正确设置，还是在 adjust_bbox 调用链中某些步骤导致的？",
+    "是否所有后端或所有图形保存/显示操作都会触发此错误，还是仅特定配置？",
+    "修复后，inset_axes 返回对象的 .figure 属性应在何时被正确设置？"
+  ],
+  "raw": {
+    "issue_summary": "使用 inset_axes 创建子图时，在特定条件下会因 renderer 为 None 而抛出 AttributeError。",
+    "trigger_condition": {
+      "text": "调用 inset_axes 创建子图后，尝试显示或保存图形（触发渲染流程）。",
+      "evidence": [
+        "Issue 中的复现代码：`axins = inset_axes(ax, width=1.3, height=0.9)` 后调用 `plt.show()`。",
+        "源码片段 1 显示 inset_axes 返回一个由 AnchoredSizeLocator 定位的轴对象。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "AttributeError: 'NoneType' object has no attribute '_get_renderer'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈显示在 offsetbox.py 的 get_window_extent 方法中，`renderer = self.figure._get_renderer()` 因 self.figure 为 None 而失败。",
+        "堆栈跟踪指向 _tight_bbox.adjust_bbox 调用了 locator(ax, None)，其中 renderer 参数为 None。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "inset_axes 应能成功创建并定位子图，在图形渲染时不应因 renderer 缺失而崩溃。",
+      "evidence": [
+        "Issue 描述期望在第一个子图的右上角添加一个空框。",
+        "相关测试 1 和 2 展示了 inset_axes 在各种参数下能正常工作并绘制。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "inset_axes",
+        "kind": "function",
+        "source_path": "lib/mpl_toolkits/axes_grid1/inset_locator.py",
+        "reason": "Issue 直接报告调用此函数时出错。"
+      },
+      {
+        "name": "AnchoredLocatorBase.__call__",
+        "kind": "method",
+        "source_path": "lib/mpl_toolkits/axes_grid1/inset_locator.py",
+        "reason": "错误堆栈中显示此方法被调用，且其调用了 get_window_extent。"
+      },
+      {
+        "name": "OffsetBox.get_window_extent",
+        "kind": "method",
+        "source_path": "lib/matplotlib/offsetbox.py",
+        "reason": "错误直接发生在此方法中，它试图访问 self.figure._get_renderer()。"
+      },
+      {
+        "name": "_tight_bbox.adjust_bbox",
+        "kind": "function",
+        "source_path": "lib/matplotlib/_tight_bbox.py",
+        "reason": "堆栈显示此函数调用了 locator(ax, None)，触发了后续错误。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/mpl_toolkits/axes_grid1/inset_locator.py",
+        "object": "AnchoredLocatorBase.__call__",
+        "lines": "71-77",
+        "reason": "此方法在 renderer 为 None 时被调用（来自 adjust_bbox），并调用了 get_window_extent(renderer)。"
+      },
+      {
+        "path": "lib/matplotlib/offsetbox.py",
+        "object": "OffsetBox.get_window_extent",
+        "lines": "395-404",
+        "reason": "此方法在 renderer 为 None 时尝试访问 self.figure，而 self.figure 可能为 None，导致 AttributeError。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_inset_axes_complete",
+        "test_file": "lib/mpl_toolkits/axes_grid1/tests/test_axes_grid1.py",
+        "why_relevant": "此测试直接调用了 inset_axes 并验证其位置，包含多种参数组合，且调用了 fig.canvas.draw() 触发渲染。",
+        "reusable_parts": [
+          "imports (plt, inset_axes)",
+          "fig, ax = plt.subplots(...) 设置",
+          "ins = inset_axes(...) 调用",
+          "fig.canvas.draw()",
+          "assert_array_almost_equal 断言风格"
+        ],
+        "possible_gap": "该测试在调用 draw 前显式设置了 fig.subplots_adjust，且可能没有模拟 Issue 中触发 _tight_bbox.adjust_bbox 的保存/显示场景。"
+      },
+      {
+        "test_name": "test_inset_axes",
+        "test_file": "lib/mpl_toolkits/axes_grid1/tests/test_axes_grid1.py",
+        "why_relevant": "此测试也调用了 inset_axes 并进行了图像比较，展示了典型用法。",
+        "reusable_parts": [
+          "imports",
+          "fig, ax = plt.subplots(...)",
+          "axins = inset_axes(...)",
+          "图像绘制和设置"
+        ],
+        "possible_gap": "这是一个图像比较测试，可能不直接触发 adjust_bbox 路径，且依赖于后端渲染。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中通常先创建图形和轴，然后调用 inset_axes，最后可能调用 fig.canvas.draw() 或 fig.savefig()。",
+        "target_pattern": "在调用 inset_axes 后，不显式调整图形布局，直接尝试显示（plt.show()）或保存图形（fig.savefig()），这可能触发 _tight_bbox.adjust_bbox 路径。",
+        "reason": "Issue 中的错误发生在 plt.show() 过程中，堆栈显示 adjust_bbox 被调用，且传入了 None renderer。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试可能使用默认后端或非交互式后端。",
+        "target_pattern": "使用 Issue 中提到的 'module://matplotlib_inline.backend_inline' 后端，或在保存图形时指定 bbox_inches='tight'。",
+        "reason": "Issue 发生在特定后端下，且 adjust_bbox 通常在保存图形并指定 bbox_inches 时被调用。",
+        "confidence": "low"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "是否抛出 AttributeError 且错误信息包含 '_get_renderer'。",
+        "reason": "这是 Issue 中观察到的直接错误症状。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "inset_axes 返回对象的 .figure 属性在创建后和渲染前的状态。",
+        "reason": "错误源于 self.figure 为 None，观察其何时/为何被设置可能有助于定位问题。"
+      },
+      {
+        "kind": "call_chain",
+        "expression_hint": "_tight_bbox.adjust_bbox 是否被调用，以及调用时传入的 renderer 参数。",
+        "reason": "堆栈显示 adjust_bbox 调用了 locator(ax, None)，这是触发错误的起点。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "调用 inset_axes 并随后触发图形渲染（如 show 或 savefig）不应抛出 AttributeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言具体的图形输出像素或精确位置，除非与错误无关。",
+        "reason": "Issue 的核心是异常，因此断言不抛出特定异常是直接且稳定的验证方式。修复后，此断言应改为不抛出异常。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要创建图形和轴对象作为父轴，然后调用 inset_axes。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟图形保存或显示操作以触发渲染路径。",
+        "source": "issue|inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "考虑使用 pytest 和 matplotlib.testing 的设施。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "导致 self.figure 为 None 的确切条件是什么？是 inset_axes 创建时未正确设置，还是在 adjust_bbox 调用链中某些步骤导致的？",
+      "是否所有后端或所有图形保存/显示操作都会触发此错误，还是仅特定配置？",
+      "修复后，inset_axes 返回对象的 .figure 属性应在何时被正确设置？"
+    ]
+  }
+}

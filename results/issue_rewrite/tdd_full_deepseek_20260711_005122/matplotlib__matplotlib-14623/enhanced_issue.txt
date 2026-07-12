@@ -1,0 +1,126 @@
+instance_id: matplotlib__matplotlib-14623
+
+issue_summary: 在 matplotlib 3.1.0 中，对数坐标轴无法通过设置上下限来反转方向。
+
+trigger_condition:
+{
+  "text": "先设置 y 轴为对数刻度，然后调用 set_ylim 并传入一个递减的区间（例如 (max, min)）。",
+  "evidence": [
+    "Issue 中的代码：`ax.set_yscale('log')` 后跟 `ax.set_ylim(y.max(), y.min())`。",
+    "源码片段 2 的文档说明：`The *bottom* value may be greater than the *top* value, in which case the y-axis values will decrease from *bottom* to *top*.`"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "y 轴方向未反转，保持为正常（递增）方向。",
+  "symptom_type": "state_not_updated",
+  "evidence": [
+    "Issue 描述：`The yaxis is only inverted for the \"linear\" scale.`",
+    "Issue 中的图片对比显示对数刻度轴未反转。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "无论坐标轴是线性刻度还是对数刻度，当 set_ylim 的 bottom 参数大于 top 参数时，y 轴都应被反转。",
+  "evidence": [
+    "Issue 中的期望：`I would expect the yaxis to be inverted for both the \"linear\" and the \"log\" scale.`",
+    "源码片段 2 的文档说明支持反转语义。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "matplotlib.axes.Axes.set_yscale",
+    "kind": "method",
+    "source_path": "lib/matplotlib/axes/_base.py",
+    "reason": "用于设置 y 轴为对数刻度，是触发条件的一部分。"
+  },
+  {
+    "name": "matplotlib.axes.Axes.set_ylim",
+    "kind": "method",
+    "source_path": "lib/matplotlib/axes/_base.py",
+    "reason": "用于设置 y 轴上下限，当传入递减区间时预期应反转轴，是缺陷的核心 API。"
+  },
+  {
+    "name": "matplotlib.axes.Axes.get_ylim",
+    "kind": "method",
+    "source_path": "",
+    "reason": "用于在测试中断言轴的实际限制和方向。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "相似测试 `test_inverted_limits` 使用 `ax.invert_yaxis()` 来反转轴。",
+    "target_pattern": "不使用 `invert_yaxis()`，而是在设置对数刻度后，使用 `ax.set_ylim(bottom, top)` 并传入递减区间（例如 `(max_val, min_val)`）。",
+    "reason": "Issue 表明通过 `set_ylim` 反转在对数刻度下失效，而 `invert_yaxis()` 可能工作正常。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "相似测试 `test_log_scales` 在设置对数刻度后调用 `invert_yaxis()`。",
+    "target_pattern": "保持对数刻度配置，但将反转操作替换为 `set_ylim` 调用。",
+    "reason": "为了隔离缺陷触发路径：通过 `set_ylim` 反转对数轴。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "`ax.get_ylim()` 的返回值（一个元组）。",
+    "reason": "Issue 的核心是轴限制的顺序。如果轴被反转，`get_ylim()` 应返回 `(max, min)`；如果未反转，则返回 `(min, max)`。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "`ax.yaxis_inverted()` 的返回值（布尔值）。",
+    "reason": "这是轴反转状态的直接查询方法，应与 `get_ylim()` 的顺序一致。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "在对数刻度下，当通过 `set_ylim` 设置递减区间后，y 轴的限制顺序应为递减的（即 `(max, min)`）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言精确的浮点数值，因为数据可能不同。应断言顺序关系。",
+    "reason": "Issue 的预期是轴被反转，这直接体现在限制的顺序上。"
+  },
+  {
+    "assertion_goal": "在对数刻度下，`ax.yaxis_inverted()` 在通过 `set_ylim` 设置递减区间后应返回 True。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免仅依赖图像比较或内部状态的非公开属性。",
+    "reason": "`yaxis_inverted()` 是公开 API，直接反映了轴的反转状态。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 matplotlib.pyplot 和 numpy 以生成测试数据。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试应在独立的图形和坐标轴上下文中运行，使用 `plt.subplots()` 并在测试后关闭图形。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "缺陷是否也影响其他对数刻度变体（如 symlog、logit）。",
+  "缺陷是否也影响 x 轴（`set_xlim` 与 `set_xscale('log')`）。",
+  "`set_ylim` 中处理对数刻度边界检查的代码（第 3599-3611 行）是否直接导致了反转逻辑被忽略，或者问题出在更下游的变换或视图更新中。",
+  "在 matplotlib 3.1.0 之前，此功能是否正常工作，以及具体是哪个提交引入了该缺陷。"
+]

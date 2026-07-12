@@ -1,0 +1,188 @@
+```json
+{
+    "issue_summary": "使用 values()/values_list() 与 annotate() 组合的 QuerySet 在 pickle 序列化再反序列化后，返回错误的模型实例而非字典，导致 AttributeError。",
+    "trigger_condition": {
+        "text": "对一个使用了 values() 或 values_list() 与 annotate() 组合的 QuerySet 对象进行 pickle.dumps 和 pickle.loads 操作，然后将反序列化后的 query 对象赋值给一个新的 QuerySet 实例的 query 属性，最后对该新 QuerySet 进行求值。",
+        "evidence": ["Issue 中提供了最小复现代码：`prices = Toy.objects.values('material').annotate(total_price=Sum('price'))`，然后 `prices2.query = pickle.loads(pickle.dumps(prices.query))`，最后 `print(prices2)`。", "Issue 标题和描述明确指出是 `Queryset with values()/values_list() crashes when recreated from a pickled query.`"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "反序列化后求值的 QuerySet 返回了模型实例（Toy）而不是预期的字典，并且这些实例的内部状态是损坏的，尝试访问其 .id 属性会引发 AttributeError: 'NoneType' object has no attribute 'attname'。",
+        "symptom_type": "exception",
+        "evidence": ["Issue 中打印 `type(prices2[0])` 结果为 `<class \"models.Toy\">`，而 `type(prices[0])` 是 `'dict'`。", "Issue 中提供了完整的异常堆栈跟踪，最终错误是 `AttributeError: 'NoneType' object has no attribute 'attname'`。", "Issue 描述提到：'it tries to create model instances from them, which does not work as the data has wrong structure.'"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "从 pickled query 重建的 QuerySet 在求值时，应该返回与原始 QuerySet 相同类型的结果，即当原始 QuerySet 使用 values() 时，应返回字典列表；使用 values_list() 时，应返回元组列表或 flat 值列表。",
+        "evidence": ["Issue 描述中明确说明原始查询 `prices` 的结果是 'a list of dicts'，并且 `type(prices[0])` 是 'dict'。", "Django 文档（Issue 中链接）描述了 pickling querysets 用于后续重新评估。", "相关测试 `test_annotate_values` 和 `test_annotate_values_list` 展示了使用 values()/values_list() 与 annotate() 组合时返回字典或元组的正确行为。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "django.db.models.query.QuerySet.values",
+            "kind": "method",
+            "source_path": "django/db/models/query.py",
+            "reason": "Issue 的核心是使用了 values() 方法的 QuerySet 在 pickle 后行为异常。"
+        },
+        {
+            "name": "django.db.models.query.QuerySet.annotate",
+            "kind": "method",
+            "source_path": "django/db/models/query.py",
+            "reason": "Issue 中复现的查询组合了 values() 和 annotate()。"
+        },
+        {
+            "name": "django.db.models.aggregates.Sum",
+            "kind": "class",
+            "source_path": "django/db/models/aggregates.py",
+            "reason": "Issue 中使用了 Sum 聚合函数作为 annotate 的参数。"
+        },
+        {
+            "name": "django.db.models.query.QuerySet.query",
+            "kind": "property",
+            "source_path": "django/db/models/query.py",
+            "reason": "Issue 中通过 pickle 和赋值操作直接操作了 queryset.query 属性。"
+        },
+        {
+            "name": "pickle.dumps",
+            "kind": "function",
+            "source_path": "",
+            "reason": "用于序列化 query 对象。"
+        },
+        {
+            "name": "pickle.loads",
+            "kind": "function",
+            "source_path": "",
+            "reason": "用于反序列化 query 对象。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/db/models/query.py",
+            "object": "QuerySet.__setstate__",
+            "lines": "",
+            "reason": "pickle 反序列化时会调用 __setstate__ 来恢复对象状态，可能未正确处理 _iterable_class 等与 values() 相关的属性。"
+        },
+        {
+            "path": "django/db/models/query.py",
+            "object": "QuerySet._clone",
+            "lines": "",
+            "reason": "在设置 query 属性或 pickle 恢复后，克隆或创建新 QuerySet 时可能未正确继承原始 QuerySet 的 _iterable_class 设置。"
+        },
+        {
+            "path": "django/db/models/query.py",
+            "object": "QuerySet._iterable_class",
+            "lines": "",
+            "reason": "values() 方法会设置 `clone._iterable_class = ValuesIterable`，这个状态可能在 pickle/unpickle 过程中丢失或未被正确恢复。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "PickleabilityTestCase.test_specialized_queryset",
+            "test_file": "tests/queryset_pickle/tests.py",
+            "why_relevant": "这个测试直接测试了包含 values() 和 values_list() 的 QuerySet 的 pickle 能力，并且使用了 assert_pickles 辅助方法。",
+            "reusable_parts": ["测试类 PickleabilityTestCase 继承自 TestCase", "assert_pickles 辅助方法的使用模式", "使用 values() 和 values_list() 创建 QuerySet 的方式"],
+            "possible_gap": "该测试没有组合使用 values() 和 annotate()，也没有测试将 unpickled 的 query 赋值给新 QuerySet 的 query 属性后的求值行为，它可能只测试了 pickle 过程本身不崩溃。"
+        },
+        {
+            "test_name": "AggregateTestCase.test_annotate_values",
+            "test_file": "tests/aggregation/tests.py",
+            "why_relevant": "这个测试详细测试了 values() 与 annotate() 组合使用的正确行为，包括返回字典列表的断言，是 Issue 中期望的正确行为的参考。",
+            "reusable_parts": ["使用 annotate() 与聚合函数（如 Avg）的组合", "使用 values() 获取字典结果", "对返回的字典列表进行断言（assertEqual）的模式", "可能需要的数据模型（Book, Author）的 fixture 设置思路"],
+            "possible_gap": "这个测试完全不涉及 pickle 操作，因此无法直接复现 Issue。"
+        },
+        {
+            "test_name": "AggregateTestCase.test_annotate_values_list",
+            "test_file": "tests/aggregation/tests.py",
+            "why_relevant": "测试了 values_list() 与 annotate() 的组合，是 Issue 标题中提到的 values_list() 场景的参考。",
+            "reusable_parts": ["使用 values_list() 获取元组结果", "对返回的元组列表进行断言", "使用 flat=True 参数"],
+            "possible_gap": "不涉及 pickle 操作。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "call_chain",
+            "current_pattern": "相关测试中，要么只测试 pickle（不测试赋值给新 queryset.query 后的求值），要么只测试 values().annotate() 的正确行为（不测试 pickle）。",
+            "target_pattern": "将两个模式结合：1) 创建 values().annotate() 的 QuerySet；2) pickle 其 query 属性；3) 创建一个新的基础 QuerySet（如 .all()）；4) 将 unpickled 的 query 赋值给新 QuerySet 的 .query 属性；5) 对新 QuerySet 求值并断言。",
+            "reason": "Issue 的触发条件正是这个特定的操作链，单独测试任一部分都不会触发缺陷。",
+            "confidence": "high"
+        },
+        {
+            "slot": "object_state",
+            "current_pattern": "在 PickleabilityTestCase 的测试中，pickle 和 unpickle 的是整个 QuerySet 对象（如 `Happening.objects.values('name')`）。",
+            "target_pattern": "只 pickle 和 unpickle QuerySet 的 `.query` 属性，然后将其赋值给另一个 QuerySet 实例的 `.query` 属性。",
+            "reason": "Issue 中的复现步骤明确是 `prices2.query = pickle.loads(pickle.dumps(prices.query))`，而不是直接 pickle 整个 prices QuerySet。这个差异可能影响 _iterable_class 等状态的恢复。",
+            "confidence": "medium"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "type",
+            "expression_hint": "type(queryset[0]) 或 type(list(queryset)[0])",
+            "reason": "Issue 的关键错误是返回类型从 dict 错误地变成了模型实例。观测第一个元素的类型可以直接判断缺陷是否触发。"
+        },
+        {
+            "kind": "exception",
+            "expression_hint": "尝试访问反序列化后 QuerySet 结果中对象的 .id 或 .pk 属性，或直接调用 repr(queryset)。",
+            "reason": "Issue 中当尝试打印 `prices2` 或访问损坏实例的属性时会抛出 AttributeError。观测异常是否发生是直接的失败信号。"
+        },
+        {
+            "kind": "repr",
+            "expression_hint": "repr(queryset) 的输出内容",
+            "reason": "Issue 中异常堆栈显示 __repr__ 在尝试生成字符串时失败。观测 repr 是否成功执行或输出内容是否包含模型实例的表示（而非字典表示）可以提供线索。"
+        },
+        {
+            "kind": "state",
+            "expression_hint": "queryset._iterable_class 在 pickle 前、pickle 后、赋值给新 queryset.query 后的值。",
+            "reason": "values() 方法会设置 _iterable_class，这个状态可能在序列化/反序列化过程中丢失，导致后续迭代时使用了默认的 ModelIterable。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "从 pickled query 重建的 QuerySet 求值后，其元素的类型应与原始 QuerySet 一致（例如 dict 或 tuple）。",
+            "preferred_assertion_style": "isinstance",
+            "avoid": "断言完整的 repr 字符串或完整的字典值，因为这些可能依赖于数据库 ID 等不稳定数据。",
+            "reason": "类型错误是 Issue 的核心，且类型断言相对稳定，不依赖于具体数据值。"
+        },
+        {
+            "assertion_goal": "从 pickled query 重建的 QuerySet 可以正常求值，不会引发 AttributeError 或其他异常。",
+            "preferred_assertion_style": "raises",
+            "avoid": "断言特定的异常消息字符串。",
+            "reason": "Issue 中观察到的直接错误是异常。在修复后，这个断言应该不再引发异常（即测试通过）。注意：此提示的极性在修复后应为‘不引发异常’，但当前框架下，我们描述的是用于检测缺陷的断言风格。一个健壮的测试可能同时包含正向断言（类型正确）和反向断言（无异常）。"
+        },
+        {
+            "assertion_goal": "原始 QuerySet 和从 pickled query 重建的 QuerySet 返回的数据内容（忽略类型）应该相同。",
+            "preferred_assertion_style": "equals",
+            "avoid": "直接比较两个 QuerySet 对象或它们的 query 对象。",
+            "reason": "在类型正确的前提下，数据一致性是基本要求。比较提取出的数据列表（如 list(queryset)）可以验证功能正确性。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要一个简单的 Django 模型（如 Issue 中的 Toy），并在测试的 setUp 方法中创建一些实例以提供聚合数据。",
+            "source": "issue",
+            "confidence": "high"
+        },
+        {
+            "hint": "测试应该继承自 django.test.TestCase 以确保数据库环境。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "可能需要导入 pickle 模块。",
+            "source": "issue",
+            "confidence": "high"
+        },
+        {
+            "hint": "可以参考相关测试中使用的聚合函数（如 Sum, Avg, Count）的导入和使用方式。",
+            "source": "retrieved_test",
+            "confidence": "medium"
+        }
+    ],
+    "uncertainties": [
+        "缺陷是否也影响不包含 annotate() 的纯 values() 或 values_list() QuerySet？Issue 标题提到了两者，但示例结合了 annotate()。",
+        "在 pickle/unpickle 过程中，具体是 QuerySet 的哪个属性（除了 _iterable_class）丢失或设置错误导致了行为差异？",
+        "直接 pickle 整个 QuerySet 对象（而不是仅其 .query 属性）然后 unpickle 并求值，是否也会触发同样的错误？相关测试 test_specialized_queryset 似乎没有报告问题。",
+        "除了 .id 访问，损坏的模型实例在其他操作（如字段访问）上是否会有其他异常行为？"
+    ]
+}
+```

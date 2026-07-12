@@ -1,0 +1,450 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+In v5.3, NDDataRef mask propagation fails when one of the operand does not have a mask
+### Description
+
+This applies to v5.3. 
+
+It looks like when one of the operand does not have a mask, the mask propagation when doing arithmetic, in particular with `handle_mask=np.bitwise_or` fails.  This is not a problem in v5.2.
+
+I don't know enough about how all that works, but it seems from the error that the operand without a mask is set as a mask of None's and then the bitwise_or tries to operate on an integer and a None and fails.
+
+### Expected behavior
+
+When one of the operand does not have mask, the mask that exists should just be copied over to the output.  Or whatever was done in that situation in v5.2 where there's no problem.
+
+### How to Reproduce
+
+This is with v5.3.   With v5.2, there are no errors.
+
+```
+>>> import numpy as np
+>>> from astropy.nddata import NDDataRef
+
+>>> array = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]])
+>>> mask = np.array([[0, 1, 64], [8, 0, 1], [2, 1, 0]])
+
+>>> nref_nomask = NDDataRef(array)
+>>> nref_mask = NDDataRef(array, mask=mask)
+
+# multiply no mask by constant (no mask * no mask)
+>>> nref_nomask.multiply(1., handle_mask=np.bitwise_or).mask   # returns nothing, no mask,  OK
+
+# multiply no mask by itself (no mask * no mask)
+>>> nref_nomask.multiply(nref_nomask, handle_mask=np.bitwise_or).mask # return nothing, no mask, OK
+
+# multiply mask by constant (mask * no mask)
+>>> nref_mask.multiply(1., handle_mask=np.bitwise_or).mask
+...
+TypeError: unsupported operand type(s) for |: 'int' and 'NoneType'
+
+# multiply mask by itself (mask * mask)
+>>> nref_mask.multiply(nref_mask, handle_mask=np.bitwise_or).mask
+array([[ 0,  1, 64],
+       [ 8,  0,  1],
+       [ 2,  1,  0]])
+
+# multiply mask by no mask (mask * no mask)
+>>> nref_mask.multiply(nref_nomask, handle_mask=np.bitwise_or).mask
+...
+TypeError: unsupported operand type(s) for |: 'int' and 'NoneType'
+```
+
+
+### Versions
+
+>>> import sys; print("Python", sys.version)
+Python 3.10.11 | packaged by conda-forge | (main, May 10 2023, 19:07:22) [Clang 14.0.6 ]
+>>> import astropy; print("astropy", astropy.__version__)
+astropy 5.3
+>>> import numpy; print("Numpy", numpy.__version__)
+Numpy 1.24.3
+>>> import erfa; print("pyerfa", erfa.__version__)
+pyerfa 2.0.0.3
+>>> import scipy; print("Scipy", scipy.__version__)
+Scipy 1.10.1
+>>> import matplotlib; print("Matplotlib", matplotlib.__version__)
+Matplotlib 3.7.1
+
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：astropy/nddata/nddata_withmixins.py
+对象名称：NDDataRef
+节点类型：class
+父节点：nddata_withmixins
+行号范围：16-72
+代码：
+class NDDataRef(NDArithmeticMixin, NDIOMixin, NDSlicingMixin, NDData):
+    """Implements `NDData` with all Mixins.
+
+    This class implements a `NDData`-like container that supports reading and
+    writing as implemented in the ``astropy.io.registry`` and also slicing
+    (indexing) and simple arithmetic (add, subtract, divide and multiply).
+
+    Notes
+    -----
+    A key distinction from `NDDataArray` is that this class does not attempt
+    to provide anything that was not defined in any of the parent classes.
+
+    See Also
+    --------
+    NDData
+    NDArithmeticMixin
+    NDSlicingMixin
+    NDIOMixin
+
+    Examples
+    --------
+    The mixins allow operation that are not possible with `NDData` or
+    `NDDataBase`, i.e. simple arithmetic::
+
+        >>> from astropy.nddata import NDDataRef, StdDevUncertainty
+        >>> import numpy as np
+
+        >>> data = np.ones((3,3), dtype=float)
+        >>> ndd1 = NDDataRef(data, uncertainty=StdDevUncertainty(data))
+        >>> ndd2 = NDDataRef(data, uncertainty=StdDevUncertainty(data))
+
+        >>> ndd3 = ndd1.add(ndd2)
+        >>> ndd3.data  # doctest: +FLOAT_CMP
+        array([[2., 2., 2.],
+               [2., 2., 2.],
+               [2., 2., 2.]])
+        >>> ndd3.uncertainty.array  # doctest: +FLOAT_CMP
+        array([[1.41421356, 1.41421356, 1.41421356],
+               [1.41421356, 1.41421356, 1.41421356],
+               [1.41421356, 1.41421356, 1.41421356]])
+
+    see `NDArithmeticMixin` for a complete list of all supported arithmetic
+    operations.
+
+    But also slicing (indexing) is possible::
+
+        >>> ndd4 = ndd3[1,:]
+        >>> ndd4.data  # doctest: +FLOAT_CMP
+        array([2., 2., 2.])
+        >>> ndd4.uncertainty.array  # doctest: +FLOAT_CMP
+        array([1.41421356, 1.41421356, 1.41421356])
+
+    See `NDSlicingMixin` for a description how slicing works (which attributes)
+    are sliced.
+    """
+
+
+【源码片段 2】
+文件路径：astropy/nddata/mixins/ndarithmetic.py
+对象名称：multiply
+节点类型：class_function
+父节点：NDArithmeticMixin
+行号范围：617-620
+代码：
+    def multiply(self, operand, operand2=None, **kwargs):
+        return self._prepare_then_do_arithmetic(
+            np.multiply, operand, operand2, **kwargs
+        )
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：astropy/nddata/mixins/tests/test_ndarithmetic.py
+测试名称：test_arithmetics_data_masks
+测试代码：
+@pytest.mark.parametrize(
+    ("mask1", "mask2"),
+    [
+        (None, None),
+        (None, False),
+        (True, None),
+        (False, False),
+        (True, False),
+        (False, True),
+        (True, True),
+        (np.array(False), np.array(True)),
+        (np.array(False), np.array([0, 1, 0, 1, 1], dtype=np.bool_)),
+        (np.array(True), np.array([[0, 1, 0, 1, 1], [1, 1, 0, 1, 1]], dtype=np.bool_)),
+        (
+            np.array([0, 1, 0, 1, 1], dtype=np.bool_),
+            np.array([1, 1, 0, 0, 1], dtype=np.bool_),
+        ),
+        (
+            np.array([0, 1, 0, 1, 1], dtype=np.bool_),
+            np.array([[0, 1, 0, 1, 1], [1, 0, 0, 1, 1]], dtype=np.bool_),
+        ),
+        (
+            np.array([[0, 1, 0, 1, 1], [1, 0, 0, 1, 1]], dtype=np.bool_),
+            np.array([[0, 1, 0, 1, 1], [1, 1, 0, 1, 1]], dtype=np.bool_),
+        ),
+    ],
+)
+def test_arithmetics_data_masks(mask1, mask2):
+    nd1 = NDDataArithmetic(1, mask=mask1)
+    nd2 = NDDataArithmetic(1, mask=mask2)
+
+    if mask1 is None and mask2 is None:
+        ref_mask = None
+    elif mask1 is None:
+        ref_mask = mask2
+    elif mask2 is None:
+        ref_mask = mask1
+    else:
+        ref_mask = mask1 | mask2
+
+    # Addition
+    nd3 = nd1.add(nd2)
+    assert_array_equal(ref_mask, nd3.mask)
+    # Subtraction
+    nd4 = nd1.subtract(nd2)
+    assert_array_equal(ref_mask, nd4.mask)
+    # Multiplication
+    nd5 = nd1.multiply(nd2)
+    assert_array_equal(ref_mask, nd5.mask)
+    # Division
+    nd6 = nd1.divide(nd2)
+    assert_array_equal(ref_mask, nd6.mask)
+    for nd in [nd3, nd4, nd5, nd6]:
+        # Check all other attributes are not set
+        assert nd.unit is None
+        assert nd.uncertainty is None
+        assert len(nd.meta) == 0
+        assert nd.wcs is None
+
+【相关测试 2】
+测试文件：astropy/nddata/mixins/tests/test_ndarithmetic.py
+测试名称：test_arithmetics_mask_func
+测试代码：
+def test_arithmetics_mask_func():
+    def mask_sad_func(mask1, mask2, fun=0):
+        if fun > 0.5:
+            return mask2
+        else:
+            return mask1
+
+    meta1 = {"a": 1}
+    meta2 = {"a": 3, "b": 2}
+    mask1 = [True, False, True]
+    mask2 = [True, False, False]
+    uncertainty1 = StdDevUncertainty([1, 2, 3])
+    uncertainty2 = StdDevUncertainty([1, 2, 3])
+    data1 = [1, 1, 1]
+    data2 = [1, 1, 1]
+
+    nd1 = NDDataArithmetic(data1, meta=meta1, mask=mask1, uncertainty=uncertainty1)
+    nd2 = NDDataArithmetic(data2, meta=meta2, mask=mask2, uncertainty=uncertainty2)
+
+    nd3 = nd1.add(nd2, handle_mask=mask_sad_func)
+    assert_array_equal(nd3.mask, nd1.mask)
+
+    nd4 = nd1.add(nd2, handle_mask=mask_sad_func, mask_fun=1)
+    assert_array_equal(nd4.mask, nd2.mask)
+
+    with pytest.raises(KeyError):
+        nd1.add(nd2, handle_mask=mask_sad_func, fun=1)
+
+【相关测试 3】
+测试文件：astropy/nddata/tests/test_nddata.py
+测试名称：test_param_mask
+测试代码：
+def test_param_mask():
+    # Since everything is allowed we only need to test something
+    nd = NDData([1], mask=False)
+    assert not nd.mask
+    # Test conflicting mask (other NDData)
+    nd2 = NDData(nd, mask=True)
+    assert nd2.mask
+    # (masked array)
+    nd3 = NDData(np.ma.array([1], mask=False), mask=True)
+    assert nd3.mask
+    # (masked quantity)
+    mq = np.ma.array(np.array([2, 3]) * u.m, mask=False)
+    nd4 = NDData(mq, mask=True)
+    assert nd4.mask
+
+【相关测试 4】
+测试文件：astropy/nddata/mixins/tests/test_ndarithmetic.py
+测试名称：test_arithmetics_stddevuncertainty_one_missing
+测试代码：
+def test_arithmetics_stddevuncertainty_one_missing():
+    nd1 = NDDataArithmetic([1, -2, 3])
+    nd1_ref = NDDataArithmetic([1, -2, 3], uncertainty=StdDevUncertainty([0, 0, 0]))
+    nd2 = NDDataArithmetic([2, 2, -2], uncertainty=StdDevUncertainty([2, 2, 2]))
+
+    # Addition
+    nd3 = nd1.add(nd2)
+    nd3_ref = nd1_ref.add(nd2)
+    assert_array_equal(nd3.uncertainty.array, nd3_ref.uncertainty.array)
+    assert_array_equal(np.abs(nd3.uncertainty.array), nd3.uncertainty.array)
+
+    nd3 = nd2.add(nd1)
+    nd3_ref = nd2.add(nd1_ref)
+    assert_array_equal(nd3.uncertainty.array, nd3_ref.uncertainty.array)
+    assert_array_equal(np.abs(nd3.uncertainty.array), nd3.uncertainty.array)
+
+    # Subtraction
+    nd3 = nd1.subtract(nd2)
+    nd3_ref = nd1_ref.subtract(nd2)
+    assert_array_equal(nd3.uncertainty.array, nd3_ref.uncertainty.array)
+    assert_array_equal(np.abs(nd3.uncertainty.array), nd3.uncertainty.array)
+
+    nd3 = nd2.subtract(nd1)
+    nd3_ref = nd2.subtract(nd1_ref)
+    assert_array_equal(nd3.uncertainty.array, nd3_ref.uncertainty.array)
+    assert_array_equal(np.abs(nd3.uncertainty.array), nd3.uncertainty.array)
+
+    # Multiplication
+    nd3 = nd1.multiply(nd2)
+    nd3_ref = nd1_ref.multiply(nd2)
+    assert_array_equal(nd3.uncertainty.array, nd3_ref.uncertainty.array)
+    assert_array_equal(np.abs(nd3.uncertainty.array), nd3.uncertainty.array)
+
+    nd3 = nd2.multiply(nd1)
+    nd3_ref = nd2.multiply(nd1_ref)
+    assert_array_equal(nd3.uncertainty.array, nd3_ref.uncertainty.array)
+    assert_array_equal(np.abs(nd3.uncertainty.array), nd3.uncertainty.array)
+
+    # Division
+    nd3 = nd1.divide(nd2)
+    nd3_ref = nd1_ref.divide(nd2)
+    assert_array_equal(nd3.uncertainty.array, nd3_ref.uncertainty.array)
+    assert_array_equal(np.abs(nd3.uncertainty.array), nd3.uncertainty.array)
+
+    nd3 = nd2.divide(nd1)
+    nd3_ref = nd2.divide(nd1_ref)
+    assert_array_equal(nd3.uncertainty.array, nd3_ref.uncertainty.array)
+    assert_array_equal(np.abs(nd3.uncertainty.array), nd3.uncertainty.array)
+
+【相关测试 5】
+测试文件：astropy/nddata/tests/test_ccddata.py
+测试名称：test_mask_arithmetic_ccd
+测试代码：
+@pytest.mark.parametrize("operation", ["multiply", "divide", "add", "subtract"])
+def test_mask_arithmetic_ccd(operation):
+    ccd_data = create_ccd_data()
+    ccd_data2 = ccd_data.copy()
+    ccd_data.mask = ccd_data.data > 0
+    method = getattr(ccd_data, operation)
+    result = method(ccd_data2)
+    np.testing.assert_equal(result.mask, ccd_data.mask)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

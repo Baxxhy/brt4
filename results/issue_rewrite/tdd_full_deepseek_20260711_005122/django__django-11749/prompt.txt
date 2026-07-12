@@ -1,0 +1,343 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+call_command fails when argument of required mutually exclusive group is passed in kwargs.
+Description
+	
+This error 
+django.core.management.base.CommandError: Error: one of the arguments --shop-id --shop is required
+is raised when I run 
+call_command('my_command', shop_id=1)
+the argument 'shop_id' is part of a required mutually exclusive group:
+shop = parser.add_mutually_exclusive_group(required=True)
+shop.add_argument('--shop-id', nargs='?', type=int, default=None, dest='shop_id')
+shop.add_argument('--shop', nargs='?', type=str, default=None, dest='shop_name')
+However, everything is fine when I call this command in this way:
+call_command('my_command, '--shop-id=1')
+In django sources I found that only those keyword arguments of call_command are passed to the parser that are defined as required:
+# Any required arguments which are passed in via '**options' must be passed
+# to parse_args().
+parse_args += [
+	'{}={}'.format(min(opt.option_strings), arg_options[opt.dest])
+	for opt in parser._actions if opt.required and opt.dest in options
+]
+but in this special case both of them individually are not required, they are actually part of a group that is required. And the code of call_command does nothing with groups defined in the parser.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/core/management/__init__.py
+对象名称：call_command
+节点类型：top-level function
+父节点：__init__
+行号范围：76-160
+代码：
+def call_command(command_name, *args, **options):
+    """
+    Call the given command, with the given options and args/kwargs.
+
+    This is the primary API you should use for calling specific commands.
+
+    `command_name` may be a string or a command object. Using a string is
+    preferred unless the command object is required for further processing or
+    testing.
+
+    Some examples:
+        call_command('migrate')
+        call_command('shell', plain=True)
+        call_command('sqlmigrate', 'myapp')
+
+        from django.core.management.commands import flush
+        cmd = flush.Command()
+        call_command(cmd, verbosity=0, interactive=False)
+        # Do something with cmd ...
+    """
+    if isinstance(command_name, BaseCommand):
+        # Command object passed in.
+        command = command_name
+        command_name = command.__class__.__module__.split('.')[-1]
+    else:
+        # Load the command object by name.
+        try:
+            app_name = get_commands()[command_name]
+        except KeyError:
+            raise CommandError("Unknown command: %r" % command_name)
+
+        if isinstance(app_name, BaseCommand):
+            # If the command is already loaded, use it directly.
+            command = app_name
+        else:
+            command = load_command_class(app_name, command_name)
+
+    # Simulate argument parsing to get the option defaults (see #10080 for details).
+    parser = command.create_parser('', command_name)
+    # Use the `dest` option name from the parser option
+    opt_mapping = {
+        min(s_opt.option_strings).lstrip('-').replace('-', '_'): s_opt.dest
+        for s_opt in parser._actions if s_opt.option_strings
+    }
+    arg_options = {opt_mapping.get(key, key): value for key, value in options.items()}
+    parse_args = [str(a) for a in args]
+
+    def get_actions(parser):
+        # Parser actions and actions from sub-parser choices.
+        for opt in parser._actions:
+            if isinstance(opt, _SubParsersAction):
+                for sub_opt in opt.choices.values():
+                    yield from get_actions(sub_opt)
+            else:
+                yield opt
+
+    parser_actions = list(get_actions(parser))
+    # Any required arguments which are passed in via **options must be passed
+    # to parse_args().
+    parse_args += [
+        '{}={}'.format(min(opt.option_strings), arg_options[opt.dest])
+        for opt in parser_actions if opt.required and opt.dest in options
+    ]
+    defaults = parser.parse_args(args=parse_args)
+    defaults = dict(defaults._get_kwargs(), **arg_options)
+    # Raise an error if any unknown options were passed.
+    stealth_options = set(command.base_stealth_options + command.stealth_options)
+    dest_parameters = {action.dest for action in parser_actions}
+    valid_options = (dest_parameters | stealth_options).union(opt_mapping)
+    unknown_options = set(options) - valid_options
+    if unknown_options:
+        raise TypeError(
+            "Unknown option(s) for %s command: %s. "
+            "Valid options are: %s." % (
+                command_name,
+                ', '.join(sorted(unknown_options)),
+                ', '.join(sorted(valid_options)),
+            )
+        )
+    # Move positional args out of options to mimic legacy optparse
+    args = defaults.pop('args', ())
+    if 'skip_checks' not in options:
+        defaults['skip_checks'] = True
+
+    return command.execute(*args, **defaults)
+
+
+【源码片段 2】
+文件路径：django/core/management/base.py
+对象名称：parse_args
+节点类型：class_function
+父节点：CommandParser
+行号范围：50-55
+代码：
+    def parse_args(self, args=None, namespace=None):
+        # Catch missing argument for a better error message
+        if (self.missing_args_message and
+                not (args or any(not arg.startswith('-') for arg in args))):
+            self.error(self.missing_args_message)
+        return super().parse_args(args, namespace)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/user_commands/tests.py
+测试名称：test_call_command_with_required_parameters_in_mixed_options
+测试代码：
+@override_settings(
+    INSTALLED_APPS=[
+        'django.contrib.auth',
+        'django.contrib.contenttypes',
+        'user_commands',
+    ],
+)
+class CommandTests(SimpleTestCase):
+    def test_call_command_with_required_parameters_in_mixed_options(self):
+        out = StringIO()
+        management.call_command('required_option', '--need-me=foo', needme2='bar', stdout=out)
+        self.assertIn('need_me', out.getvalue())
+        self.assertIn('needme2', out.getvalue())
+
+【相关测试 2】
+测试文件：tests/user_commands/tests.py
+测试名称：test_call_command_with_required_parameters_in_options
+测试代码：
+@override_settings(
+    INSTALLED_APPS=[
+        'django.contrib.auth',
+        'django.contrib.contenttypes',
+        'user_commands',
+    ],
+)
+class CommandTests(SimpleTestCase):
+    def test_call_command_with_required_parameters_in_options(self):
+        out = StringIO()
+        management.call_command('required_option', need_me='foo', needme2='bar', stdout=out)
+        self.assertIn('need_me', out.getvalue())
+        self.assertIn('needme2', out.getvalue())
+
+【相关测试 3】
+测试文件：tests/user_commands/tests.py
+测试名称：test_call_command_option_parsing
+测试代码：
+@override_settings(
+    INSTALLED_APPS=[
+        'django.contrib.auth',
+        'django.contrib.contenttypes',
+        'user_commands',
+    ],
+)
+class CommandTests(SimpleTestCase):
+    def test_call_command_option_parsing(self):
+        """
+        When passing the long option name to call_command, the available option
+        key is the option dest name (#22985).
+        """
+        out = StringIO()
+        management.call_command('dance', stdout=out, opt_3=True)
+        self.assertIn("option3", out.getvalue())
+        self.assertNotIn("opt_3", out.getvalue())
+        self.assertNotIn("opt-3", out.getvalue())
+
+【相关测试 4】
+测试文件：tests/admin_scripts/tests.py
+测试名称：test_no_color_force_color_mutually_exclusive_execute
+测试代码：
+class CommandTypes(AdminScriptTestCase):
+    def test_no_color_force_color_mutually_exclusive_execute(self):
+        msg = "The --no-color and --force-color options can't be used together."
+        with self.assertRaisesMessage(CommandError, msg):
+            call_command(BaseCommand(), no_color=True, force_color=True)
+
+【相关测试 5】
+测试文件：tests/user_commands/tests.py
+测试名称：test_subparser_dest_required_args
+测试代码：
+@override_settings(
+    INSTALLED_APPS=[
+        'django.contrib.auth',
+        'django.contrib.contenttypes',
+        'user_commands',
+    ],
+)
+class CommandTests(SimpleTestCase):
+    def test_subparser_dest_required_args(self):
+        out = StringIO()
+        management.call_command('subparser_required', 'foo_1', 'foo_2', bar=12, stdout=out)
+        self.assertIn('bar', out.getvalue())
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

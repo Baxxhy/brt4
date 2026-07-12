@@ -1,0 +1,143 @@
+instance_id: django__django-12663
+
+issue_summary: 在包含嵌套子查询注解的查询集中使用 SimpleLazyObject 会引发 TypeError 异常。
+
+trigger_condition:
+{
+  "text": "在 QuerySet 的 filter 方法中，将一个 SimpleLazyObject 实例作为值传递给一个由嵌套子查询（Subquery）生成的注解字段进行过滤。",
+  "evidence": [
+    "Issue 中的测试用例：`A.objects.annotate(owner_user=Subquery(owner_user)).filter(owner_user=user)`，其中 `user` 是 `SimpleLazyObject`。",
+    "Issue 描述指出，在特定提交之前，这种行为是可行的。",
+    "相关测试 1 和 2 展示了 Subquery 和 filter 的典型用法。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "执行查询时抛出 TypeError: int() argument must be a string, a bytes-like object or a number, not 'SimpleLazyObject'。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中提供的完整 Traceback 显示错误发生在 `django/db/models/fields/__init__.py` 的 `get_prep_value` 方法中，尝试对 SimpleLazyObject 调用 `int()`。",
+    "错误信息明确指出参数类型错误：`not 'SimpleLazyObject'`。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "包含嵌套子查询注解的查询集应能正确处理 SimpleLazyObject 类型的过滤值，并成功执行查询，而不引发类型错误。",
+  "evidence": [
+    "Issue 标题和描述明确指出这是一个回归（regression），暗示在特定提交之前，该操作是可行的。",
+    "相关测试 5 表明 SimpleLazyObject 在其他上下文中（如序列化）可以正常工作。"
+  ],
+  "confidence": "medium"
+}
+
+target_apis:
+[
+  {
+    "name": "SimpleLazyObject",
+    "kind": "class",
+    "source_path": "django/utils/functional.py",
+    "reason": "Issue 的核心是使用 SimpleLazyObject 作为查询过滤值导致失败。"
+  },
+  {
+    "name": "Subquery",
+    "kind": "class",
+    "source_path": "django/db/models/expressions.py",
+    "reason": "Issue 中的查询使用了嵌套的 Subquery 注解。"
+  },
+  {
+    "name": "QuerySet.filter",
+    "kind": "method",
+    "source_path": "django/db/models/query.py",
+    "reason": "触发错误的 API 调用是 filter 方法。"
+  },
+  {
+    "name": "ForeignKey",
+    "kind": "class",
+    "source_path": "django/db/models/fields/related.py",
+    "reason": "Issue 中的模型使用了 ForeignKey，这影响了子查询中值的类型推断。"
+  },
+  {
+    "name": "TestCase",
+    "kind": "class",
+    "source_path": "django/test/testcases.py",
+    "reason": "Issue 和检索到的测试都使用 TestCase 作为测试基类。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中使用普通模型实例（如 Employee 或 User 实例）作为 filter 的参数值。",
+    "target_pattern": "将 filter 的参数值替换为用 SimpleLazyObject(lambda: ...) 包装的模型实例。",
+    "reason": "Issue 表明，当过滤值是 SimpleLazyObject 时，类型处理路径会出错。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "相似测试中的查询通常是 `Model.objects.filter(field=value)` 或涉及子查询但不与惰性对象比较。",
+    "target_pattern": "构建一个查询，其中 filter 的值是一个 SimpleLazyObject，并且该过滤应用于一个由嵌套 Subquery 生成的注解字段。",
+    "reason": "Issue 的触发需要特定的组合：Subquery 注解 + SimpleLazyObject 过滤值。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "在执行 `queryset.filter(...)` 调用时捕获的异常及其类型和消息。",
+    "reason": "Issue 的核心症状是 TypeError 异常，直接观测此异常可确认缺陷是否触发。"
+  },
+  {
+    "kind": "type",
+    "expression_hint": "在 filter 调用前，观察 `SimpleLazyObject` 实例的 `__class__` 或其内部包装的值的类型。在查询构建过程中，观察传递给 `get_prep_value` 的 `value` 参数的类型。",
+    "reason": "错误表明系统在处理 SimpleLazyObject 类型时失败，观测类型有助于理解转换路径。"
+  },
+  {
+    "kind": "sql",
+    "expression_hint": "触发异常前，尝试捕获生成的 SQL 查询字符串（例如通过 `str(queryset.query)` 或连接器日志）。",
+    "reason": "可以揭示查询构建器在崩溃前如何解释 SimpleLazyObject，或确认在修复后查询能正常生成。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证使用 SimpleLazyObject 对 Subquery 注解字段进行过滤的查询能够正常执行，不抛出 TypeError。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言具体的 SQL 字符串或完整的查询结果集，因为这些可能因数据库后端或测试数据而异。",
+    "reason": "Issue 的核心是异常。一个稳定的断言是验证特定异常（TypeError）是否被引发。修复后，该断言应变为验证异常未被引发。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要创建 Django 项目所需的测试数据库和模型（A, B, C, User）。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "应使用 django.test.TestCase 作为测试基类以管理数据库事务。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要导入 django.contrib.auth.models.User, django.db.models 中的 OuterRef 和 Subquery, 以及 django.utils.functional.SimpleLazyObject。",
+    "source": "issue",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "导致回归的具体代码变更（提交 35431298226165986ad07e91f9d3aca721ff38ec）的细节未知。",
+  "SimpleLazyObject 在查询处理路径中应该在哪个环节被解析（评估）为实际值尚不明确。",
+  "除了给出的模型关系，是否还有其他模型配置或字段类型组合会触发此问题。",
+  "修复后，SimpleLazyObject 是否应该被完全评估为底层模型实例，还是以其他方式被处理。"
+]

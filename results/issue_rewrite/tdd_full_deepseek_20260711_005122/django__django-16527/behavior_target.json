@@ -1,0 +1,321 @@
+{
+  "instance_id": "django__django-16527",
+  "issue_summary": "Django admin 的 'show_save_as_new' 上下文变量在用户没有添加权限时错误地显示为 True。",
+  "trigger_condition": {
+    "text": "当用户拥有修改权限但没有添加权限时，访问一个已存在对象的 admin 修改页面，并检查模板上下文中的 'show_save_as_new' 变量。",
+    "evidence": [
+      "Issue 描述指出 'save_as_new' 是一种添加操作，但当前代码缺少对 has_add_permission 的检查。",
+      "相关测试 1 (test_change_view_save_as_new) 验证了没有 'add' 权限的用户执行 'Save as new' 操作应被拒绝。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "在 admin 修改页面的模板中，'Save as new' 按钮对没有添加权限的用户可见或可操作，导致他们可能尝试执行未授权的添加操作。",
+    "symptom_type": "state_not_updated",
+    "evidence": [
+      "Issue 描述指出在 admin_modify.py 中，'show_save_as_new' 变量的计算缺少 has_add_permission 检查。",
+      "相关测试 1 表明，没有添加权限的用户 POST 'Save as new' 会得到 403 状态码，但 Issue 关注的是前端按钮的可见性/状态。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "只有当用户同时拥有添加权限和修改权限，且满足其他条件（非弹窗、是修改页面、save_as 为 True）时，'show_save_as_new' 才应为 True。",
+    "evidence": [
+      "Issue 描述中用户建议的修复是在计算 'show_save_as_new' 时加入 'and has_add_permission'。",
+      "相关测试 1 的文档字符串说明 'Save as new' 对于没有 'add' 权限的用户应引发 PermissionDenied。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "submit_row",
+      "kind": "function",
+      "source_path": "django/contrib/admin/templatetags/admin_modify.py",
+      "reason": "该模板标签负责生成 admin 修改页面的提交行上下文，其中包含 'show_save_as_new' 变量。"
+    },
+    {
+      "name": "has_add_permission",
+      "kind": "method",
+      "source_path": "django/contrib/admin/options.py",
+      "reason": "Issue 的核心是缺少对此权限的检查。该方法用于判断用户是否有添加对象的权限。"
+    },
+    {
+      "name": "has_change_permission",
+      "kind": "method",
+      "source_path": "django/contrib/admin/options.py",
+      "reason": "当前 'show_save_as_new' 的计算已经包含了此权限检查，它是正确行为的一部分。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/contrib/admin/templatetags/admin_modify.py",
+      "object": "submit_row 函数或其中计算 'show_save_as_new' 的代码块",
+      "lines": "",
+      "reason": "Issue 明确指出了该文件第 102 行附近缺少 has_add_permission 检查。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "AdminViewPermissionsTest.test_change_view_save_as_new",
+      "test_file": "tests/admin_views/tests.py",
+      "why_relevant": "它直接测试了用户在没有 'add' 权限时执行 'Save as new' POST 操作的行为，与 Issue 的权限主题高度相关。",
+      "reusable_parts": [
+        "测试类装饰器 (override_settings)",
+        "用户权限设置 (adduser, changeuser)",
+        "使用 client.post 模拟 admin 操作",
+        "使用 assertEqual 检查状态码和对象数量"
+      ],
+      "possible_gap": "该测试通过 HTTP POST 和状态码验证后端权限，但 Issue 关注的是前端模板上下文变量 'show_save_as_new' 的计算逻辑，这是两个不同的验证层面。"
+    },
+    {
+      "test_name": "AdminTemplateTagsTest.test_submit_row",
+      "test_file": "tests/admin_views/test_templatetags.py",
+      "why_relevant": "它直接测试了 submit_row 模板标签，该标签正是生成 'show_save_as_new' 等上下文变量的地方。",
+      "reusable_parts": [
+        "测试类 AdminTemplateTagsTest",
+        "使用 request_factory 和 admin.change_view 构建请求和上下文",
+        "调用 submit_row 函数并检查其返回的上下文字典"
+      ],
+      "possible_gap": "该测试使用超级用户（拥有所有权限），因此无法直接复现缺少添加权限的场景。"
+    },
+    {
+      "test_name": "ModelAdminPermissionTests.test_has_add_permission",
+      "test_file": "tests/modeladmin/tests.py",
+      "why_relevant": "它测试了 has_add_permission 方法在不同用户下的返回值，这是 Issue 中缺失检查的核心 API。",
+      "reusable_parts": [
+        "Mock 用户对象的创建模式",
+        "对 has_add_permission 返回值的断言风格"
+      ],
+      "possible_gap": "这是一个单元测试，不涉及模板上下文或 admin 视图的集成流程。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "object_state",
+      "current_pattern": "在相关测试 2 和 3 中，request.user 被设置为超级用户（拥有所有权限）。",
+      "target_pattern": "将 request.user 设置为一个只有 change 权限但没有 add 权限的用户。",
+      "reason": "Issue 描述的问题在用户缺少 add 权限时触发。改变用户权限状态可以使测试走向计算 'show_save_as_new' 的错误路径。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "相关测试 1 中，通过不同用户登录来改变权限上下文。",
+      "target_pattern": "在测试 submit_row 或 admin.change_view 时，传入一个只有 change 权限的 user 对象。",
+      "reason": "为了在模板标签层面复现问题，需要模拟一个没有 add 权限的请求上下文。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "submit_row(context) 返回的字典中 'show_save_as_new' 键的值。",
+      "reason": "这是 Issue 直接关注的错误变量。观察其值可以判断权限检查逻辑是否正确。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "admin.change_view 返回的 response.context_data 在传递给 submit_row 之前的状态。",
+      "reason": "'show_save_as_new' 的原始计算可能发生在 admin 视图准备上下文的阶段，需要观察其源头。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "当用户没有 add 权限时，'show_save_as_new' 上下文变量的值应为 False。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的模板渲染输出字符串，因为模板可能变化。",
+      "reason": "直接断言核心上下文变量的布尔值，这与 Issue 的语义（按钮不应显示）直接对应，且稳定。"
+    },
+    {
+      "assertion_goal": "当用户同时拥有 add 和 change 权限时，'show_save_as_new' 在满足其他条件下应为 True。",
+      "preferred_assertion_style": "equals",
+      "avoid": "仅断言没有异常，需要明确验证正向情况。",
+      "reason": "确保修复不会破坏原有的、正确的功能。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要一个 Django TestCase 环境，配置好 admin 站点和测试模型（如 Article 或 User）。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要创建具有特定权限的用户对象（例如，只有 change 权限的用户）。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 RequestFactory 来构建请求对象，并手动设置 request.user。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要导入并调用 admin 的 change_view 方法或直接调用 submit_row 模板标签函数。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "Issue 中提到的第 102 行具体代码内容未在提供的源码片段中给出，因此无法确认 'show_save_as_new' 当前的确切计算逻辑。",
+    "不确定 'save_as' 这个条件变量在计算 'show_save_as_new' 时是否必须为 True，以及它如何被设置。",
+    "不确定除了 has_add_permission 和 has_change_permission 外，计算 'show_save_as_new' 是否还依赖其他未提及的变量或条件。"
+  ],
+  "raw": {
+    "issue_summary": "Django admin 的 'show_save_as_new' 上下文变量在用户没有添加权限时错误地显示为 True。",
+    "trigger_condition": {
+      "text": "当用户拥有修改权限但没有添加权限时，访问一个已存在对象的 admin 修改页面，并检查模板上下文中的 'show_save_as_new' 变量。",
+      "evidence": [
+        "Issue 描述指出 'save_as_new' 是一种添加操作，但当前代码缺少对 has_add_permission 的检查。",
+        "相关测试 1 (test_change_view_save_as_new) 验证了没有 'add' 权限的用户执行 'Save as new' 操作应被拒绝。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在 admin 修改页面的模板中，'Save as new' 按钮对没有添加权限的用户可见或可操作，导致他们可能尝试执行未授权的添加操作。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述指出在 admin_modify.py 中，'show_save_as_new' 变量的计算缺少 has_add_permission 检查。",
+        "相关测试 1 表明，没有添加权限的用户 POST 'Save as new' 会得到 403 状态码，但 Issue 关注的是前端按钮的可见性/状态。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "只有当用户同时拥有添加权限和修改权限，且满足其他条件（非弹窗、是修改页面、save_as 为 True）时，'show_save_as_new' 才应为 True。",
+      "evidence": [
+        "Issue 描述中用户建议的修复是在计算 'show_save_as_new' 时加入 'and has_add_permission'。",
+        "相关测试 1 的文档字符串说明 'Save as new' 对于没有 'add' 权限的用户应引发 PermissionDenied。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "submit_row",
+        "kind": "function",
+        "source_path": "django/contrib/admin/templatetags/admin_modify.py",
+        "reason": "该模板标签负责生成 admin 修改页面的提交行上下文，其中包含 'show_save_as_new' 变量。"
+      },
+      {
+        "name": "has_add_permission",
+        "kind": "method",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "Issue 的核心是缺少对此权限的检查。该方法用于判断用户是否有添加对象的权限。"
+      },
+      {
+        "name": "has_change_permission",
+        "kind": "method",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "当前 'show_save_as_new' 的计算已经包含了此权限检查，它是正确行为的一部分。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/templatetags/admin_modify.py",
+        "object": "submit_row 函数或其中计算 'show_save_as_new' 的代码块",
+        "lines": "",
+        "reason": "Issue 明确指出了该文件第 102 行附近缺少 has_add_permission 检查。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AdminViewPermissionsTest.test_change_view_save_as_new",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "它直接测试了用户在没有 'add' 权限时执行 'Save as new' POST 操作的行为，与 Issue 的权限主题高度相关。",
+        "reusable_parts": [
+          "测试类装饰器 (override_settings)",
+          "用户权限设置 (adduser, changeuser)",
+          "使用 client.post 模拟 admin 操作",
+          "使用 assertEqual 检查状态码和对象数量"
+        ],
+        "possible_gap": "该测试通过 HTTP POST 和状态码验证后端权限，但 Issue 关注的是前端模板上下文变量 'show_save_as_new' 的计算逻辑，这是两个不同的验证层面。"
+      },
+      {
+        "test_name": "AdminTemplateTagsTest.test_submit_row",
+        "test_file": "tests/admin_views/test_templatetags.py",
+        "why_relevant": "它直接测试了 submit_row 模板标签，该标签正是生成 'show_save_as_new' 等上下文变量的地方。",
+        "reusable_parts": [
+          "测试类 AdminTemplateTagsTest",
+          "使用 request_factory 和 admin.change_view 构建请求和上下文",
+          "调用 submit_row 函数并检查其返回的上下文字典"
+        ],
+        "possible_gap": "该测试使用超级用户（拥有所有权限），因此无法直接复现缺少添加权限的场景。"
+      },
+      {
+        "test_name": "ModelAdminPermissionTests.test_has_add_permission",
+        "test_file": "tests/modeladmin/tests.py",
+        "why_relevant": "它测试了 has_add_permission 方法在不同用户下的返回值，这是 Issue 中缺失检查的核心 API。",
+        "reusable_parts": [
+          "Mock 用户对象的创建模式",
+          "对 has_add_permission 返回值的断言风格"
+        ],
+        "possible_gap": "这是一个单元测试，不涉及模板上下文或 admin 视图的集成流程。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "在相关测试 2 和 3 中，request.user 被设置为超级用户（拥有所有权限）。",
+        "target_pattern": "将 request.user 设置为一个只有 change 权限但没有 add 权限的用户。",
+        "reason": "Issue 描述的问题在用户缺少 add 权限时触发。改变用户权限状态可以使测试走向计算 'show_save_as_new' 的错误路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 中，通过不同用户登录来改变权限上下文。",
+        "target_pattern": "在测试 submit_row 或 admin.change_view 时，传入一个只有 change 权限的 user 对象。",
+        "reason": "为了在模板标签层面复现问题，需要模拟一个没有 add 权限的请求上下文。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "submit_row(context) 返回的字典中 'show_save_as_new' 键的值。",
+        "reason": "这是 Issue 直接关注的错误变量。观察其值可以判断权限检查逻辑是否正确。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "admin.change_view 返回的 response.context_data 在传递给 submit_row 之前的状态。",
+        "reason": "'show_save_as_new' 的原始计算可能发生在 admin 视图准备上下文的阶段，需要观察其源头。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当用户没有 add 权限时，'show_save_as_new' 上下文变量的值应为 False。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的模板渲染输出字符串，因为模板可能变化。",
+        "reason": "直接断言核心上下文变量的布尔值，这与 Issue 的语义（按钮不应显示）直接对应，且稳定。"
+      },
+      {
+        "assertion_goal": "当用户同时拥有 add 和 change 权限时，'show_save_as_new' 在满足其他条件下应为 True。",
+        "preferred_assertion_style": "equals",
+        "avoid": "仅断言没有异常，需要明确验证正向情况。",
+        "reason": "确保修复不会破坏原有的、正确的功能。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django TestCase 环境，配置好 admin 站点和测试模型（如 Article 或 User）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建具有特定权限的用户对象（例如，只有 change 权限的用户）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 RequestFactory 来构建请求对象，并手动设置 request.user。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入并调用 admin 的 change_view 方法或直接调用 submit_row 模板标签函数。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到的第 102 行具体代码内容未在提供的源码片段中给出，因此无法确认 'show_save_as_new' 当前的确切计算逻辑。",
+      "不确定 'save_as' 这个条件变量在计算 'show_save_as_new' 时是否必须为 True，以及它如何被设置。",
+      "不确定除了 has_add_permission 和 has_change_permission 外，计算 'show_save_as_new' 是否还依赖其他未提及的变量或条件。"
+    ]
+  }
+}

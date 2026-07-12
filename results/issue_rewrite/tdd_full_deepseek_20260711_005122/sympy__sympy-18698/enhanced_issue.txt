@@ -1,0 +1,102 @@
+instance_id: sympy__sympy-18698
+
+issue_summary: sqf_list 函数在处理具有相同重数的不同因子时，输出顺序不一致，导致因子与重数对应关系错误。
+
+trigger_condition:
+{
+  "text": "调用 Poly.sqf_list() 或 sqf_list() 函数，输入一个多项式，该多项式包含两个或更多具有相同重数但不同的不可约因子。",
+  "evidence": [
+    "Issue 中第一个示例：sqf_list( (x**2 + 1) * (x - 1)**2 * (x - 2)**3 * (x - 3)**3 )",
+    "Issue 中第二个示例：sqf_list( x**5 - 2*x**4 - 2*x**3 + 4*x**2 + x - 2 )",
+    "相关测试 4 中展示了 sqf_list 的调用方式。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "sqf_list 返回的因子列表中，具有相同重数的因子（例如重数都为 3）的顺序与预期不符，导致因子与重数的配对错误。",
+  "symptom_type": "wrong_order",
+  "evidence": [
+    "Issue 描述：'we should have (x*_2 - 5_x + 6, 3) and not 2 factors of multiplicity 3'，并指出第一个示例的输出 (x - 3, 3) 和 (x - 2, 3) 顺序有问题。",
+    "Issue 指出第二个示例的输出 (x**2 - 1, 2) 是正确的（只有一个重数为 2 的因子）。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "sqf_list 应返回正确的平方自由因子分解，对于具有相同重数的不同因子，应保持其与原始多项式因子一致的顺序或某种确定的顺序，确保每个因子与其正确的重数相关联。",
+  "evidence": [
+    "Issue 中明确说明了第一个示例的正确预期：'we should have (x*_2 - 5_x + 6, 3) and not 2 factors of multiplicity 3'，暗示应合并为一个因子。但根据代码上下文，更合理的预期是因子列表的顺序是确定且正确的。",
+    "相关测试 1 和 4 中的 assert 语句表明 sqf_list 的返回值（系数和因子列表）是确定且可测试的。"
+  ],
+  "confidence": "medium"
+}
+
+target_apis:
+[
+  {
+    "name": "Poly.sqf_list",
+    "kind": "method",
+    "source_path": "sympy/polys/polytools.py",
+    "reason": "Issue 直接报告了 Poly.sqf_list 或顶层 sqf_list 函数（最终调用 Poly.sqf_list）的输出不一致问题。"
+  },
+  {
+    "name": "sqf_list",
+    "kind": "function",
+    "source_path": "sympy/polys/polytools.py",
+    "reason": "Issue 标题和内容中使用了 sqf_list，这是 Poly.sqf_list 的顶层包装函数。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中使用的多项式，其不同因子的重数通常是不同的（如 test_sqf 中的 (g,1) 和 (h,2)），或者只有一个因子具有某个重数。",
+    "target_pattern": "构造一个多项式，其中至少两个不同的不可约因子具有相同的重数（例如都是 3），如 Issue 中的 (x-2)**3 * (x-3)**3。",
+    "reason": "Issue 表明当多个因子共享相同重数时，输出顺序可能出现错误。改变输入以包含此模式可能触发缺陷路径。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "sqf_list(poly) 返回的元组，特别是其第二个元素（因子列表）的顺序。例如，观察 [(x-1, 2), (x-3, 3), (x-2, 3)] 中 (x-3,3) 和 (x-2,3) 的顺序。",
+    "reason": "Issue 的核心错误现象是返回列表中具有相同重数的因子顺序错误。直接观察返回值是判断问题是否触发的关键。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "Poly(poly).sqf_list() 的返回值，与顶层 sqf_list 进行对比。",
+    "reason": "Issue 可能涉及 Poly 方法与其顶层包装函数之间的一致性，或底层 rep.sqf_list 的实现。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证 sqf_list 返回的因子列表中，每个因子与其正确的重数相关联，并且对于具有相同重数的因子，其顺序是确定且符合预期的（例如，与某种规范顺序一致，如按因子排序）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言完整的、可能不稳定的字符串表示。避免仅断言列表长度而忽略顺序。",
+    "reason": "Issue 明确指出输出顺序不一致导致错误。一个稳定的断言应该检查因子-重数对的确切顺序，或者至少检查具有相同重数的因子组内的顺序是否确定。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 sympy 的 Poly、sqf_list 以及符号变量（如 x）。测试可以放在现有的 test_polytools.py 框架中。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "Issue 中提到的正确输出具体是什么？是应该合并为一个因子 (x**2 - 5x + 6, 3)，还是两个因子 (x-2,3) 和 (x-3,3) 但顺序固定？根据代码和测试，后者（返回两个因子）更可能，但顺序需要确定。",
+  "缺陷的确切根源是在 Poly.sqf_list 方法中，还是在更底层的 rep.sqf_list 实现中？",
+  "对于具有相同重数的因子，预期的“正确”顺序是什么（例如，按某种规范形式排序）？这需要从代码库的其他部分或文档中推断。"
+]

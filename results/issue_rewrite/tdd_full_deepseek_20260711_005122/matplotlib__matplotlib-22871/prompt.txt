@@ -1,0 +1,655 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+[Bug]: ConciseDateFormatter not showing year anywhere when plotting <12 months
+### Bug summary
+
+When I plot < 1 year and January is not included in the x-axis, the year doesn't show up anywhere.
+This bug is different from bug #21670 (fixed in #21785).
+
+### Code for reproduction
+
+```python
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from datetime import datetime, timedelta
+
+#create time array
+initial = datetime(2021,2,14,0,0,0)
+time_array = [initial + timedelta(days=x) for x in range(1,200)]
+
+#create data array
+data = [-x**2/20000 for x in range(1,200)]
+
+
+#plot data
+fig,ax = plt.subplots()
+ax.plot(time_array,data) 
+        
+locator = mdates.AutoDateLocator()
+formatter = mdates.ConciseDateFormatter(locator)
+
+ax.grid(True)
+ax.set_ylabel("Temperature ($\degree$C)")
+ax.xaxis.set_major_locator(locator)   
+ax.xaxis.set_major_formatter(formatter)
+fig.autofmt_xdate() #automatically makes the x-labels rotate
+```
+
+
+### Actual outcome
+
+![image](https://user-images.githubusercontent.com/15143365/154090257-c7813f1c-f9ea-4252-86bf-f84e449c2f46.png)
+
+
+### Expected outcome
+
+I expect the year "2021" to show in the offset, to the right of the x-axis
+
+### Additional information
+
+I'm using Spyder IDE, v5.1.5
+
+### Operating system
+
+Windows 10
+
+### Matplotlib Version
+
+3.4.3
+
+### Matplotlib Backend
+
+Qt5Agg
+
+### Python version
+
+3.9.1
+
+### Jupyter version
+
+_No response_
+
+### Installation
+
+conda
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：lib/matplotlib/dates.py
+对象名称：ConciseDateFormatter
+节点类型：class
+父节点：dates
+行号范围：642-858
+代码：
+class ConciseDateFormatter(ticker.Formatter):
+    """
+    A `.Formatter` which attempts to figure out the best format to use for the
+    date, and to make it as compact as possible, but still be complete. This is
+    most useful when used with the `AutoDateLocator`::
+
+    >>> locator = AutoDateLocator()
+    >>> formatter = ConciseDateFormatter(locator)
+
+    Parameters
+    ----------
+    locator : `.ticker.Locator`
+        Locator that this axis is using.
+
+    tz : str or `~datetime.tzinfo`, default: :rc:`timezone`
+        Passed to `.dates.num2date`.
+
+    formats : list of 6 strings, optional
+        Format strings for 6 levels of tick labelling: mostly years,
+        months, days, hours, minutes, and seconds.  Strings use
+        the same format codes as `~datetime.datetime.strftime`.  Default is
+        ``['%Y', '%b', '%d', '%H:%M', '%H:%M', '%S.%f']``
+
+    zero_formats : list of 6 strings, optional
+        Format strings for tick labels that are "zeros" for a given tick
+        level.  For instance, if most ticks are months, ticks around 1 Jan 2005
+        will be labeled "Dec", "2005", "Feb".  The default is
+        ``['', '%Y', '%b', '%b-%d', '%H:%M', '%H:%M']``
+
+    offset_formats : list of 6 strings, optional
+        Format strings for the 6 levels that is applied to the "offset"
+        string found on the right side of an x-axis, or top of a y-axis.
+        Combined with the tick labels this should completely specify the
+        date.  The default is::
+
+            ['', '%Y', '%Y-%b', '%Y-%b-%d', '%Y-%b-%d', '%Y-%b-%d %H:%M']
+
+    show_offset : bool, default: True
+        Whether to show the offset or not.
+
+    usetex : bool, default: :rc:`text.usetex`
+        To enable/disable the use of TeX's math mode for rendering the results
+        of the formatter.
+
+    Examples
+    --------
+    See :doc:`/gallery/ticks/date_concise_formatter`
+
+    .. plot::
+
+        import datetime
+        import matplotlib.dates as mdates
+
+        base = datetime.datetime(2005, 2, 1)
+        dates = np.array([base + datetime.timedelta(hours=(2 * i))
+                          for i in range(732)])
+        N = len(dates)
+        np.random.seed(19680801)
+        y = np.cumsum(np.random.randn(N))
+
+        fig, ax = plt.subplots(constrained_layout=True)
+        locator = mdates.AutoDateLocator()
+        formatter = mdates.ConciseDateFormatter(locator)
+        ax.xaxis.set_major_locator(locator)
+        ax.xaxis.set_major_formatter(formatter)
+
+        ax.plot(dates, y)
+        ax.set_title('Concise Date Formatter')
+
+    """
+    def __init__(self, locator, tz=None, formats=None, offset_formats=None,
+                 zero_formats=None, show_offset=True, *, usetex=None):
+    def __call__(self, x, pos=None):
+    def format_ticks(self, values):
+    def get_offset(self):
+    def format_data_short(self, value):
+
+
+【源码片段 2】
+文件路径：lib/matplotlib/dates.py
+对象名称：AutoDateLocator
+节点类型：class
+父节点：dates
+行号范围：1236-1466
+代码：
+class AutoDateLocator(DateLocator):
+    """
+    On autoscale, this class picks the best `DateLocator` to set the view
+    limits and the tick locations.
+
+    Attributes
+    ----------
+    intervald : dict
+
+        Mapping of tick frequencies to multiples allowed for that ticking.
+        The default is ::
+
+            self.intervald = {
+                YEARLY  : [1, 2, 4, 5, 10, 20, 40, 50, 100, 200, 400, 500,
+                           1000, 2000, 4000, 5000, 10000],
+                MONTHLY : [1, 2, 3, 4, 6],
+                DAILY   : [1, 2, 3, 7, 14, 21],
+                HOURLY  : [1, 2, 3, 4, 6, 12],
+                MINUTELY: [1, 5, 10, 15, 30],
+                SECONDLY: [1, 5, 10, 15, 30],
+                MICROSECONDLY: [1, 2, 5, 10, 20, 50, 100, 200, 500,
+                                1000, 2000, 5000, 10000, 20000, 50000,
+                                100000, 200000, 500000, 1000000],
+            }
+
+        where the keys are defined in `dateutil.rrule`.
+
+        The interval is used to specify multiples that are appropriate for
+        the frequency of ticking. For instance, every 7 days is sensible
+        for daily ticks, but for minutes/seconds, 15 or 30 make sense.
+
+        When customizing, you should only modify the values for the existing
+        keys. You should not add or delete entries.
+
+        Example for forcing ticks every 3 hours::
+
+            locator = AutoDateLocator()
+            locator.intervald[HOURLY] = [3]  # only show every 3 hours
+    """
+    def __init__(self, tz=None, minticks=5, maxticks=None,
+                 interval_multiples=True):
+    def __call__(self):
+    def tick_values(self, vmin, vmax):
+    def nonsingular(self, vmin, vmax):
+    def _get_unit(self):
+    def get_locator(self, dmin, dmax):
+
+
+【源码片段 3】
+文件路径：lib/matplotlib/axis.py
+对象名称：set_major_locator
+节点类型：class_function
+父节点：Axis
+行号范围：1757-1771
+代码：
+    def set_major_locator(self, locator):
+        """
+        Set the locator of the major ticker.
+
+        Parameters
+        ----------
+        locator : `~matplotlib.ticker.Locator`
+        """
+        _api.check_isinstance(mticker.Locator, locator=locator)
+        self.isDefault_majloc = False
+        self.major.locator = locator
+        if self.major.formatter:
+            self.major.formatter._set_locator(locator)
+        locator.set_axis(self)
+        self.stale = True
+
+
+【源码片段 4】
+文件路径：lib/matplotlib/axis.py
+对象名称：set_major_formatter
+节点类型：class_function
+父节点：Axis
+行号范围：1691-1715
+代码：
+    def set_major_formatter(self, formatter):
+        """
+        Set the formatter of the major ticker.
+
+        In addition to a `~matplotlib.ticker.Formatter` instance,
+        this also accepts a ``str`` or function.
+
+        For a ``str`` a `~matplotlib.ticker.StrMethodFormatter` is used.
+        The field used for the value must be labeled ``'x'`` and the field used
+        for the position must be labeled ``'pos'``.
+        See the  `~matplotlib.ticker.StrMethodFormatter` documentation for
+        more information.
+
+        For a function, a `~matplotlib.ticker.FuncFormatter` is used.
+        The function must take two inputs (a tick value ``x`` and a
+        position ``pos``), and return a string containing the corresponding
+        tick label.
+        See the  `~matplotlib.ticker.FuncFormatter` documentation for
+        more information.
+
+        Parameters
+        ----------
+        formatter : `~matplotlib.ticker.Formatter`, ``str``, or function
+        """
+        self._set_formatter(formatter, self.major)
+
+
+【源码片段 5】
+文件路径：lib/matplotlib/axis.py
+对象名称：locator
+节点类型：class_function
+父节点：Ticker
+行号范围：553-554
+代码：
+    def locator(self):
+        return self._locator
+
+
+【源码片段 6】
+文件路径：lib/matplotlib/axis.py
+对象名称：formatter
+节点类型：class_function
+父节点：Ticker
+行号范围：564-565
+代码：
+    def formatter(self):
+        return self._formatter
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：lib/matplotlib/tests/test_dates.py
+测试名称：test_concise_formatter_show_offset
+测试代码：
+@pytest.mark.parametrize('t_delta, expected', [
+    (datetime.timedelta(seconds=0.01), '1997-Jan-01 00:00'),
+    (datetime.timedelta(minutes=1), '1997-Jan-01 00:01'),
+    (datetime.timedelta(hours=1), '1997-Jan-01'),
+    (datetime.timedelta(days=1), '1997-Jan-02'),
+    (datetime.timedelta(weeks=1), '1997-Jan'),
+    (datetime.timedelta(weeks=26), ''),
+    (datetime.timedelta(weeks=520), '')
+])
+def test_concise_formatter_show_offset(t_delta, expected):
+    d1 = datetime.datetime(1997, 1, 1)
+    d2 = d1 + t_delta
+
+    fig, ax = plt.subplots()
+    locator = mdates.AutoDateLocator()
+    formatter = mdates.ConciseDateFormatter(locator)
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(formatter)
+
+    ax.plot([d1, d2], [0, 0])
+    fig.canvas.draw()
+    assert formatter.get_offset() == expected
+
+【相关测试 2】
+测试文件：lib/matplotlib/tests/test_dates.py
+测试名称：test_concise_formatter
+测试代码：
+def test_concise_formatter():
+    def _create_auto_date_locator(date1, date2):
+        fig, ax = plt.subplots()
+
+        locator = mdates.AutoDateLocator(interval_multiples=True)
+        formatter = mdates.ConciseDateFormatter(locator)
+        ax.yaxis.set_major_locator(locator)
+        ax.yaxis.set_major_formatter(formatter)
+        ax.set_ylim(date1, date2)
+        fig.canvas.draw()
+        sts = [st.get_text() for st in ax.get_yticklabels()]
+        return sts
+
+    d1 = datetime.datetime(1997, 1, 1)
+    results = ([datetime.timedelta(weeks=52 * 200),
+                [str(t) for t in range(1980, 2201, 20)]
+                ],
+               [datetime.timedelta(weeks=52),
+                ['1997', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug',
+                 'Sep', 'Oct', 'Nov', 'Dec']
+                ],
+               [datetime.timedelta(days=141),
+                ['Jan', '15', 'Feb', '15', 'Mar', '15', 'Apr', '15',
+                 'May', '15']
+                ],
+               [datetime.timedelta(days=40),
+                ['Jan', '05', '09', '13', '17', '21', '25', '29', 'Feb',
+                 '05', '09']
+                ],
+               [datetime.timedelta(hours=40),
+                ['Jan-01', '04:00', '08:00', '12:00', '16:00', '20:00',
+                 'Jan-02', '04:00', '08:00', '12:00', '16:00']
+                ],
+               [datetime.timedelta(minutes=20),
+                ['00:00', '00:05', '00:10', '00:15', '00:20']
+                ],
+               [datetime.timedelta(seconds=40),
+                ['00:00', '05', '10', '15', '20', '25', '30', '35', '40']
+                ],
+               [datetime.timedelta(seconds=2),
+                ['59.5', '00:00', '00.5', '01.0', '01.5', '02.0', '02.5']
+                ],
+               )
+    for t_delta, expected in results:
+        d2 = d1 + t_delta
+        strings = _create_auto_date_locator(d1, d2)
+        assert strings == expected
+
+【相关测试 3】
+测试文件：lib/matplotlib/tests/test_dates.py
+测试名称：test_concise_formatter_zformats
+测试代码：
+def test_concise_formatter_zformats():
+    zero_formats = ['', "'%y", '%B', '%m-%d', '%S', '%S.%f']
+
+    def _create_auto_date_locator(date1, date2):
+        fig, ax = plt.subplots()
+
+        locator = mdates.AutoDateLocator(interval_multiples=True)
+        formatter = mdates.ConciseDateFormatter(
+            locator, zero_formats=zero_formats)
+        ax.yaxis.set_major_locator(locator)
+        ax.yaxis.set_major_formatter(formatter)
+        ax.set_ylim(date1, date2)
+        fig.canvas.draw()
+        sts = [st.get_text() for st in ax.get_yticklabels()]
+        return sts
+
+    d1 = datetime.datetime(1997, 1, 1)
+    results = ([datetime.timedelta(weeks=52 * 200),
+                [str(t) for t in range(1980, 2201, 20)]
+                ],
+               [datetime.timedelta(weeks=52),
+                ["'97", 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+                ],
+               [datetime.timedelta(days=141),
+                ['January', '15', 'February', '15', 'March',
+                    '15', 'April', '15', 'May', '15']
+                ],
+               [datetime.timedelta(days=40),
+                ['January', '05', '09', '13', '17', '21',
+                    '25', '29', 'February', '05', '09']
+                ],
+               [datetime.timedelta(hours=40),
+                ['01-01', '04:00', '08:00', '12:00', '16:00', '20:00',
+                    '01-02', '04:00', '08:00', '12:00', '16:00']
+                ],
+               [datetime.timedelta(minutes=20),
+                ['00', '00:05', '00:10', '00:15', '00:20']
+                ],
+               [datetime.timedelta(seconds=40),
+                ['00', '05', '10', '15', '20', '25', '30', '35', '40']
+                ],
+               [datetime.timedelta(seconds=2),
+                ['59.5', '00.0', '00.5', '01.0', '01.5', '02.0', '02.5']
+                ],
+               )
+    for t_delta, expected in results:
+        d2 = d1 + t_delta
+        strings = _create_auto_date_locator(d1, d2)
+        assert strings == expected
+
+【相关测试 4】
+测试文件：lib/matplotlib/tests/test_dates.py
+测试名称：test_concise_formatter_formats
+测试代码：
+def test_concise_formatter_formats():
+    formats = ['%Y', '%m/%Y', 'day: %d',
+               '%H hr %M min', '%H hr %M min', '%S.%f sec']
+
+    def _create_auto_date_locator(date1, date2):
+        fig, ax = plt.subplots()
+
+        locator = mdates.AutoDateLocator(interval_multiples=True)
+        formatter = mdates.ConciseDateFormatter(locator, formats=formats)
+        ax.yaxis.set_major_locator(locator)
+        ax.yaxis.set_major_formatter(formatter)
+        ax.set_ylim(date1, date2)
+        fig.canvas.draw()
+        sts = [st.get_text() for st in ax.get_yticklabels()]
+        return sts
+
+    d1 = datetime.datetime(1997, 1, 1)
+    results = (
+        [datetime.timedelta(weeks=52 * 200), [str(t) for t in range(1980,
+         2201, 20)]],
+        [datetime.timedelta(weeks=52), [
+            '1997', '02/1997', '03/1997', '04/1997', '05/1997', '06/1997',
+            '07/1997', '08/1997', '09/1997', '10/1997', '11/1997', '12/1997',
+            ]],
+        [datetime.timedelta(days=141), [
+            '01/1997', 'day: 15', '02/1997', 'day: 15', '03/1997', 'day: 15',
+            '04/1997', 'day: 15', '05/1997', 'day: 15',
+            ]],
+        [datetime.timedelta(days=40), [
+            '01/1997', 'day: 05', 'day: 09', 'day: 13', 'day: 17', 'day: 21',
+            'day: 25', 'day: 29', '02/1997', 'day: 05', 'day: 09',
+            ]],
+        [datetime.timedelta(hours=40), [
+            'day: 01', '04 hr 00 min', '08 hr 00 min', '12 hr 00 min',
+            '16 hr 00 min', '20 hr 00 min', 'day: 02', '04 hr 00 min',
+            '08 hr 00 min', '12 hr 00 min', '16 hr 00 min',
+            ]],
+        [datetime.timedelta(minutes=20), ['00 hr 00 min', '00 hr 05 min',
+         '00 hr 10 min', '00 hr 15 min', '00 hr 20 min']],
+        [datetime.timedelta(seconds=40), [
+            '00 hr 00 min', '05.000000 sec', '10.000000 sec',
+            '15.000000 sec', '20.000000 sec', '25.000000 sec',
+            '30.000000 sec', '35.000000 sec', '40.000000 sec',
+            ]],
+        [datetime.timedelta(seconds=2), [
+            '59.500000 sec', '00 hr 00 min', '00.500000 sec', '01.000000 sec',
+            '01.500000 sec', '02.000000 sec', '02.500000 sec',
+            ]],
+        )
+    for t_delta, expected in results:
+        d2 = d1 + t_delta
+        strings = _create_auto_date_locator(d1, d2)
+        assert strings == expected
+
+【相关测试 5】
+测试文件：lib/matplotlib/tests/test_dates.py
+测试名称：test_concise_formatter_tz
+测试代码：
+def test_concise_formatter_tz():
+    def _create_auto_date_locator(date1, date2, tz):
+        fig, ax = plt.subplots()
+
+        locator = mdates.AutoDateLocator(interval_multiples=True)
+        formatter = mdates.ConciseDateFormatter(locator, tz=tz)
+        ax.yaxis.set_major_locator(locator)
+        ax.yaxis.set_major_formatter(formatter)
+        ax.set_ylim(date1, date2)
+        fig.canvas.draw()
+        sts = [st.get_text() for st in ax.get_yticklabels()]
+        return sts, ax.yaxis.get_offset_text().get_text()
+
+    d1 = datetime.datetime(1997, 1, 1).replace(tzinfo=datetime.timezone.utc)
+    results = ([datetime.timedelta(hours=40),
+                ['03:00', '07:00', '11:00', '15:00', '19:00', '23:00',
+                 '03:00', '07:00', '11:00', '15:00', '19:00'],
+                "1997-Jan-02"
+                ],
+               [datetime.timedelta(minutes=20),
+                ['03:00', '03:05', '03:10', '03:15', '03:20'],
+                "1997-Jan-01"
+                ],
+               [datetime.timedelta(seconds=40),
+                ['03:00', '05', '10', '15', '20', '25', '30', '35', '40'],
+                "1997-Jan-01 03:00"
+                ],
+               [datetime.timedelta(seconds=2),
+                ['59.5', '03:00', '00.5', '01.0', '01.5', '02.0', '02.5'],
+                "1997-Jan-01 03:00"
+                ],
+               )
+
+    new_tz = datetime.timezone(datetime.timedelta(hours=3))
+    for t_delta, expected_strings, expected_offset in results:
+        d2 = d1 + t_delta
+        strings, offset = _create_auto_date_locator(d1, d2, new_tz)
+        assert strings == expected_strings
+        assert offset == expected_offset
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

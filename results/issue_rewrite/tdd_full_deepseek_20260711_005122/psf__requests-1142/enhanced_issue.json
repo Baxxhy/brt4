@@ -1,0 +1,337 @@
+{
+  "instance_id": "psf__requests-1142",
+  "issue_summary": "requests.get 总是发送 content-length 请求头，导致某些服务器（如 amazon.com）返回 503 错误。",
+  "trigger_condition": {
+    "text": "使用 requests.get 方法发送 GET 请求，且请求中可能包含 data 参数或默认的 data 字典。",
+    "evidence": [
+      "Issue 提到 'requests.get is ALWAYS sending content length'，并举例 GET 请求包含 'content-length' 头会导致 amazon.com 返回 503。",
+      "源码片段 4 中 Request.__init__ 的 data 参数默认值为 dict()。",
+      "源码片段 2 中 request 方法会将 data 参数传递给 Request 对象。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "GET 请求中自动添加了 'content-length' 请求头，导致目标服务器（如 amazon.com）返回 503 状态码。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 明确说明 'http://amazon.com returns 503 for every get request that contains 'content-length' header'。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "GET 请求在不应有请求体时（例如 data 为空或未提供），不应自动添加 'content-length' 请求头；或者提供一种方式让用户可以选择不发送此头。",
+    "evidence": [
+      "Issue 提到 'the right behavior is not to add this header automatically in GET requests or add the possibility to not send it'。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "requests.get",
+      "kind": "function",
+      "source_path": "requests/sessions.py",
+      "reason": "Issue 直接报告 requests.get 的问题，它是触发缺陷的主要入口。"
+    },
+    {
+      "name": "Session.request",
+      "kind": "method",
+      "source_path": "requests/sessions.py",
+      "reason": "requests.get 最终调用此方法，它负责创建和发送请求。"
+    },
+    {
+      "name": "Request.prepare",
+      "kind": "method",
+      "source_path": "requests/models.py",
+      "reason": "此方法构造 PreparedRequest，可能负责准备请求头，包括 content-length。"
+    },
+    {
+      "name": "PreparedRequest.prepare_body",
+      "kind": "method",
+      "source_path": "",
+      "reason": "此方法（未在检索片段中直接出现，但从 prepare 调用链推断）很可能负责根据 data 和 files 设置请求体和相关头信息。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "requests/models.py",
+      "object": "PreparedRequest.prepare_body",
+      "lines": "",
+      "reason": "此方法可能无条件地为 GET 请求设置 content-length 头，即使 data 为空或默认空字典。"
+    },
+    {
+      "path": "requests/models.py",
+      "object": "Request.__init__",
+      "lines": "",
+      "reason": "data 参数默认值为 dict()，可能导致即使调用者未提供 data，也传递了一个非 None 的空字典，进而被 prepare_body 处理。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "RequestsTestCase.test_HTTP_200_OK_GET_WITH_PARAMS",
+      "test_file": "test_requests.py",
+      "why_relevant": "它直接使用 requests.get 发送 GET 请求，并检查响应状态码，与 Issue 场景相似。",
+      "reusable_parts": [
+        "import requests",
+        "requests.get 调用",
+        "assertEqual 检查状态码"
+      ],
+      "possible_gap": "该测试没有显式设置或检查请求头，也没有模拟触发 content-length 头添加的条件（如传递 data）。"
+    },
+    {
+      "test_name": "RequestsTestCase.test_HTTP_200_OK_GET_ALTERNATIVE",
+      "test_file": "test_requests.py",
+      "why_relevant": "它展示了通过 Request 对象和 Session 发送 GET 请求的另一种方式，涉及请求准备和发送的完整流程。",
+      "reusable_parts": [
+        "requests.Request 构造",
+        "Session.send",
+        "req.prepare()",
+        "状态码断言"
+      ],
+      "possible_gap": "该测试没有传递 data 参数，可能不会触发 content-length 头的添加。"
+    },
+    {
+      "test_name": "RequestsTestCase.test_basic_building",
+      "test_file": "test_requests.py",
+      "why_relevant": "它直接操作 Request 对象并设置 data，然后调用 prepare()，这与准备请求体和头部的过程相关。",
+      "reusable_parts": [
+        "requests.Request() 构造",
+        "设置 req.data",
+        "req.prepare()",
+        "检查 prepared request 的属性"
+      ],
+      "possible_gap": "该测试关注 URL 和 body 的构建，没有发送实际请求或检查请求头。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中 requests.get 或 Request 构造时不传递 data 参数，或传递 None。",
+      "target_pattern": "在 GET 请求中传递 data 参数，即使其值为空字典 {} 或某些值。",
+      "reason": "Issue 暗示 content-length 头总是被添加，这可能与 data 参数的默认值或处理逻辑有关。传递 data 可能触发 prepare_body 添加该头。",
+      "confidence": "medium"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "Request 对象在 prepare 前，其 data 属性可能为 None 或未设置。",
+      "target_pattern": "确保 Request 对象的 data 属性在 prepare 前被设置为一个（可能为空的）字典。",
+      "reason": "源码中 Request.__init__ 的 data 默认值为 dict()，这可能导致 prepare_body 认为存在请求体。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "响应对象的 status_code 属性，例如 resp.status_code。",
+      "reason": "Issue 明确指出服务器返回 503 错误，这是最直接的错误症状。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "准备后的请求对象（PreparedRequest）的 headers 字典，例如 prep.headers。",
+      "reason": "需要观察是否自动添加了 'content-length' 头，这是缺陷的核心。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "Request 对象在 prepare 前后的 data 属性值。",
+      "reason": "了解 data 的状态如何影响头部生成。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证在特定条件下（如 GET 请求且 data 为空），发送的请求头中不包含 'content-length'。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "断言完整的 headers 字典完全等于某个固定值，因为其他头可能变化。",
+      "reason": "Issue 的核心是 'content-length' 头的不当存在。断言其不存在更稳定且直接针对问题。"
+    },
+    {
+      "assertion_goal": "验证发送请求后，服务器返回的状态码不是因 content-length 头导致的错误（如 503）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "硬编码断言状态码必须为 200，因为其他非 200 状态码可能由其他原因导致。",
+      "reason": "Issue 描述了特定错误状态码，但更通用的断言是状态码不应是 503（或类似的客户端错误）。但根据 expected_behavior，更稳定的断言是检查请求头。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "可能需要使用一个测试服务器（如 httpbin）来接收请求并检查请求头，或者 mock 网络请求以检查发出的请求头。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "使用 unittest.TestCase 作为测试基类。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "content-length 头被添加的确切条件是什么？是只要 data 参数被传递（即使为空字典），还是与 files 参数也有关？",
+    "修复后的预期行为是：1) 完全不为 GET 请求添加此头，还是 2) 仅在 data 和 files 均为 None/空时才不添加，还是 3) 提供一个参数让用户控制？Issue 提到了两种可能。",
+    "默认的 data=dict() 是否是导致此问题的根本原因？还是 prepare_body 方法中的逻辑问题？"
+  ],
+  "raw": {
+    "issue_summary": "requests.get 总是发送 content-length 请求头，导致某些服务器（如 amazon.com）返回 503 错误。",
+    "trigger_condition": {
+      "text": "使用 requests.get 方法发送 GET 请求，且请求中可能包含 data 参数或默认的 data 字典。",
+      "evidence": [
+        "Issue 提到 'requests.get is ALWAYS sending content length'，并举例 GET 请求包含 'content-length' 头会导致 amazon.com 返回 503。",
+        "源码片段 4 中 Request.__init__ 的 data 参数默认值为 dict()。",
+        "源码片段 2 中 request 方法会将 data 参数传递给 Request 对象。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "GET 请求中自动添加了 'content-length' 请求头，导致目标服务器（如 amazon.com）返回 503 状态码。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 明确说明 'http://amazon.com returns 503 for every get request that contains 'content-length' header'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "GET 请求在不应有请求体时（例如 data 为空或未提供），不应自动添加 'content-length' 请求头；或者提供一种方式让用户可以选择不发送此头。",
+      "evidence": [
+        "Issue 提到 'the right behavior is not to add this header automatically in GET requests or add the possibility to not send it'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "requests.get",
+        "kind": "function",
+        "source_path": "requests/sessions.py",
+        "reason": "Issue 直接报告 requests.get 的问题，它是触发缺陷的主要入口。"
+      },
+      {
+        "name": "Session.request",
+        "kind": "method",
+        "source_path": "requests/sessions.py",
+        "reason": "requests.get 最终调用此方法，它负责创建和发送请求。"
+      },
+      {
+        "name": "Request.prepare",
+        "kind": "method",
+        "source_path": "requests/models.py",
+        "reason": "此方法构造 PreparedRequest，可能负责准备请求头，包括 content-length。"
+      },
+      {
+        "name": "PreparedRequest.prepare_body",
+        "kind": "method",
+        "source_path": "",
+        "reason": "此方法（未在检索片段中直接出现，但从 prepare 调用链推断）很可能负责根据 data 和 files 设置请求体和相关头信息。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "requests/models.py",
+        "object": "PreparedRequest.prepare_body",
+        "lines": "",
+        "reason": "此方法可能无条件地为 GET 请求设置 content-length 头，即使 data 为空或默认空字典。"
+      },
+      {
+        "path": "requests/models.py",
+        "object": "Request.__init__",
+        "lines": "",
+        "reason": "data 参数默认值为 dict()，可能导致即使调用者未提供 data，也传递了一个非 None 的空字典，进而被 prepare_body 处理。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "RequestsTestCase.test_HTTP_200_OK_GET_WITH_PARAMS",
+        "test_file": "test_requests.py",
+        "why_relevant": "它直接使用 requests.get 发送 GET 请求，并检查响应状态码，与 Issue 场景相似。",
+        "reusable_parts": [
+          "import requests",
+          "requests.get 调用",
+          "assertEqual 检查状态码"
+        ],
+        "possible_gap": "该测试没有显式设置或检查请求头，也没有模拟触发 content-length 头添加的条件（如传递 data）。"
+      },
+      {
+        "test_name": "RequestsTestCase.test_HTTP_200_OK_GET_ALTERNATIVE",
+        "test_file": "test_requests.py",
+        "why_relevant": "它展示了通过 Request 对象和 Session 发送 GET 请求的另一种方式，涉及请求准备和发送的完整流程。",
+        "reusable_parts": [
+          "requests.Request 构造",
+          "Session.send",
+          "req.prepare()",
+          "状态码断言"
+        ],
+        "possible_gap": "该测试没有传递 data 参数，可能不会触发 content-length 头的添加。"
+      },
+      {
+        "test_name": "RequestsTestCase.test_basic_building",
+        "test_file": "test_requests.py",
+        "why_relevant": "它直接操作 Request 对象并设置 data，然后调用 prepare()，这与准备请求体和头部的过程相关。",
+        "reusable_parts": [
+          "requests.Request() 构造",
+          "设置 req.data",
+          "req.prepare()",
+          "检查 prepared request 的属性"
+        ],
+        "possible_gap": "该测试关注 URL 和 body 的构建，没有发送实际请求或检查请求头。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 requests.get 或 Request 构造时不传递 data 参数，或传递 None。",
+        "target_pattern": "在 GET 请求中传递 data 参数，即使其值为空字典 {} 或某些值。",
+        "reason": "Issue 暗示 content-length 头总是被添加，这可能与 data 参数的默认值或处理逻辑有关。传递 data 可能触发 prepare_body 添加该头。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "Request 对象在 prepare 前，其 data 属性可能为 None 或未设置。",
+        "target_pattern": "确保 Request 对象的 data 属性在 prepare 前被设置为一个（可能为空的）字典。",
+        "reason": "源码中 Request.__init__ 的 data 默认值为 dict()，这可能导致 prepare_body 认为存在请求体。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "响应对象的 status_code 属性，例如 resp.status_code。",
+        "reason": "Issue 明确指出服务器返回 503 错误，这是最直接的错误症状。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "准备后的请求对象（PreparedRequest）的 headers 字典，例如 prep.headers。",
+        "reason": "需要观察是否自动添加了 'content-length' 头，这是缺陷的核心。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "Request 对象在 prepare 前后的 data 属性值。",
+        "reason": "了解 data 的状态如何影响头部生成。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在特定条件下（如 GET 请求且 data 为空），发送的请求头中不包含 'content-length'。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的 headers 字典完全等于某个固定值，因为其他头可能变化。",
+        "reason": "Issue 的核心是 'content-length' 头的不当存在。断言其不存在更稳定且直接针对问题。"
+      },
+      {
+        "assertion_goal": "验证发送请求后，服务器返回的状态码不是因 content-length 头导致的错误（如 503）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "硬编码断言状态码必须为 200，因为其他非 200 状态码可能由其他原因导致。",
+        "reason": "Issue 描述了特定错误状态码，但更通用的断言是状态码不应是 503（或类似的客户端错误）。但根据 expected_behavior，更稳定的断言是检查请求头。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要使用一个测试服务器（如 httpbin）来接收请求并检查请求头，或者 mock 网络请求以检查发出的请求头。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 unittest.TestCase 作为测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "content-length 头被添加的确切条件是什么？是只要 data 参数被传递（即使为空字典），还是与 files 参数也有关？",
+      "修复后的预期行为是：1) 完全不为 GET 请求添加此头，还是 2) 仅在 data 和 files 均为 None/空时才不添加，还是 3) 提供一个参数让用户控制？Issue 提到了两种可能。",
+      "默认的 data=dict() 是否是导致此问题的根本原因？还是 prepare_body 方法中的逻辑问题？"
+    ]
+  }
+}

@@ -1,0 +1,107 @@
+```json
+{
+    "issue_summary": "DataArray.quantile 方法在指定 keep_attrs=True 时未能保留属性。",
+    "trigger_condition": {
+        "text": "调用 DataArray.quantile 方法，并设置参数 keep_attrs=True。",
+        "evidence": ["Issue 中的 MCVE 代码：`out = da.quantile(.9, dim='x', keep_attrs=True)`", "源码片段 2 中 quantile 方法的签名包含 `keep_attrs: bool = None` 参数。"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "返回的 DataArray 对象的 attrs 属性为空 OrderedDict，而不是包含原始属性 {'units': 'K'}。",
+        "symptom_type": "wrong_return",
+        "evidence": ["Issue 中的实际输出：`OrderedDict()`", "Issue 中的预期输出：`OrderedDict([('units', 'K')])`"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "当调用 DataArray.quantile 方法并设置 keep_attrs=True 时，返回的 DataArray 应保留原始 DataArray 的属性。",
+        "evidence": ["Issue 中的预期输出展示了保留的属性。", "相关测试 1、2、3 表明其他 reduce 方法（如 mean）在 keep_attrs=True 时能正确保留属性。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "DataArray.quantile",
+            "kind": "method",
+            "source_path": "xarray/core/dataarray.py",
+            "reason": "Issue 直接报告此方法在特定参数下行为不正确。"
+        },
+        {
+            "name": "DataArray.attrs",
+            "kind": "property",
+            "source_path": "xarray/core/dataarray.py",
+            "reason": "Issue 的核心是检查此属性的值。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "xarray/core/dataarray.py",
+            "object": "DataArray.quantile",
+            "lines": "2827-2878",
+            "reason": "该方法内部调用了 `self._to_temp_dataset().quantile(...)`，可能未正确处理 keep_attrs 参数以将属性传递回结果 DataArray。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_reduce_keep_attrs",
+            "test_file": "xarray/tests/test_dataarray.py",
+            "why_relevant": "它测试了 DataArray 的 reduce 方法（如 mean）的 keep_attrs 参数行为，与 quantile 方法类似。",
+            "reusable_parts": ["测试类结构（TestDataArray）", "使用 OrderedDict 进行属性比较的断言风格", "测试 keep_attrs=True 和 keep_attrs=False 两种场景的模式"],
+            "possible_gap": "该测试针对的是 `mean` 方法，而非 `quantile` 方法。"
+        },
+        {
+            "test_name": "test_quantile",
+            "test_file": "xarray/tests/test_dataarray.py",
+            "why_relevant": "它直接测试了 DataArray.quantile 方法，验证了其数值计算的正确性。",
+            "reusable_parts": ["对 DataArray.quantile 方法的调用模式", "使用不同 q 和 dim 参数进行测试的模式", "与 numpy.nanpercentile 的结果比较"],
+            "possible_gap": "该测试没有检查 `keep_attrs` 参数的行为，也没有验证返回对象的属性。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "argument",
+            "current_pattern": "相关测试 4 中调用 quantile 时未指定 keep_attrs 参数（使用默认值）。",
+            "target_pattern": "在调用 quantile 时显式设置参数 `keep_attrs=True`。",
+            "reason": "Issue 表明只有当 keep_attrs=True 时才会触发属性丢失的 bug。",
+            "confidence": "high"
+        },
+        {
+            "slot": "object_state",
+            "current_pattern": "相关测试 4 中使用的 DataArray（self.dv）可能没有设置 attrs，或者其 attrs 未被测试关注。",
+            "target_pattern": "创建一个带有非空 attrs 属性的 DataArray 作为测试对象。",
+            "reason": "Issue 的 MCVE 中 DataArray 具有 attrs={'units':'K'}，这是观察 bug 的必要条件。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "return_value",
+            "expression_hint": "调用 quantile 后返回的 DataArray 对象的 attrs 属性。",
+            "reason": "Issue 的核心错误现象是返回对象的 attrs 为空，而非包含原始属性。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "断言当 keep_attrs=True 时，quantile 返回的 DataArray 的 attrs 等于原始 DataArray 的 attrs。",
+            "preferred_assertion_style": "equals",
+            "avoid": "避免断言 attrs 的完整字符串表示，或断言与特定无关属性的相等。",
+            "reason": "Issue 明确给出了预期的 attrs 内容，且相关测试 1 也使用了 equals 风格来比较 attrs。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要导入 xarray 和 OrderedDict，并创建一个带有 attrs 的 DataArray 对象。",
+            "source": "issue",
+            "confidence": "high"
+        },
+        {
+            "hint": "可以使用 TestDataArray 测试类作为基础框架。",
+            "source": "retrieved_test",
+            "confidence": "medium"
+        }
+    ],
+    "uncertainties": [
+        "DataArray.quantile 方法内部调用 Dataset.quantile 时，keep_attrs 参数是如何传递和处理的？",
+        "bug 的确切位置是在 DataArray.quantile 方法中，还是在它调用的 Dataset.quantile 方法中？",
+        "除了 quantile，其他 DataArray 方法（如 rank）的 keep_attrs 参数是否也存在类似问题？"
+    ]
+}
+```

@@ -1,0 +1,119 @@
+instance_id: django__django-13346
+
+issue_summary: 在 MySQL、Oracle 和 SQLite 上，JSONField 的 key transform 与 __in 查找操作符组合使用时，查询结果与直接使用相等查找不一致。
+
+trigger_condition:
+{
+  "text": "对 JSONField 使用带有 key transform 的 __in 查找操作符进行过滤，例如 `our_field__key__in=[0]`。",
+  "evidence": [
+    "Issue 中用户使用了 `first_filter = {'our_field__key__in': [0]}` 进行查询。",
+    "相关测试代码中展示了多种对 JSONField 使用 key transform 和查找操作符的组合，如 `value__baz__has_key`、`value__d__contains`。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "使用 `__in` 查找操作符的查询返回空结果集（0 条记录），而使用直接相等查找（`our_field__key=0`）的查询返回了 312 条记录。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 中描述：`len(first_items)` 返回 0，而 `len(second_items)` 返回 312。",
+    "用户期望两个过滤器返回相同的查询集，但事实并非如此。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "对 JSONField 使用带有 key transform 的 `__in` 查找操作符进行过滤时，应返回与直接使用相等查找（`our_field__key=0`）逻辑上一致的记录集。",
+  "evidence": [
+    "Issue 中用户明确表示：\"I would expect that both filters would give me the same queryset but this is not the case.\"",
+    "相关测试代码表明 JSONField 支持 key transform 与多种查找操作符的组合，如 `has_key`、`contains`、`iexact`，暗示 `__in` 也应正常工作。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "JSONField",
+    "kind": "class",
+    "source_path": "django/db/models/fields/json.py",
+    "reason": "Issue 涉及从 django_mysql.models.JSONField 迁移到 models.JSONField，核心是 JSONField 的行为。"
+  },
+  {
+    "name": "Query.filter",
+    "kind": "method",
+    "source_path": "",
+    "reason": "Issue 中通过 `OurModel.objects.filter(**first_filter)` 触发问题，这是 Django ORM 的核心查询方法。"
+  },
+  {
+    "name": "KeyTransform",
+    "kind": "class",
+    "source_path": "",
+    "reason": "相关测试代码中大量使用 KeyTransform 或 key transform 语法（如 `value__foo`），这是实现 JSON 键访问的基础。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "operator",
+    "current_pattern": "相似测试中使用 `has_key`、`contains`、`iexact`、`=` 等查找操作符与 key transform 组合。",
+    "target_pattern": "将查找操作符替换为 `__in`，例如将 `value__foo='bar'` 或 `value__baz__has_key='c'` 的模式变为 `value__key__in=[some_value]`。",
+    "reason": "Issue 表明 `__in` 操作符在 key transform 上下文中行为异常，而其他操作符在测试中工作正常，因此变异操作符可能触发缺陷路径。",
+    "confidence": "high"
+  },
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中查找的值通常是单个值（如字符串、字典、列表）或 KeyTransform 对象。",
+    "target_pattern": "将查找值设置为一个列表（如 `[0]`），以匹配 `__in` 操作符的语义。",
+    "reason": "`__in` 操作符期望一个可迭代对象作为右值，这与相等查找的单个值不同，输入结构的改变可能暴露处理逻辑的缺陷。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "sql",
+    "expression_hint": "生成的 SQL 查询字符串，特别是 WHERE 子句中处理 `__in` 和 JSON key 访问的部分。",
+    "reason": "比较 `our_field__key__in=[0]` 和 `our_field__key=0` 生成的 SQL 差异，可以揭示转换或参数化错误。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "`QuerySet` 的结果数量（`len(queryset)`）或具体记录。",
+    "reason": "Issue 的核心现象是结果数量不一致，直接观察返回值是判断缺陷是否触发的关键。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "使用 `__in` 查找操作符的查询返回的记录集，应与使用直接相等查找（相同 key 和值）的查询返回的记录集相同。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言完整的、数据库相关的 SQL 字符串，避免断言不相关的模型属性或记录顺序。",
+    "reason": "Issue 的期望是逻辑结果一致，而不是具体的 SQL 实现。比较两个查询集的记录内容或数量是最稳定且与 Issue 对齐的断言方式。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用支持 JSON 字段的数据库后端（如 MySQL, Oracle, SQLite, PostgreSQL），并使用 `skipUnlessDBFeature('supports_json_field')` 装饰器。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要一个包含 JSONField 的测试模型（如 `NullableJSONModel`），并预先填充包含特定键值对的 JSON 数据。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "缺陷是否在所有支持 JSON 字段的数据库后端（MySQL, Oracle, SQLite）上表现一致，还是特定于某些后端。",
+  "`__in` 操作符与 key transform 组合时，内部转换和 SQL 生成的确切故障点在哪里。",
+  "除了 `__in`，是否还有其他查找操作符（如 `range`, `gt`, `lt`）在 key transform 上下文中也存在类似问题。"
+]

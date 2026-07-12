@@ -1,0 +1,135 @@
+```json
+{
+    "issue_summary": "solveset 在处理某些方程时抛出 NotImplementedError 而不是返回 ConditionSet。",
+    "trigger_condition": {
+        "text": "对包含符号 n 的方程 Eq(n*cos(n) - 3*sin(n), 0) 调用 as_set() 方法。",
+        "evidence": ["Issue 中提供的代码示例：Eq(n*cos(n) - 3*sin(n), 0).as_set()"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "抛出 NotImplementedError 异常。",
+        "symptom_type": "exception",
+        "evidence": ["Issue 中显示的错误信息：NotImplementedError"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "as_set() 方法应返回一个 ConditionSet 对象，表示满足方程 n*cos(n) - 3*sin(n) = 0 的实数 n 的集合。",
+        "evidence": ["Issue 中作者给出的期望结果：ConditionSet(n, Eq(n*cos(n) - 3*sin(n), 0), Reals)", "相关测试 1 中展示了 solveset 在无法解析方程时返回 ConditionSet 的模式"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "Eq.as_set",
+            "kind": "method",
+            "source_path": "sympy/logic/boolalg.py",
+            "reason": "Issue 中直接调用的方法，其实现中可能包含抛出 NotImplementedError 的逻辑。"
+        },
+        {
+            "name": "solveset",
+            "kind": "function",
+            "source_path": "sympy/solvers/solveset.py",
+            "reason": "Issue 标题和描述指出问题在于 solveset，且 as_set() 内部可能调用 solveset。"
+        },
+        {
+            "name": "ConditionSet",
+            "kind": "class",
+            "source_path": "sympy/sets/conditionset.py",
+            "reason": "Issue 期望的返回类型，用于构造表示条件集合的对象。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "sympy/logic/boolalg.py",
+            "object": "Boolean.as_set",
+            "lines": "124-163",
+            "reason": "源码片段 2 显示 as_set 方法在特定条件下会抛出 NotImplementedError，Issue 中的错误可能源于此。"
+        },
+        {
+            "path": "sympy/solvers/solveset.py",
+            "object": "solveset",
+            "lines": "",
+            "reason": "Issue 标题明确指出 solveset 是问题所在，它可能在处理特定方程时未能正确委托给 ConditionSet。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_conditionset",
+            "test_file": "sympy/solvers/tests/test_solveset.py",
+            "why_relevant": "它测试了 solveset 在无法解析方程时返回 ConditionSet 的行为，与 Issue 场景高度相似。",
+            "reusable_parts": ["从 sympy 导入 solveset, Eq, ConditionSet, S", "使用 solveset(Eq(...), x, domain=S.Reals) 的调用模式", "使用 assert ... == ConditionSet(...) 的断言风格"],
+            "possible_gap": "该测试使用的方程（如 x**2 + x*sin(x) - 1 = 0）与 Issue 中的方程（n*cos(n) - 3*sin(n) = 0）在具体形式上不同，可能触发不同的代码路径。"
+        },
+        {
+            "test_name": "test_bool_as_set",
+            "test_file": "sympy/logic/tests/test_boolalg.py",
+            "why_relevant": "它直接测试了 as_set() 方法的行为，包括其抛出 NotImplementedError 的情况。",
+            "reusable_parts": ["从 sympy 导入相关符号和类", "使用 .as_set() 的调用方式", "使用 raises(NotImplementedError, lambda: ...) 来测试异常"],
+            "possible_gap": "该测试主要关注布尔表达式（如 sin(x) < 1）的 as_set()，而 Issue 涉及的是等式 Eq(...) 的 as_set()。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "input",
+            "current_pattern": "相似测试 test_conditionset 中使用的方程，如 Eq(x**2 + x*sin(x), 1)。",
+            "target_pattern": "Issue 中触发错误的方程：Eq(n*cos(n) - 3*sin(n), 0)。",
+            "reason": "将测试输入变异为 Issue 中特定的方程形式，可能触发 as_set() 或 solveset 中不同的、有缺陷的处理逻辑。",
+            "confidence": "high"
+        },
+        {
+            "slot": "call_chain",
+            "current_pattern": "在 test_conditionset 中直接调用 solveset(Eq(...), ...)。",
+            "target_pattern": "调用 Eq(...).as_set()，这内部可能调用 solveset。",
+            "reason": "Issue 的触发点是调用 as_set() 方法，这可能是更直接的调用路径，可能暴露 solveset 在特定上下文中的问题。",
+            "confidence": "medium"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "exception",
+            "expression_hint": "调用 Eq(n*cos(n) - 3*sin(n), 0).as_set() 时是否抛出 NotImplementedError。",
+            "reason": "Issue 的核心错误现象就是抛出此异常，观测此异常是判断缺陷是否触发的直接方式。"
+        },
+        {
+            "kind": "return_value",
+            "expression_hint": "调用 Eq(n*cos(n) - 3*sin(n), 0).as_set() 的返回值类型和结构。",
+            "reason": "修复后应返回 ConditionSet 对象，观测返回值可以验证行为是否符合预期。"
+        },
+        {
+            "kind": "type",
+            "expression_hint": "as_set() 返回值的类型，例如 isinstance(result, ConditionSet)。",
+            "reason": "判断是否成功返回了期望的 ConditionSet 类型。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "验证对给定方程调用 as_set() 不会抛出 NotImplementedError，并返回一个 ConditionSet。",
+            "preferred_assertion_style": "isinstance",
+            "avoid": "断言 ConditionSet 内部表达式的完整字符串表示完全相等，因为 repr 格式可能变化。",
+            "reason": "Issue 的核心是返回类型应为 ConditionSet，而不是具体的字符串格式。使用 isinstance 检查类型更稳定。"
+        },
+        {
+            "assertion_goal": "验证返回的 ConditionSet 的 condition 属性与原始方程等价，且 base_set 为 Reals。",
+            "preferred_assertion_style": "equals",
+            "avoid": "直接比较 ConditionSet 对象的 repr 字符串。",
+            "reason": "应关注 ConditionSet 的语义内容（条件、定义域）是否正确，而不是其具体字符串表示。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要从 sympy 导入 Symbol, Eq, ConditionSet, S, sin, cos。符号 n 应定义为实数或无假设的符号。",
+            "source": "issue|retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "测试可能不需要复杂的 fixture，直接构造方程并调用方法即可。",
+            "source": "inference",
+            "confidence": "medium"
+        }
+    ],
+    "uncertainties": [
+        "as_set() 方法内部调用 solveset 的确切流程和触发 NotImplementedError 的具体条件是什么？",
+        "方程 n*cos(n) - 3*sin(n) = 0 的哪个特性（周期性？）导致了当前实现无法处理而抛出异常？",
+        "修复后的正确行为是始终返回 ConditionSet，还是在某些情况下仍应抛出异常？"
+    ]
+}
+```

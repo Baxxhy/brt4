@@ -1,0 +1,253 @@
+{
+  "instance_id": "sympy__sympy-20590",
+  "issue_summary": "Symbol 实例在 1.7 版本中意外获得了 __dict__ 属性，而 1.6.2 版本中该属性不存在且类定义了 __slots__。",
+  "trigger_condition": {
+    "text": "创建一个 Symbol 实例，然后访问其 __dict__ 属性。",
+    "evidence": [
+      "Issue 中展示了 sympy.Symbol('s').__dict__ 的调用。",
+      "Issue 中提及 1.6.2 版本 Symbol 实例没有 __dict__ 属性。",
+      "源码片段 1 显示 Symbol 类定义了 __slots__ = ('name',)。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "在 1.7 版本中，sympy.Symbol('s').__dict__ 返回一个空字典，而不是像 1.6.2 版本那样引发 AttributeError。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 中展示了 1.6.2 版本访问 __dict__ 会引发 AttributeError。",
+      "Issue 中说明 1.7 版本中 sympy.Symbol('s').__dict__ 现在存在并返回空字典。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "Symbol 实例不应拥有 __dict__ 属性，访问它应引发 AttributeError，以符合 __slots__ 的设计目的。",
+    "evidence": [
+      "Issue 中提及 __slots__ 的目的，并假设这是一个 bug。",
+      "源码片段 1 显示 Symbol 类定义了 __slots__ = ('name',)。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "sympy.Symbol",
+      "kind": "class",
+      "source_path": "sympy/core/symbol.py",
+      "reason": "Issue 的核心是关于 Symbol 类的实例属性 __dict__ 的行为变化。"
+    },
+    {
+      "name": "__dict__",
+      "kind": "attribute",
+      "source_path": "",
+      "reason": "Issue 直接关注 Symbol 实例的 __dict__ 属性的存在与否。"
+    },
+    {
+      "name": "__slots__",
+      "kind": "attribute",
+      "source_path": "",
+      "reason": "Issue 将 __dict__ 的出现与 __slots__ 的设计目的联系起来。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/core/symbol.py",
+      "object": "Symbol",
+      "lines": "182-348",
+      "reason": "Symbol 类的定义在此，其 __slots__ 定义可能被父类继承链中的变化影响，导致 __dict__ 出现。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_Symbol",
+      "test_file": "sympy/core/tests/test_symbol.py",
+      "why_relevant": "它直接测试 Symbol 的创建和基本行为，是构造 Symbol 实例的起点。",
+      "reusable_parts": [
+        "imports (如 from sympy import Symbol, Dummy, symbols)",
+        "Symbol 对象的构造方式 (如 a = Symbol(\"a\"))",
+        "assert 风格"
+      ],
+      "possible_gap": "该测试没有检查 __dict__ 或 __slots__ 属性。"
+    },
+    {
+      "test_name": "test_no_len",
+      "test_file": "sympy/core/tests/test_symbol.py",
+      "why_relevant": "它测试了 Symbol 实例不支持 len 操作，展示了如何测试 Symbol 实例的预期行为（引发 TypeError）。",
+      "reusable_parts": [
+        "Symbol 对象的构造",
+        "raises 断言的使用模式"
+      ],
+      "possible_gap": "它测试的是 len 操作，而不是 __dict__ 属性。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试中构造 Symbol 实例后，测试其相等性、类型或引发其他异常（如 len）。",
+      "target_pattern": "构造 Symbol 实例后，尝试访问其 __dict__ 属性。",
+      "reason": "Issue 表明访问 __dict__ 是触发意外行为（返回空字典而非引发 AttributeError）的关键操作。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "sympy.Symbol('s').__dict__",
+      "reason": "直接观察 __dict__ 属性的访问结果，判断是返回字典还是引发 AttributeError。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "type(getattr(sympy.Symbol('s'), '__dict__', None))",
+      "reason": "帮助判断 __dict__ 是否存在及其类型。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "sympy.Symbol('s').__slots__",
+      "reason": "确认 Symbol 类是否仍然定义了 __slots__，以关联 __dict__ 的出现是否与 __slots__ 失效有关。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "Symbol 实例不应拥有 __dict__ 属性，访问它应引发 AttributeError。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言 __dict__ 返回空字典的具体值，因为修复后应引发异常。",
+      "reason": "Issue 的预期行为是修复后应恢复 __slots__ 的效果，即禁止 __dict__，因此断言应检查 AttributeError 是否被引发。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 sympy 模块或直接从 sympy.core.symbol 导入 Symbol。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "是 Symbol 类的直接父类（AtomicExpr, Boolean）还是更上层的类（如 Basic）的 __slots__ 定义发生了变化？",
+    "除了 Symbol，其他使用 __slots__ 的 sympy 类是否也受到了影响？",
+    "导致 __dict__ 出现的具体代码变更是什么？"
+  ],
+  "raw": {
+    "issue_summary": "Symbol 实例在 1.7 版本中意外获得了 __dict__ 属性，而 1.6.2 版本中该属性不存在且类定义了 __slots__。",
+    "trigger_condition": {
+      "text": "创建一个 Symbol 实例，然后访问其 __dict__ 属性。",
+      "evidence": [
+        "Issue 中展示了 sympy.Symbol('s').__dict__ 的调用。",
+        "Issue 中提及 1.6.2 版本 Symbol 实例没有 __dict__ 属性。",
+        "源码片段 1 显示 Symbol 类定义了 __slots__ = ('name',)。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在 1.7 版本中，sympy.Symbol('s').__dict__ 返回一个空字典，而不是像 1.6.2 版本那样引发 AttributeError。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中展示了 1.6.2 版本访问 __dict__ 会引发 AttributeError。",
+        "Issue 中说明 1.7 版本中 sympy.Symbol('s').__dict__ 现在存在并返回空字典。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Symbol 实例不应拥有 __dict__ 属性，访问它应引发 AttributeError，以符合 __slots__ 的设计目的。",
+      "evidence": [
+        "Issue 中提及 __slots__ 的目的，并假设这是一个 bug。",
+        "源码片段 1 显示 Symbol 类定义了 __slots__ = ('name',)。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sympy.Symbol",
+        "kind": "class",
+        "source_path": "sympy/core/symbol.py",
+        "reason": "Issue 的核心是关于 Symbol 类的实例属性 __dict__ 的行为变化。"
+      },
+      {
+        "name": "__dict__",
+        "kind": "attribute",
+        "source_path": "",
+        "reason": "Issue 直接关注 Symbol 实例的 __dict__ 属性的存在与否。"
+      },
+      {
+        "name": "__slots__",
+        "kind": "attribute",
+        "source_path": "",
+        "reason": "Issue 将 __dict__ 的出现与 __slots__ 的设计目的联系起来。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/core/symbol.py",
+        "object": "Symbol",
+        "lines": "182-348",
+        "reason": "Symbol 类的定义在此，其 __slots__ 定义可能被父类继承链中的变化影响，导致 __dict__ 出现。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_Symbol",
+        "test_file": "sympy/core/tests/test_symbol.py",
+        "why_relevant": "它直接测试 Symbol 的创建和基本行为，是构造 Symbol 实例的起点。",
+        "reusable_parts": [
+          "imports (如 from sympy import Symbol, Dummy, symbols)",
+          "Symbol 对象的构造方式 (如 a = Symbol(\"a\"))",
+          "assert 风格"
+        ],
+        "possible_gap": "该测试没有检查 __dict__ 或 __slots__ 属性。"
+      },
+      {
+        "test_name": "test_no_len",
+        "test_file": "sympy/core/tests/test_symbol.py",
+        "why_relevant": "它测试了 Symbol 实例不支持 len 操作，展示了如何测试 Symbol 实例的预期行为（引发 TypeError）。",
+        "reusable_parts": [
+          "Symbol 对象的构造",
+          "raises 断言的使用模式"
+        ],
+        "possible_gap": "它测试的是 len 操作，而不是 __dict__ 属性。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中构造 Symbol 实例后，测试其相等性、类型或引发其他异常（如 len）。",
+        "target_pattern": "构造 Symbol 实例后，尝试访问其 __dict__ 属性。",
+        "reason": "Issue 表明访问 __dict__ 是触发意外行为（返回空字典而非引发 AttributeError）的关键操作。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "sympy.Symbol('s').__dict__",
+        "reason": "直接观察 __dict__ 属性的访问结果，判断是返回字典还是引发 AttributeError。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(getattr(sympy.Symbol('s'), '__dict__', None))",
+        "reason": "帮助判断 __dict__ 是否存在及其类型。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "sympy.Symbol('s').__slots__",
+        "reason": "确认 Symbol 类是否仍然定义了 __slots__，以关联 __dict__ 的出现是否与 __slots__ 失效有关。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "Symbol 实例不应拥有 __dict__ 属性，访问它应引发 AttributeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言 __dict__ 返回空字典的具体值，因为修复后应引发异常。",
+        "reason": "Issue 的预期行为是修复后应恢复 __slots__ 的效果，即禁止 __dict__，因此断言应检查 AttributeError 是否被引发。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 模块或直接从 sympy.core.symbol 导入 Symbol。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "是 Symbol 类的直接父类（AtomicExpr, Boolean）还是更上层的类（如 Basic）的 __slots__ 定义发生了变化？",
+      "除了 Symbol，其他使用 __slots__ 的 sympy 类是否也受到了影响？",
+      "导致 __dict__ 出现的具体代码变更是什么？"
+    ]
+  }
+}

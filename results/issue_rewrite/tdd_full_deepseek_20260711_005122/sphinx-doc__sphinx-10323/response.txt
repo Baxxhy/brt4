@@ -1,0 +1,110 @@
+{
+  "issue_summary": "使用 literalinclude 指令的 prepend 选项时，前置文本的 leading whitespace 被移除，导致代码示例缩进不正确。",
+  "trigger_condition": {
+    "text": "在 .rst 文件中使用 literalinclude 指令，并设置 prepend 选项，其值包含 leading whitespace。",
+    "evidence": ["Issue 中的示例：`:prepend:       </plugin>` 包含多个空格。", "Issue 描述：'leading whitespace is removed'。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "生成的代码块中，prepend 文本的 leading whitespace 被去除，导致整体缩进与预期不符。",
+    "symptom_type": "wrong_return",
+    "evidence": ["Issue 中展示的 'Produces the following valid xml, which is indented poorly'，其中 `<plugin>` 行没有预期的前置空格。", "Issue 中 'Expect leading white space to be preserved in output' 表明期望行为未满足。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "literalinclude 指令的 prepend 选项中的 leading whitespace 应被保留在最终输出中。",
+    "evidence": ["Issue 中 'Expect leading white space to be preserved in output' 及展示的预期输出片段包含前置空格。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "LiteralIncludeReader",
+      "kind": "class",
+      "source_path": "",
+      "reason": "相关测试中使用了 LiteralIncludeReader 来测试 prepend 和 dedent 功能，它是处理 literalinclude 指令的核心类。"
+    },
+    {
+      "name": "LiteralIncludeReader.read",
+      "kind": "method",
+      "source_path": "",
+      "reason": "测试中调用 read() 方法来获取处理后的内容，该方法应负责处理 prepend 选项。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "",
+      "object": "LiteralIncludeReader 或其相关处理逻辑",
+      "lines": "",
+      "reason": "Issue 涉及 literalinclude 指令的 prepend 选项处理，且相关测试直接测试该类的 prepend 功能。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_LiteralIncludeReader_prepend",
+      "test_file": "tests/test_directive_code.py",
+      "why_relevant": "该测试直接测试了 LiteralIncludeReader 的 prepend 选项，是处理相同功能的起点。",
+      "reusable_parts": ["LiteralIncludeReader 的导入和构造", "使用 options 字典配置 prepend", "调用 reader.read()", "assert content == ... 的断言风格"],
+      "possible_gap": "当前测试的 prepend 值 'Hello' 不含 leading whitespace，因此可能无法复现 leading whitespace 被移除的 bug。"
+    },
+    {
+      "test_name": "test_LiteralIncludeReader_dedent",
+      "test_file": "tests/test_directive_code.py",
+      "why_relevant": "Issue 中提到使用 dedent 作为 workaround 但产生警告，该测试涉及 dedent 选项的处理。",
+      "reusable_parts": ["LiteralIncludeReader 的构造和 read 调用", "多组 options 的测试模式", "assert content == ... 的断言风格"],
+      "possible_gap": "该测试主要关注 dedent 对源文件内容的影响，未结合 prepend 选项测试。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "prepend 选项值为不含 leading whitespace 的字符串，如 'Hello'。",
+      "target_pattern": "prepend 选项值为包含 leading whitespace 的字符串，如 '       </plugin>'。",
+      "reason": "Issue 表明当 prepend 包含 leading whitespace 时，这些空格在输出中被移除。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "测试可能使用简单的文件内容。",
+      "target_pattern": "使用类似 Issue 中描述的 XML 文件，并配合 start-at 和 end-at 选项。",
+      "reason": "Issue 的复现步骤涉及特定文件内容和选项组合。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "reader.read() 返回的 content 字符串",
+      "reason": "可以直接检查 prepend 文本的 leading whitespace 是否被保留。"
+    },
+    {
+      "kind": "file_output",
+      "expression_hint": "最终生成的文档（如 HTML/XML）中对应代码块的内容",
+      "reason": "Issue 展示的是最终渲染输出的缩进问题。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 prepend 文本中的 leading whitespace 在输出内容中被保留。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免对整个输出字符串进行精确相等断言，因为文件内容可能变化。",
+      "reason": "Issue 核心是 leading whitespace 的保留，而非整个输出的精确匹配。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要创建包含特定内容的源文件（如 pom.xml）和 .rst 文件，并使用 literal_inc_path 类似的 fixture。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 pytest.mark.sphinx 来构建完整的 Sphinx 应用以测试最终输出。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "leading whitespace 被移除的确切代码位置。",
+    "dedent 选项与 prepend 选项交互的具体行为细节。",
+    "是否还有其他选项（如 append）存在类似问题。"
+  ]
+}

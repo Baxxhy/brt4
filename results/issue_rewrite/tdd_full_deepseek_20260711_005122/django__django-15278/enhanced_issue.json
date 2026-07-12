@@ -1,0 +1,379 @@
+{
+  "instance_id": "django__django-15278",
+  "issue_summary": "在 SQLite 数据库上为模型添加可为空的 OneToOneField 字段时，执行迁移操作会引发 OperationalError: Cannot add a UNIQUE column。",
+  "trigger_condition": {
+    "text": "在 SQLite 数据库上，使用 migrations.AddField 操作向一个已存在的表中添加一个可为空（null=True）的 OneToOneField 字段。",
+    "evidence": [
+      "Issue 描述中展示了迁移代码片段：migrations.AddField(...)，其中 field 参数为 OneToOneField(blank=True, null=True, ...)。",
+      "Issue 中的错误堆栈显示执行的是 ALTER TABLE ... ADD COLUMN ... NULL UNIQUE ... 语句。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "执行迁移时，SQLite 数据库后端抛出 django.db.utils.OperationalError: Cannot add a UNIQUE column。",
+    "symptom_type": "exception",
+    "evidence": [
+      "Issue 中直接引用了错误信息：E\t django.db.utils.OperationalError: Cannot add a UNIQUE column。",
+      "错误发生在 SQLiteCursorWrapper.execute 方法中。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "迁移应成功执行，在 SQLite 数据库的现有表中添加一个可为空且具有 UNIQUE 约束的列，而不会引发 OperationalError。",
+    "evidence": [
+      "Issue 标题和描述暗示这是一个新出现的错误，意味着在 Django 4.0 版本中此操作可能正常工作。",
+      "相关测试 SchemaTests.test_add_field_default_nullable 和 OperationTests.test_add_field 展示了向现有表添加可为空字段的成功场景。"
+    ],
+    "confidence": "medium"
+  },
+  "target_apis": [
+    {
+      "name": "migrations.AddField",
+      "kind": "class",
+      "source_path": "django/db/migrations/operations/fields.py",
+      "reason": "Issue 中触发错误的直接操作是 AddField 迁移操作。"
+    },
+    {
+      "name": "OneToOneField",
+      "kind": "class",
+      "source_path": "django/db/models/fields/related.py",
+      "reason": "Issue 中要添加的字段类型是 OneToOneField，其内部带有 UNIQUE 约束。"
+    },
+    {
+      "name": "SQLiteCursorWrapper.execute",
+      "kind": "method",
+      "source_path": "django/db/backends/sqlite3/base.py",
+      "reason": "错误堆栈显示异常是在该方法执行 SQL 语句时抛出的。"
+    },
+    {
+      "name": "connection.schema_editor",
+      "kind": "method",
+      "source_path": "",
+      "reason": "相关测试中用于执行数据库模式变更（如 add_field）的上下文管理器。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/backends/sqlite3/base.py",
+      "object": "SQLiteCursorWrapper.execute",
+      "lines": "324-341",
+      "reason": "错误直接在此方法中抛出，表明 SQLite 后端处理特定 ALTER TABLE 语句时存在问题。"
+    },
+    {
+      "path": "django/db/migrations/operations/fields.py",
+      "object": "AddField.database_forwards",
+      "lines": "",
+      "reason": "该方法负责生成并执行前向迁移的数据库操作，可能生成了 SQLite 不支持的 SQL 语句。"
+    },
+    {
+      "path": "django/db/backends/sqlite3/schema.py",
+      "object": "",
+      "lines": "",
+      "reason": "SQLite 特定的模式编辑器（SchemaEditor）可能负责将 Django 的字段定义转换为 SQLite 的 ALTER TABLE 语句，Issue 提到 #33355 中有许多 sqlite3 更改。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "SchemaTests.test_add_field_default_nullable",
+      "test_file": "tests/schema/tests.py",
+      "why_relevant": "它测试了使用 schema_editor.add_field 向现有表添加一个可为空字段（CharField）的场景，与 Issue 中“添加可为空字段”的核心操作相似。",
+      "reusable_parts": [
+        "使用 connection.schema_editor() 上下文管理器。",
+        "使用 add_field 方法。",
+        "创建模型、添加字段、插入数据、使用 cursor 查询和断言的基本流程。",
+        "对字段 nullable 属性的断言。"
+      ],
+      "possible_gap": "它添加的是 CharField，而不是带有 UNIQUE 约束的 OneToOneField。SQLite 对添加 UNIQUE 列有特殊限制。"
+    },
+    {
+      "test_name": "OperationTests.test_add_field",
+      "test_file": "tests/migrations/test_operations.py",
+      "why_relevant": "它直接测试 migrations.AddField 操作，使用 database_forwards 方法，并检查列是否存在。",
+      "reusable_parts": [
+        "直接使用 migrations.AddField 类。",
+        "使用 operation.database_forwards 执行迁移。",
+        "使用 assertColumnExists/NotExists 来验证数据库状态。",
+        "测试前向和反向操作的模式。"
+      ],
+      "possible_gap": "它添加的是 FloatField，不是 OneToOneField，且测试可能未在 SQLite 后端运行，或未触发 SQLite 的特定限制。"
+    },
+    {
+      "test_name": "SchemaTests.test_alter_o2o_to_fk",
+      "test_file": "tests/schema/tests.py",
+      "why_relevant": "它涉及 OneToOneField，并测试了其唯一性约束，以及使用 schema_editor.alter_field 进行模式变更。",
+      "reusable_parts": [
+        "创建带有 OneToOneField 的模型。",
+        "验证 OneToOneField 的唯一性约束（通过 IntegrityError）。",
+        "使用 schema_editor 进行字段变更。",
+        "使用 assertForeignKeyExists。"
+      ],
+      "possible_gap": "它测试的是修改现有 OneToOneField，而不是向空表添加新的 OneToOneField。操作是 alter_field 而非 add_field。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中添加的字段是 CharField、TextField 或 FloatField，且可为空。",
+      "target_pattern": "将添加的字段改为 OneToOneField(..., null=True, ...)。",
+      "reason": "OneToOneField 内部带有 UNIQUE 约束，而 SQLite 的 ALTER TABLE ADD COLUMN 对添加 UNIQUE 列有严格限制，这可能是触发错误的直接原因。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试中，表在添加字段前是空的或只有少量数据。",
+      "target_pattern": "确保在添加 OneToOneField 之前，目标表中已存在一些数据行。",
+      "reason": "SQLite 的“Cannot add a UNIQUE column”错误通常发生在向已有数据的表添加 UNIQUE 列时，因为无法为现有行分配唯一的、且满足新约束的值（尤其是当字段可为空时逻辑复杂）。Issue 中的错误可能依赖于表状态。",
+      "confidence": "medium"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "测试可能默认运行在支持所需特性的数据库上。",
+      "target_pattern": "确保测试在 SQLite 数据库后端上运行。",
+      "reason": "错误是 SQLite 特有的（OperationalError: Cannot add a UNIQUE column）。Issue 明确指出是 SQLite 错误。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "在调用 operation.database_forwards(...) 或 editor.add_field(...) 时，捕获并检查 django.db.utils.OperationalError。",
+      "reason": "Issue 的核心现象就是抛出此异常。观测是否抛出该异常是判断缺陷是否触发的直接方式。"
+    },
+    {
+      "kind": "sql",
+      "expression_hint": "在 SQLite 后端执行迁移时，捕获并检查由 schema_editor 生成的最终 SQL 查询字符串（例如，通过 mocking 或 logging）。",
+      "reason": "错误信息包含 SQL 片段：'ALTER TABLE ... ADD COLUMN ... NULL UNIQUE ...'。观测生成的完整 SQL 有助于理解 SQLite 不接受的确切语法或约束组合。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "在迁移操作前后，检查目标表的结构（例如，通过 introspection 检查列是否存在、是否可为空、是否有唯一约束）。",
+      "reason": "验证迁移是否成功改变了数据库模式，或者是否因为错误而完全未应用。相关测试中已有检查列存在和 nullable 的代码模式。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证在 SQLite 上执行添加可为空 OneToOneField 的迁移不会引发 OperationalError。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言完整的 SQL 字符串或错误信息文本完全匹配，因为具体信息可能因 Django 版本或 SQLite 版本而异。",
+      "reason": "Issue 的核心是操作会引发异常。一个稳定的断言是检查该特定异常是否被引发（修复后应不再引发）。"
+    },
+    {
+      "assertion_goal": "验证迁移成功后，新添加的列在数据库中存在且具有正确的约束（可为空，并有唯一索引）。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "仅断言列名存在，而不检查其约束属性。",
+      "reason": "这能确保迁移不仅不报错，而且正确完成了其语义目标——添加了一个具有特定约束的列。相关测试中已有检查列存在和 nullable 的模式。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 TransactionTestCase 或派生类，并确保测试在 SQLite 数据库连接上运行。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要创建基础模型（类似于 Issue 中的 oauth2_provider_accesstoken），然后对其应用 AddField 操作。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要模拟一个已包含数据的表状态，然后再添加字段，以触发 SQLite 的限制。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "导致错误的精确 SQLite 版本和 Django 提交范围（仅知在 Django 4.0 和 main 分支之间）。",
+    "错误是否仅在表中已有数据时触发，还是即使空表也会触发。",
+    "SQLite 后端生成的确切 ALTER TABLE 语句的完整逻辑和上下文。",
+    "修复后的正确行为是成功添加列但暂时不强制执行唯一性，还是通过多步操作（如创建无约束列、填充数据、再添加约束）来实现。"
+  ],
+  "raw": {
+    "issue_summary": "在 SQLite 数据库上为模型添加可为空的 OneToOneField 字段时，执行迁移操作会引发 OperationalError: Cannot add a UNIQUE column。",
+    "trigger_condition": {
+      "text": "在 SQLite 数据库上，使用 migrations.AddField 操作向一个已存在的表中添加一个可为空（null=True）的 OneToOneField 字段。",
+      "evidence": [
+        "Issue 描述中展示了迁移代码片段：migrations.AddField(...)，其中 field 参数为 OneToOneField(blank=True, null=True, ...)。",
+        "Issue 中的错误堆栈显示执行的是 ALTER TABLE ... ADD COLUMN ... NULL UNIQUE ... 语句。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行迁移时，SQLite 数据库后端抛出 django.db.utils.OperationalError: Cannot add a UNIQUE column。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中直接引用了错误信息：E\t django.db.utils.OperationalError: Cannot add a UNIQUE column。",
+        "错误发生在 SQLiteCursorWrapper.execute 方法中。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "迁移应成功执行，在 SQLite 数据库的现有表中添加一个可为空且具有 UNIQUE 约束的列，而不会引发 OperationalError。",
+      "evidence": [
+        "Issue 标题和描述暗示这是一个新出现的错误，意味着在 Django 4.0 版本中此操作可能正常工作。",
+        "相关测试 SchemaTests.test_add_field_default_nullable 和 OperationTests.test_add_field 展示了向现有表添加可为空字段的成功场景。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "migrations.AddField",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/fields.py",
+        "reason": "Issue 中触发错误的直接操作是 AddField 迁移操作。"
+      },
+      {
+        "name": "OneToOneField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 中要添加的字段类型是 OneToOneField，其内部带有 UNIQUE 约束。"
+      },
+      {
+        "name": "SQLiteCursorWrapper.execute",
+        "kind": "method",
+        "source_path": "django/db/backends/sqlite3/base.py",
+        "reason": "错误堆栈显示异常是在该方法执行 SQL 语句时抛出的。"
+      },
+      {
+        "name": "connection.schema_editor",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试中用于执行数据库模式变更（如 add_field）的上下文管理器。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/sqlite3/base.py",
+        "object": "SQLiteCursorWrapper.execute",
+        "lines": "324-341",
+        "reason": "错误直接在此方法中抛出，表明 SQLite 后端处理特定 ALTER TABLE 语句时存在问题。"
+      },
+      {
+        "path": "django/db/migrations/operations/fields.py",
+        "object": "AddField.database_forwards",
+        "lines": "",
+        "reason": "该方法负责生成并执行前向迁移的数据库操作，可能生成了 SQLite 不支持的 SQL 语句。"
+      },
+      {
+        "path": "django/db/backends/sqlite3/schema.py",
+        "object": "",
+        "lines": "",
+        "reason": "SQLite 特定的模式编辑器（SchemaEditor）可能负责将 Django 的字段定义转换为 SQLite 的 ALTER TABLE 语句，Issue 提到 #33355 中有许多 sqlite3 更改。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "SchemaTests.test_add_field_default_nullable",
+        "test_file": "tests/schema/tests.py",
+        "why_relevant": "它测试了使用 schema_editor.add_field 向现有表添加一个可为空字段（CharField）的场景，与 Issue 中“添加可为空字段”的核心操作相似。",
+        "reusable_parts": [
+          "使用 connection.schema_editor() 上下文管理器。",
+          "使用 add_field 方法。",
+          "创建模型、添加字段、插入数据、使用 cursor 查询和断言的基本流程。",
+          "对字段 nullable 属性的断言。"
+        ],
+        "possible_gap": "它添加的是 CharField，而不是带有 UNIQUE 约束的 OneToOneField。SQLite 对添加 UNIQUE 列有特殊限制。"
+      },
+      {
+        "test_name": "OperationTests.test_add_field",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "它直接测试 migrations.AddField 操作，使用 database_forwards 方法，并检查列是否存在。",
+        "reusable_parts": [
+          "直接使用 migrations.AddField 类。",
+          "使用 operation.database_forwards 执行迁移。",
+          "使用 assertColumnExists/NotExists 来验证数据库状态。",
+          "测试前向和反向操作的模式。"
+        ],
+        "possible_gap": "它添加的是 FloatField，不是 OneToOneField，且测试可能未在 SQLite 后端运行，或未触发 SQLite 的特定限制。"
+      },
+      {
+        "test_name": "SchemaTests.test_alter_o2o_to_fk",
+        "test_file": "tests/schema/tests.py",
+        "why_relevant": "它涉及 OneToOneField，并测试了其唯一性约束，以及使用 schema_editor.alter_field 进行模式变更。",
+        "reusable_parts": [
+          "创建带有 OneToOneField 的模型。",
+          "验证 OneToOneField 的唯一性约束（通过 IntegrityError）。",
+          "使用 schema_editor 进行字段变更。",
+          "使用 assertForeignKeyExists。"
+        ],
+        "possible_gap": "它测试的是修改现有 OneToOneField，而不是向空表添加新的 OneToOneField。操作是 alter_field 而非 add_field。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中添加的字段是 CharField、TextField 或 FloatField，且可为空。",
+        "target_pattern": "将添加的字段改为 OneToOneField(..., null=True, ...)。",
+        "reason": "OneToOneField 内部带有 UNIQUE 约束，而 SQLite 的 ALTER TABLE ADD COLUMN 对添加 UNIQUE 列有严格限制，这可能是触发错误的直接原因。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，表在添加字段前是空的或只有少量数据。",
+        "target_pattern": "确保在添加 OneToOneField 之前，目标表中已存在一些数据行。",
+        "reason": "SQLite 的“Cannot add a UNIQUE column”错误通常发生在向已有数据的表添加 UNIQUE 列时，因为无法为现有行分配唯一的、且满足新约束的值（尤其是当字段可为空时逻辑复杂）。Issue 中的错误可能依赖于表状态。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试可能默认运行在支持所需特性的数据库上。",
+        "target_pattern": "确保测试在 SQLite 数据库后端上运行。",
+        "reason": "错误是 SQLite 特有的（OperationalError: Cannot add a UNIQUE column）。Issue 明确指出是 SQLite 错误。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 operation.database_forwards(...) 或 editor.add_field(...) 时，捕获并检查 django.db.utils.OperationalError。",
+        "reason": "Issue 的核心现象就是抛出此异常。观测是否抛出该异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "在 SQLite 后端执行迁移时，捕获并检查由 schema_editor 生成的最终 SQL 查询字符串（例如，通过 mocking 或 logging）。",
+        "reason": "错误信息包含 SQL 片段：'ALTER TABLE ... ADD COLUMN ... NULL UNIQUE ...'。观测生成的完整 SQL 有助于理解 SQLite 不接受的确切语法或约束组合。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在迁移操作前后，检查目标表的结构（例如，通过 introspection 检查列是否存在、是否可为空、是否有唯一约束）。",
+        "reason": "验证迁移是否成功改变了数据库模式，或者是否因为错误而完全未应用。相关测试中已有检查列存在和 nullable 的代码模式。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在 SQLite 上执行添加可为空 OneToOneField 的迁移不会引发 OperationalError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 SQL 字符串或错误信息文本完全匹配，因为具体信息可能因 Django 版本或 SQLite 版本而异。",
+        "reason": "Issue 的核心是操作会引发异常。一个稳定的断言是检查该特定异常是否被引发（修复后应不再引发）。"
+      },
+      {
+        "assertion_goal": "验证迁移成功后，新添加的列在数据库中存在且具有正确的约束（可为空，并有唯一索引）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "仅断言列名存在，而不检查其约束属性。",
+        "reason": "这能确保迁移不仅不报错，而且正确完成了其语义目标——添加了一个具有特定约束的列。相关测试中已有检查列存在和 nullable 的模式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 TransactionTestCase 或派生类，并确保测试在 SQLite 数据库连接上运行。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建基础模型（类似于 Issue 中的 oauth2_provider_accesstoken），然后对其应用 AddField 操作。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟一个已包含数据的表状态，然后再添加字段，以触发 SQLite 的限制。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "导致错误的精确 SQLite 版本和 Django 提交范围（仅知在 Django 4.0 和 main 分支之间）。",
+      "错误是否仅在表中已有数据时触发，还是即使空表也会触发。",
+      "SQLite 后端生成的确切 ALTER TABLE 语句的完整逻辑和上下文。",
+      "修复后的正确行为是成功添加列但暂时不强制执行唯一性，还是通过多步操作（如创建无约束列、填充数据、再添加约束）来实现。"
+    ]
+  }
+}

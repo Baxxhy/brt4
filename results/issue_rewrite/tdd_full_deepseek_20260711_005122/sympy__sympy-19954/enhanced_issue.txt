@@ -1,0 +1,130 @@
+instance_id: sympy__sympy-19954
+
+issue_summary: 对某些 DihedralGroup 调用 sylow_subgroup 方法时，在 minimal_blocks 方法中发生 IndexError 异常。
+
+trigger_condition:
+{
+  "text": "对 DihedralGroup(n) 对象调用 sylow_subgroup(p=2)，其中 n 为 18 或 2*25 等偶数。",
+  "evidence": [
+    "Issue 中用户代码：G = DihedralGroup(18); S2 = G.sylow_subgroup(p=2)",
+    "Issue 中用户代码：G = DihedralGroup(2*25); S2 = G.sylow_subgroup(p=2)"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "IndexError: list assignment index out of range，发生在 perm_groups.py 文件 minimal_blocks 方法的 del num_blocks[i], blocks[i] 行。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中 traceback：File \"...\\sympy\\combinatorics\\perm_groups.py\", line 2207, in minimal_blocks del num_blocks[i], blocks[i] IndexError: list assignment index out of range"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "对 DihedralGroup(n) 调用 sylow_subgroup(p=2) 应成功返回一个 p-Sylow 子群，而不抛出 IndexError。",
+  "evidence": [
+    "相关测试 1 中 test_sylow_subgroup 对 DihedralGroup(12) 调用 sylow_subgroup(3) 成功",
+    "相关测试 1 中 test_sylow_subgroup 对 DihedralGroup(12) 调用 sylow_subgroup(3) 成功",
+    "源码片段 4 中 sylow_subgroup 方法的文档字符串描述了其功能"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "DihedralGroup",
+    "kind": "function",
+    "source_path": "sympy/combinatorics/named_groups.py",
+    "reason": "Issue 中触发缺陷的起始对象构造器。"
+  },
+  {
+    "name": "PermutationGroup.sylow_subgroup",
+    "kind": "method",
+    "source_path": "sympy/combinatorics/perm_groups.py",
+    "reason": "直接触发缺陷的 API 调用。"
+  },
+  {
+    "name": "PermutationGroup.minimal_blocks",
+    "kind": "method",
+    "source_path": "sympy/combinatorics/perm_groups.py",
+    "reason": "异常发生的直接位置。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相关测试 1 中：P = DihedralGroup(12); S = P.sylow_subgroup(3)",
+    "target_pattern": "G = DihedralGroup(18); S2 = G.sylow_subgroup(p=2)",
+    "reason": "Issue 表明当 DihedralGroup 参数 n 为 18 且 p=2 时触发缺陷，而现有测试使用 n=12, p=3。",
+    "confidence": "high"
+  },
+  {
+    "slot": "input",
+    "current_pattern": "相关测试 2 中：P = DihedralGroup(6).minimal_blocks()",
+    "target_pattern": "对 DihedralGroup(18) 调用 sylow_subgroup(p=2)，其内部会调用 minimal_blocks。",
+    "reason": "直接调用 minimal_blocks 可能正常，但通过 sylow_subgroup 调用时，内部状态或调用链可能不同，导致缺陷。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用 G.sylow_subgroup(p=2) 时是否抛出 IndexError",
+    "reason": "Issue 的核心错误现象是 IndexError。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "G.sylow_subgroup(p=2) 的返回值类型和属性（如 order()）",
+    "reason": "修复后应返回一个合法的 PermutationGroup 子群。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "minimal_blocks 方法内部的 num_blocks、blocks、rep_blocks 列表状态",
+    "reason": "异常发生在对这些列表的索引操作中，其状态可能异常。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "对 DihedralGroup(18) 调用 sylow_subgroup(p=2) 不应抛出 IndexError。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言完整的返回值 repr 或精确的群结构。",
+    "reason": "Issue 的核心是异常，修复后应消除此异常。"
+  },
+  {
+    "assertion_goal": "sylow_subgroup 返回的对象是一个合法的子群（例如，其 order 是 2 的幂且整除群阶）。",
+    "preferred_assertion_style": "isinstance",
+    "avoid": "断言返回对象的完整生成元列表。",
+    "reason": "验证方法基本功能正常，且与 Sylow 子群定义一致。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 DihedralGroup 和 PermutationGroup 等类。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能在一个干净的 Python 环境中运行，无需特殊配置。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "导致 IndexError 的精确内部条件（例如，num_blocks、blocks、rep_blocks 列表在何种情况下长度不一致或索引无效）。",
+  "是否所有偶数 n 的 DihedralGroup 在 p=2 时都会触发此缺陷，还是仅特定 n（如 18, 50）。",
+  "sylow_subgroup 方法中调用 minimal_blocks 的具体分支路径。"
+]

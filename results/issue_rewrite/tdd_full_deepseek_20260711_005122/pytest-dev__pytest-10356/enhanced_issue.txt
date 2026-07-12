@@ -1,0 +1,114 @@
+instance_id: pytest-dev__pytest-10356
+
+issue_summary: 当测试类从多个带有 pytest 标记的基类继承时，标记会丢失其中一个基类的标记，而不是合并所有标记。
+
+trigger_condition:
+{
+  "text": "定义一个带有 pytest 标记的基类 Foo 和另一个带有不同标记的基类 Bar，然后创建一个测试类 TestDings 同时继承 Foo 和 Bar。",
+  "evidence": [
+    "Issue 中的代码示例展示了 @pytest.mark.foo 的 Foo 类和 @pytest.mark.bar 的 Bar 类，以及继承两者的 TestDings 类。",
+    "Issue 描述：'inheriting from both of those baseclasses will lose the markers of one of those classes'。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "TestDings 类中的测试方法 test_dings 只获得了来自一个基类（根据 MRO 顺序）的标记，而不是同时获得 foo 和 bar 两个标记。",
+  "symptom_type": "state_not_updated",
+  "evidence": [
+    "Issue 描述：'I'd expect `foo` and `bar` to be markers for `test_dings`, but this only actually is the case with this metaclass.'",
+    "Issue 中的注释：'In practice markers are resolved using MRO (so foo wins)'。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "从多个带有标记的基类继承的测试类应该合并所有基类的标记，而不是只保留其中一个。",
+  "evidence": [
+    "Issue 描述：'I'd argue that it would be more intuitive to attempt to merge marker values into one, possibly deduplicating marker names by MRO.'",
+    "Issue 中提供的 metaclass 示例展示了期望的合并行为。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "pytest.mark",
+    "kind": "decorator",
+    "source_path": "",
+    "reason": "Issue 涉及使用 @pytest.mark 装饰器为类添加标记。"
+  },
+  {
+    "name": "pytestmark",
+    "kind": "attribute",
+    "source_path": "",
+    "reason": "Issue 中提到 pytestmark 属性用于存储类级别的标记。"
+  },
+  {
+    "name": "iter_markers",
+    "kind": "method",
+    "source_path": "",
+    "reason": "相关测试中使用 item.iter_markers() 来检查标记。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "相关测试中的继承结构通常是单继承链（如 Base -> Base2 -> Test1）或平行继承（如 TestFooClass 和 TestBarClass 分别继承 BaseTests）。",
+    "target_pattern": "创建一个测试类同时继承两个带有不同标记的基类（如 class TestDings(Foo, Bar):）。",
+    "reason": "Issue 表明 bug 在多重继承场景下触发，其中一个基类的标记会丢失。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "测试通常使用默认的标记收集逻辑。",
+    "target_pattern": "不使用 Issue 中提供的自定义 metaclass（BaseMeta），以暴露默认行为下的问题。",
+    "reason": "Issue 指出，没有自定义 metaclass 时标记会丢失，这是 bug 的触发条件。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "state",
+    "expression_hint": "收集到的测试项（item）的标记列表，例如 [marker.name for marker in item.iter_markers()]。",
+    "reason": "可以直接观察测试方法实际获得的标记，判断是否合并了所有基类的标记。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证从多重继承类创建的测试项同时拥有来自所有基类的标记（例如 'foo' 和 'bar'）。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "断言完整的标记对象列表或精确顺序，因为标记的存储顺序可能不是重点。",
+    "reason": "Issue 的核心是标记的存在性，而不是顺序或完整对象相等。检查标记名称是否都出现更稳定。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "使用 pytester fixture 来动态创建测试文件并收集测试项。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试代码需要导入 pytest 并使用 @pytest.mark 装饰器。",
+    "source": "issue",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "标记合并时去重的具体规则（例如同名标记如何处理）在 Issue 中没有明确说明。",
+  "标记的存储属性（如 _pytestmark）的确切内部实现和访问方式可能影响观测。",
+  "除了类装饰器标记，通过 pytestmark 属性设置的标记在多重继承下的行为是否相同。"
+]

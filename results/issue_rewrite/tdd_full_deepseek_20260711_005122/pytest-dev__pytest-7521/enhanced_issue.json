@@ -1,0 +1,269 @@
+{
+  "instance_id": "pytest-dev__pytest-7521",
+  "issue_summary": "pytest 6.0.0rc1 中 capfd.readouterr() 将捕获输出中的回车符 \\r 错误地转换为换行符 \\n。",
+  "trigger_condition": {
+    "text": "使用 capfd fixture 捕获包含回车符 \\r 的输出，然后调用 readouterr() 方法。",
+    "evidence": [
+      "Issue 中用户提供的简化复现器：print('Greetings from DOS', end='\\r') 后调用 capfd.readouterr()。",
+      "Issue 中原始失败测试：pi.show(0) 输出包含 '  0%\\r'，然后调用 capfd.readouterr()。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "capfd.readouterr() 返回的字符串中，预期的回车符 \\r 被替换为换行符 \\n，导致断言失败。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 中错误信息：assert '  0%\\n' == '  0%\\r' 和 assert out.endswith('\\r') 失败，因为 out 以 '\\n' 结尾。",
+      "Issue 中显示 pytest 5 通过，pytest 6 失败，表明是回归问题。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "capfd.readouterr() 应正确捕获并返回包含原始回车符 \\r 的输出，不将其转换为换行符 \\n。",
+    "evidence": [
+      "Issue 中用户期望断言 out.endswith('\\r') 通过，即输出应以 \\r 结尾。",
+      "Issue 中原始测试期望 err == '  0%\\r'，表明 \\r 是预期输出的一部分。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "capfd.readouterr",
+      "kind": "method",
+      "source_path": "src/_pytest/capture.py",
+      "reason": "Issue 直接与此方法的返回值相关，它错误地转换了 \\r 字符。"
+    },
+    {
+      "name": "CaptureFixture",
+      "kind": "class",
+      "source_path": "src/_pytest/capture.py",
+      "reason": "capfd fixture 返回此类的实例，其 readouterr 方法是问题的核心。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "src/_pytest/capture.py",
+      "object": "CaptureFixture.readouterr",
+      "lines": "788-800",
+      "reason": "此方法负责读取和返回捕获的输出，是处理输出字符串（可能包含 \\r）的关键位置。"
+    },
+    {
+      "path": "src/_pytest/capture.py",
+      "object": "CaptureFixture",
+      "lines": "760-817",
+      "reason": "该类管理捕获过程，其内部属性（如 _captured_out, _captured_err）或底层 _capture 对象可能涉及字符转换。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "TestCaptureFixture.test_capfdbinary",
+      "test_file": "testing/test_capture.py",
+      "why_relevant": "它测试了 capfdbinary.readouterr() 对二进制数据的捕获，涉及 readouterr 方法的使用和断言。",
+      "reusable_parts": [
+        "使用 capfdbinary fixture（与 capfd 类似）",
+        "调用 readouterr() 方法",
+        "对返回的 out/err 进行断言"
+      ],
+      "possible_gap": "它测试的是二进制模式（capfdbinary）和原始字节，而 Issue 是关于文本模式（capfd）下特殊字符 \\r 的转换。"
+    },
+    {
+      "test_name": "TestCaptureFixture.test_capsysbinary",
+      "test_file": "testing/test_capture.py",
+      "why_relevant": "它测试了 capsysbinary 对混合文本和二进制输出的捕获，涉及对 readouterr 返回值的复杂断言。",
+      "reusable_parts": [
+        "在测试中写入输出（包括可能难以解码的字节）",
+        "调用 readouterr() 并断言其返回值",
+        "使用 testdir 运行测试的模式"
+      ],
+      "possible_gap": "它针对 capsysbinary 而非 capfd，且不涉及 \\r 字符的处理。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试中写入的输出通常是普通文本、换行符或原始字节（如 b'\\xfe\\x98\\x20'）。",
+      "target_pattern": "写入包含回车符 \\r 的文本输出（例如 end='\\r'）。",
+      "reason": "Issue 表明只有当输出包含 \\r 时，readouterr() 才会错误地将其转换为 \\n。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "相关测试通常直接调用 sys.stdout.buffer.write 或 print 后立即 readouterr。",
+      "target_pattern": "使用 print(..., end='\\r') 或 sys.stdout.write('...\\r') 生成输出，然后调用 capfd.readouterr()。",
+      "reason": "Issue 的复现器使用了 print 并指定 end='\\r'，这是触发缺陷的特定调用模式。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "capfd.readouterr() 返回的 CaptureResult 的 out 和 err 属性字符串。",
+      "reason": "需要直接观察返回的字符串中是否包含 \\r 或 \\n，以确认转换是否发生。"
+    },
+    {
+      "kind": "repr",
+      "expression_hint": "repr(capfd.readouterr().out) 或 repr(capfd.readouterr().err)。",
+      "reason": "repr 可以明确显示字符串中的不可见字符（如 '\\r' 和 '\\n'），便于比较。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 capfd.readouterr() 返回的字符串中包含原始的回车符 \\r，且未被替换为换行符 \\n。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免断言完整的、可能包含环境依赖的字符串相等（如 '  0%\\r'），因为 Issue 未提供所有上下文。",
+      "reason": "Issue 的核心是 \\r 字符的存在性，而非整个输出字符串的精确匹配。使用 contains 或 endswith 检查 \\r 更稳定。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 capfd fixture。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要模拟原始测试中设置环境变量（如 COLUMNS, LINES）或使用 monkeypatch，但这在简化复现中可能非必需。",
+      "source": "issue",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "缺陷是否也影响 capsys 或其他捕获 fixture（如 capfdbinary）。",
+    "转换是发生在捕获过程中，还是在 readouterr() 方法内部拼接字符串时。",
+    "是否所有 \\r 字符都会被转换，还是仅在某些特定上下文（如行尾）下。",
+    "pytest 5 和 6 之间哪些具体代码变更导致了此回归。"
+  ],
+  "raw": {
+    "issue_summary": "pytest 6.0.0rc1 中 capfd.readouterr() 将捕获输出中的回车符 \\r 错误地转换为换行符 \\n。",
+    "trigger_condition": {
+      "text": "使用 capfd fixture 捕获包含回车符 \\r 的输出，然后调用 readouterr() 方法。",
+      "evidence": [
+        "Issue 中用户提供的简化复现器：print('Greetings from DOS', end='\\r') 后调用 capfd.readouterr()。",
+        "Issue 中原始失败测试：pi.show(0) 输出包含 '  0%\\r'，然后调用 capfd.readouterr()。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "capfd.readouterr() 返回的字符串中，预期的回车符 \\r 被替换为换行符 \\n，导致断言失败。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中错误信息：assert '  0%\\n' == '  0%\\r' 和 assert out.endswith('\\r') 失败，因为 out 以 '\\n' 结尾。",
+        "Issue 中显示 pytest 5 通过，pytest 6 失败，表明是回归问题。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "capfd.readouterr() 应正确捕获并返回包含原始回车符 \\r 的输出，不将其转换为换行符 \\n。",
+      "evidence": [
+        "Issue 中用户期望断言 out.endswith('\\r') 通过，即输出应以 \\r 结尾。",
+        "Issue 中原始测试期望 err == '  0%\\r'，表明 \\r 是预期输出的一部分。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "capfd.readouterr",
+        "kind": "method",
+        "source_path": "src/_pytest/capture.py",
+        "reason": "Issue 直接与此方法的返回值相关，它错误地转换了 \\r 字符。"
+      },
+      {
+        "name": "CaptureFixture",
+        "kind": "class",
+        "source_path": "src/_pytest/capture.py",
+        "reason": "capfd fixture 返回此类的实例，其 readouterr 方法是问题的核心。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/capture.py",
+        "object": "CaptureFixture.readouterr",
+        "lines": "788-800",
+        "reason": "此方法负责读取和返回捕获的输出，是处理输出字符串（可能包含 \\r）的关键位置。"
+      },
+      {
+        "path": "src/_pytest/capture.py",
+        "object": "CaptureFixture",
+        "lines": "760-817",
+        "reason": "该类管理捕获过程，其内部属性（如 _captured_out, _captured_err）或底层 _capture 对象可能涉及字符转换。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestCaptureFixture.test_capfdbinary",
+        "test_file": "testing/test_capture.py",
+        "why_relevant": "它测试了 capfdbinary.readouterr() 对二进制数据的捕获，涉及 readouterr 方法的使用和断言。",
+        "reusable_parts": [
+          "使用 capfdbinary fixture（与 capfd 类似）",
+          "调用 readouterr() 方法",
+          "对返回的 out/err 进行断言"
+        ],
+        "possible_gap": "它测试的是二进制模式（capfdbinary）和原始字节，而 Issue 是关于文本模式（capfd）下特殊字符 \\r 的转换。"
+      },
+      {
+        "test_name": "TestCaptureFixture.test_capsysbinary",
+        "test_file": "testing/test_capture.py",
+        "why_relevant": "它测试了 capsysbinary 对混合文本和二进制输出的捕获，涉及对 readouterr 返回值的复杂断言。",
+        "reusable_parts": [
+          "在测试中写入输出（包括可能难以解码的字节）",
+          "调用 readouterr() 并断言其返回值",
+          "使用 testdir 运行测试的模式"
+        ],
+        "possible_gap": "它针对 capsysbinary 而非 capfd，且不涉及 \\r 字符的处理。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中写入的输出通常是普通文本、换行符或原始字节（如 b'\\xfe\\x98\\x20'）。",
+        "target_pattern": "写入包含回车符 \\r 的文本输出（例如 end='\\r'）。",
+        "reason": "Issue 表明只有当输出包含 \\r 时，readouterr() 才会错误地将其转换为 \\n。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试通常直接调用 sys.stdout.buffer.write 或 print 后立即 readouterr。",
+        "target_pattern": "使用 print(..., end='\\r') 或 sys.stdout.write('...\\r') 生成输出，然后调用 capfd.readouterr()。",
+        "reason": "Issue 的复现器使用了 print 并指定 end='\\r'，这是触发缺陷的特定调用模式。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "capfd.readouterr() 返回的 CaptureResult 的 out 和 err 属性字符串。",
+        "reason": "需要直接观察返回的字符串中是否包含 \\r 或 \\n，以确认转换是否发生。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "repr(capfd.readouterr().out) 或 repr(capfd.readouterr().err)。",
+        "reason": "repr 可以明确显示字符串中的不可见字符（如 '\\r' 和 '\\n'），便于比较。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 capfd.readouterr() 返回的字符串中包含原始的回车符 \\r，且未被替换为换行符 \\n。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、可能包含环境依赖的字符串相等（如 '  0%\\r'），因为 Issue 未提供所有上下文。",
+        "reason": "Issue 的核心是 \\r 字符的存在性，而非整个输出字符串的精确匹配。使用 contains 或 endswith 检查 \\r 更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 capfd fixture。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟原始测试中设置环境变量（如 COLUMNS, LINES）或使用 monkeypatch，但这在简化复现中可能非必需。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否也影响 capsys 或其他捕获 fixture（如 capfdbinary）。",
+      "转换是发生在捕获过程中，还是在 readouterr() 方法内部拼接字符串时。",
+      "是否所有 \\r 字符都会被转换，还是仅在某些特定上下文（如行尾）下。",
+      "pytest 5 和 6 之间哪些具体代码变更导致了此回归。"
+    ]
+  }
+}

@@ -1,0 +1,118 @@
+instance_id: pytest-dev__pytest-5631
+
+issue_summary: 当使用数组作为 new 参数进行 mock patch 时，pytest 在收集测试时抛出 ValueError 异常。
+
+trigger_condition:
+{
+  "text": "使用 unittest.mock.patch 装饰器，其中 new 参数是一个数组（例如 numpy 数组），然后运行 pytest 收集测试。",
+  "evidence": [
+    "Issue 中用户描述：'@patch(target='XXXXXX', new=np.array([-5.5, 3.0]))'",
+    "Issue 中错误信息显示 'p.new in sentinels' 对数组求值"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "在 pytest 收集测试阶段抛出 ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中错误堆栈的最后一行显示该异常信息"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "pytest 应能正常收集使用数组作为 mock patch new 参数的测试，而不抛出 ValueError 异常。",
+  "evidence": [
+    "Issue 中提到 'This works fine with pytest 3.1.3'，表明旧版本行为正常",
+    "Issue 中用户期望 patch 能正常工作"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "unittest.mock.patch",
+    "kind": "function",
+    "source_path": "",
+    "reason": "Issue 中触发 bug 的装饰器"
+  },
+  {
+    "name": "_pytest.compat.num_mock_patch_args",
+    "kind": "function",
+    "source_path": "src/_pytest/compat.py",
+    "reason": "源码片段显示该函数包含导致错误的 'p.new in sentinels' 检查"
+  },
+  {
+    "name": "_pytest.compat.getfuncargnames",
+    "kind": "function",
+    "source_path": "src/_pytest/compat.py",
+    "reason": "错误堆栈显示该函数调用了 num_mock_patch_args"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "mock",
+    "current_pattern": "相似测试中使用 mock 模块的标准对象（如 call）或默认值",
+    "target_pattern": "使用数组（如 numpy 数组或 Python 列表）作为 patch 装饰器的 new 参数",
+    "reason": "Issue 指出当 p.new 是数组时，'p.new in sentinels' 会产生布尔数组而非单个布尔值，触发 ValueError",
+    "confidence": "high"
+  },
+  {
+    "slot": "argument",
+    "current_pattern": "patch 装饰器使用标量或 mock 对象作为 new 参数",
+    "target_pattern": "patch 装饰器使用多元素数组作为 new 参数",
+    "reason": "多元素数组在布尔上下文中求值会产生歧义，正是错误信息所指出的问题",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "在调用 pytest 收集测试时是否抛出 ValueError，异常信息是否包含 'truth value of an array'",
+    "reason": "Issue 的核心错误现象是收集阶段抛出 ValueError"
+  },
+  {
+    "kind": "type",
+    "expression_hint": "p.new 的类型以及 'p.new in sentinels' 表达式的结果类型",
+    "reason": "Issue 指出当 p.new 是数组时，in 操作返回布尔数组而非布尔值"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证使用数组作为 patch new 参数的测试能被 pytest 正常收集，不抛出 ValueError",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言具体的异常消息字符串完全匹配，因为不同 Python 版本可能略有差异",
+    "reason": "Issue 的核心是异常不应发生，因此断言不引发特定异常是合适的"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 unittest.mock.patch 和 numpy（或使用 Python 列表）来创建数组",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "使用 testdir 来创建和运行测试文件",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "是否只有 numpy 数组会触发此问题，还是任何实现 __bool__ 或 __nonzero__ 并返回非标量布尔值的对象都会触发",
+  "除了 patch 装饰器，其他使用 mock 的方式是否也会受此影响",
+  "修复后 'p.new in sentinels' 对数组应返回什么值（False 还是需要特殊处理）"
+]

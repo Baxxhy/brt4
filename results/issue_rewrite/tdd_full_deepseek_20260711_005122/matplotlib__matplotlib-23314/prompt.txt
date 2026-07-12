@@ -1,0 +1,424 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+[Bug]: set_visible() not working for 3d projection 
+### Bug summary
+
+in the subplot projection="3d" the set_visible function doesn't work even if the value is set to False
+
+### Code for reproduction
+
+```python
+import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
+
+fig, (ax1, ax2) = plt.subplots(1, 2, subplot_kw={'projection': '3d'})
+ax1.scatter(1,1,1)
+ax2.scatter(1,1,1, c='r')
+ax1.set_visible(False)
+
+plt.show()
+# Thanks Tim for your help! 
+```
+
+
+### Actual outcome
+
+the subplot remains visible which should not happen if the value is set to False
+
+### Expected outcome
+
+the subplot is not visible if the value is set to False
+
+### Additional information
+
+_No response_
+
+### Operating system
+
+_No response_
+
+### Matplotlib Version
+
+3.4.2
+
+### Matplotlib Backend
+
+Qt5Agg
+
+### Python version
+
+3.8.10
+
+### Jupyter version
+
+_No response_
+
+### Installation
+
+_No response_
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：lib/matplotlib/pyplot.py
+对象名称：subplots
+节点类型：top-level function
+父节点：pyplot
+行号范围：1325-1462
+代码：
+def subplots(nrows=1, ncols=1, *, sharex=False, sharey=False, squeeze=True,
+             subplot_kw=None, gridspec_kw=None, **fig_kw):
+    """
+    Create a figure and a set of subplots.
+
+    This utility wrapper makes it convenient to create common layouts of
+    subplots, including the enclosing figure object, in a single call.
+
+    Parameters
+    ----------
+    nrows, ncols : int, default: 1
+        Number of rows/columns of the subplot grid.
+
+    sharex, sharey : bool or {'none', 'all', 'row', 'col'}, default: False
+        Controls sharing of properties among x (*sharex*) or y (*sharey*)
+        axes:
+
+        - True or 'all': x- or y-axis will be shared among all subplots.
+        - False or 'none': each subplot x- or y-axis will be independent.
+        - 'row': each subplot row will share an x- or y-axis.
+        - 'col': each subplot column will share an x- or y-axis.
+
+        When subplots have a shared x-axis along a column, only the x tick
+        labels of the bottom subplot are created. Similarly, when subplots
+        have a shared y-axis along a row, only the y tick labels of the first
+        column subplot are created. To later turn other subplots' ticklabels
+        on, use `~matplotlib.axes.Axes.tick_params`.
+
+        When subplots have a shared axis that has units, calling
+        `~matplotlib.axis.Axis.set_units` will update each axis with the
+        new units.
+
+    squeeze : bool, default: True
+        - If True, extra dimensions are squeezed out from the returned
+          array of `~matplotlib.axes.Axes`:
+
+          - if only one subplot is constructed (nrows=ncols=1), the
+            resulting single Axes object is returned as a scalar.
+          - for Nx1 or 1xM subplots, the returned object is a 1D numpy
+            object array of Axes objects.
+          - for NxM, subplots with N>1 and M>1 are returned as a 2D array.
+
+        - If False, no squeezing at all is done: the returned Axes object is
+          always a 2D array containing Axes instances, even if it ends up
+          being 1x1.
+
+    subplot_kw : dict, optional
+        Dict with keywords passed to the
+        `~matplotlib.figure.Figure.add_subplot` call used to create each
+        subplot.
+
+    gridspec_kw : dict, optional
+        Dict with keywords passed to the `~matplotlib.gridspec.GridSpec`
+        constructor used to create the grid the subplots are placed on.
+
+    **fig_kw
+        All additional keyword arguments are passed to the
+        `.pyplot.figure` call.
+
+    Returns
+    -------
+    fig : `.Figure`
+
+    ax : `~.axes.Axes` or array of Axes
+        *ax* can be either a single `~.axes.Axes` object, or an array of Axes
+        objects if more than one subplot was created.  The dimensions of the
+        resulting array can be controlled with the squeeze keyword, see above.
+
+        Typical idioms for handling the return value are::
+
+            # using the variable ax for single a Axes
+            fig, ax = plt.subplots()
+
+            # using the variable axs for multiple Axes
+            fig, axs = plt.subplots(2, 2)
+
+            # using tuple unpacking for multiple Axes
+            fig, (ax1, ax2) = plt.subplots(1, 2)
+            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2)
+
+        The names ``ax`` and pluralized ``axs`` are preferred over ``axes``
+        because for the latter it's not clear if it refers to a single
+        `~.axes.Axes` instance or a collection of these.
+
+    See Also
+    --------
+    .pyplot.figure
+    .pyplot.subplot
+    .pyplot.axes
+    .Figure.subplots
+    .Figure.add_subplot
+
+    Examples
+    --------
+    ::
+
+        # First create some toy data:
+        x = np.linspace(0, 2*np.pi, 400)
+        y = np.sin(x**2)
+
+        # Create just a figure and only one subplot
+        fig, ax = plt.subplots()
+        ax.plot(x, y)
+        ax.set_title('Simple plot')
+
+        # Create two subplots and unpack the output array immediately
+        f, (ax1, ax2) = plt.subplots(1, 2, sharey=True)
+        ax1.plot(x, y)
+        ax1.set_title('Sharing Y axis')
+        ax2.scatter(x, y)
+
+        # Create four polar axes and access them through the returned array
+        fig, axs = plt.subplots(2, 2, subplot_kw=dict(projection="polar"))
+        axs[0, 0].plot(x, y)
+        axs[1, 1].scatter(x, y)
+
+        # Share a X axis with each column of subplots
+        plt.subplots(2, 2, sharex='col')
+
+        # Share a Y axis with each row of subplots
+        plt.subplots(2, 2, sharey='row')
+
+        # Share both X and Y axes with all subplots
+        plt.subplots(2, 2, sharex='all', sharey='all')
+
+        # Note that this is the same as
+        plt.subplots(2, 2, sharex=True, sharey=True)
+
+        # Create figure number 10 with a single subplot
+        # and clears it if it already exists.
+        fig, ax = plt.subplots(num=10, clear=True)
+
+    """
+    fig = figure(**fig_kw)
+    axs = fig.subplots(nrows=nrows, ncols=ncols, sharex=sharex, sharey=sharey,
+                       squeeze=squeeze, subplot_kw=subplot_kw,
+                       gridspec_kw=gridspec_kw)
+    return fig, axs
+
+
+【源码片段 2】
+文件路径：lib/matplotlib/widgets.py
+对象名称：set_visible
+节点类型：class_function
+父节点：_SelectorWidget
+行号范围：2054-2058
+代码：
+    def set_visible(self, visible):
+        """Set the visibility of our artists."""
+        self.visible = visible
+        for artist in self.artists:
+            artist.set_visible(visible)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：lib/matplotlib/tests/test_axes.py
+测试名称：test_invisible_axes
+测试代码：
+def test_invisible_axes():
+    # invisible axes should not respond to events...
+    fig, ax = plt.subplots()
+    assert fig.canvas.inaxes((200, 200)) is not None
+    ax.set_visible(False)
+    assert fig.canvas.inaxes((200, 200)) is None
+
+【相关测试 2】
+测试文件：lib/mpl_toolkits/tests/test_mplot3d.py
+测试名称：test_axes3d_cla
+测试代码：
+@mpl3d_image_comparison(['axes3d_cla.png'], remove_text=False)
+def test_axes3d_cla():
+    # fixed in pull request 4553
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1, projection='3d')
+    ax.set_axis_off()
+    ax.cla()  # make sure the axis displayed is 3D (not 2D)
+
+【相关测试 3】
+测试文件：lib/mpl_toolkits/tests/test_mplot3d.py
+测试名称：test_autoscale
+测试代码：
+def test_autoscale():
+    fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+    ax.margins(x=0, y=.1, z=.2)
+    ax.plot([0, 1], [0, 1], [0, 1])
+    assert ax.get_w_lims() == (0, 1, -.1, 1.1, -.2, 1.2)
+    ax.autoscale(False)
+    ax.set_autoscalez_on(True)
+    ax.plot([0, 2], [0, 2], [0, 2])
+    assert ax.get_w_lims() == (0, 1, -.1, 1.1, -.4, 2.4)
+
+【相关测试 4】
+测试文件：lib/mpl_toolkits/tests/test_mplot3d.py
+测试名称：test_inverted_cla
+测试代码：
+def test_inverted_cla():
+    # GitHub PR #5450. Setting autoscale should reset
+    # axes to be non-inverted.
+    fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+    # 1. test that a new axis is not inverted per default
+    assert not ax.xaxis_inverted()
+    assert not ax.yaxis_inverted()
+    assert not ax.zaxis_inverted()
+    ax.set_xlim(1, 0)
+    ax.set_ylim(1, 0)
+    ax.set_zlim(1, 0)
+    assert ax.xaxis_inverted()
+    assert ax.yaxis_inverted()
+    assert ax.zaxis_inverted()
+    ax.cla()
+    assert not ax.xaxis_inverted()
+    assert not ax.yaxis_inverted()
+    assert not ax.zaxis_inverted()
+
+【相关测试 5】
+测试文件：lib/mpl_toolkits/tests/test_mplot3d.py
+测试名称：test_ax3d_tickcolour
+测试代码：
+def test_ax3d_tickcolour():
+    fig = plt.figure()
+    ax = Axes3D(fig)
+
+    ax.tick_params(axis='x', colors='red')
+    ax.tick_params(axis='y', colors='red')
+    ax.tick_params(axis='z', colors='red')
+    fig.canvas.draw()
+
+    for tick in ax.xaxis.get_major_ticks():
+        assert tick.tick1line._color == 'red'
+    for tick in ax.yaxis.get_major_ticks():
+        assert tick.tick1line._color == 'red'
+    for tick in ax.zaxis.get_major_ticks():
+        assert tick.tick1line._color == 'red'
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

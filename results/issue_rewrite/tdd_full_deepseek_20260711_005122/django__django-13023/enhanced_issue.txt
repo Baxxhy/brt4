@@ -1,0 +1,105 @@
+instance_id: django__django-13023
+
+issue_summary: DecimalField.to_python() 在输入为字典时抛出 TypeError 而非 ValidationError。
+
+trigger_condition:
+{
+  "text": "调用 DecimalField.to_python() 方法，并将一个字典对象作为 value 参数传入。",
+  "evidence": [
+    "Issue 描述：'A call to DecimalField.to_python() with a dictionary as the value parameter produces TypeError instead of ValidationError.'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "抛出 TypeError 异常，而不是预期的 ValidationError 异常。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 描述：'produces TypeError instead of ValidationError'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当传入字典等无效值时，DecimalField.to_python() 应抛出 ValidationError 异常。",
+  "evidence": [
+    "Issue 描述：'produces TypeError instead of ValidationError'，表明期望抛出 ValidationError。",
+    "源码片段 2 显示 to_python 方法在 decimal.Decimal(value) 失败时会抛出 ValidationError。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "DecimalField.to_python",
+    "kind": "method",
+    "source_path": "django/db/models/fields/__init__.py",
+    "reason": "Issue 直接报告此方法在特定输入下抛出错误类型的异常。"
+  },
+  {
+    "name": "decimal.Decimal",
+    "kind": "function",
+    "source_path": "",
+    "reason": "源码片段 2 显示 to_python 方法内部调用了 decimal.Decimal(value)，这是可能抛出 InvalidOperation 的地方。"
+  },
+  {
+    "name": "ValidationError",
+    "kind": "class",
+    "source_path": "django/core/exceptions.py",
+    "reason": "Issue 期望抛出的异常类型，源码中 to_python 方法也使用了它。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中 to_python 的输入是数字、字符串或浮点数，例如 3, '3.14', 'abc'。",
+    "target_pattern": "将输入变异为一个字典，例如 {} 或 {'key': 'value'}。",
+    "reason": "Issue 明确指出字典输入会触发 TypeError 而非 ValidationError。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用 f.to_python(some_dict) 时捕获的异常类型。",
+    "reason": "Issue 的核心是异常类型错误，观测抛出的异常是 TypeError 还是 ValidationError 可以直接判断问题是否复现。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当 to_python 的输入是字典时，应抛出 ValidationError 异常。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言完整的异常消息字符串，因为消息内容可能因修复而调整。",
+    "reason": "Issue 关注的是异常类型，而不是具体的消息文本。使用 assertRaises(ValidationError) 更稳定。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 django.db.models 和 decimal.Decimal。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试类可能继承自 TestCase 或 SimpleTestCase。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "字典的具体内容是否会影响行为？",
+  "除了字典，其他非字符串/数字/浮点数的类型（如列表、元组）是否也会导致同样问题？",
+  "修复后 ValidationError 的具体错误消息内容是什么？"
+]

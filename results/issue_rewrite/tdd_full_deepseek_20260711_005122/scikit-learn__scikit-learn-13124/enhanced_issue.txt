@@ -1,0 +1,131 @@
+instance_id: scikit-learn__scikit-learn-13124
+
+issue_summary: StratifiedKFold 的 shuffle 参数行为与文档描述不符，它只打乱了批次的顺序，而没有打乱每个分层内的样本顺序。
+
+trigger_condition:
+{
+  "text": "使用 StratifiedKFold 时，设置 shuffle=True 和不同的 random_state 值。",
+  "evidence": [
+    "Issue 中提供了 shuffle=True 和不同 random_state 的代码示例。",
+    "源码片段 1 中 StratifiedKFold 的文档描述了 shuffle 参数。",
+    "相关测试 2 和 4 也测试了 shuffle=True 的行为。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "当 shuffle=True 时，不同 random_state 产生的批次（fold）内容相同，只是顺序不同。具体表现为，样本对（如 1 与 11，2 与 12）总是出现在同一个批次中。",
+  "symptom_type": "wrong_order",
+  "evidence": [
+    "Issue 中展示了 shuffle=True 时，random_state=1 和 random_state=2 的输出，批次内容相同但顺序不同。",
+    "Issue 描述指出：\"When shuffle=True, the batches are always the same for any random_state, but appear in a different order.\""
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当 shuffle=True 时，每个分层（stratum）内的样本顺序应该被打乱，从而使得不同 random_state 产生的批次内容（即每个 fold 中的样本索引）不同。",
+  "evidence": [
+    "Issue 中期望：\"I expect batches to be different when Shuffle is turned on for different random_state seeds.\"",
+    "源码片段 1 中 StratifiedKFold 的文档字符串描述：\"Whether to shuffle each stratification of the data before splitting into batches.\""
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "StratifiedKFold",
+    "kind": "class",
+    "source_path": "sklearn/model_selection/_split.py",
+    "reason": "Issue 直接报告了该类 shuffle 参数的行为问题。"
+  },
+  {
+    "name": "StratifiedKFold.split",
+    "kind": "method",
+    "source_path": "sklearn/model_selection/_split.py",
+    "reason": "Issue 中通过调用 split 方法展示问题，这是生成训练/测试索引的核心方法。"
+  },
+  {
+    "name": "sklearn.utils.shuffle",
+    "kind": "function",
+    "source_path": "sklearn/utils/__init__.py",
+    "reason": "Issue 期望的分层内打乱功能可能与这个工具函数有关。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "相关测试中，使用 shuffle=True 和不同的 random_state（如 0 和 1）来生成不同的测试集。",
+    "target_pattern": "使用 shuffle=True 和不同的 random_state，但比较每个批次（fold）的样本内容（而不仅仅是测试集集合或顺序）。",
+    "reason": "Issue 表明当前 shuffle 只改变了批次顺序。要触发问题，需要验证不同 random_state 下，对应的批次（例如第一个 fold）是否包含完全相同的样本索引。",
+    "confidence": "high"
+  },
+  {
+    "slot": "input",
+    "current_pattern": "相关测试中使用的 y 标签分布相对简单（如 [0]*20 + [1]*20）。",
+    "target_pattern": "使用 Issue 中提供的特定输入：每个类 10 个样本，且样本索引与类别有明确对应关系（如 0-9 为类 1，10-19 为类 0）。",
+    "reason": "Issue 中的输入能清晰展示样本对（如 1 与 11）总是被分在一起的问题。使用相同输入可以精确复现 Issue 描述的现象。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "order",
+    "expression_hint": "对于每个 random_state，记录 StratifiedKFold.split 返回的所有 (train_idx, test_idx) 对中 test_idx 的内容（而不仅仅是顺序）。",
+    "reason": "比较不同 random_state 下，对应位置（例如第一个 fold）的 test_idx 是否包含相同的样本索引，可以判断 shuffle 是否真的改变了批次内容。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "在 StratifiedKFold 内部方法（如 _make_test_folds）中，观察每个分层（stratum）的索引在 shuffle 前后的顺序。",
+    "reason": "Issue 的核心是 shuffle 是否应用于每个分层内。观测分层内索引的顺序变化可以直接验证预期行为。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当 shuffle=True 且 random_state 不同时，StratifiedKFold.split 产生的对应批次（例如第一个 fold）的测试索引（test_idx）应该不同。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "仅断言整个迭代器输出的顺序不同，或仅断言测试集集合不同。",
+    "reason": "Issue 表明当前实现下，不同 random_state 的对应批次内容相同。因此，修复后，对应批次的内容应不同，这能直接验证 shuffle 是否真正作用于分层内样本。"
+  },
+  {
+    "assertion_goal": "对于给定的输入，当 shuffle=True 时，样本对（如索引 1 和 11）不应总是出现在同一个测试 fold 中。",
+    "preferred_assertion_style": "before_after_relation",
+    "avoid": "硬编码具体的索引分配。",
+    "reason": "Issue 中观察到的具体现象是样本对总是成对出现。修复后，这种固定配对应该被打破。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 numpy 和 sklearn.model_selection.StratifiedKFold。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "可以使用 pytest 测试框架，以及 numpy.testing 中的断言函数（如 assert_array_equal）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试数据构造可以参考 Issue 中的示例：使用 np.linspace 和 np.concatenate 创建具有明确类别和索引的 X 和 y。",
+    "source": "issue",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "StratifiedKFold 内部具体哪个方法（_make_test_folds 或 _iter_test_masks）负责实现 shuffle 逻辑，以及具体的错误代码位置。",
+  "修复后的确切行为：是每个分层内完全随机打乱，还是某种特定的随机化策略？",
+  "除了 Issue 中提供的特定输入，是否还有其他输入模式更容易触发或暴露此问题？"
+]

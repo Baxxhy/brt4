@@ -1,0 +1,140 @@
+{
+  "issue_summary": "runserver 命令使用 '0:8000' 作为 addrport 参数时，输出的启动信息中地址显示为 'http://0:8000/' 而非预期的 'http://0.0.0.0:8000/'。",
+  "trigger_condition": {
+    "text": "执行命令 `python manage.py runserver 0:8000`。",
+    "evidence": ["Issue 描述中明确提到运行 `python manage.py runserver 0:8000` 并观察输出。", "相关测试 2 显示 `default_addr` 可设置为 '0.0.0.0'，表明 '0' 可能被用作地址的简写。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "控制台输出的启动信息为 'Starting development server at http://0:8000/'，导致该链接在浏览器中无法使用。",
+    "symptom_type": "wrong_return",
+    "evidence": ["Issue 中明确给出了错误输出：'Starting development server at http://0:8000/'。", "Issue 指出无法在浏览器中使用 'http://0:8000/' 链接。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当命令行提供 '0:8000' 时，输出的启动信息地址应为 'http://0.0.0.0:8000/'，与文档保持一致且可在浏览器中使用。",
+    "evidence": ["Issue 明确说明输出应为 'Starting development server at http://0.0.0.0:8000/' 以保持与文档一致。", "相关测试 2 表明 '0.0.0.0' 是一个有效的默认地址设置。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "django.core.management.commands.runserver.Command.handle",
+      "kind": "method",
+      "source_path": "django/core/management/commands/runserver.py",
+      "reason": "这是 runserver 命令的入口点，负责解析 addrport 参数并生成输出信息。"
+    },
+    {
+      "name": "django.contrib.staticfiles.management.commands.runserver.Command.run",
+      "kind": "method",
+      "source_path": "django/contrib/staticfiles/management/commands/runserver.py",
+      "reason": "iCoRe 检索出的相关源码指向此文件，可能涉及 runserver 命令的执行流程。"
+    },
+    {
+      "name": "call_command",
+      "kind": "function",
+      "source_path": "",
+      "reason": "所有相关测试都使用 call_command 来调用 runserver 命令进行测试。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/core/management/commands/runserver.py",
+      "object": "Command.handle 或相关地址解析逻辑",
+      "lines": "",
+      "reason": "Issue 涉及 runserver 命令对 '0:8000' 参数的解析和输出格式化，核心逻辑应在此文件中。"
+    },
+    {
+      "path": "django/contrib/staticfiles/management/commands/runserver.py",
+      "object": "runserver",
+      "lines": "",
+      "reason": "iCoRe 检索出的相关源码片段指向此文件，可能与 runserver 命令的继承或覆盖有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "ManageRunserver.test_runserver_addrport",
+      "test_file": "tests/admin_scripts/tests.py",
+      "why_relevant": "该测试直接测试 runserver 命令的 addrport 参数，并验证服务器设置，与 Issue 触发条件高度相关。",
+      "reusable_parts": ["测试类 ManageRunserver(SimpleTestCase)", "使用 call_command 调用 runserver", "assertServerSettings 断言方法"],
+      "possible_gap": "现有测试用例未覆盖 '0:8000' 这种特殊地址格式，也未检查控制台输出的字符串。"
+    },
+    {
+      "test_name": "ManageRunserver.test_runner_custom_defaults",
+      "test_file": "tests/admin_scripts/tests.py",
+      "why_relevant": "该测试设置了 default_addr 为 '0.0.0.0'，与 Issue 中期望的地址一致。",
+      "reusable_parts": ["设置 cmd.default_addr", "call_command 调用模式"],
+      "possible_gap": "测试关注默认设置，而非通过命令行参数 '0:8000' 触发的情况。"
+    },
+    {
+      "test_name": "ManageRunserver.test_runner_ambiguous",
+      "test_file": "tests/admin_scripts/tests.py",
+      "why_relevant": "该测试处理了类似 'beef:7654' 的模糊地址格式，与 '0:8000' 的格式相似。",
+      "reusable_parts": ["call_command 使用 addrport 参数", "assertServerSettings 验证地址和端口"],
+      "possible_gap": "测试未涉及地址 '0' 的特殊语义（应映射为 '0.0.0.0'），也未检查输出信息。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试中 addrport 参数值为 '1.2.3.4:8000', '7000', 'localhost:8000' 等。",
+      "target_pattern": "addrport 参数值为 '0:8000'。",
+      "reason": "Issue 明确指出使用 '0:8000' 会触发错误输出，而现有测试未覆盖此输入。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "相关测试 2 通过设置 cmd.default_addr 来改变默认地址。",
+      "target_pattern": "不设置 default_addr，仅通过命令行参数 '0:8000' 传递。",
+      "reason": "Issue 的触发依赖于命令行参数解析，而非默认配置。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "file_output",
+      "expression_hint": "call_command 执行后捕获的标准输出（stdout）或日志信息。",
+      "reason": "Issue 的核心错误现象是控制台输出的地址字符串不正确，必须观测此输出。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "call_command 的返回值或命令执行后 server 的地址配置对象。",
+      "reason": "需要确认内部解析出的地址和端口是否正确（应为 '0.0.0.0' 和 '8000'）。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证控制台输出中包含 'http://0.0.0.0:8000/' 片段。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的输出字符串完全相等，因为输出可能包含其他动态信息（如时间戳、进程ID）。",
+      "reason": "Issue 关注的是地址部分的正确性，使用片段匹配更稳定且与预期行为对齐。"
+    },
+    {
+      "assertion_goal": "验证内部解析出的服务器地址为 '0.0.0.0'，端口为 '8000'。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言与 'http://0:8000/' 相关的内容，因为这是错误状态。",
+      "reason": "确保命令的底层配置正确，这是输出正确地址的基础。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 SimpleTestCase 或类似的 Django 测试基类。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要导入 call_command 和 runserver 命令类。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要捕获标准输出（例如使用 StringIO）以进行断言。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "runserver 命令内部将 '0' 解析为地址的具体逻辑和代码位置。",
+    "输出信息 'Starting development server at ...' 是在代码的哪一部分生成的。",
+    "除了输出信息外，'0:8000' 是否还会影响服务器的实际绑定行为。"
+  ]
+}

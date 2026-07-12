@@ -1,0 +1,142 @@
+instance_id: django__django-15916
+
+issue_summary: modelform_factory 函数在调用时如果未显式提供 formfield_callback 参数，会覆盖掉传入的 form 类中 Meta.formfield_callback 的设置，导致回调函数未被使用。
+
+trigger_condition:
+{
+  "text": "调用 modelform_factory 函数时，传入一个自定义的 ModelForm 子类作为 form 参数，该子类的 Meta 内部类中定义了 formfield_callback 属性，但调用 modelform_factory 时未显式提供 formfield_callback 参数。",
+  "evidence": [
+    "Issue 描述中提供的示例代码：FactoryForm = forms.modelform_factory(MyModel, form=MyForm)，其中 MyForm.Meta.formfield_callback = all_required，但调用时未传 formfield_callback 参数。",
+    "源码片段 1 中 modelform_factory 函数定义，其参数 formfield_callback 默认值为 None。",
+    "源码片段 1 中第 603-604 行：if formfield_callback: Meta.formfield_callback = staticmethod(formfield_callback)。这表明仅在显式提供 formfield_callback 参数（非 None）时才会设置 Meta.formfield_callback。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "通过 modelform_factory 生成的表单类没有使用基类 Meta 中指定的 formfield_callback 回调函数，导致预期的字段属性修改（如 required=True）未生效。",
+  "symptom_type": "state_not_updated",
+  "evidence": [
+    "Issue 描述中：'in FactoryForm the fields are not required'，而预期是 'the fields would be required'。",
+    "Issue 提到之前 #18573 票证中的测试断言回调被调用次数错误（2次 vs 4次），这间接表明回调未被正确应用。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当调用 modelform_factory 且未显式提供 formfield_callback 参数时，应继承并使用传入的 form 类中 Meta.formfield_callback 属性（如果存在）作为回调函数。",
+  "evidence": [
+    "Issue 描述中：'The expected behavior would be that the FactoryForm uses the formfield_callback specified in the Meta attribute of MyForm'。",
+    "相关测试 1 (test_custom_callback) 展示了当显式提供 formfield_callback 参数时，该回调会被使用。预期行为应与此逻辑一致，即回调的来源应优先考虑传入的 form 类。",
+    "源码片段 1 中第 595-596 行关于 Meta 基类的继承逻辑：'bases = (form.Meta,) if hasattr(form, \"Meta\") else ()'，暗示了从父 form 继承 Meta 属性的意图。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "django.forms.models.modelform_factory",
+    "kind": "function",
+    "source_path": "django/forms/models.py",
+    "reason": "Issue 直接报告此函数在处理 formfield_callback 参数时的行为问题。"
+  },
+  {
+    "name": "django.forms.ModelForm",
+    "kind": "class",
+    "source_path": "django/forms/models.py",
+    "reason": "Issue 涉及自定义 ModelForm 子类及其 Meta 内部类，modelform_factory 的 form 参数接收此类。"
+  },
+  {
+    "name": "ModelForm.Meta",
+    "kind": "class",
+    "source_path": "",
+    "reason": "Issue 的核心是 Meta 内部类的 formfield_callback 属性未被 modelform_factory 正确继承。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "modelform_factory(Person, form=BaseForm, formfield_callback=callback) （显式提供回调）",
+    "target_pattern": "modelform_factory(Person, form=BaseForm) （不提供 formfield_callback 参数）",
+    "reason": "Issue 触发条件正是当不显式提供 formfield_callback 参数时，函数默认值 None 会覆盖基类 Meta 中的设置。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "BaseForm 的 Meta 类中可能未定义 formfield_callback，或定义了但未被测试关注。",
+    "target_pattern": "BaseForm 的 Meta 类中明确定义了 formfield_callback 属性，指向一个自定义回调函数。",
+    "reason": "Issue 的核心是基类 Meta 中已存在的 formfield_callback 属性应被 modelform_factory 在未收到显式参数时继承和使用。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "state",
+    "expression_hint": "生成的表单类（如 FactoryForm）的 base_fields 字典中特定字段的属性，例如 field.required。",
+    "reason": "Issue 中回调函数的作用是修改字段的 required 属性，观察该属性可以判断回调是否被应用。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "modelform_factory 返回的类（或其实例）的 Meta.formfield_callback 属性值。",
+    "reason": "可以直接检查最终生成的表单类的 Meta 中是否包含了预期的回调函数。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "自定义回调函数内部的状态（如被调用的次数、接收到的参数）。",
+    "reason": "通过监控回调是否被调用、调用次数和参数，可以精确判断 modelform_factory 是否使用了正确的回调。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "断言通过 modelform_factory（未传 formfield_callback 参数）生成的表单，其字段具有由基类 Meta.formfield_callback 所修改的属性（例如 required=True）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言完整的字段对象或复杂的内部结构相等。避免断言回调被调用的精确次数，除非 Issue 明确给出（当前 Issue 对次数的描述是历史且可能有误的）。",
+    "reason": "直接验证字段的最终状态（如 required）是最稳定且与 Issue 描述（字段应为 required）直接对齐的断言。"
+  },
+  {
+    "assertion_goal": "断言自定义回调函数在表单构建过程中被调用。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言回调参数列表的完整顺序和内容与某个固定值完全一致，除非有明确依据。",
+    "reason": "回调被调用是它生效的必要条件，验证调用次数大于0是稳定且相关的断言。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要定义一个简单的 Django 模型（如 Person）作为测试基础。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试应继承自 SimpleTestCase 或类似的 Django 测试基类。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要定义一个修改字段属性（如设置 required=True）的 formfield_callback 函数。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要定义一个自定义 ModelForm，在其 Meta 中指定 model、fields 和 formfield_callback。",
+    "source": "issue",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "当传入的 form 类本身（而非其 Meta）也定义了 formfield_callback 类属性时，modelform_factory 的行为和优先级如何？Issue 示例中在类和 Meta 中都设置了，但未明确讨论区别。",
+  "源码中第 607 行 'form_class_attrs = {\"Meta\": Meta, \"formfield_callback\": formfield_callback}' 将 formfield_callback（可能是 None）赋给新类，这是否会覆盖从父类继承的 formfield_callback 属性？其与 Meta.formfield_callback 的交互细节。",
+  "修复后，回调函数被调用的确切次数和顺序（与字段数量、Meta 配置的关系）是什么？Issue 提到历史测试中关于2次和4次的争议。"
+]

@@ -1,0 +1,127 @@
+{
+  "issue_summary": "inspectdb 在处理指向特定字段（非主键）的外键时，未能正确生成 to_field 参数。",
+  "trigger_condition": {
+    "text": "对一个包含外键约束的数据库表运行 inspectdb 命令，该外键约束引用的是目标表的非主键唯一字段。",
+    "evidence": ["Issue 中给出的 SQL 示例：`FOREIGN KEY(other_id) references foo(other_id)`，其中 `foo(other_id)` 是唯一字段但不是主键。", "Issue 标题和描述明确指出问题与 'Foreign key to a specific field' 相关。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "inspectdb 生成的模型代码中，外键字段指向了目标模型（例如 `models.ForeignKey('foo', models.DO_NOTHING)`），但缺失了指定目标字段的 `to_field` 参数（例如 `to_field='other_id'`）。",
+    "symptom_type": "wrong_return",
+    "evidence": ["Issue 描述：'the generated model for the bar table will have the other_id be a FK to foo and not foo(other_id).'", "相关源码片段 2 中 ForeignKey 类的文档字符串和 `__init__` 方法参数表明 `to_field` 参数用于指定目标字段。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "inspectdb 在遇到指向目标表特定字段（非主键）的外键约束时，生成的模型代码应包含正确的 `to_field` 参数，以准确反映数据库约束。",
+    "evidence": ["Issue 描述暗示了期望行为：外键应指向 `foo(other_id)`。", "相关源码片段 2 中 ForeignKey 类的 `to_field` 参数设计目的就是用于此场景。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "inspectdb",
+      "kind": "module",
+      "source_path": "django/contrib/gis/management/commands/inspectdb.py",
+      "reason": "Issue 直接关于 inspectdb 命令的行为。"
+    },
+    {
+      "name": "call_command",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试代码中用于调用 inspectdb 命令。"
+    },
+    {
+      "name": "ForeignKey",
+      "kind": "class",
+      "source_path": "django/db/models/fields/related.py",
+      "reason": "生成的模型代码中需要正确实例化 ForeignKey 字段，并设置 to_field 参数。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/contrib/gis/management/commands/inspectdb.py",
+      "object": "inspectdb 命令相关的代码",
+      "lines": "",
+      "reason": "Issue 直接关于 inspectdb 命令的输出，且提供了潜在修复。"
+    },
+    {
+      "path": "django/db/models/fields/related.py",
+      "object": "ForeignKey",
+      "lines": "793-1049",
+      "reason": "外键字段的生成逻辑（包括 to_field 参数的设置）可能涉及此类的使用或相关元数据解析。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "InspectDBTestCase.test_attribute_name_not_python_keyword",
+      "test_file": "tests/inspectdb/tests.py",
+      "why_relevant": "该测试直接测试 inspectdb 命令的输出，并检查生成的 ForeignKey 字段定义字符串。",
+      "reusable_parts": ["使用 call_command('inspectdb', ...) 和 StringIO 捕获输出", "使用 assertIn/assertNotIn 检查输出片段", "TestCase 基类"],
+      "possible_gap": "该测试检查的是外键指向 'self' 或处理 Python 关键字的情况，但没有测试外键指向非主键字段的场景。"
+    },
+    {
+      "test_name": "InspectDBTransactionalTests.test_foreign_data_wrapper",
+      "test_file": "tests/inspectdb/tests.py",
+      "why_relevant": "该测试展示了在 PostgreSQL 上运行 inspectdb 并检查输出的模式。",
+      "reusable_parts": ["使用 TransactionTestCase 和数据库游标进行复杂设置", "调用 call_command 并检查输出", "清理逻辑"],
+      "possible_gap": "测试焦点是外部数据包装器，不涉及常规外键约束的解析。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "相关测试中使用的数据库表结构是常规的（例如指向主键的外键）。",
+      "target_pattern": "创建一个数据库表，其外键约束指向另一个表的非主键唯一字段。",
+      "reason": "Issue 的触发条件是外键引用特定字段（非主键）。需要变异测试的数据库 schema 来匹配此模式。",
+      "confidence": "high"
+    },
+    {
+      "slot": "input",
+      "current_pattern": "相关测试检查的输出片段是标准的外键定义（如 \"models.ForeignKey('self', models.DO_NOTHING)\"）。",
+      "target_pattern": "检查的输出片段应包含 to_field 参数（如 \"models.ForeignKey('foo', models.DO_NOTHING, to_field='other_id')\"）。",
+      "reason": "Issue 的错误现象是缺失 to_field 参数。测试断言需要变异以检查该参数是否存在。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "file_output",
+      "expression_hint": "call_command('inspectdb', ...) 后捕获的 stdout 字符串。",
+      "reason": "Issue 的核心是 inspectdb 命令生成的模型代码字符串。观察输出内容可以直接判断 to_field 参数是否被正确生成。"
+    },
+    {
+      "kind": "sql",
+      "expression_hint": "测试前在数据库中创建的表的 DDL（特别是外键约束定义）。",
+      "reason": "需要确保测试环境中的数据库 schema 精确匹配 Issue 描述的触发条件（外键指向特定字段）。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 inspectdb 为指向特定字段的外键生成的模型代码包含 'to_field=\"other_id\"'（或相应字段名）的片段。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的、可能因 Django 版本或格式而变化的输出行。避免断言不相关的字段属性。",
+      "reason": "Issue 的关键是 to_field 参数的存在与否。检查输出字符串中是否包含该参数片段是稳定且直接的对齐方式。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用支持外键约束的数据库后端（如 PostgreSQL, MySQL, SQLite）。可能需要使用 skipUnlessDBFeature('can_introspect_foreign_keys')。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要在测试方法内使用数据库游标执行 Issue 中给出的 CREATE TABLE SQL 语句来创建特定的表结构。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要使用 StringIO 来捕获 inspectdb 命令的标准输出。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "inspectdb 内部解析数据库元数据并生成 ForeignKey 字段的确切代码位置和逻辑。",
+    "当目标字段不是唯一字段时，inspectdb 的预期行为是什么？Issue 中目标字段是 UNIQUE，但未明确说明这是必要条件。",
+    "生成的模型代码中 to_field 参数的确切格式和位置（例如，参数顺序、是否包含 db_constraint 等）。"
+  ]
+}

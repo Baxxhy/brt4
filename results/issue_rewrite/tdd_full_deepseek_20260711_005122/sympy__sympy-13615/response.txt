@@ -1,0 +1,140 @@
+{
+  "issue_summary": "Complement 在输入是符号和数字的混合时，未能正确计算补集，导致数字元素被错误地排除。",
+  "trigger_condition": {
+    "text": "对包含符号（如 x, y）和数字（如 2）的 FiniteSet 与一个 Interval 进行 Complement 操作。",
+    "evidence": ["Issue 中的示例：a=FiniteSet(x,y,2); b=Interval(-10,10); Complement(a,b)"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "Complement 返回的结果是 {x, y}，缺失了数字元素 2，而期望输出是 {x, y, 2} 或 {x, y} \\ [-10,10]（即包含数字 2）。",
+    "symptom_type": "wrong_return",
+    "evidence": ["Issue 中的输出：{x, y} 与期望输出：{x, y} \\ [-10,10] 不符。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "Complement 操作应正确计算补集，当 FiniteSet 中的数字元素不在 Interval 内时，应保留在结果中。",
+    "evidence": ["Issue 中的期望输出描述：`{x, y} \\ [-10,10]` is expected as output."],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "Complement",
+      "kind": "class",
+      "source_path": "sympy/sets/sets.py",
+      "reason": "Issue 直接调用了 Complement 类，且其行为与缺陷相关。"
+    },
+    {
+      "name": "FiniteSet",
+      "kind": "class",
+      "source_path": "sympy/sets/sets.py",
+      "reason": "Issue 中作为第一个参数（被补集）的集合是 FiniteSet。"
+    },
+    {
+      "name": "Interval",
+      "kind": "class",
+      "source_path": "sympy/sets/sets.py",
+      "reason": "Issue 中作为第二个参数（补集）的集合是 Interval。"
+    },
+    {
+      "name": "FiniteSet._complement",
+      "kind": "method",
+      "source_path": "sympy/sets/sets.py",
+      "reason": "源码片段 1 显示 FiniteSet 有 _complement 方法，可能负责计算补集逻辑。"
+    },
+    {
+      "name": "Interval._complement",
+      "kind": "method",
+      "source_path": "sympy/sets/sets.py",
+      "reason": "源码片段 2 显示 Interval 有 _complement 方法，可能参与补集计算。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/sets/sets.py",
+      "object": "FiniteSet._complement",
+      "lines": "",
+      "reason": "缺陷涉及 FiniteSet 与 Interval 的补集计算，FiniteSet 的 _complement 方法可能是处理逻辑所在。"
+    },
+    {
+      "path": "sympy/sets/sets.py",
+      "object": "Complement.__new__ 或 Complement.reduce",
+      "lines": "",
+      "reason": "Complement 类的构造函数或 reduce 静态方法可能负责整体补集计算和化简。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_complement",
+      "test_file": "sympy/sets/tests/test_sets.py",
+      "why_relevant": "该测试直接测试了 Complement 和 .complement() 方法，包含 FiniteSet 与 Interval 的用例。",
+      "reusable_parts": ["imports (如 from sympy import ...)", "FiniteSet 和 Interval 的构造", "Complement 的调用方式", "assert 风格（使用 == 比较）"],
+      "possible_gap": "现有测试主要测试纯数字或纯符号的 FiniteSet，缺少符号和数字混合的 FiniteSet 与 Interval 的补集测试。"
+    },
+    {
+      "test_name": "test_Complement",
+      "test_file": "sympy/sets/tests/test_sets.py",
+      "why_relevant": "该测试也直接测试 Complement 类，包含 FiniteSet 与 FiniteSet 的补集用例。",
+      "reusable_parts": ["Complement 的构造", "assert 风格"],
+      "possible_gap": "缺少 FiniteSet（混合元素）与 Interval 的补集用例。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中 FiniteSet 的参数是纯数字（如 FiniteSet(0)）或纯符号（如 FiniteSet(x)）。",
+      "target_pattern": "FiniteSet 的参数应包含符号和数字的混合，如 FiniteSet(x, y, 2)。",
+      "reason": "Issue 表明当 FiniteSet 包含混合元素时，Complement 计算可能出错。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "相似测试中 Complement 的第二个参数常为 S.Reals 或其他集合。",
+      "target_pattern": "第二个参数应为 Interval，如 Interval(-10, 10)。",
+      "reason": "Issue 中缺陷在 FiniteSet 与 Interval 的补集中触发。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "Complement(FiniteSet(x, y, 2), Interval(-10, 10)) 的结果",
+      "reason": "直接观察 Complement 的返回值是否包含数字 2，以判断缺陷是否触发。"
+    },
+    {
+      "kind": "repr",
+      "expression_hint": "str(Complement(...)) 或 repr(Complement(...))",
+      "reason": "Issue 中展示了输出表示，观察输出字符串有助于判断结果是否正确。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "Complement 的结果应包含数字 2（因为 2 不在 Interval(-10,10) 内）。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免断言完整的字符串表示，因为符号顺序可能变化。",
+      "reason": "缺陷核心是数字元素缺失，断言包含数字 2 更稳定且与 Issue 对齐。"
+    },
+    {
+      "assertion_goal": "Complement 的结果应等于期望的集合表达式（如 {x, y, 2} 或 Complement({x, y, 2}, Interval(-10,10))）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免依赖内部未公开的表示或顺序。",
+      "reason": "如果修复后能正确计算，结果应等于正确的数学补集。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 sympy 和 sympy.sets 相关类（如 FiniteSet, Interval, Complement）。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要定义符号变量（如 x, y）。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "缺陷的确切位置是在 FiniteSet._complement、Interval._complement 还是 Complement 的化简逻辑中。",
+    "修复后的精确输出是 {x, y, 2} 还是 {x, y} \\ [-10,10]（后者可能是一个未求值的 Complement 对象）。",
+    "是否还有其他边界情况（如不同开闭区间的 Interval）会影响此缺陷。"
+  ]
+}

@@ -1,0 +1,317 @@
+{
+  "instance_id": "django__django-12193",
+  "issue_summary": "SplitArrayField 与 BooleanField 组合时，当初始数据包含 True 值后，后续所有复选框 widget 都会被错误地渲染为 checked 状态。",
+  "trigger_condition": {
+    "text": "使用 SplitArrayField 包装 BooleanField，并提供包含至少一个 True 值的初始数据数组。",
+    "evidence": [
+      "Issue 描述：'When providing a SplitArrayField BooleanField with preexisting data...'",
+      "Issue 指出问题发生在 for 循环处理初始数据数组时遇到第一个 True 值后。",
+      "源码片段 4 显示 CheckboxInput.get_context 会修改传入的 attrs 字典，添加 'checked': True。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "在渲染的 HTML 中，初始数据为 False 的复选框也被错误地添加了 checked 属性。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 描述：'every widget initialized after that defaults to checked even though the backing data may be False.'",
+      "相关测试 4 和 5 展示了 CheckboxInput 在 value 为 True 和 False 时的正确渲染输出，可用于对比错误输出。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "每个复选框 widget 的 checked 属性应仅在其对应的初始数据值为 True 时被设置。",
+    "evidence": [
+      "Issue 暗示了正确的行为：复选框的状态应与其底层数据值一致。",
+      "相关测试 5 显示当 value 为 False 时，渲染的 HTML 不应包含 checked 属性。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "SplitArrayField",
+      "kind": "class",
+      "source_path": "django/contrib/postgres/forms/array.py",
+      "reason": "Issue 直接涉及此字段类与 BooleanField 的组合使用。"
+    },
+    {
+      "name": "CheckboxInput",
+      "kind": "class",
+      "source_path": "django/forms/widgets.py",
+      "reason": "Issue 明确指出 CheckboxInput 的 get_context 方法会修改 attrs 字典，是问题的根源。"
+    },
+    {
+      "name": "CheckboxInput.get_context",
+      "kind": "method",
+      "source_path": "django/forms/widgets.py",
+      "reason": "Issue 引用了该方法，并指出它是唯一会修改传入 attrs 字典的 widget 方法。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/forms/widgets.py",
+      "object": "CheckboxInput.get_context",
+      "lines": "523-528",
+      "reason": "Issue 直接引用此方法，指出它修改了传入的 attrs 字典，可能导致字典在后续迭代中被共享和错误复用。"
+    },
+    {
+      "path": "django/contrib/postgres/forms/array.py",
+      "object": "SplitArrayField",
+      "lines": "168-234",
+      "reason": "Issue 涉及 SplitArrayField 与 BooleanField 的交互，可能是其内部 widget 渲染逻辑未正确处理 CheckboxInput 对 attrs 的修改。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "TestSplitFormField.test_valid",
+      "test_file": "tests/postgres_tests/test_array.py",
+      "why_relevant": "它测试了 SplitArrayField 的基本功能，包括表单验证和数据清理，是构建缺陷复现测试的良好起点。",
+      "reusable_parts": [
+        "导入 SplitArrayField",
+        "创建包含该字段的 Form 类",
+        "使用表单数据字典",
+        "调用 form.is_valid() 和检查 cleaned_data"
+      ],
+      "possible_gap": "它使用 CharField 作为 base_field，而不是 BooleanField，且未测试带有初始数据的渲染行为。"
+    },
+    {
+      "test_name": "CheckboxInputTest.test_render_true",
+      "test_file": "tests/forms_tests/widget_tests/test_checkboxinput.py",
+      "why_relevant": "它测试了 CheckboxInput 在 value 为 True 时的正确渲染输出，可用于对比错误输出。",
+      "reusable_parts": [
+        "使用 check_html 辅助方法",
+        "widget 实例化",
+        "渲染调用模式"
+      ],
+      "possible_gap": "它测试的是独立的 CheckboxInput，而不是嵌入在 SplitArrayWidget 中的情况。"
+    },
+    {
+      "test_name": "CheckboxInputTest.test_render_false",
+      "test_file": "tests/forms_tests/widget_tests/test_checkboxinput.py",
+      "why_relevant": "它测试了 CheckboxInput 在 value 为 False 时的正确渲染输出（无 checked 属性），这正是缺陷中错误出现的情况。",
+      "reusable_parts": [
+        "使用 check_html 辅助方法",
+        "widget 实例化",
+        "渲染调用模式"
+      ],
+      "possible_gap": "它测试的是独立的 CheckboxInput，而不是嵌入在 SplitArrayWidget 中的情况。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试 3 中使用 CharField 和字符串数据。",
+      "target_pattern": "将 base_field 改为 BooleanField，并提供包含 True 和 False 值的初始数据数组。",
+      "reason": "Issue 明确指出缺陷发生在 SplitArrayField(BooleanField) 且初始数据包含 True 时。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "相关测试 3 中表单使用提交的数据 (data) 初始化。",
+      "target_pattern": "表单使用 initial 参数提供初始数据，然后渲染表单以观察 HTML 输出。",
+      "reason": "Issue 描述的是‘preexisting data’（即初始数据）导致的渲染问题，而不是表单提交后的验证。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "渲染后的 HTML 字符串中每个复选框 input 标签的属性。",
+      "reason": "缺陷表现为错误的 checked 属性，直接检查渲染输出可以判断问题是否触发。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "在 SplitArrayWidget 渲染子 widget 过程中，传递给每个 CheckboxInput.get_context 的 attrs 字典的 id 或内容。",
+      "reason": "Issue 指出 attrs 字典被 CheckboxInput.get_context 修改，可能导致字典对象被意外共享。观察其变化可以定位问题。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "对于初始数据为 False 的复选框，其渲染的 HTML 中不应包含 checked 属性。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "断言完整的、具体的 HTML 字符串相等，因为模板细节可能变化。",
+      "reason": "Issue 的核心是错误地添加了 checked 属性。检查特定片段的存在与否更稳定，且与预期行为直接相关。"
+    },
+    {
+      "assertion_goal": "对于初始数据为 True 的复选框，其渲染的 HTML 中应包含 checked 属性。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的、具体的 HTML 字符串相等，因为模板细节可能变化。",
+      "reason": "确保 True 值对应的复选框正确渲染，以区分是全部错误还是部分错误。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 PostgreSQL 测试用例基类（如 PostgreSQLSimpleTestCase），因为 SplitArrayField 在 django.contrib.postgres 中。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 check_html 辅助方法来简化 HTML 输出的断言。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "SplitArrayField 内部具体是如何迭代并调用子 widget 的 get_context 方法的，以及 attrs 字典是如何在迭代间传递的。",
+    "除了使用 initial 参数，是否还有其他方式提供‘preexisting data’（例如从模型实例绑定表单）也会触发此缺陷。",
+    "修复方案的具体细节未知，因此断言应基于问题语义（checked 属性与数据值一致），而非假设的补丁实现。"
+  ],
+  "raw": {
+    "issue_summary": "SplitArrayField 与 BooleanField 组合时，当初始数据包含 True 值后，后续所有复选框 widget 都会被错误地渲染为 checked 状态。",
+    "trigger_condition": {
+      "text": "使用 SplitArrayField 包装 BooleanField，并提供包含至少一个 True 值的初始数据数组。",
+      "evidence": [
+        "Issue 描述：'When providing a SplitArrayField BooleanField with preexisting data...'",
+        "Issue 指出问题发生在 for 循环处理初始数据数组时遇到第一个 True 值后。",
+        "源码片段 4 显示 CheckboxInput.get_context 会修改传入的 attrs 字典，添加 'checked': True。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在渲染的 HTML 中，初始数据为 False 的复选框也被错误地添加了 checked 属性。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'every widget initialized after that defaults to checked even though the backing data may be False.'",
+        "相关测试 4 和 5 展示了 CheckboxInput 在 value 为 True 和 False 时的正确渲染输出，可用于对比错误输出。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "每个复选框 widget 的 checked 属性应仅在其对应的初始数据值为 True 时被设置。",
+      "evidence": [
+        "Issue 暗示了正确的行为：复选框的状态应与其底层数据值一致。",
+        "相关测试 5 显示当 value 为 False 时，渲染的 HTML 不应包含 checked 属性。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "SplitArrayField",
+        "kind": "class",
+        "source_path": "django/contrib/postgres/forms/array.py",
+        "reason": "Issue 直接涉及此字段类与 BooleanField 的组合使用。"
+      },
+      {
+        "name": "CheckboxInput",
+        "kind": "class",
+        "source_path": "django/forms/widgets.py",
+        "reason": "Issue 明确指出 CheckboxInput 的 get_context 方法会修改 attrs 字典，是问题的根源。"
+      },
+      {
+        "name": "CheckboxInput.get_context",
+        "kind": "method",
+        "source_path": "django/forms/widgets.py",
+        "reason": "Issue 引用了该方法，并指出它是唯一会修改传入 attrs 字典的 widget 方法。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/widgets.py",
+        "object": "CheckboxInput.get_context",
+        "lines": "523-528",
+        "reason": "Issue 直接引用此方法，指出它修改了传入的 attrs 字典，可能导致字典在后续迭代中被共享和错误复用。"
+      },
+      {
+        "path": "django/contrib/postgres/forms/array.py",
+        "object": "SplitArrayField",
+        "lines": "168-234",
+        "reason": "Issue 涉及 SplitArrayField 与 BooleanField 的交互，可能是其内部 widget 渲染逻辑未正确处理 CheckboxInput 对 attrs 的修改。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestSplitFormField.test_valid",
+        "test_file": "tests/postgres_tests/test_array.py",
+        "why_relevant": "它测试了 SplitArrayField 的基本功能，包括表单验证和数据清理，是构建缺陷复现测试的良好起点。",
+        "reusable_parts": [
+          "导入 SplitArrayField",
+          "创建包含该字段的 Form 类",
+          "使用表单数据字典",
+          "调用 form.is_valid() 和检查 cleaned_data"
+        ],
+        "possible_gap": "它使用 CharField 作为 base_field，而不是 BooleanField，且未测试带有初始数据的渲染行为。"
+      },
+      {
+        "test_name": "CheckboxInputTest.test_render_true",
+        "test_file": "tests/forms_tests/widget_tests/test_checkboxinput.py",
+        "why_relevant": "它测试了 CheckboxInput 在 value 为 True 时的正确渲染输出，可用于对比错误输出。",
+        "reusable_parts": [
+          "使用 check_html 辅助方法",
+          "widget 实例化",
+          "渲染调用模式"
+        ],
+        "possible_gap": "它测试的是独立的 CheckboxInput，而不是嵌入在 SplitArrayWidget 中的情况。"
+      },
+      {
+        "test_name": "CheckboxInputTest.test_render_false",
+        "test_file": "tests/forms_tests/widget_tests/test_checkboxinput.py",
+        "why_relevant": "它测试了 CheckboxInput 在 value 为 False 时的正确渲染输出（无 checked 属性），这正是缺陷中错误出现的情况。",
+        "reusable_parts": [
+          "使用 check_html 辅助方法",
+          "widget 实例化",
+          "渲染调用模式"
+        ],
+        "possible_gap": "它测试的是独立的 CheckboxInput，而不是嵌入在 SplitArrayWidget 中的情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 3 中使用 CharField 和字符串数据。",
+        "target_pattern": "将 base_field 改为 BooleanField，并提供包含 True 和 False 值的初始数据数组。",
+        "reason": "Issue 明确指出缺陷发生在 SplitArrayField(BooleanField) 且初始数据包含 True 时。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 3 中表单使用提交的数据 (data) 初始化。",
+        "target_pattern": "表单使用 initial 参数提供初始数据，然后渲染表单以观察 HTML 输出。",
+        "reason": "Issue 描述的是‘preexisting data’（即初始数据）导致的渲染问题，而不是表单提交后的验证。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "渲染后的 HTML 字符串中每个复选框 input 标签的属性。",
+        "reason": "缺陷表现为错误的 checked 属性，直接检查渲染输出可以判断问题是否触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 SplitArrayWidget 渲染子 widget 过程中，传递给每个 CheckboxInput.get_context 的 attrs 字典的 id 或内容。",
+        "reason": "Issue 指出 attrs 字典被 CheckboxInput.get_context 修改，可能导致字典对象被意外共享。观察其变化可以定位问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于初始数据为 False 的复选框，其渲染的 HTML 中不应包含 checked 属性。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的、具体的 HTML 字符串相等，因为模板细节可能变化。",
+        "reason": "Issue 的核心是错误地添加了 checked 属性。检查特定片段的存在与否更稳定，且与预期行为直接相关。"
+      },
+      {
+        "assertion_goal": "对于初始数据为 True 的复选框，其渲染的 HTML 中应包含 checked 属性。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、具体的 HTML 字符串相等，因为模板细节可能变化。",
+        "reason": "确保 True 值对应的复选框正确渲染，以区分是全部错误还是部分错误。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 PostgreSQL 测试用例基类（如 PostgreSQLSimpleTestCase），因为 SplitArrayField 在 django.contrib.postgres 中。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 check_html 辅助方法来简化 HTML 输出的断言。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "SplitArrayField 内部具体是如何迭代并调用子 widget 的 get_context 方法的，以及 attrs 字典是如何在迭代间传递的。",
+      "除了使用 initial 参数，是否还有其他方式提供‘preexisting data’（例如从模型实例绑定表单）也会触发此缺陷。",
+      "修复方案的具体细节未知，因此断言应基于问题语义（checked 属性与数据值一致），而非假设的补丁实现。"
+    ]
+  }
+}

@@ -1,0 +1,514 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+ascii.qdp Table format assumes QDP commands are upper case
+### Description
+
+ascii.qdp assumes that commands in a QDP file are upper case, for example, for errors they must be "READ SERR 1 2" whereas QDP itself is not case sensitive and case use "read serr 1 2". 
+
+As many QDP files are created by hand, the expectation that all commands be all-caps should be removed.
+
+### Expected behavior
+
+The following qdp file should read into a `Table` with errors, rather than crashing.
+```
+read serr 1 2 
+1 0.5 1 0.5
+```
+
+### How to Reproduce
+
+Create a QDP file:
+```
+> cat > test.qdp
+read serr 1 2 
+1 0.5 1 0.5
+<EOF>
+
+ > python
+Python 3.10.9 (main, Dec  7 2022, 02:03:23) [Clang 13.0.0 (clang-1300.0.29.30)] on darwin
+Type "help", "copyright", "credits" or "license" for more information.
+>>> from astropy.table import Table
+>>> Table.read('test.qdp',format='ascii.qdp')
+WARNING: table_id not specified. Reading the first available table [astropy.io.ascii.qdp]
+Traceback (most recent call last):
+...
+    raise ValueError(f'Unrecognized QDP line: {line}')
+ValueError: Unrecognized QDP line: read serr 1 2
+```
+
+Running "qdp test.qdp" works just fine.
+
+
+### Versions
+
+Python 3.10.9 (main, Dec  7 2022, 02:03:23) [Clang 13.0.0 (clang-1300.0.29.30)]
+astropy 5.1
+Numpy 1.24.1
+pyerfa 2.0.0.1
+Scipy 1.10.0
+Matplotlib 3.6.3
+
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：astropy/io/ascii/qdp.py
+对象名称：read
+节点类型：class_function
+父节点：QDP
+行号范围：630-637
+代码：
+    def read(self, table):
+        self.lines = self.inputter.get_lines(table, newline="\n")
+        return _read_table_qdp(
+            self.lines,
+            table_id=self.table_id,
+            names=self.names,
+            delimiter=self.delimiter,
+        )
+
+
+【源码片段 2】
+文件路径：astropy/io/ascii/qdp.py
+对象名称：qdp
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 3】
+文件路径：astropy/io/ascii/qdp.py
+对象名称：QDP
+节点类型：class
+父节点：qdp
+行号范围：523-642
+代码：
+class QDP(basic.Basic):
+    """Quick and Dandy Plot table.
+
+    Example::
+
+        ! Initial comment line 1
+        ! Initial comment line 2
+        READ TERR 1
+        READ SERR 3
+        ! Table 0 comment
+        !a a(pos) a(neg) b be c d
+        53000.5   0.25  -0.5   1  1.5  3.5 2
+        54000.5   1.25  -1.5   2  2.5  4.5 3
+        NO NO NO NO NO
+        ! Table 1 comment
+        !a a(pos) a(neg) b be c d
+        54000.5   2.25  -2.5   NO  3.5  5.5 5
+        55000.5   3.25  -3.5   4  4.5  6.5 nan
+
+    The input table above contains some initial comments, the error commands,
+    then two tables.
+    This file format can contain multiple tables, separated by a line full
+    of ``NO``s. Comments are exclamation marks, and missing values are single
+    ``NO`` entries. The delimiter is usually whitespace, more rarely a comma.
+    The QDP format differentiates between data and error columns. The table
+    above has commands::
+
+        READ TERR 1
+        READ SERR 3
+
+    which mean that after data column 1 there will be two error columns
+    containing its positive and engative error bars, then data column 2 without
+    error bars, then column 3, then a column with the symmetric error of column
+    3, then the remaining data columns.
+
+    As explained below, table headers are highly inconsistent. Possible
+    comments containing column names will be ignored and columns will be called
+    ``col1``, ``col2``, etc. unless the user specifies their names with the
+    ``names=`` keyword argument,
+    When passing column names, pass **only the names of the data columns, not
+    the error columns.**
+    Error information will be encoded in the names of the table columns.
+    (e.g. ``a_perr`` and ``a_nerr`` for the positive and negative error of
+    column ``a``, ``b_err`` the symmetric error of column ``b``.)
+
+    When writing tables to this format, users can pass an ``err_specs`` keyword
+    passing a dictionary ``{'serr': [3], 'terr': [1, 2]}``, meaning that data
+    columns 1 and two will have two additional columns each with their positive
+    and negative errors, and data column 3 will have an additional column with
+    a symmetric error (just like the ``READ SERR`` and ``READ TERR`` commands
+    above)
+
+    Headers are just comments, and tables distributed by various missions
+    can differ greatly in their use of conventions. For example, light curves
+    distributed by the Swift-Gehrels mission have an extra space in one header
+    entry that makes the number of labels inconsistent with the number of cols.
+    For this reason, we ignore the comments that might encode the column names
+    and leave the name specification to the user.
+
+    Example::
+
+        >               Extra space
+        >                   |
+        >                   v
+        >!     MJD       Err (pos)       Err(neg)        Rate            Error
+        >53000.123456   2.378e-05     -2.378472e-05     NO             0.212439
+
+    These readers and writer classes will strive to understand which of the
+    comments belong to all the tables, and which ones to each single table.
+    General comments will be stored in the ``initial_comments`` meta of each
+    table. The comments of each table will be stored in the ``comments`` meta.
+
+    Example::
+
+        t = Table.read(example_qdp, format='ascii.qdp', table_id=1, names=['a', 'b', 'c', 'd'])
+
+    reads the second table (``table_id=1``) in file ``example.qdp`` containing
+    the table above. There are four column names but seven data columns, why?
+    Because the ``READ SERR`` and ``READ TERR`` commands say that there are
+    three error columns.
+    ``t.meta['initial_comments']`` will contain the initial two comment lines
+    in the file, while ``t.meta['comments']`` will contain ``Table 1 comment``
+
+    The table can be written to another file, preserving the same information,
+    as::
+
+        t.write(test_file, err_specs={'terr': [1], 'serr': [3]})
+
+    Note how the ``terr`` and ``serr`` commands are passed to the writer.
+
+    """
+    _format_name = "qdp"
+    _io_registry_can_write = True
+    _io_registry_suffix = ".qdp"
+    _description = "Quick and Dandy Plotter"
+    header_class = QDPHeader
+    data_class = QDPData
+    def __init__(self, table_id=None, names=None, err_specs=None, sep=None):
+    def read(self, table):
+    def write(self, table):
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：astropy/io/ascii/tests/test_qdp.py
+测试名称：test_read_example
+测试代码：
+def test_read_example():
+    example_qdp = """
+        ! Initial comment line 1
+        ! Initial comment line 2
+        READ TERR 1
+        READ SERR 3
+        ! Table 0 comment
+        !a a(pos) a(neg) b c ce d
+        53000.5   0.25  -0.5   1  1.5  3.5 2
+        54000.5   1.25  -1.5   2  2.5  4.5 3
+        NO NO NO NO NO
+        ! Table 1 comment
+        !a a(pos) a(neg) b c ce d
+        54000.5   2.25  -2.5   NO  3.5  5.5 5
+        55000.5   3.25  -3.5   4  4.5  6.5 nan
+        """
+    dat = ascii.read(example_qdp, format="qdp", table_id=1, names=["a", "b", "c", "d"])
+    t = Table.read(
+        example_qdp, format="ascii.qdp", table_id=1, names=["a", "b", "c", "d"]
+    )
+
+    assert np.allclose(t["a"], [54000, 55000])
+    assert t["c_err"][0] == 5.5
+    assert np.ma.is_masked(t["b"][0])
+    assert np.isnan(t["d"][1])
+
+    for col1, col2 in zip(t.itercols(), dat.itercols()):
+        assert np.allclose(col1, col2, equal_nan=True)
+
+【相关测试 2】
+测试文件：astropy/io/ascii/tests/test_qdp.py
+测试名称：test_get_tables_from_qdp_file
+测试代码：
+def test_get_tables_from_qdp_file(tmp_path):
+    example_qdp = """
+    ! Swift/XRT hardness ratio of trigger: XXXX, name: BUBU X-2
+    ! Columns are as labelled
+    READ TERR 1
+    READ SERR 2
+    ! WT -- hard data
+    !MJD            Err (pos)       Err(neg)        Rate            Error
+    53000.123456 2.37847222222222e-05    -2.37847222222222e-05   -0.212439       0.212439
+    55045.099887 1.14467592592593e-05    -1.14467592592593e-05   0.000000        0.000000
+    NO NO NO NO NO
+    ! WT -- soft data
+    !MJD            Err (pos)       Err(neg)        Rate            Error
+    53000.123456 2.37847222222222e-05    -2.37847222222222e-05   0.726155        0.583890
+    55045.099887 1.14467592592593e-05    -1.14467592592593e-05   2.410935        1.393592
+    NO NO NO NO NO
+    ! WT -- hardness ratio
+    !MJD            Err (pos)       Err(neg)        Rate            Error
+    53000.123456 2.37847222222222e-05    -2.37847222222222e-05   -0.292553       -0.374935
+    55045.099887 1.14467592592593e-05    -1.14467592592593e-05   0.000000        -nan
+    """
+
+    path = tmp_path / "test.qdp"
+
+    with open(path, "w") as fp:
+        print(example_qdp, file=fp)
+
+    table0 = _read_table_qdp(fp.name, names=["MJD", "Rate"], table_id=0)
+    assert table0.meta["initial_comments"][0].startswith("Swift")
+    assert table0.meta["comments"][0].startswith("WT -- hard data")
+    table2 = _read_table_qdp(fp.name, names=["MJD", "Rate"], table_id=2)
+    assert table2.meta["initial_comments"][0].startswith("Swift")
+    assert table2.meta["comments"][0].startswith("WT -- hardness")
+    assert np.isclose(table2["MJD_nerr"][0], -2.37847222222222e-05)
+
+【相关测试 3】
+测试文件：astropy/io/ascii/tests/test_qdp.py
+测试名称：test_roundtrip_example
+测试代码：
+def test_roundtrip_example(tmp_path):
+    example_qdp = """
+        ! Initial comment line 1
+        ! Initial comment line 2
+        READ TERR 1
+        READ SERR 3
+        ! Table 0 comment
+        !a a(pos) a(neg) b c ce d
+        53000.5   0.25  -0.5   1  1.5  3.5 2
+        54000.5   1.25  -1.5   2  2.5  4.5 3
+        NO NO NO NO NO
+        ! Table 1 comment
+        !a a(pos) a(neg) b c ce d
+        54000.5   2.25  -2.5   NO  3.5  5.5 5
+        55000.5   3.25  -3.5   4  4.5  6.5 nan
+        """
+    test_file = tmp_path / "test.qdp"
+
+    t = Table.read(
+        example_qdp, format="ascii.qdp", table_id=1, names=["a", "b", "c", "d"]
+    )
+    t.write(test_file, err_specs={"terr": [1], "serr": [3]})
+    t2 = Table.read(test_file, names=["a", "b", "c", "d"], table_id=0)
+
+    for col1, col2 in zip(t.itercols(), t2.itercols()):
+        assert np.allclose(col1, col2, equal_nan=True)
+
+【相关测试 4】
+测试文件：astropy/io/ascii/tests/test_qdp.py
+测试名称：test_roundtrip_example_comma
+测试代码：
+def test_roundtrip_example_comma(tmp_path):
+    example_qdp = """
+        ! Initial comment line 1
+        ! Initial comment line 2
+        READ TERR 1
+        READ SERR 3
+        ! Table 0 comment
+        !a,a(pos),a(neg),b,c,ce,d
+        53000.5,0.25,-0.5,1,1.5,3.5,2
+        54000.5,1.25,-1.5,2,2.5,4.5,3
+        NO,NO,NO,NO,NO
+        ! Table 1 comment
+        !a,a(pos),a(neg),b,c,ce,d
+        54000.5,2.25,-2.5,NO,3.5,5.5,5
+        55000.5,3.25,-3.5,4,4.5,6.5,nan
+        """
+    test_file = tmp_path / "test.qdp"
+
+    t = Table.read(
+        example_qdp, format="ascii.qdp", table_id=1, names=["a", "b", "c", "d"], sep=","
+    )
+    t.write(test_file, err_specs={"terr": [1], "serr": [3]})
+    t2 = Table.read(test_file, names=["a", "b", "c", "d"], table_id=0)
+
+    # t.values_equal(t2)
+    for col1, col2 in zip(t.itercols(), t2.itercols()):
+        assert np.allclose(col1, col2, equal_nan=True)
+
+【相关测试 5】
+测试文件：astropy/io/ascii/tests/test_qdp.py
+测试名称：test_roundtrip
+测试代码：
+def test_roundtrip(tmp_path):
+    example_qdp = """
+    ! Swift/XRT hardness ratio of trigger: XXXX, name: BUBU X-2
+    ! Columns are as labelled
+    READ TERR 1
+    READ SERR 2
+    ! WT -- hard data
+    !MJD            Err (pos)       Err(neg)        Rate            Error
+    53000.123456 2.37847222222222e-05    -2.37847222222222e-05   NO       0.212439
+    55045.099887 1.14467592592593e-05    -1.14467592592593e-05   0.000000        0.000000
+    NO NO NO NO NO
+    ! WT -- soft data
+    !MJD            Err (pos)       Err(neg)        Rate            Error
+    53000.123456 2.37847222222222e-05    -2.37847222222222e-05   0.726155        0.583890
+    55045.099887 1.14467592592593e-05    -1.14467592592593e-05   2.410935        1.393592
+    NO NO NO NO NO
+    ! WT -- hardness ratio
+    !MJD            Err (pos)       Err(neg)        Rate            Error
+    53000.123456 2.37847222222222e-05    -2.37847222222222e-05   -0.292553       -0.374935
+    55045.099887 1.14467592592593e-05    -1.14467592592593e-05   0.000000        NO
+    ! Add command, just to raise the warning.
+    READ TERR 1
+    ! WT -- whatever
+    !MJD            Err (pos)       Err(neg)        Rate            Error
+    53000.123456 2.37847222222222e-05    -2.37847222222222e-05   -0.292553       -0.374935
+    NO 1.14467592592593e-05    -1.14467592592593e-05   0.000000        NO
+    """
+
+    path = str(tmp_path / "test.qdp")
+    path2 = str(tmp_path / "test2.qdp")
+
+    with open(path, "w") as fp:
+        print(example_qdp, file=fp)
+    with pytest.warns(AstropyUserWarning) as record:
+        table = _read_table_qdp(path, names=["MJD", "Rate"], table_id=0)
+    assert np.any(
+        [
+            "This file contains multiple command blocks" in r.message.args[0]
+            for r in record
+        ]
+    )
+
+    _write_table_qdp(table, path2)
+
+    new_table = _read_table_qdp(path2, names=["MJD", "Rate"], table_id=0)
+
+    for col in new_table.colnames:
+        is_masked = np.array([np.ma.is_masked(val) for val in new_table[col]])
+        if np.any(is_masked):
+            # All NaN values are read as such.
+            assert np.ma.is_masked(table[col][is_masked])
+
+        is_nan = np.array(
+            [(not np.ma.is_masked(val) and np.isnan(val)) for val in new_table[col]]
+        )
+        # All non-NaN values are the same
+        assert np.allclose(new_table[col][~is_nan], table[col][~is_nan])
+        if np.any(is_nan):
+            # All NaN values are read as such.
+            assert np.isnan(table[col][is_nan])
+    assert np.allclose(new_table["MJD_perr"], [2.378472e-05, 1.1446759e-05])
+
+    for meta_name in ["initial_comments", "comments"]:
+        assert meta_name in new_table.meta
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

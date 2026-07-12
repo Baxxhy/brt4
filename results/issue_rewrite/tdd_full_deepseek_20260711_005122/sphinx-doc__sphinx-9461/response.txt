@@ -1,0 +1,119 @@
+```json
+{
+    "issue_summary": "Sphinx 无法为同时使用 @classmethod 和 @property 装饰的方法生成文档。",
+    "trigger_condition": {
+        "text": "使用 Sphinx 的 autodoc 扩展为同时装饰了 @classmethod 和 @property 的方法生成文档。",
+        "evidence": ["Issue 描述：'sphinx does not seem to document any such methods (regular @property decorated methods get documented just fine.)'", "Issue 中列出了未正确记录的类属性，如 `BaseClass.baseclass_class_property`。"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "同时装饰了 @classmethod 和 @property 的方法在生成的 HTML 文档中缺失。",
+        "symptom_type": "unknown",
+        "evidence": ["Issue 中列出了未记录的多个方法，如 `MetaClass.metaclass_class_property`、`BaseClass.baseclass_class_property` 等。"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "同时装饰了 @classmethod 和 @property 的方法应该像普通 @property 方法一样被 Sphinx 正确记录。",
+        "evidence": ["Issue 的 'Expected behavior' 部分：'Methods that are decorated with both @classmethod and @property should be documented appropriately.'"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "sphinx.ext.autodoc",
+            "kind": "module",
+            "source_path": "",
+            "reason": "Issue 涉及 Sphinx 的 autodoc 扩展无法正确处理特定装饰器组合。"
+        },
+        {
+            "name": "do_autodoc",
+            "kind": "function",
+            "source_path": "",
+            "reason": "相关测试代码中用于生成文档的函数，是测试 autodoc 功能的核心。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "",
+            "object": "",
+            "lines": "",
+            "reason": "Issue 指出问题根源在于 `type(BaseClass.baseclass_class_property)` 返回的是返回对象的类型，而非 property 类型，导致 Sphinx 无法提取 __doc__。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_autodoc_classmethod",
+            "test_file": "tests/test_ext_autodoc.py",
+            "why_relevant": "该测试验证了 @classmethod 装饰的方法能被 autodoc 正确记录。",
+            "reusable_parts": ["测试装饰器 @pytest.mark.sphinx('html', testroot='ext-autodoc')", "使用 do_autodoc 函数生成文档", "断言生成的文档字符串列表"],
+            "possible_gap": "该测试只涉及 @classmethod，未涉及 @classmethod 与 @property 的组合。"
+        },
+        {
+            "test_name": "test_properties",
+            "test_file": "tests/test_ext_autodoc_autoproperty.py",
+            "why_relevant": "该测试验证了 @property 装饰的方法能被 autodoc 正确记录。",
+            "reusable_parts": ["测试装饰器 @pytest.mark.sphinx('html', testroot='ext-autodoc')", "使用 do_autodoc 函数生成文档", "断言生成的文档字符串列表"],
+            "possible_gap": "该测试只涉及 @property，未涉及 @classmethod 与 @property 的组合。"
+        },
+        {
+            "test_name": "test_autodoc_descriptor",
+            "test_file": "tests/test_ext_autodoc.py",
+            "why_relevant": "该测试验证了描述符（如 property）的文档生成。",
+            "reusable_parts": ["测试装饰器 @pytest.mark.sphinx('html', testroot='ext-autodoc')", "使用 do_autodoc 函数生成文档", "断言生成的文档字符串列表"],
+            "possible_gap": "该测试未涉及 @classmethod 与 @property 的组合。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "input",
+            "current_pattern": "测试目标为单独的 @classmethod 方法或单独的 @property 方法。",
+            "target_pattern": "测试目标应为同时装饰了 @classmethod 和 @property 的方法。",
+            "reason": "Issue 明确指出问题只出现在 @classmethod 和 @property 组合使用时。",
+            "confidence": "high"
+        },
+        {
+            "slot": "object_state",
+            "current_pattern": "测试类中定义普通方法、类方法或属性。",
+            "target_pattern": "测试类中定义同时使用 @classmethod 和 @property 装饰的方法。",
+            "reason": "需要创建触发缺陷的特定类结构。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "return_value",
+            "expression_hint": "do_autodoc 函数返回的文档字符串列表",
+            "reason": "通过观察生成的文档字符串列表是否包含目标方法的条目，可以判断文档是否被正确生成。"
+        },
+        {
+            "kind": "type",
+            "expression_hint": "type(target_class.classmethod_property)",
+            "reason": "Issue 指出问题的关键在于 `type(BaseClass.baseclass_class_property)` 返回的是返回对象的类型，而非 property 类型。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "生成的文档字符串列表应包含目标类属性（@classmethod @property）的条目。",
+            "preferred_assertion_style": "contains_fragment",
+            "avoid": "断言完整的、固定的文档字符串列表，因为具体输出格式可能变化。",
+            "reason": "Issue 的核心是文档条目缺失，因此断言应检查条目是否存在，而非精确的格式。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要使用 @pytest.mark.sphinx 装饰器并指定 testroot='ext-autodoc' 来设置 Sphinx 应用。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要创建一个包含同时装饰了 @classmethod 和 @property 的方法的测试目标类。",
+            "source": "issue",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "Sphinx 内部处理 @classmethod 和 @property 组合的确切代码位置。",
+        "Python 3.10 的修复是否已向后移植或影响当前测试环境。",
+        "除了文档条目缺失外，是否还有其他副作用（如异常）。"
+    ]
+}
+```

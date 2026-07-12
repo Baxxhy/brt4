@@ -1,0 +1,305 @@
+{
+  "instance_id": "astropy__astropy-14369",
+  "issue_summary": "astropy.table 的 ascii.cds 读取器在解析符合 CDS 标准的复合单位时顺序错误。",
+  "trigger_condition": {
+    "text": "使用 format='ascii.cds' 读取包含复合单位（如 '10+3J/m/s/kpc2' 和 '10-7J/s/kpc2'）的 MRT 文件。",
+    "evidence": [
+      "Issue 描述中提供了具体的 MRT 文件内容和读取代码。",
+      "Issue 的 'How to Reproduce' 部分给出了完整的输入文件和读取步骤。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "读取后表格列的单位与输入文件中的单位顺序不一致，例如 '10+3J/m/s/kpc2' 被错误解析为 '1e+3 J s / (kpc2 m)'，'10-7J/s/kpc2' 被错误解析为 '1e-7 J kpc2 / s'。",
+    "symptom_type": "wrong_order",
+    "evidence": [
+      "Issue 中展示了读取后的表格输出，并明确指出 'the second is in the wrong place' 和 'kpc2 is in the wrong place'。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "读取后表格列的单位应与输入 MRT 文件中定义的单位字符串在语义上完全一致。",
+    "evidence": [
+      "Issue 的 'Expected behavior' 部分明确说明 'The units in the resulting Table should be the same as in the input MRT file.'"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "astropy.table.Table.read",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 中用于读取 MRT 文件的主要 API。"
+    },
+    {
+      "name": "astropy.io.ascii.cds.Cds.read",
+      "kind": "method",
+      "source_path": "astropy/io/ascii/cds.py",
+      "reason": "iCoRe 检索出的相关源码片段 2 显示这是 ascii.cds 读取器的核心读取方法。"
+    },
+    {
+      "name": "astropy.units.format.CDS.parse",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试 3 和 5 表明 CDS 单位字符串的解析逻辑在此，与缺陷直接相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "astropy/io/ascii/cds.py",
+      "object": "Cds.read 或相关的单位解析逻辑",
+      "lines": "",
+      "reason": "这是 ascii.cds 读取器的实现文件，缺陷很可能出现在处理 CDS 格式单位字符串的代码中。"
+    },
+    {
+      "path": "astropy/units/format.py",
+      "object": "CDS.parse",
+      "lines": "",
+      "reason": "相关测试 3 和 5 专门测试 CDS 单位语法解析，复合单位顺序错误可能源于此解析器。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_cds_units",
+      "test_file": "astropy/io/ascii/tests/test_cds_header_from_readme.py",
+      "why_relevant": "该测试使用 ascii.Cds 读取器读取包含单位的 CDS 格式文件，并验证单位解析是否正确。",
+      "reusable_parts": [
+        "使用 ascii.get_reader(reader_cls) 获取读取器",
+        "调用 reader.read(data_and_readme) 读取数据",
+        "使用 assert 验证列的单位属性"
+      ],
+      "possible_gap": "该测试验证的是简单单位 'GMsun' 的解析，而非 Issue 中涉及的复杂复合单位（如 '10+3J/m/s/kpc2'）。"
+    },
+    {
+      "test_name": "test_cds_grammar",
+      "test_file": "astropy/units/tests/test_format.py",
+      "why_relevant": "该测试直接验证 CDS 单位字符串解析器 (u_format.CDS.parse) 对各种输入（包括复合单位如 'km/s'、'mW/m2'）的输出是否正确。",
+      "reusable_parts": [
+        "使用 u_format.CDS.parse(s) 解析单位字符串",
+        "使用 assert unit2 == unit 进行断言"
+      ],
+      "possible_gap": "该测试是单元测试，直接测试解析函数，而非通过 Table.read 读取完整文件。它可能未覆盖 Issue 中 '10+3J/m/s/kpc2' 这种特定格式的复合单位。"
+    },
+    {
+      "test_name": "test_write_byte_by_byte_units",
+      "test_file": "astropy/io/ascii/tests/test_cds.py",
+      "why_relevant": "该测试涉及 CDS/MRT 格式的读写往返，并验证读取后的单位与原始单位一致，与 Issue 的核心问题（单位不一致）直接相关。",
+      "reusable_parts": [
+        "使用 ascii.read 和 format='ascii.mrt' 或 'cds'",
+        "使用 Table.write 写入",
+        "使用 assert 比较列的单位列表"
+      ],
+      "possible_gap": "该测试使用的单位（如 u.C, u.kg, u.m / u.s）可能不是触发缺陷的特定 CDS 复合单位格式。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试中使用的单位字符串（如 'K'、'km.s-1'、'GMsun'、'mW/m2'）。",
+      "target_pattern": "Issue 中触发缺陷的 CDS 复合单位字符串，如 '10+3J/m/s/kpc2' 和 '10-7J/s/kpc2'。",
+      "reason": "缺陷可能只对特定格式的复合单位（包含多个除法 '/' 和幂次 '^2' 的 CDS 表示法）敏感。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "在相关测试中，可能直接调用单位解析器 (CDS.parse) 或通过读取简单数据文件触发单位解析。",
+      "target_pattern": "通过 Table.read('file.mrt', format='ascii.cds') 完整流程读取包含问题单位定义的 MRT 文件头。",
+      "reason": "缺陷可能出现在从文件头提取单位字符串到传递给单位解析器的完整链路中，而不仅仅是解析函数本身。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "读取后 Table 对象的列单位属性，例如 dat['SBCONT'].unit 和 dat['SBLINE'].unit 的 repr 或 str 表示。",
+      "reason": "Issue 的核心错误是列单位错误，直接观察这些单位属性可以判断解析是否正确。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "中间解析结果，例如在单位解析函数内部，观察对 '10+3J/m/s/kpc2' 字符串解析后的 astropy.units.Unit 对象。",
+      "reason": "有助于定位错误是发生在字符串解析阶段，还是在后续将解析结果赋予表格列的阶段。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证从 MRT 文件读取的表格列的单位，与根据 CDS 标准从原始单位字符串（如 '10+3J/m/s/kpc2'）正确解析出的 astropy Unit 对象相等。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的、格式化后的单位字符串表示（如 str(unit)）完全相等，因为这可能依赖于单位的内部表示或格式化方式。",
+      "reason": "应断言 Unit 对象在物理量上的等价性，而不是其字符串表示的顺序或格式，这更稳定且与 Issue 的语义（单位错误）对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要创建一个临时的 MRT 格式文本文件，内容包含 Issue 中描述的字节对字节头和数据行。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 StringIO 或临时文件来模拟文件输入，类似于相关测试中的做法。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能需要导入 astropy.table.Table 和 astropy.io.ascii。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "缺陷的确切位置是在 ascii.cds 读取器的单位提取逻辑中，还是在更底层的 astropy.units.format.CDS 解析器中。",
+    "除了给出的例子，是否还有其他特定格式的复合单位会触发此错误。",
+    "单位解析错误的根本原因是对 CDS 标准中复合单位书写规则（无空格、特定顺序）的理解或实现有误。"
+  ],
+  "raw": {
+    "issue_summary": "astropy.table 的 ascii.cds 读取器在解析符合 CDS 标准的复合单位时顺序错误。",
+    "trigger_condition": {
+      "text": "使用 format='ascii.cds' 读取包含复合单位（如 '10+3J/m/s/kpc2' 和 '10-7J/s/kpc2'）的 MRT 文件。",
+      "evidence": [
+        "Issue 描述中提供了具体的 MRT 文件内容和读取代码。",
+        "Issue 的 'How to Reproduce' 部分给出了完整的输入文件和读取步骤。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "读取后表格列的单位与输入文件中的单位顺序不一致，例如 '10+3J/m/s/kpc2' 被错误解析为 '1e+3 J s / (kpc2 m)'，'10-7J/s/kpc2' 被错误解析为 '1e-7 J kpc2 / s'。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 中展示了读取后的表格输出，并明确指出 'the second is in the wrong place' 和 'kpc2 is in the wrong place'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "读取后表格列的单位应与输入 MRT 文件中定义的单位字符串在语义上完全一致。",
+      "evidence": [
+        "Issue 的 'Expected behavior' 部分明确说明 'The units in the resulting Table should be the same as in the input MRT file.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "astropy.table.Table.read",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中用于读取 MRT 文件的主要 API。"
+      },
+      {
+        "name": "astropy.io.ascii.cds.Cds.read",
+        "kind": "method",
+        "source_path": "astropy/io/ascii/cds.py",
+        "reason": "iCoRe 检索出的相关源码片段 2 显示这是 ascii.cds 读取器的核心读取方法。"
+      },
+      {
+        "name": "astropy.units.format.CDS.parse",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 3 和 5 表明 CDS 单位字符串的解析逻辑在此，与缺陷直接相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "astropy/io/ascii/cds.py",
+        "object": "Cds.read 或相关的单位解析逻辑",
+        "lines": "",
+        "reason": "这是 ascii.cds 读取器的实现文件，缺陷很可能出现在处理 CDS 格式单位字符串的代码中。"
+      },
+      {
+        "path": "astropy/units/format.py",
+        "object": "CDS.parse",
+        "lines": "",
+        "reason": "相关测试 3 和 5 专门测试 CDS 单位语法解析，复合单位顺序错误可能源于此解析器。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_cds_units",
+        "test_file": "astropy/io/ascii/tests/test_cds_header_from_readme.py",
+        "why_relevant": "该测试使用 ascii.Cds 读取器读取包含单位的 CDS 格式文件，并验证单位解析是否正确。",
+        "reusable_parts": [
+          "使用 ascii.get_reader(reader_cls) 获取读取器",
+          "调用 reader.read(data_and_readme) 读取数据",
+          "使用 assert 验证列的单位属性"
+        ],
+        "possible_gap": "该测试验证的是简单单位 'GMsun' 的解析，而非 Issue 中涉及的复杂复合单位（如 '10+3J/m/s/kpc2'）。"
+      },
+      {
+        "test_name": "test_cds_grammar",
+        "test_file": "astropy/units/tests/test_format.py",
+        "why_relevant": "该测试直接验证 CDS 单位字符串解析器 (u_format.CDS.parse) 对各种输入（包括复合单位如 'km/s'、'mW/m2'）的输出是否正确。",
+        "reusable_parts": [
+          "使用 u_format.CDS.parse(s) 解析单位字符串",
+          "使用 assert unit2 == unit 进行断言"
+        ],
+        "possible_gap": "该测试是单元测试，直接测试解析函数，而非通过 Table.read 读取完整文件。它可能未覆盖 Issue 中 '10+3J/m/s/kpc2' 这种特定格式的复合单位。"
+      },
+      {
+        "test_name": "test_write_byte_by_byte_units",
+        "test_file": "astropy/io/ascii/tests/test_cds.py",
+        "why_relevant": "该测试涉及 CDS/MRT 格式的读写往返，并验证读取后的单位与原始单位一致，与 Issue 的核心问题（单位不一致）直接相关。",
+        "reusable_parts": [
+          "使用 ascii.read 和 format='ascii.mrt' 或 'cds'",
+          "使用 Table.write 写入",
+          "使用 assert 比较列的单位列表"
+        ],
+        "possible_gap": "该测试使用的单位（如 u.C, u.kg, u.m / u.s）可能不是触发缺陷的特定 CDS 复合单位格式。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用的单位字符串（如 'K'、'km.s-1'、'GMsun'、'mW/m2'）。",
+        "target_pattern": "Issue 中触发缺陷的 CDS 复合单位字符串，如 '10+3J/m/s/kpc2' 和 '10-7J/s/kpc2'。",
+        "reason": "缺陷可能只对特定格式的复合单位（包含多个除法 '/' 和幂次 '^2' 的 CDS 表示法）敏感。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "在相关测试中，可能直接调用单位解析器 (CDS.parse) 或通过读取简单数据文件触发单位解析。",
+        "target_pattern": "通过 Table.read('file.mrt', format='ascii.cds') 完整流程读取包含问题单位定义的 MRT 文件头。",
+        "reason": "缺陷可能出现在从文件头提取单位字符串到传递给单位解析器的完整链路中，而不仅仅是解析函数本身。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "读取后 Table 对象的列单位属性，例如 dat['SBCONT'].unit 和 dat['SBLINE'].unit 的 repr 或 str 表示。",
+        "reason": "Issue 的核心错误是列单位错误，直接观察这些单位属性可以判断解析是否正确。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "中间解析结果，例如在单位解析函数内部，观察对 '10+3J/m/s/kpc2' 字符串解析后的 astropy.units.Unit 对象。",
+        "reason": "有助于定位错误是发生在字符串解析阶段，还是在后续将解析结果赋予表格列的阶段。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证从 MRT 文件读取的表格列的单位，与根据 CDS 标准从原始单位字符串（如 '10+3J/m/s/kpc2'）正确解析出的 astropy Unit 对象相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的、格式化后的单位字符串表示（如 str(unit)）完全相等，因为这可能依赖于单位的内部表示或格式化方式。",
+        "reason": "应断言 Unit 对象在物理量上的等价性，而不是其字符串表示的顺序或格式，这更稳定且与 Issue 的语义（单位错误）对齐。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要创建一个临时的 MRT 格式文本文件，内容包含 Issue 中描述的字节对字节头和数据行。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 StringIO 或临时文件来模拟文件输入，类似于相关测试中的做法。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要导入 astropy.table.Table 和 astropy.io.ascii。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置是在 ascii.cds 读取器的单位提取逻辑中，还是在更底层的 astropy.units.format.CDS 解析器中。",
+      "除了给出的例子，是否还有其他特定格式的复合单位会触发此错误。",
+      "单位解析错误的根本原因是对 CDS 标准中复合单位书写规则（无空格、特定顺序）的理解或实现有误。"
+    ]
+  }
+}

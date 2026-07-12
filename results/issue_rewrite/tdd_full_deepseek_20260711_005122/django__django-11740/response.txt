@@ -1,0 +1,151 @@
+{
+  "issue_summary": "将模型字段从 UUIDField 改为 ForeignKey 时，生成的迁移文件没有正确创建对目标模型的依赖。",
+  "trigger_condition": {
+    "text": "在一个 Django 项目中，有两个应用（testapp1, testapp2）。在 testapp1 的模型中，将一个允许为空的 UUIDField 字段（名为 'another_app'）修改为指向 testapp2 中 App2 模型的 ForeignKey 字段（null=True, blank=True, on_delete=models.SET_NULL），然后生成迁移。",
+    "evidence": ["Issue 描述中详细说明了模型定义、字段修改操作和生成迁移的过程。", "相关测试 2 (test_alter_fk_non_fk) 和 3 (test_alter_fk) 涉及字段类型变更和迁移操作。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "运行迁移时抛出异常：ValueError: Related model 'testapp2.App2' cannot be resolved。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 中明确提到：'Project contains small test, after running him, you will get exception like this: ValueError: Related model \\'testapp2.App2\\' cannot be resolved.'"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当将一个字段从 UUIDField 修改为指向另一个应用的模型的 ForeignKey 时，生成的迁移文件应正确包含对目标模型所在应用的依赖，从而允许迁移成功运行并解析相关模型。",
+    "evidence": ["Issue 标题和描述表明用户期望迁移能创建对 App2 的依赖。", "相关测试 1 (test_alter_to_fk) 展示了成功将 IntegerField 改为 ForeignKey 并建立约束。", "相关测试 4 (test_alter_field_reloads_state_on_fk_target_changes) 涉及迁移状态和依赖管理。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "migrations.AlterField",
+      "kind": "class",
+      "source_path": "django/db/migrations/operations/fields.py",
+      "reason": "Issue 的核心是修改字段类型并生成迁移，AlterField 是执行此操作的迁移操作类。"
+    },
+    {
+      "name": "ForeignKey",
+      "kind": "class",
+      "source_path": "django/db/models/fields/related.py",
+      "reason": "Issue 中将字段修改为 ForeignKey，需要理解其构造和属性。"
+    },
+    {
+      "name": "UUIDField",
+      "kind": "class",
+      "source_path": "django/db/models/fields/__init__.py",
+      "reason": "Issue 中原始字段类型是 UUIDField。"
+    },
+    {
+      "name": "connection.schema_editor",
+      "kind": "method",
+      "source_path": "",
+      "reason": "相关测试中用于执行数据库模式变更（如 alter_field）的上下文管理器。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/migrations/autodetector.py",
+      "object": "MigrationAutodetector",
+      "lines": "",
+      "reason": "Issue 涉及迁移依赖的自动检测和生成，当字段类型从非关系型（UUIDField）变更为关系型（ForeignKey）时，可能未正确识别并添加对目标模型应用的依赖。"
+    },
+    {
+      "path": "django/db/migrations/operations/fields.py",
+      "object": "AlterField",
+      "lines": "",
+      "reason": "AlterField 操作在状态前向传播（state_forwards）或数据库前向传播（database_forwards）时，可能未正确处理跨应用 ForeignKey 的依赖关系。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_alter_to_fk",
+      "test_file": "tests/schema/tests.py",
+      "why_relevant": "该测试将 IntegerField 改为 ForeignKey，并验证了外键约束的创建，与 Issue 中字段类型变更的核心操作相似。",
+      "reusable_parts": ["使用 connection.schema_editor() 执行 alter_field 操作的模式。", "使用 assertForeignKeyExists 验证外键约束的断言风格。", "在事务测试用例中创建和修改模型的框架。"],
+      "possible_gap": "该测试在同一应用内操作，且原始字段是 IntegerField 而非 UUIDField，没有涉及跨应用依赖的生成问题。"
+    },
+    {
+      "test_name": "test_alter_fk_non_fk",
+      "test_file": "tests/migrations/test_operations.py",
+      "why_relevant": "该测试涉及字段类型在 FK 和非 FK 之间的变更（AlterField），并检查数据库列的变化，与 Issue 中字段类型变更的迁移操作直接相关。",
+      "reusable_parts": ["使用 OperationTestBase 和 migrations.AlterField 的模式。", "使用 assertColumnExists/NotExists 检查数据库状态的断言风格。", "测试迁移操作前向和反向执行的结构。"],
+      "possible_gap": "该测试关注数据库列的变更，没有测试迁移依赖的生成或跨应用模型的解析。"
+    },
+    {
+      "test_name": "test_alter_field_reloads_state_on_fk_target_changes",
+      "test_file": "tests/migrations/test_operations.py",
+      "why_relevant": "该测试涉及迁移状态的重载和 ForeignKey 目标的变化，与 Issue 中迁移依赖和模型解析问题在概念上相关。",
+      "reusable_parts": ["使用 apply_operations 方法应用一系列迁移操作的模式。", "创建跨模型 ForeignKey 的模型定义方式。"],
+      "possible_gap": "该测试主要关注迁移状态管理以避免数据库约束问题，而非依赖生成。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试通常在单一应用内创建和修改模型，或使用 IntegerField 作为起点。",
+      "target_pattern": "需要设置两个不同的应用（app1, app2），在 app1 的模型中有一个 UUIDField，然后将其修改为指向 app2 中模型的 ForeignKey。",
+      "reason": "Issue 明确指出问题发生在跨应用且字段类型从 UUIDField 变为 ForeignKey 时，依赖未被创建。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "相似测试直接调用 alter_field 或应用迁移操作，可能假设依赖已存在或自动处理。",
+      "target_pattern": "需要模拟生成迁移文件（makemigrations）的过程，然后尝试应用（migrate）该迁移文件。",
+      "reason": "Issue 中的错误是在运行生成的迁移时发生的，而不仅仅是执行模式编辑器的 alter_field。需要测试完整的迁移流程。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "state",
+      "expression_hint": "生成的迁移文件对象（Migration 实例）的 `dependencies` 属性。",
+      "reason": "Issue 的核心是迁移缺少对目标应用的依赖。观察 dependencies 列表可以确认是否包含了对 'testapp2' 的依赖。"
+    },
+    {
+      "kind": "exception",
+      "expression_hint": "尝试应用迁移（migrate）或解析迁移状态时捕获的异常（如 ValueError）。",
+      "reason": "Issue 中观察到的直接错误现象是 ValueError，表明相关模型无法解析。"
+    },
+    {
+      "kind": "sql",
+      "expression_hint": "由 schema_editor 执行的 SQL 语句，特别是涉及添加外键约束的语句。",
+      "reason": "可以观察迁移是否尝试创建外键约束，或者是否因为缺少依赖而跳过或失败。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证生成的迁移文件包含对目标模型所在应用的正确依赖。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的 dependencies 列表完全相等，因为可能还有其他依赖。",
+      "reason": "Issue 的关键是依赖缺失，因此断言依赖列表中存在对 'testapp2' 的引用是稳定且直接相关的。"
+    },
+    {
+      "assertion_goal": "验证迁移可以成功应用而不抛出 ValueError。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言不抛出任何异常，因为测试可能因其他原因失败。",
+      "reason": "Issue 明确描述了 ValueError 异常，因此断言不抛出该特定异常可以验证问题是否被修复。注意：修复后应正常，所以此断言在复现 bug 时使用（assertRaises），在验证修复时使用反向断言。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 TransactionTestCase 或 TestCase 来管理数据库事务。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要配置 Django 设置，注册两个测试应用（例如 'testapp1' 和 'testapp2'）。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 `@skipUnlessDBFeature('supports_foreign_keys')` 装饰器来跳过不支持外键的数据库后端。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "导致依赖缺失的确切代码位置（是 autodetector、AlterField 还是其他迁移逻辑）。",
+    "除了跨应用和 UUIDField 起点外，是否还有其他必要条件（如特定的 Django 版本 2.2 行为、数据库后端 PostgreSQL）会触发此问题。",
+    "修复后的正确行为下，依赖的具体格式是什么（例如，是 ('testapp2', '__first__') 还是 ('testapp2', 'xxxx_initial')）。"
+  ]
+}

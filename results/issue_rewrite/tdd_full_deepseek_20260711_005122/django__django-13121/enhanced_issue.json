@@ -1,0 +1,313 @@
+{
+  "instance_id": "django__django-13121",
+  "issue_summary": "在 SQLite 和 MySQL 上，仅包含 DurationField 和 timedelta 的表达式在 annotate 中会引发 decimal.InvalidOperation 异常。",
+  "trigger_condition": {
+    "text": "在 SQLite 或 MySQL 数据库后端，对包含 DurationField 的 QuerySet 使用 annotate，其表达式为 F('duration_field') + datetime.timedelta(...)。",
+    "evidence": [
+      "Issue 中的代码示例：list(Experiment.objects.annotate(duration=F('estimated_time') + datetime.timedelta(1)))",
+      "Issue 标题指出问题在 SQLite 和 MySQL 上。",
+      "相关测试 1 和 3 展示了类似的 DurationField 与 timedelta 的表达式操作。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "执行查询时抛出 decimal.InvalidOperation: [<class 'decimal.ConversionSyntax'>] 异常。",
+    "symptom_type": "exception",
+    "evidence": [
+      "Issue 中的 Traceback 显示异常发生在 django/db/backends/base/operations.py 的 convert_durationfield_value 函数中。",
+      "异常信息：decimal.InvalidOperation: [<class 'decimal.ConversionSyntax'>]。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "在 SQLite 和 MySQL 上，对 DurationField 使用 annotate 并加上 timedelta 的表达式应该能正常执行并返回结果，不引发异常。",
+    "evidence": [
+      "相关测试 1、2、3 展示了 DurationField 与 timedelta 表达式在其他上下文（如 filter）中正常工作。",
+      "Issue 描述暗示这是一个应被修复的功能缺陷。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "annotate",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 中触发 bug 的调用链起点。"
+    },
+    {
+      "name": "F",
+      "kind": "class",
+      "source_path": "",
+      "reason": "Issue 中表达式的一部分，用于引用模型字段。"
+    },
+    {
+      "name": "DurationField",
+      "kind": "class",
+      "source_path": "django/db/models/fields/__init__.py",
+      "reason": "Issue 中涉及的字段类型。"
+    },
+    {
+      "name": "convert_durationfield_value",
+      "kind": "method",
+      "source_path": "django/db/backends/base/operations.py",
+      "reason": "异常抛出的直接位置。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/backends/base/operations.py",
+      "object": "convert_durationfield_value",
+      "lines": "581-583",
+      "reason": "异常堆栈指向此处，该函数负责将数据库值转换为 timedelta，可能对某些输入处理不当。"
+    },
+    {
+      "path": "django/db/models/fields/__init__.py",
+      "object": "DurationField",
+      "lines": "1527-1584",
+      "reason": "DurationField 的定义及其与数据库的交互可能影响表达式在特定后端（SQLite/MySQL）的计算结果。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "FTimeDeltaTests.test_durationfield_add",
+      "test_file": "tests/expressions/tests.py",
+      "why_relevant": "它测试了 DurationField 与 F 表达式和 timedelta 的加法操作，使用了相同的模型和字段类型。",
+      "reusable_parts": [
+        "Experiment 模型导入和 fixture 设置",
+        "使用 F 表达式和 timedelta 的语法",
+        "TestCase 框架"
+      ],
+      "possible_gap": "该测试在 filter 子句中使用表达式，而 Issue 发生在 annotate 子句中，且可能使用了不同的数据库后端。"
+    },
+    {
+      "test_name": "FTimeDeltaTests.test_delta_add",
+      "test_file": "tests/expressions/tests.py",
+      "why_relevant": "它测试了 timedelta 与 F('start') 的加法，并使用了 annotate 的上下文（通过 filter），展示了类似的表达式模式。",
+      "reusable_parts": [
+        "datetime.timedelta 的使用",
+        "F 表达式与 timedelta 的加法操作",
+        "QuerySet 迭代和结果验证模式"
+      ],
+      "possible_gap": "它没有直接使用 DurationField，而是 DateTimeField，且表达式在 filter 中而非 annotate 中。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "call_chain",
+      "current_pattern": "在 filter 条件中使用 F('field') + timedelta 表达式。",
+      "target_pattern": "在 annotate 子句中使用 F('duration_field') + timedelta 表达式。",
+      "reason": "Issue 表明 bug 在 annotate 上下文中触发，而现有测试多在 filter 中。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "测试可能默认使用支持微秒精度的数据库后端（如 PostgreSQL）。",
+      "target_pattern": "配置测试使用 SQLite 或 MySQL 数据库后端。",
+      "reason": "Issue 明确指出问题仅发生在 SQLite 和 MySQL 上。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "在调用 list(queryset) 或迭代 queryset 时捕获 decimal.InvalidOperation 异常。",
+      "reason": "Issue 中的错误症状是特定异常。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "观察 annotate 后 QuerySet 的查询结果值或类型。",
+      "reason": "修复后应能正常返回包含计算字段的结果列表。"
+    },
+    {
+      "kind": "sql",
+      "expression_hint": "观察生成的 SQL 查询语句，特别是涉及 DurationField 和 timedelta 加法的部分。",
+      "reason": "不同数据库后端可能生成不同的 SQL，导致转换问题。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "使用 annotate 和 F('duration_field') + timedelta 表达式的查询应能正常执行，不抛出 decimal.InvalidOperation 异常。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言具体的异常消息字符串或完整的 SQL 输出。",
+      "reason": "当前 Issue 的核心是异常被触发，修复后应不再触发。因此，初始复现测试应断言会引发异常。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用包含 DurationField 的模型（如 Issue 中的 Experiment）。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试类应继承自 django.test.TestCase 以支持数据库事务。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要配置测试使用 SQLite 或 MySQL 数据库后端。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "异常触发的精确数据条件：是否所有 timedelta 值都会触发，还是特定值？",
+    "convert_durationfield_value 函数接收到的 `value` 参数在出错时的具体类型和内容是什么？",
+    "除了 annotate，其他使用类似表达式的操作（如 update）是否也会受影响？"
+  ],
+  "raw": {
+    "issue_summary": "在 SQLite 和 MySQL 上，仅包含 DurationField 和 timedelta 的表达式在 annotate 中会引发 decimal.InvalidOperation 异常。",
+    "trigger_condition": {
+      "text": "在 SQLite 或 MySQL 数据库后端，对包含 DurationField 的 QuerySet 使用 annotate，其表达式为 F('duration_field') + datetime.timedelta(...)。",
+      "evidence": [
+        "Issue 中的代码示例：list(Experiment.objects.annotate(duration=F('estimated_time') + datetime.timedelta(1)))",
+        "Issue 标题指出问题在 SQLite 和 MySQL 上。",
+        "相关测试 1 和 3 展示了类似的 DurationField 与 timedelta 的表达式操作。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行查询时抛出 decimal.InvalidOperation: [<class 'decimal.ConversionSyntax'>] 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 Traceback 显示异常发生在 django/db/backends/base/operations.py 的 convert_durationfield_value 函数中。",
+        "异常信息：decimal.InvalidOperation: [<class 'decimal.ConversionSyntax'>]。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在 SQLite 和 MySQL 上，对 DurationField 使用 annotate 并加上 timedelta 的表达式应该能正常执行并返回结果，不引发异常。",
+      "evidence": [
+        "相关测试 1、2、3 展示了 DurationField 与 timedelta 表达式在其他上下文（如 filter）中正常工作。",
+        "Issue 描述暗示这是一个应被修复的功能缺陷。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发 bug 的调用链起点。"
+      },
+      {
+        "name": "F",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中表达式的一部分，用于引用模型字段。"
+      },
+      {
+        "name": "DurationField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 中涉及的字段类型。"
+      },
+      {
+        "name": "convert_durationfield_value",
+        "kind": "method",
+        "source_path": "django/db/backends/base/operations.py",
+        "reason": "异常抛出的直接位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/base/operations.py",
+        "object": "convert_durationfield_value",
+        "lines": "581-583",
+        "reason": "异常堆栈指向此处，该函数负责将数据库值转换为 timedelta，可能对某些输入处理不当。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "DurationField",
+        "lines": "1527-1584",
+        "reason": "DurationField 的定义及其与数据库的交互可能影响表达式在特定后端（SQLite/MySQL）的计算结果。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FTimeDeltaTests.test_durationfield_add",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "它测试了 DurationField 与 F 表达式和 timedelta 的加法操作，使用了相同的模型和字段类型。",
+        "reusable_parts": [
+          "Experiment 模型导入和 fixture 设置",
+          "使用 F 表达式和 timedelta 的语法",
+          "TestCase 框架"
+        ],
+        "possible_gap": "该测试在 filter 子句中使用表达式，而 Issue 发生在 annotate 子句中，且可能使用了不同的数据库后端。"
+      },
+      {
+        "test_name": "FTimeDeltaTests.test_delta_add",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "它测试了 timedelta 与 F('start') 的加法，并使用了 annotate 的上下文（通过 filter），展示了类似的表达式模式。",
+        "reusable_parts": [
+          "datetime.timedelta 的使用",
+          "F 表达式与 timedelta 的加法操作",
+          "QuerySet 迭代和结果验证模式"
+        ],
+        "possible_gap": "它没有直接使用 DurationField，而是 DateTimeField，且表达式在 filter 中而非 annotate 中。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在 filter 条件中使用 F('field') + timedelta 表达式。",
+        "target_pattern": "在 annotate 子句中使用 F('duration_field') + timedelta 表达式。",
+        "reason": "Issue 表明 bug 在 annotate 上下文中触发，而现有测试多在 filter 中。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试可能默认使用支持微秒精度的数据库后端（如 PostgreSQL）。",
+        "target_pattern": "配置测试使用 SQLite 或 MySQL 数据库后端。",
+        "reason": "Issue 明确指出问题仅发生在 SQLite 和 MySQL 上。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 list(queryset) 或迭代 queryset 时捕获 decimal.InvalidOperation 异常。",
+        "reason": "Issue 中的错误症状是特定异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "观察 annotate 后 QuerySet 的查询结果值或类型。",
+        "reason": "修复后应能正常返回包含计算字段的结果列表。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "观察生成的 SQL 查询语句，特别是涉及 DurationField 和 timedelta 加法的部分。",
+        "reason": "不同数据库后端可能生成不同的 SQL，导致转换问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 annotate 和 F('duration_field') + timedelta 表达式的查询应能正常执行，不抛出 decimal.InvalidOperation 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的异常消息字符串或完整的 SQL 输出。",
+        "reason": "当前 Issue 的核心是异常被触发，修复后应不再触发。因此，初始复现测试应断言会引发异常。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用包含 DurationField 的模型（如 Issue 中的 Experiment）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 django.test.TestCase 以支持数据库事务。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置测试使用 SQLite 或 MySQL 数据库后端。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "异常触发的精确数据条件：是否所有 timedelta 值都会触发，还是特定值？",
+      "convert_durationfield_value 函数接收到的 `value` 参数在出错时的具体类型和内容是什么？",
+      "除了 annotate，其他使用类似表达式的操作（如 update）是否也会受影响？"
+    ]
+  }
+}

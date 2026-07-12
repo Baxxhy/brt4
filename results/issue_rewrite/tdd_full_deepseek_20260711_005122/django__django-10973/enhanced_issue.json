@@ -1,0 +1,267 @@
+{
+  "instance_id": "django__django-10973",
+  "issue_summary": "在 PostgreSQL 后端使用 subprocess.run 和 PGPASSWORD 环境变量来简化代码并提高可靠性。",
+  "trigger_condition": {
+    "text": "调用 PostgreSQL 数据库的 dbshell 命令，并传入包含密码的连接参数。",
+    "evidence": [
+      "Issue 提到在 django.db.backends.postgres.client 中使用 subprocess.run 和 PGPASSWORD。",
+      "相关测试展示了调用 _run_it 方法并传入包含密码的数据库连接配置字典。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "Issue 未明确描述错误现象，而是提出了一种改进方案，暗示当前实现可能不够简化或可靠。",
+    "symptom_type": "unknown",
+    "evidence": [
+      "Issue 描述是功能改进建议，而非错误报告。"
+    ],
+    "confidence": "low"
+  },
+  "expected_behavior": {
+    "text": "使用 subprocess.run 并设置 PGPASSWORD 环境变量来安全、可靠地启动 PostgreSQL 的 psql 客户端。",
+    "evidence": [
+      "Issue 明确说明使用 subprocess.run 和 PGPASSWORD 可以简化代码并使其更可靠。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "django.db.backends.postgres.client.runshell",
+      "kind": "function",
+      "source_path": "django/db/backends/postgresql/client.py",
+      "reason": "Issue 明确提到在此模块中使用 subprocess.run 和 PGPASSWORD。"
+    },
+    {
+      "name": "subprocess.run",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 的核心是建议使用此函数来改进子进程调用。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/backends/postgresql/client.py",
+      "object": "runshell",
+      "lines": "",
+      "reason": "Issue 明确指出在此处进行改进，暗示当前实现可能不是最优的。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "PostgreSqlDbshellCommandTestCase.test_basic",
+      "test_file": "tests/dbshell/test_postgresql.py",
+      "why_relevant": "该测试直接调用了与 dbshell 命令相关的 _run_it 方法，并验证了命令参数和 pgpass 字符串的生成，这是 Issue 所讨论功能的核心。",
+      "reusable_parts": [
+        "测试类 PostgreSqlDbshellCommandTestCase",
+        "_run_it 方法的调用模式",
+        "使用字典配置数据库连接参数",
+        "assertEqual 断言风格"
+      ],
+      "possible_gap": "当前测试验证的是命令参数列表和 pgpass 字符串，但 Issue 关注的是子进程调用机制（使用 subprocess.run 和 PGPASSWORD），测试可能没有直接观测环境变量或子进程调用方式。"
+    },
+    {
+      "test_name": "PostgreSqlDbshellCommandTestCase.test_nopass",
+      "test_file": "tests/dbshell/test_postgresql.py",
+      "why_relevant": "测试了没有密码的情况，有助于理解不同输入条件下行为的边界。",
+      "reusable_parts": [
+        "测试类 PostgreSqlDbshellCommandTestCase",
+        "_run_it 方法的调用模式",
+        "使用字典配置数据库连接参数（不含密码）",
+        "assertEqual 断言风格"
+      ],
+      "possible_gap": "同样，没有直接测试子进程调用机制。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "call_chain",
+      "current_pattern": "测试通过 _run_it 方法间接调用底层功能，并验证输出参数。",
+      "target_pattern": "需要变异测试，使其能够直接或间接观测到子进程的调用方式（例如，使用 subprocess.run）以及是否设置了 PGPASSWORD 环境变量。",
+      "reason": "Issue 的核心是改变子进程的调用方式，因此测试需要能够捕捉到这个实现细节。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "测试传入包含密码的数据库连接配置字典。",
+      "target_pattern": "保持传入密码，但测试需要验证密码是否通过环境变量（PGPASSWORD）传递，而非其他方式（如命令行参数或 pgpass 文件）。",
+      "reason": "Issue 建议使用 PGPASSWORD 环境变量，这是行为改变的关键。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "config",
+      "expression_hint": "传递给 subprocess.run 的 `env` 参数字典，特别是其中是否包含 'PGPASSWORD' 键及其值。",
+      "reason": "这是 Issue 建议改进的核心：通过环境变量传递密码。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "subprocess.run 的调用结果或最终生成的命令参数列表。",
+      "reason": "需要确认改进后的调用方式是否仍然能正确构造命令并成功执行。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证在调用 PostgreSQL dbshell 时，密码通过 PGPASSWORD 环境变量安全传递。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免断言完整的、硬编码的命令行字符串或环境字典，因为具体实现可能变化。",
+      "reason": "Issue 的目标是使用 PGPASSWORD 环境变量，断言其存在是稳定且与目标对齐的。"
+    },
+    {
+      "assertion_goal": "验证子进程调用使用了 subprocess.run 函数。",
+      "preferred_assertion_style": "isinstance",
+      "avoid": "避免断言 subprocess.run 调用的所有具体参数。",
+      "reason": "Issue 明确建议使用 subprocess.run，这是另一个核心改进点。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 SimpleTestCase 或类似的测试基类，并可能需要模拟或监控 subprocess.run 调用。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要准备包含主机、端口、数据库、用户和密码的数据库连接配置字典。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "当前 django.db.backends.postgres.client.runshell 函数的确切实现是什么？它是如何调用 psql 的？",
+    "当前实现是否已经使用了 PGPASSWORD？还是使用了其他方法（如 .pgpass 文件或命令行参数）传递密码？",
+    "Issue 中提到的‘更可靠’具体指代哪些潜在问题？是安全性、错误处理还是跨平台兼容性？"
+  ],
+  "raw": {
+    "issue_summary": "在 PostgreSQL 后端使用 subprocess.run 和 PGPASSWORD 环境变量来简化代码并提高可靠性。",
+    "trigger_condition": {
+      "text": "调用 PostgreSQL 数据库的 dbshell 命令，并传入包含密码的连接参数。",
+      "evidence": [
+        "Issue 提到在 django.db.backends.postgres.client 中使用 subprocess.run 和 PGPASSWORD。",
+        "相关测试展示了调用 _run_it 方法并传入包含密码的数据库连接配置字典。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Issue 未明确描述错误现象，而是提出了一种改进方案，暗示当前实现可能不够简化或可靠。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述是功能改进建议，而非错误报告。"
+      ],
+      "confidence": "low"
+    },
+    "expected_behavior": {
+      "text": "使用 subprocess.run 并设置 PGPASSWORD 环境变量来安全、可靠地启动 PostgreSQL 的 psql 客户端。",
+      "evidence": [
+        "Issue 明确说明使用 subprocess.run 和 PGPASSWORD 可以简化代码并使其更可靠。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.backends.postgres.client.runshell",
+        "kind": "function",
+        "source_path": "django/db/backends/postgresql/client.py",
+        "reason": "Issue 明确提到在此模块中使用 subprocess.run 和 PGPASSWORD。"
+      },
+      {
+        "name": "subprocess.run",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 的核心是建议使用此函数来改进子进程调用。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/postgresql/client.py",
+        "object": "runshell",
+        "lines": "",
+        "reason": "Issue 明确指出在此处进行改进，暗示当前实现可能不是最优的。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "PostgreSqlDbshellCommandTestCase.test_basic",
+        "test_file": "tests/dbshell/test_postgresql.py",
+        "why_relevant": "该测试直接调用了与 dbshell 命令相关的 _run_it 方法，并验证了命令参数和 pgpass 字符串的生成，这是 Issue 所讨论功能的核心。",
+        "reusable_parts": [
+          "测试类 PostgreSqlDbshellCommandTestCase",
+          "_run_it 方法的调用模式",
+          "使用字典配置数据库连接参数",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "当前测试验证的是命令参数列表和 pgpass 字符串，但 Issue 关注的是子进程调用机制（使用 subprocess.run 和 PGPASSWORD），测试可能没有直接观测环境变量或子进程调用方式。"
+      },
+      {
+        "test_name": "PostgreSqlDbshellCommandTestCase.test_nopass",
+        "test_file": "tests/dbshell/test_postgresql.py",
+        "why_relevant": "测试了没有密码的情况，有助于理解不同输入条件下行为的边界。",
+        "reusable_parts": [
+          "测试类 PostgreSqlDbshellCommandTestCase",
+          "_run_it 方法的调用模式",
+          "使用字典配置数据库连接参数（不含密码）",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "同样，没有直接测试子进程调用机制。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通过 _run_it 方法间接调用底层功能，并验证输出参数。",
+        "target_pattern": "需要变异测试，使其能够直接或间接观测到子进程的调用方式（例如，使用 subprocess.run）以及是否设置了 PGPASSWORD 环境变量。",
+        "reason": "Issue 的核心是改变子进程的调用方式，因此测试需要能够捕捉到这个实现细节。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试传入包含密码的数据库连接配置字典。",
+        "target_pattern": "保持传入密码，但测试需要验证密码是否通过环境变量（PGPASSWORD）传递，而非其他方式（如命令行参数或 pgpass 文件）。",
+        "reason": "Issue 建议使用 PGPASSWORD 环境变量，这是行为改变的关键。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "config",
+        "expression_hint": "传递给 subprocess.run 的 `env` 参数字典，特别是其中是否包含 'PGPASSWORD' 键及其值。",
+        "reason": "这是 Issue 建议改进的核心：通过环境变量传递密码。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "subprocess.run 的调用结果或最终生成的命令参数列表。",
+        "reason": "需要确认改进后的调用方式是否仍然能正确构造命令并成功执行。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在调用 PostgreSQL dbshell 时，密码通过 PGPASSWORD 环境变量安全传递。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、硬编码的命令行字符串或环境字典，因为具体实现可能变化。",
+        "reason": "Issue 的目标是使用 PGPASSWORD 环境变量，断言其存在是稳定且与目标对齐的。"
+      },
+      {
+        "assertion_goal": "验证子进程调用使用了 subprocess.run 函数。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言 subprocess.run 调用的所有具体参数。",
+        "reason": "Issue 明确建议使用 subprocess.run，这是另一个核心改进点。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的测试基类，并可能需要模拟或监控 subprocess.run 调用。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要准备包含主机、端口、数据库、用户和密码的数据库连接配置字典。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "当前 django.db.backends.postgres.client.runshell 函数的确切实现是什么？它是如何调用 psql 的？",
+      "当前实现是否已经使用了 PGPASSWORD？还是使用了其他方法（如 .pgpass 文件或命令行参数）传递密码？",
+      "Issue 中提到的‘更可靠’具体指代哪些潜在问题？是安全性、错误处理还是跨平台兼容性？"
+    ]
+  }
+}

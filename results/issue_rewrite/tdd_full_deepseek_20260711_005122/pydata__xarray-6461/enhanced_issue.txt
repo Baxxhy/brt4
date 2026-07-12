@@ -1,0 +1,118 @@
+instance_id: pydata__xarray-6461
+
+issue_summary: 当第二个参数是标量时，xr.where 在 keep_attrs=True 时会抛出 IndexError 异常。
+
+trigger_condition:
+{
+  "text": "调用 xr.where，其中第一个参数是 DataArray 与标量的比较结果（例如 cond = DataArray > 0），第二个参数是标量（例如 1），第三个参数是标量（例如 0），并且 keep_attrs=True（默认值）。",
+  "evidence": [
+    "Issue 中的代码示例：xr.where(xr.DataArray([1, 2, 3]) > 0, 1, 0)",
+    "Issue 中的错误跟踪指向 keep_attrs=True 分支"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "抛出 IndexError: list index out of range，发生在 apply_ufunc 内部处理 keep_attrs 逻辑时，试图访问 attrs[1]。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中的错误跟踪显示 IndexError 在 attrs[1] 处发生"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "xr.where 在第二个参数为标量且 keep_attrs=True 时应正常执行，返回一个 DataArray，其属性可能根据 keep_attrs 逻辑（例如，默认保留第二个参数的属性）正确设置，而不抛出异常。",
+  "evidence": [
+    "相关测试 test_where 显示 xr.where 可以接受标量参数并正常工作",
+    "相关测试 test_where_attrs 显示 keep_attrs=True 时属性处理逻辑"
+  ],
+  "confidence": "medium"
+}
+
+target_apis:
+[
+  {
+    "name": "xr.where",
+    "kind": "function",
+    "source_path": "xarray/core/computation.py",
+    "reason": "Issue 直接报告 xr.where 函数的问题。"
+  },
+  {
+    "name": "apply_ufunc",
+    "kind": "function",
+    "source_path": "xarray/core/computation.py",
+    "reason": "错误跟踪指向 apply_ufunc 调用，且 keep_attrs 处理逻辑在其中。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "test_where_attrs 中第二个参数 x 是 DataArray([1, 1], dims=\"x\", attrs={\"attr\": \"x\"})",
+    "target_pattern": "将第二个参数替换为标量 1",
+    "reason": "Issue 表明当第二个参数是标量时，keep_attrs 处理逻辑会失败。",
+    "confidence": "high"
+  },
+  {
+    "slot": "argument",
+    "current_pattern": "test_where 中 cond 是 DataArray([True, False], dims=\"x\")",
+    "target_pattern": "将 cond 替换为 DataArray([1, 2, 3]) > 0",
+    "reason": "Issue 中的触发条件使用了这种比较表达式。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用 xr.where(cond, scalar, scalar, keep_attrs=True) 时是否抛出 IndexError",
+    "reason": "Issue 的核心错误是 IndexError，观测异常是判断缺陷是否触发的直接方式。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "调用 xr.where(cond, scalar, scalar, keep_attrs=True) 的返回值类型和属性",
+    "reason": "修复后应返回 DataArray 且属性处理正确，观测返回值可验证预期行为。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当第二个参数是标量且 keep_attrs=True 时，xr.where 调用不应抛出 IndexError。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言完整的错误消息字符串或完整的堆栈跟踪",
+    "reason": "Issue 明确报告了 IndexError，断言不抛出此异常与修复目标一致。"
+  },
+  {
+    "assertion_goal": "xr.where 在给定输入下应返回一个 DataArray。",
+    "preferred_assertion_style": "isinstance",
+    "avoid": "断言返回值的精确数据或坐标值",
+    "reason": "基本功能是返回 DataArray，这是稳定的断言目标。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 xarray 并构造 DataArray 和标量参数。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要使用 pytest 的异常断言上下文管理器。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "keep_attrs 处理逻辑在参数为标量时的具体预期行为（例如，应该保留哪个参数的属性，或者是否应该没有属性）",
+  "apply_ufunc 内部 attrs 列表的确切结构和内容，以及当参数是标量时它如何变化",
+  "除了第二个参数是标量之外，其他参数组合（例如第一个或第三个参数是标量）是否也会触发类似错误"
+]

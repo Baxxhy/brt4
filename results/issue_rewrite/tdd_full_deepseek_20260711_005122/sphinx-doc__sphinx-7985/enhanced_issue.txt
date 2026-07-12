@@ -1,0 +1,88 @@
+instance_id: sphinx-doc__sphinx-7985
+
+issue_summary: linkcheck 构建器没有检查本地（内部）链接，只检查了外部链接。
+
+trigger_condition:
+{
+  "text": "在 Sphinx 项目中，使用 linkcheck 构建器检查包含损坏的本地（内部）链接（例如指向不存在的本地目标）的文档。",
+  "evidence": [
+    "Issue 描述：'linkcheck currently doesn't check local (internal) links'",
+    "Issue 重现步骤：在 index.rst 中放置 'broken local-link_' 和 '.. _local-link: doesntexist'，然后运行 `make linkcheck`。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "linkcheck 输出中只报告了损坏的外部链接，没有报告损坏的本地链接。",
+  "symptom_type": "warning",
+  "evidence": [
+    "Issue 的错误日志：只显示了外部链接 'https://lkfqhlkghflkhs' 的错误，而本地链接 'doesntexist' 只被标记为 '-local-'，没有报告为 'broken'。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "linkcheck 构建器应该检查并报告损坏的本地（内部）链接。",
+  "evidence": [
+    "Issue 的预期结果：'Also a check for the local link.'"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "sphinx.builders.linkcheck",
+    "kind": "module",
+    "source_path": "sphinx/builders/linkcheck.py",
+    "reason": "Issue 直接关于 linkcheck 构建器的功能，相关源码文件被检索到。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "测试数据（testroot='linkcheck'）包含外部 URL 和带锚点的 URL。",
+    "target_pattern": "测试数据应包含损坏的本地（内部）引用链接（如 '.. _label: non_existent_target'）。",
+    "reason": "Issue 表明当前 linkcheck 不检查此类链接，添加它们可能触发缺失的检查逻辑。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "file_output",
+    "expression_hint": "linkcheck 构建器的输出文件内容（如 output.txt 或 output.json）。",
+    "reason": "Issue 的错误现象体现在输出中缺少对本地链接的 'broken' 状态报告。观察输出内容可以判断本地链接是否被检查。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "linkcheck 的输出应包含对损坏本地链接的错误报告。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "断言完整的、特定格式的错误信息字符串，因为具体信息可能变化。",
+    "reason": "Issue 期望本地链接被检查，因此断言输出中存在表明本地链接损坏的片段（如 'broken' 状态或错误信息）是稳定且与目标对齐的。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "使用 @pytest.mark.sphinx 装饰器设置 'linkcheck' 构建器，并可能需要一个包含本地链接的测试文档根目录（testroot）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "本地链接检查的具体失败标准是什么（例如，目标不存在 vs 格式错误）？",
+  "linkcheck 对本地链接的检查逻辑是否应该与外部链接检查完全集成，还是单独处理？",
+  "修复后，损坏本地链接在输出中的具体报告格式是什么？"
+]

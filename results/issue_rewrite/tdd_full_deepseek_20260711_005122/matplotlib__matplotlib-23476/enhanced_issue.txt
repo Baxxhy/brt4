@@ -1,0 +1,155 @@
+instance_id: matplotlib__matplotlib-23476
+
+issue_summary: 在 M1 Mac 上，图形反序列化后 DPI 值翻倍，多次循环会导致溢出错误。
+
+trigger_condition:
+{
+  "text": "在 M1 Mac 上使用 MacOSX 后端，对 matplotlib 图形对象进行 pickle 序列化和反序列化操作。",
+  "evidence": [
+    "Issue 中提供的复现代码展示了 pickle.dump 和 pickle.load 操作。",
+    "Issue 描述此问题仅发生在 M1 MacBooks 上，且 Python 版本无关。",
+    "Issue 中实际输出显示每次循环后 DPI 值翻倍。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "图形反序列化后，其 DPI 值变为原来的两倍，多次循环后 DPI 值指数增长，最终在创建画布时引发 OverflowError: signed integer is greater than maximum。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中实际输出显示 DPI 值从 200.0 开始，每次循环后翻倍。",
+    "Issue 中堆栈跟踪显示在 backend_macosx.py 的 FigureCanvas.__init__ 中抛出 OverflowError。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "图形反序列化后，其 DPI 值应保持不变，与序列化前一致。",
+  "evidence": [
+    "Issue 中预期输出显示 DPI 值在所有循环中保持为 200.0。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "matplotlib.figure.Figure.__setstate__",
+    "kind": "method",
+    "source_path": "lib/matplotlib/figure.py",
+    "reason": "Issue 堆栈跟踪显示在反序列化时调用了此方法，它负责恢复图形状态。"
+  },
+  {
+    "name": "matplotlib.backend_bases._Backend.new_figure_manager_given_figure",
+    "kind": "method",
+    "source_path": "lib/matplotlib/backend_bases.py",
+    "reason": "Issue 堆栈跟踪显示 __setstate__ 调用了此方法，用于为反序列化的图形创建管理器。"
+  },
+  {
+    "name": "matplotlib.backends.backend_macosx.FigureCanvas.__init__",
+    "kind": "method",
+    "source_path": "lib/matplotlib/backends/backend_macosx.py",
+    "reason": "Issue 堆栈跟踪显示溢出错误发生在此方法中，可能与传入的宽度/高度参数有关。"
+  },
+  {
+    "name": "pickle.dump",
+    "kind": "function",
+    "source_path": "",
+    "reason": "Issue 复现代码中用于序列化图形对象。"
+  },
+  {
+    "name": "pickle.load",
+    "kind": "function",
+    "source_path": "",
+    "reason": "Issue 复现代码中用于反序列化图形对象。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "相似测试中，图形被序列化后立即丢弃或仅检查画布存在性。",
+    "target_pattern": "序列化后，将反序列化得到的图形对象重新赋值给变量，并检查其 DPI 属性是否与原始图形一致。",
+    "reason": "Issue 表明 DPI 状态在反序列化过程中被错误修改，需要检查状态保持性。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "相似测试通常只进行一次序列化/反序列化操作。",
+    "target_pattern": "在循环中多次对同一个图形对象（或每次反序列化得到的新对象）进行序列化/反序列化操作。",
+    "reason": "Issue 显示 DPI 翻倍效应是累积的，多次操作会放大问题并最终导致溢出。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "相似测试通常在默认后端或未指定后端下运行。",
+    "target_pattern": "确保测试在 MacOSX 后端下运行（例如使用 pytest.mark.backend('macosx')）。",
+    "reason": "Issue 明确指出问题仅发生在 M1 Mac 的 MacOSX 后端上。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "state",
+    "expression_hint": "fig.dpi",
+    "reason": "DPI 值是 Issue 中直接观察到的错误状态，其翻倍是核心问题。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "fig.canvas.renderer.width 和 fig.canvas.renderer.height",
+    "reason": "渲染器尺寸由 DPI 和图形尺寸计算得出，DPI 翻倍会导致尺寸翻倍，最终可能引发溢出。"
+  },
+  {
+    "kind": "exception",
+    "expression_hint": "OverflowError",
+    "reason": "DPI 多次翻倍后，计算出的画布尺寸超过整数限制，会抛出此异常，是缺陷的最终表现。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "反序列化后图形的 DPI 值应与序列化前图形的 DPI 值相等。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言完整的图形 repr 或与渲染无关的内部状态。",
+    "reason": "DPI 相等是 Issue 期望的核心正确行为，且是稳定的数值比较。"
+  },
+  {
+    "assertion_goal": "多次序列化/反序列化循环后，DPI 值应保持恒定，不增长。",
+    "preferred_assertion_style": "before_after_relation",
+    "avoid": "避免断言循环中每次 DPI 的精确翻倍序列，因为修复后应恒定。",
+    "reason": "这直接针对 Issue 中描述的 DPI 累积翻倍问题。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 pytest.mark.backend('macosx') 装饰器来确保在正确的后端运行测试。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要一个临时文件或 BytesIO 对象来进行 pickle 操作。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要模拟或检测运行环境是否为 M1 Mac，但测试可能无法直接模拟硬件架构。",
+    "source": "inference",
+    "confidence": "low"
+  }
+]
+
+uncertainties:
+[
+  "DPI 翻倍的确切根源是在 __setstate__ 中，还是在后端特定的画布初始化代码中。",
+  "除了 MacOSX 后端，其他后端（如 Agg）是否也存在此问题。",
+  "DPI 翻倍是否与图形尺寸（figsize）的序列化/反序列化有关。",
+  "修复后，是否需要在 __setstate__ 中显式地阻止某些状态（如 DPI）被重复应用。"
+]

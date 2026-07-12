@@ -1,0 +1,527 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+autowrap with cython backend fails when array arguments do not appear in wrapped expr
+When using the cython backend for autowrap, it appears that the code is not correctly generated when the function in question has array arguments that do not appear in the final expression. A minimal counterexample is:
+
+```python
+from sympy.utilities.autowrap import autowrap
+from sympy import MatrixSymbol
+import numpy as np
+
+x = MatrixSymbol('x', 2, 1)
+expr = 1.0
+f = autowrap(expr, args=(x,), backend='cython')
+
+f(np.array([[1.0, 2.0]]))
+```
+
+This should of course return `1.0` but instead fails with:
+```python
+TypeError: only size-1 arrays can be converted to Python scalars
+```
+
+A little inspection reveals that this is because the corresponding C function is generated with an incorrect signature:
+
+```C
+double autofunc(double x) {
+
+   double autofunc_result;
+   autofunc_result = 1.0;
+   return autofunc_result;
+
+}
+```
+
+(`x` should be `double *`, not `double` in this case)
+
+I've found that this error won't occur so long as `expr` depends at least in part on each argument. For example this slight modification of the above counterexample works perfectly:
+
+```python
+from sympy.utilities.autowrap import autowrap
+from sympy import MatrixSymbol
+import numpy as np
+
+x = MatrixSymbol('x', 2, 1)
+# now output depends on x
+expr = x[0,0]
+f = autowrap(expr, args=(x,), backend='cython')
+
+# returns 1.0 as expected, without failure
+f(np.array([[1.0, 2.0]]))
+```
+
+This may seem like a silly issue ("why even have `x` as an argument if it doesn't appear in the expression you're trying to evaluate?"). But of course in interfacing with external libraries (e.g. for numerical integration), one often needs functions to have a pre-defined signature regardless of whether a given argument contributes to the output.
+
+I think I've identified the problem in `codegen` and will suggest a PR shortly.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/utilities/autowrap.py
+对象名称：autowrap
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 2】
+文件路径：sympy/matrices/expressions/matexpr.py
+对象名称：MatrixSymbol
+节点类型：class
+父节点：matexpr
+行号范围：729-805
+代码：
+class MatrixSymbol(MatrixExpr):
+    """Symbolic representation of a Matrix object
+
+    Creates a SymPy Symbol to represent a Matrix. This matrix has a shape and
+    can be included in Matrix Expressions
+
+    Examples
+    ========
+
+    >>> from sympy import MatrixSymbol, Identity
+    >>> A = MatrixSymbol('A', 3, 4) # A 3 by 4 Matrix
+    >>> B = MatrixSymbol('B', 4, 3) # A 4 by 3 Matrix
+    >>> A.shape
+    (3, 4)
+    >>> 2*A*B + Identity(3)
+    I + 2*A*B
+    """
+    is_commutative = False
+    is_symbol = True
+    _diff_wrt = True
+    def __new__(cls, name, n, m):
+    def _hashable_content(self):
+    @property
+    def shape(self):
+    @property
+    def name(self):
+    def _eval_subs(self, old, new):
+    def __call__(self, *args):
+    def _entry(self, i, j, **kwargs):
+    @property
+    def free_symbols(self):
+    def doit(self, **hints):
+    def _eval_simplify(self, **kwargs):
+    def _eval_derivative_matrix_lines(self, x):
+
+
+【源码片段 3】
+文件路径：sympy/utilities/_compilation/tests/test_compilation.py
+对象名称：cython
+节点类型：global_var
+父节点：test_compilation
+行号范围：10-10
+代码：
+cython = import_module('cython')
+
+
+【源码片段 4】
+文件路径：sympy/core/backend.py
+对象名称：backend
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 5】
+文件路径：sympy/parsing/autolev/_antlr/autolevparser.py
+对象名称：codegen
+节点类型：class_function
+父节点：AutolevParser
+行号范围：2231-2278
+代码：
+    def codegen(self):
+
+        localctx = AutolevParser.CodegenContext(self, self._ctx, self.state)
+        self.enterRule(localctx, 48, self.RULE_codegen)
+        self._la = 0 # Token type
+        try:
+            self.enterOuterAlt(localctx, 1)
+            self.state = 322
+            self.match(AutolevParser.ID)
+            self.state = 323
+            self.functionCall()
+            self.state = 335
+            self._errHandler.sync(self)
+            _la = self._input.LA(1)
+            if _la==AutolevParser.T__0:
+                self.state = 324
+                self.match(AutolevParser.T__0)
+                self.state = 325
+                self.matrixInOutput()
+                self.state = 330
+                self._errHandler.sync(self)
+                _la = self._input.LA(1)
+                while _la==AutolevParser.T__9:
+                    self.state = 326
+                    self.match(AutolevParser.T__9)
+                    self.state = 327
+                    self.matrixInOutput()
+                    self.state = 332
+                    self._errHandler.sync(self)
+                    _la = self._input.LA(1)
+
+                self.state = 333
+                self.match(AutolevParser.T__1)
+
+
+            self.state = 337
+            self.match(AutolevParser.ID)
+            self.state = 338
+            self.match(AutolevParser.T__19)
+            self.state = 339
+            self.match(AutolevParser.ID)
+        except RecognitionException as re:
+            localctx.exception = re
+            self._errHandler.reportError(self, re)
+            self._errHandler.recover(self, re)
+        finally:
+            self.exitRule()
+        return localctx
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/utilities/tests/test_autowrap.py
+测试名称：test_cython_wrapper_scalar_function
+测试代码：
+def test_cython_wrapper_scalar_function():
+    x, y, z = symbols('x,y,z')
+    expr = (x + y)*z
+    routine = make_routine("test", expr)
+    code_gen = CythonCodeWrapper(CCodeGen())
+    source = get_string(code_gen.dump_pyx, [routine])
+
+    expected = (
+        "cdef extern from 'file.h':\n"
+        "    double test(double x, double y, double z)\n"
+        "\n"
+        "def test_c(double x, double y, double z):\n"
+        "\n"
+        "    return test(x, y, z)")
+    assert source == expected
+
+【相关测试 2】
+测试文件：sympy/utilities/tests/test_autowrap.py
+测试名称：test_cython_wrapper_outarg
+测试代码：
+def test_cython_wrapper_outarg():
+    from sympy import Equality
+    x, y, z = symbols('x,y,z')
+    code_gen = CythonCodeWrapper(C99CodeGen())
+
+    routine = make_routine("test", Equality(z, x + y))
+    source = get_string(code_gen.dump_pyx, [routine])
+    expected = (
+        "cdef extern from 'file.h':\n"
+        "    void test(double x, double y, double *z)\n"
+        "\n"
+        "def test_c(double x, double y):\n"
+        "\n"
+        "    cdef double z = 0\n"
+        "    test(x, y, &z)\n"
+        "    return z")
+    assert source == expected
+
+【相关测试 3】
+测试文件：sympy/utilities/tests/test_autowrap.py
+测试名称：test_cython_wrapper_inoutarg
+测试代码：
+def test_cython_wrapper_inoutarg():
+    from sympy import Equality
+    x, y, z = symbols('x,y,z')
+    code_gen = CythonCodeWrapper(C99CodeGen())
+    routine = make_routine("test", Equality(z, x + y + z))
+    source = get_string(code_gen.dump_pyx, [routine])
+    expected = (
+        "cdef extern from 'file.h':\n"
+        "    void test(double x, double y, double *z)\n"
+        "\n"
+        "def test_c(double x, double y, double z):\n"
+        "\n"
+        "    test(x, y, &z)\n"
+        "    return z")
+    assert source == expected
+
+【相关测试 4】
+测试文件：sympy/external/tests/test_autowrap.py
+测试名称：test_autowrap_custom_printer
+测试代码：
+def test_autowrap_custom_printer():
+    has_module('Cython')
+
+    from sympy import pi
+    from sympy.utilities.codegen import C99CodeGen
+    from sympy.printing.ccode import C99CodePrinter
+    from sympy.functions.elementary.exponential import exp
+
+    class PiPrinter(C99CodePrinter):
+        def _print_Pi(self, expr):
+            return "S_PI"
+
+    printer = PiPrinter()
+    gen = C99CodeGen(printer=printer)
+    gen.preprocessor_statements.append('#include "shortpi.h"')
+
+    expr = pi * a
+
+    expected = (
+        '#include "%s"\n'
+        '#include <math.h>\n'
+        '#include "shortpi.h"\n'
+        '\n'
+        'double autofunc(double a) {\n'
+        '\n'
+        '   double autofunc_result;\n'
+        '   autofunc_result = S_PI*a;\n'
+        '   return autofunc_result;\n'
+        '\n'
+        '}\n'
+    )
+
+    tmpdir = tempfile.mkdtemp()
+    # write a trivial header file to use in the generated code
+    open(os.path.join(tmpdir, 'shortpi.h'), 'w').write('#define S_PI 3.14')
+
+    func = autowrap(expr, backend='cython', tempdir=tmpdir, code_gen=gen)
+
+    assert func(4.2) == 3.14 * 4.2
+
+    # check that the generated code is correct
+    for filename in os.listdir(tmpdir):
+        if filename.startswith('wrapped_code') and filename.endswith('.c'):
+            with open(os.path.join(tmpdir, filename)) as f:
+                lines = f.readlines()
+                expected = expected % filename.replace('.c', '.h')
+                assert ''.join(lines[7:]) == expected
+
+【相关测试 5】
+测试文件：sympy/utilities/tests/test_autowrap.py
+测试名称：test_cython_wrapper_compile_flags
+测试代码：
+def test_cython_wrapper_compile_flags():
+    from sympy import Equality
+    x, y, z = symbols('x,y,z')
+    routine = make_routine("test", Equality(z, x + y))
+
+    code_gen = CythonCodeWrapper(CCodeGen())
+
+    expected = """\
+try:
+    from setuptools import setup
+    from setuptools import Extension
+except ImportError:
+    from distutils.core import setup
+    from distutils.extension import Extension
+from Cython.Build import cythonize
+cy_opts = {}
+
+ext_mods = [Extension(
+    'wrapper_module_%(num)s', ['wrapper_module_%(num)s.pyx', 'wrapped_code_%(num)s.c'],
+    include_dirs=[],
+    library_dirs=[],
+    libraries=[],
+    extra_compile_args=['-std=c99'],
+    extra_link_args=[]
+)]
+setup(ext_modules=cythonize(ext_mods, **cy_opts))
+""" % {'num': CodeWrapper._module_counter}
+
+    temp_dir = tempfile.mkdtemp()
+    TmpFileManager.tmp_folder(temp_dir)
+    setup_file_path = os.path.join(temp_dir, 'setup.py')
+
+    code_gen._prepare_files(routine, build_dir=temp_dir)
+    with open(setup_file_path) as f:
+        setup_text = f.read()
+    assert setup_text == expected
+
+    code_gen = CythonCodeWrapper(CCodeGen(),
+                                 include_dirs=['/usr/local/include', '/opt/booger/include'],
+                                 library_dirs=['/user/local/lib'],
+                                 libraries=['thelib', 'nilib'],
+                                 extra_compile_args=['-slow-math'],
+                                 extra_link_args=['-lswamp', '-ltrident'],
+                                 cythonize_options={'compiler_directives': {'boundscheck': False}}
+                                 )
+    expected = """\
+try:
+    from setuptools import setup
+    from setuptools import Extension
+except ImportError:
+    from distutils.core import setup
+    from distutils.extension import Extension
+from Cython.Build import cythonize
+cy_opts = {'compiler_directives': {'boundscheck': False}}
+
+ext_mods = [Extension(
+    'wrapper_module_%(num)s', ['wrapper_module_%(num)s.pyx', 'wrapped_code_%(num)s.c'],
+    include_dirs=['/usr/local/include', '/opt/booger/include'],
+    library_dirs=['/user/local/lib'],
+    libraries=['thelib', 'nilib'],
+    extra_compile_args=['-slow-math', '-std=c99'],
+    extra_link_args=['-lswamp', '-ltrident']
+)]
+setup(ext_modules=cythonize(ext_mods, **cy_opts))
+""" % {'num': CodeWrapper._module_counter}
+
+    code_gen._prepare_files(routine, build_dir=temp_dir)
+    with open(setup_file_path) as f:
+        setup_text = f.read()
+    assert setup_text == expected
+
+    expected = """\
+try:
+    from setuptools import setup
+    from setuptools import Extension
+except ImportError:
+    from distutils.core import setup
+    from distutils.extension import Extension
+from Cython.Build import cythonize
+cy_opts = {'compiler_directives': {'boundscheck': False}}
+import numpy as np
+
+ext_mods = [Extension(
+    'wrapper_module_%(num)s', ['wrapper_module_%(num)s.pyx', 'wrapped_code_%(num)s.c'],
+    include_dirs=['/usr/local/include', '/opt/booger/include', np.get_include()],
+    library_dirs=['/user/local/lib'],
+    libraries=['thelib', 'nilib'],
+    extra_compile_args=['-slow-math', '-std=c99'],
+    extra_link_args=['-lswamp', '-ltrident']
+)]
+setup(ext_modules=cythonize(ext_mods, **cy_opts))
+""" % {'num': CodeWrapper._module_counter}
+
+    code_gen._need_numpy = True
+    code_gen._prepare_files(routine, build_dir=temp_dir)
+    with open(setup_file_path) as f:
+        setup_text = f.read()
+    assert setup_text == expected
+
+    TmpFileManager.cleanup()
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

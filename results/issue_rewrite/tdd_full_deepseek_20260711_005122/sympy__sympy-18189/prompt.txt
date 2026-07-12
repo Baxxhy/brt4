@@ -1,0 +1,356 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+diophantine: incomplete results depending on syms order with permute=True
+```
+In [10]: diophantine(n**4 + m**4 - 2**4 - 3**4, syms=(m,n), permute=True)
+Out[10]: {(-3, -2), (-3, 2), (-2, -3), (-2, 3), (2, -3), (2, 3), (3, -2), (3, 2)}
+
+In [11]: diophantine(n**4 + m**4 - 2**4 - 3**4, syms=(n,m), permute=True)
+Out[11]: {(3, 2)}
+```
+
+diophantine: incomplete results depending on syms order with permute=True
+```
+In [10]: diophantine(n**4 + m**4 - 2**4 - 3**4, syms=(m,n), permute=True)
+Out[10]: {(-3, -2), (-3, 2), (-2, -3), (-2, 3), (2, -3), (2, 3), (3, -2), (3, 2)}
+
+In [11]: diophantine(n**4 + m**4 - 2**4 - 3**4, syms=(n,m), permute=True)
+Out[11]: {(3, 2)}
+```
+
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/solvers/diophantine.py
+对象名称：diophantine
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 2】
+文件路径：sympy/core/trace.py
+对象名称：permute
+节点类型：class_function
+父节点：Tr
+行号范围：181-208
+代码：
+    def permute(self, pos):
+        """ Permute the arguments cyclically.
+
+        Parameters
+        ==========
+        pos : integer, if positive, shift-right, else shift-left
+
+        Examples
+        ========
+
+        >>> from sympy.core.trace import Tr
+        >>> from sympy import symbols
+        >>> A, B, C, D = symbols('A B C D', commutative=False)
+        >>> t = Tr(A*B*C*D)
+        >>> t.permute(2)
+        Tr(C*D*A*B)
+        >>> t.permute(-2)
+        Tr(C*D*A*B)
+
+        """
+        if pos > 0:
+            pos = pos % len(self.args[0].args)
+        else:
+            pos = -(abs(pos) % len(self.args[0].args))
+
+        args = list(self.args[0].args[-pos:] + self.args[0].args[0:-pos])
+
+        return Tr(Mul(*(args)))
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/solvers/tests/test_diophantine.py
+测试名称：test_diophantine_permute_sign
+测试代码：
+def test_diophantine_permute_sign():
+    from sympy.abc import a, b, c, d, e
+    eq = a**4 + b**4 - (2**4 + 3**4)
+    base_sol = set([(2, 3)])
+    assert diophantine(eq) == base_sol
+    complete_soln = set(signed_permutations(base_sol.pop()))
+    assert diophantine(eq, permute=True) == complete_soln
+
+    eq = a**2 + b**2 + c**2 + d**2 + e**2 - 234
+    assert len(diophantine(eq)) == 35
+    assert len(diophantine(eq, permute=True)) == 62000
+    soln = set([(-1, -1), (-1, 2), (1, -2), (1, 1)])
+    assert diophantine(10*x**2 + 12*x*y + 12*y**2 - 34, permute=True) == soln
+
+【相关测试 2】
+测试文件：sympy/solvers/tests/test_diophantine.py
+测试名称：test_issue_9538
+测试代码：
+def test_issue_9538():
+    eq = x - 3*y + 2
+    assert diophantine(eq, syms=[y,x]) == set([(t_0, 3*t_0 - 2)])
+    raises(TypeError, lambda: diophantine(eq, syms=set([y,x])))
+
+【相关测试 3】
+测试文件：sympy/solvers/tests/test_diophantine.py
+测试名称：test_diophantine
+测试代码：
+def test_diophantine():
+    assert check_solutions((x - y)*(y - z)*(z - x))
+    assert check_solutions((x - y)*(x**2 + y**2 - z**2))
+    assert check_solutions((x - 3*y + 7*z)*(x**2 + y**2 - z**2))
+    assert check_solutions((x**2 - 3*y**2 - 1))
+    assert check_solutions(y**2 + 7*x*y)
+    assert check_solutions(x**2 - 3*x*y + y**2)
+    assert check_solutions(z*(x**2 - y**2 - 15))
+    assert check_solutions(x*(2*y - 2*z + 5))
+    assert check_solutions((x**2 - 3*y**2 - 1)*(x**2 - y**2 - 15))
+    assert check_solutions((x**2 - 3*y**2 - 1)*(y - 7*z))
+    assert check_solutions((x**2 + y**2 - z**2)*(x - 7*y - 3*z + 4*w))
+    # Following test case caused problems in parametric representation
+    # But this can be solved by factroing out y.
+    # No need to use methods for ternary quadratic equations.
+    assert check_solutions(y**2 - 7*x*y + 4*y*z)
+    assert check_solutions(x**2 - 2*x + 1)
+
+    assert diophantine(x - y) == diophantine(Eq(x, y))
+    assert diophantine(3*x*pi - 2*y*pi) == set([(2*t_0, 3*t_0)])
+    eq = x**2 + y**2 + z**2 - 14
+    base_sol = set([(1, 2, 3)])
+    assert diophantine(eq) == base_sol
+    complete_soln = set(signed_permutations(base_sol.pop()))
+    assert diophantine(eq, permute=True) == complete_soln
+
+    assert diophantine(x**2 + x*Rational(15, 14) - 3) == set()
+    # test issue 11049
+    eq = 92*x**2 - 99*y**2 - z**2
+    coeff = eq.as_coefficients_dict()
+    assert _diop_ternary_quadratic_normal((x, y, z), coeff) == \
+        (9, 7, 51)
+    assert diophantine(eq) == set([(
+        891*p**2 + 9*q**2, -693*p**2 - 102*p*q + 7*q**2,
+        5049*p**2 - 1386*p*q - 51*q**2)])
+    eq = 2*x**2 + 2*y**2 - z**2
+    coeff = eq.as_coefficients_dict()
+    assert _diop_ternary_quadratic_normal((x, y, z), coeff) == \
+        (1, 1, 2)
+    assert diophantine(eq) == set([(
+        2*p**2 - q**2, -2*p**2 + 4*p*q - q**2,
+        4*p**2 - 4*p*q + 2*q**2)])
+    eq = 411*x**2+57*y**2-221*z**2
+    coeff = eq.as_coefficients_dict()
+    assert _diop_ternary_quadratic_normal((x, y, z), coeff) == \
+        (2021, 2645, 3066)
+    assert diophantine(eq) == \
+        set([(115197*p**2 - 446641*q**2, -150765*p**2 + 1355172*p*q -
+        584545*q**2, 174762*p**2 - 301530*p*q + 677586*q**2)])
+    eq = 573*x**2+267*y**2-984*z**2
+    coeff = eq.as_coefficients_dict()
+    assert _diop_ternary_quadratic_normal((x, y, z), coeff) == \
+        (49, 233, 127)
+    assert diophantine(eq) == \
+        set([(4361*p**2 - 16072*q**2, -20737*p**2 + 83312*p*q - 76424*q**2,
+        11303*p**2 - 41474*p*q + 41656*q**2)])
+    # this produces factors during reconstruction
+    eq = x**2 + 3*y**2 - 12*z**2
+    coeff = eq.as_coefficients_dict()
+    assert _diop_ternary_quadratic_normal((x, y, z), coeff) == \
+        (0, 2, 1)
+    assert diophantine(eq) == \
+        set([(24*p*q, 2*p**2 - 24*q**2, p**2 + 12*q**2)])
+    # solvers have not been written for every type
+    raises(NotImplementedError, lambda: diophantine(x*y**2 + 1))
+
+    # rational expressions
+    assert diophantine(1/x) == set()
+    assert diophantine(1/x + 1/y - S.Half)
+    set([(6, 3), (-2, 1), (4, 4), (1, -2), (3, 6)])
+    assert diophantine(x**2 + y**2 +3*x- 5, permute=True) == \
+        set([(-1, 1), (-4, -1), (1, -1), (1, 1), (-4, 1), (-1, -1), (4, 1), (4, -1)])
+
+    # issue 18122
+    assert check_solutions(x**2-y)
+    assert check_solutions(y**2-x)
+    assert diophantine((x**2-y), t) == set([(t, t**2)])
+    assert diophantine((y**2-x), t) == set([(t**2, -t)])
+
+【相关测试 4】
+测试文件：sympy/solvers/tests/test_diophantine.py
+测试名称：test_diop_general_sum_of_squares_quick
+测试代码：
+def test_diop_general_sum_of_squares_quick():
+    for i in range(3, 10):
+        assert check_solutions(sum(i**2 for i in symbols(':%i' % i)) - i)
+    raises(ValueError, lambda: _diop_general_sum_of_squares((x, y), 2))
+    assert _diop_general_sum_of_squares((x, y, z), -2) == set()
+    eq = x**2 + y**2 + z**2 - (1 + 4 + 9)
+    assert diop_general_sum_of_squares(eq) == \
+        set([(1, 2, 3)])
+    eq = u**2 + v**2 + x**2 + y**2 + z**2 - 1313
+    assert len(diop_general_sum_of_squares(eq, 3)) == 3
+    # issue 11016
+    var = symbols(':5') + (symbols('6', negative=True),)
+    eq = Add(*[i**2 for i in var]) - 112
+
+    base_soln = set(
+        [(0, 1, 1, 5, 6, -7), (1, 1, 1, 3, 6, -8), (2, 3, 3, 4, 5, -7),
+            (0, 1, 1, 1, 3, -10), (0, 0, 4, 4, 4, -8), (1, 2, 3, 3, 5, -8),
+            (0, 1, 2, 3, 7, -7), (2, 2, 4, 4, 6, -6), (1, 1, 3, 4, 6, -7),
+            (0, 2, 3, 3, 3, -9), (0, 0, 2, 2, 2, -10), (1, 1, 2, 3, 4, -9),
+            (0, 1, 1, 2, 5, -9), (0, 0, 2, 6, 6, -6), (1, 3, 4, 5, 5, -6),
+            (0, 2, 2, 2, 6, -8), (0, 3, 3, 3, 6, -7), (0, 2, 3, 5, 5, -7),
+            (0, 1, 5, 5, 5, -6)])
+    assert diophantine(eq) == base_soln
+    assert len(diophantine(eq, permute=True)) == 196800
+
+    # handle negated squares with signsimp
+    assert diophantine(12 - x**2 - y**2 - z**2) == set([(2, 2, 2)])
+    # diophantine handles simplification, so classify_diop should
+    # not have to look for additional patterns that are removed
+    # by diophantine
+    eq = a**2 + b**2 + c**2 + d**2 - 4
+    raises(NotImplementedError, lambda: classify_diop(-eq))
+
+【相关测试 5】
+测试文件：sympy/solvers/tests/test_diophantine.py
+测试名称：test_assumptions
+测试代码：
+def test_assumptions():
+    """
+    Test whether diophantine respects the assumptions.
+    """
+    #Test case taken from the below so question regarding assumptions in diophantine module
+    #https://stackoverflow.com/questions/23301941/how-can-i-declare-natural-symbols-with-sympy
+    m, n = symbols('m n', integer=True, positive=True)
+    diof = diophantine(n ** 2 + m * n - 500)
+    assert diof == set([(5, 20), (40, 10), (95, 5), (121, 4), (248, 2), (499, 1)])
+
+    a, b = symbols('a b', integer=True, positive=False)
+    diof = diophantine(a*b + 2*a + 3*b - 6)
+    assert diof == set([(-15, -3), (-9, -4), (-7, -5), (-6, -6), (-5, -8), (-4, -14)])
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

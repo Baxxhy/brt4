@@ -1,0 +1,129 @@
+instance_id: django__django-14140
+
+issue_summary: Q对象包含单个非下标访问子节点时，deconstruct方法会因尝试下标访问而抛出TypeError异常。
+
+trigger_condition:
+{
+  "text": "调用Q对象的deconstruct方法，且该Q对象只有一个子节点，且该子节点不是Q对象且不支持下标访问（例如Exists对象）。",
+  "evidence": [
+    "Issue中示例：Q(Exists(get_user_model().objects.filter(username='jim'))).deconstruct()",
+    "源码片段2显示：if len(self.children) == 1 and not isinstance(self.children[0], Q): kwargs = {child[0]: child[1]}"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "调用deconstruct()时抛出TypeError: 'Exists' object is not subscriptable异常。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue中Traceback显示：kwargs = {child[0]: child[1]}; TypeError: 'Exists' object is not subscriptable"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "Q对象的deconstruct方法应能正确处理包含单个非下标访问子节点（如Exists）的情况，不抛出异常并返回有效的(path, args, kwargs)三元组。",
+  "evidence": [
+    "Issue描述指出，修复方法可以是移除特殊处理，或将单个子节点放入args而非kwargs，或检查子节点是否为长度为2的元组。",
+    "相关测试1-5表明deconstruct方法应能处理各种Q对象构造并返回结构化的三元组。"
+  ],
+  "confidence": "medium"
+}
+
+target_apis:
+[
+  {
+    "name": "django.db.models.Q",
+    "kind": "class",
+    "source_path": "django/db/models/query_utils.py",
+    "reason": "Issue的核心是关于Q类的deconstruct方法的行为。"
+  },
+  {
+    "name": "django.db.models.Q.deconstruct",
+    "kind": "method",
+    "source_path": "django/db/models/query_utils.py",
+    "reason": "这是触发缺陷的直接方法。"
+  },
+  {
+    "name": "django.db.models.Exists",
+    "kind": "class",
+    "source_path": "django/db/models/expressions.py",
+    "reason": "Issue中用作触发缺陷的示例子节点类型。"
+  },
+  {
+    "name": "django.contrib.auth.get_user_model",
+    "kind": "function",
+    "source_path": "django/contrib/auth/__init__.py",
+    "reason": "Issue示例中用于构造Exists查询集的一部分。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中使用F对象、普通键值对或嵌套Q对象作为Q的构造参数。",
+    "target_pattern": "使用一个非Q对象且非下标访问的对象（如Exists对象）作为Q的唯一构造参数。",
+    "reason": "这将使deconstruct方法进入if len(self.children) == 1 and not isinstance(self.children[0], Q)分支，并尝试对不可下标访问的child进行child[0]操作。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "Q对象的children列表包含可下标访问的元素（如元组或Q对象）。",
+    "target_pattern": "Q对象的children列表包含一个不可下标访问的元素（如Exists实例）。",
+    "reason": "这是触发TypeError的直接原因。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用q.deconstruct()时是否抛出TypeError及其消息。",
+    "reason": "Issue明确报告了此异常，是缺陷触发的直接标志。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "成功调用deconstruct()后返回的(path, args, kwargs)三元组的结构，特别是args和kwargs的内容。",
+    "reason": "Issue展示了正常和异常情况下deconstruct的不同输出模式，修复后应能返回有效结构。"
+  },
+  {
+    "kind": "type",
+    "expression_hint": "Q对象子节点（self.children[0]）的类型。",
+    "reason": "缺陷逻辑依赖于子节点是否为Q类型以及是否可下标访问。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证使用Exists等非下标访问对象作为单子节点的Q对象，其deconstruct方法调用不会抛出TypeError异常。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言返回的完整args/kwargs的精确顺序或字符串表示，因为修复方案可能改变输出结构（如从kwargs移到args）。",
+    "reason": "Issue的核心是异常，修复后应消除异常。断言不抛出异常是稳定且与Issue对齐的目标。修复后具体的返回值结构可能变化，但不应崩溃。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "可能需要导入django.db.models.Q, Exists, F；可能需要django.contrib.auth.get_user_model来构造查询集；测试类可能继承自SimpleTestCase。",
+    "source": "issue|retrieved_test|retrieved_source",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能不需要真实数据库，因为主要测试Q对象的序列化逻辑。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "除了Exists，还有哪些类型的对象作为Q的单子节点会触发此缺陷？",
+  "修复后的确切预期输出（args和kwargs的具体内容）是什么？Issue提到了不同的修复思路（移除特殊处理或检查元组长度），输出可能不同。",
+  "在修复版本中，Q(Exists(...)).deconstruct()的返回值具体是什么？是放入args还是以某种形式放入kwargs？"
+]

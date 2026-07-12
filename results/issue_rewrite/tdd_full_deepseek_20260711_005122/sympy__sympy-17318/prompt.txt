@@ -1,0 +1,561 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+sqrtdenest raises IndexError
+```
+>>> sqrtdenest((3 - sqrt(2)*sqrt(4 + 3*I) + 3*I)/2)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "sympy\simplify\sqrtdenest.py", line 132, in sqrtdenest
+    z = _sqrtdenest0(expr)
+  File "sympy\simplify\sqrtdenest.py", line 242, in _sqrtdenest0
+    return expr.func(*[_sqrtdenest0(a) for a in args])
+  File "sympy\simplify\sqrtdenest.py", line 242, in _sqrtdenest0
+    return expr.func(*[_sqrtdenest0(a) for a in args])
+  File "sympy\simplify\sqrtdenest.py", line 235, in _sqrtdenest0
+    return _sqrtdenest1(expr)
+  File "sympy\simplify\sqrtdenest.py", line 319, in _sqrtdenest1
+    val = _sqrt_match(a)
+  File "sympy\simplify\sqrtdenest.py", line 159, in _sqrt_match
+    r, b, a = split_surds(p)
+  File "sympy\simplify\radsimp.py", line 1032, in split_surds
+    g, b1, b2 = _split_gcd(*surds)
+  File "sympy\simplify\radsimp.py", line 1068, in _split_gcd
+    g = a[0]
+IndexError: tuple index out of range
+```
+
+If an expression cannot be denested it should be returned unchanged.
+IndexError fixed for sqrtdenest.
+Fixes #12420 
+Now if the expression can't be **denested**, it will be returned unchanged.
+Old Result:
+```
+>>> sqrtdenest((3 - sqrt(2)*sqrt(4 + 3*I) + 3*I)/2)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "sympy\simplify\sqrtdenest.py", line 132, in sqrtdenest
+    z = _sqrtdenest0(expr)
+  File "sympy\simplify\sqrtdenest.py", line 242, in _sqrtdenest0
+    return expr.func(*[_sqrtdenest0(a) for a in args])
+  File "sympy\simplify\sqrtdenest.py", line 242, in _sqrtdenest0
+    return expr.func(*[_sqrtdenest0(a) for a in args])
+  File "sympy\simplify\sqrtdenest.py", line 235, in _sqrtdenest0
+    return _sqrtdenest1(expr)
+  File "sympy\simplify\sqrtdenest.py", line 319, in _sqrtdenest1
+    val = _sqrt_match(a)
+  File "sympy\simplify\sqrtdenest.py", line 159, in _sqrt_match
+    r, b, a = split_surds(p)
+  File "sympy\simplify\radsimp.py", line 1032, in split_surds
+    g, b1, b2 = _split_gcd(*surds)
+  File "sympy\simplify\radsimp.py", line 1068, in _split_gcd
+    g = a[0]
+IndexError: tuple index out of range
+
+```
+New Result:
+
+```
+In [9]: sqrtdenest((3 - sqrt(2)*sqrt(4 + 3*I) + 3*I)/2)
+Out[9]: 3/2 - sqrt(2)*sqrt(4 + 3*I)/2 + 3*I/2
+```
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/simplify/sqrtdenest.py
+对象名称：sqrtdenest
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 2】
+文件路径：sympy/simplify/sqrtdenest.py
+对象名称：_sqrtdenest0
+节点类型：top-level function
+父节点：sqrtdenest
+行号范围：222-256
+代码：
+def _sqrtdenest0(expr):
+    """Returns expr after denesting its arguments."""
+
+    if is_sqrt(expr):
+        n, d = expr.as_numer_denom()
+        if d is S.One:  # n is a square root
+            if n.base.is_Add:
+                args = sorted(n.base.args, key=default_sort_key)
+                if len(args) > 2 and all((x**2).is_Integer for x in args):
+                    try:
+                        return _sqrtdenest_rec(n)
+                    except SqrtdenestStopIteration:
+                        pass
+                expr = sqrt(_mexpand(Add(*[_sqrtdenest0(x) for x in args])))
+            return _sqrtdenest1(expr)
+        else:
+            n, d = [_sqrtdenest0(i) for i in (n, d)]
+            return n/d
+
+    if isinstance(expr, Add):
+        cs = []
+        args = []
+        for arg in expr.args:
+            c, a = arg.as_coeff_Mul()
+            cs.append(c)
+            args.append(a)
+
+        if all(c.is_Rational for c in cs) and all(is_sqrt(arg) for arg in args):
+            return _sqrt_ratcomb(cs, args)
+
+    if isinstance(expr, Expr):
+        args = expr.args
+        if args:
+            return expr.func(*[_sqrtdenest0(a) for a in args])
+    return expr
+
+
+【源码片段 3】
+文件路径：sympy/simplify/sqrtdenest.py
+对象名称：_sqrtdenest1
+节点类型：top-level function
+父节点：sqrtdenest
+行号范围：320-376
+代码：
+def _sqrtdenest1(expr, denester=True):
+    """Return denested expr after denesting with simpler methods or, that
+    failing, using the denester."""
+
+    from sympy.simplify.simplify import radsimp
+
+    if not is_sqrt(expr):
+        return expr
+
+    a = expr.base
+    if a.is_Atom:
+        return expr
+    val = _sqrt_match(a)
+    if not val:
+        return expr
+
+    a, b, r = val
+    # try a quick numeric denesting
+    d2 = _mexpand(a**2 - b**2*r)
+    if d2.is_Rational:
+        if d2.is_positive:
+            z = _sqrt_numeric_denest(a, b, r, d2)
+            if z is not None:
+                return z
+        else:
+            # fourth root case
+            # sqrtdenest(sqrt(3 + 2*sqrt(3))) =
+            # sqrt(2)*3**(1/4)/2 + sqrt(2)*3**(3/4)/2
+            dr2 = _mexpand(-d2*r)
+            dr = sqrt(dr2)
+            if dr.is_Rational:
+                z = _sqrt_numeric_denest(_mexpand(b*r), a, r, dr2)
+                if z is not None:
+                    return z/root(r, 4)
+
+    else:
+        z = _sqrt_symbolic_denest(a, b, r)
+        if z is not None:
+            return z
+
+    if not denester or not is_algebraic(expr):
+        return expr
+
+    res = sqrt_biquadratic_denest(expr, a, b, r, d2)
+    if res:
+        return res
+
+    # now call to the denester
+    av0 = [a, b, r, d2]
+    z = _denester([radsimp(expr**2)], av0, 0, sqrt_depth(expr))[0]
+    if av0[1] is None:
+        return expr
+    if z is not None:
+        if sqrt_depth(z) == sqrt_depth(expr) and count_ops(z) > count_ops(expr):
+            return expr
+        return z
+    return expr
+
+
+【源码片段 4】
+文件路径：sympy/simplify/sqrtdenest.py
+对象名称：_sqrt_match
+节点类型：top-level function
+父节点：sqrtdenest
+行号范围：140-215
+代码：
+def _sqrt_match(p):
+    """Return [a, b, r] for p.match(a + b*sqrt(r)) where, in addition to
+    matching, sqrt(r) also has then maximal sqrt_depth among addends of p.
+
+    Examples
+    ========
+
+    >>> from sympy.functions.elementary.miscellaneous import sqrt
+    >>> from sympy.simplify.sqrtdenest import _sqrt_match
+    >>> _sqrt_match(1 + sqrt(2) + sqrt(2)*sqrt(3) +  2*sqrt(1+sqrt(5)))
+    [1 + sqrt(2) + sqrt(6), 2, 1 + sqrt(5)]
+    """
+    from sympy.simplify.radsimp import split_surds
+
+    p = _mexpand(p)
+    if p.is_Number:
+        res = (p, S.Zero, S.Zero)
+    elif p.is_Add:
+        pargs = sorted(p.args, key=default_sort_key)
+        if all((x**2).is_Rational for x in pargs):
+            r, b, a = split_surds(p)
+            res = a, b, r
+            return list(res)
+        # to make the process canonical, the argument is included in the tuple
+        # so when the max is selected, it will be the largest arg having a
+        # given depth
+        v = [(sqrt_depth(x), x, i) for i, x in enumerate(pargs)]
+        nmax = max(v, key=default_sort_key)
+        if nmax[0] == 0:
+            res = []
+        else:
+            # select r
+            depth, _, i = nmax
+            r = pargs.pop(i)
+            v.pop(i)
+            b = S.One
+            if r.is_Mul:
+                bv = []
+                rv = []
+                for x in r.args:
+                    if sqrt_depth(x) < depth:
+                        bv.append(x)
+                    else:
+                        rv.append(x)
+                b = Mul._from_args(bv)
+                r = Mul._from_args(rv)
+            # collect terms comtaining r
+            a1 = []
+            b1 = [b]
+            for x in v:
+                if x[0] < depth:
+                    a1.append(x[1])
+                else:
+                    x1 = x[1]
+                    if x1 == r:
+                        b1.append(1)
+                    else:
+                        if x1.is_Mul:
+                            x1args = list(x1.args)
+                            if r in x1args:
+                                x1args.remove(r)
+                                b1.append(Mul(*x1args))
+                            else:
+                                a1.append(x[1])
+                        else:
+                            a1.append(x[1])
+            a = Add(*a1)
+            b = Add(*b1)
+            res = (a, b, r**2)
+    else:
+        b, r = p.as_coeff_Mul()
+        if is_sqrt(r):
+            res = (S.Zero, b, r**2)
+        else:
+            res = []
+    return list(res)
+
+
+【源码片段 5】
+文件路径：sympy/simplify/radsimp.py
+对象名称：split_surds
+节点类型：top-level function
+父节点：radsimp
+行号范围：1062-1100
+代码：
+def split_surds(expr):
+    """
+    split an expression with terms whose squares are rationals
+    into a sum of terms whose surds squared have gcd equal to g
+    and a sum of terms with surds squared prime with g
+
+    Examples
+    ========
+
+    >>> from sympy import sqrt
+    >>> from sympy.simplify.radsimp import split_surds
+    >>> split_surds(3*sqrt(3) + sqrt(5)/7 + sqrt(6) + sqrt(10) + sqrt(15))
+    (3, sqrt(2) + sqrt(5) + 3, sqrt(5)/7 + sqrt(10))
+    """
+    args = sorted(expr.args, key=default_sort_key)
+    coeff_muls = [x.as_coeff_Mul() for x in args]
+    surds = [x[1]**2 for x in coeff_muls if x[1].is_Pow]
+    surds.sort(key=default_sort_key)
+    g, b1, b2 = _split_gcd(*surds)
+    g2 = g
+    if not b2 and len(b1) >= 2:
+        b1n = [x/g for x in b1]
+        b1n = [x for x in b1n if x != 1]
+        # only a common factor has been factored; split again
+        g1, b1n, b2 = _split_gcd(*b1n)
+        g2 = g*g1
+    a1v, a2v = [], []
+    for c, s in coeff_muls:
+        if s.is_Pow and s.exp == S.Half:
+            s1 = s.base
+            if s1 in b1:
+                a1v.append(c*sqrt(s1/g2))
+            else:
+                a2v.append(c*s)
+        else:
+            a2v.append(c*s)
+    a = Add(*a1v)
+    b = Add(*a2v)
+    return g2, a, b
+
+
+【源码片段 6】
+文件路径：sympy/simplify/radsimp.py
+对象名称：_split_gcd
+节点类型：top-level function
+父节点：radsimp
+行号范围：1103-1126
+代码：
+def _split_gcd(*a):
+    """
+    split the list of integers ``a`` into a list of integers, ``a1`` having
+    ``g = gcd(a1)``, and a list ``a2`` whose elements are not divisible by
+    ``g``.  Returns ``g, a1, a2``
+
+    Examples
+    ========
+
+    >>> from sympy.simplify.radsimp import _split_gcd
+    >>> _split_gcd(55, 35, 22, 14, 77, 10)
+    (5, [55, 35, 10], [22, 14, 77])
+    """
+    g = a[0]
+    b1 = [g]
+    b2 = []
+    for x in a[1:]:
+        g1 = gcd(g, x)
+        if g1 == 1:
+            b2.append(x)
+        else:
+            g = g1
+            b1.append(x)
+    return g, b1, b2
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/simplify/tests/test_sqrtdenest.py
+测试名称：test_sqrtdenest
+测试代码：
+def test_sqrtdenest():
+    d = {sqrt(5 + 2 * r6): r2 + r3,
+        sqrt(5. + 2 * r6): sqrt(5. + 2 * r6),
+        sqrt(5. + 4*sqrt(5 + 2 * r6)): sqrt(5.0 + 4*r2 + 4*r3),
+        sqrt(r2): sqrt(r2),
+        sqrt(5 + r7): sqrt(5 + r7),
+        sqrt(3 + sqrt(5 + 2*r7)):
+         3*r2*(5 + 2*r7)**(S(1)/4)/(2*sqrt(6 + 3*r7)) +
+         r2*sqrt(6 + 3*r7)/(2*(5 + 2*r7)**(S(1)/4)),
+        sqrt(3 + 2*r3): 3**(S(3)/4)*(r6/2 + 3*r2/2)/3}
+    for i in d:
+        assert sqrtdenest(i) == d[i]
+
+【相关测试 2】
+测试文件：sympy/simplify/tests/test_sqrtdenest.py
+测试名称：test_sqrtdenest2
+测试代码：
+def test_sqrtdenest2():
+    assert sqrtdenest(sqrt(16 - 2*r29 + 2*sqrt(55 - 10*r29))) == \
+        r5 + sqrt(11 - 2*r29)
+    e = sqrt(-r5 + sqrt(-2*r29 + 2*sqrt(-10*r29 + 55) + 16))
+    assert sqrtdenest(e) == root(-2*r29 + 11, 4)
+    r = sqrt(1 + r7)
+    assert sqrtdenest(sqrt(1 + r)) == sqrt(1 + r)
+    e = sqrt(((1 + sqrt(1 + 2*sqrt(3 + r2 + r5)))**2).expand())
+    assert sqrtdenest(e) == 1 + sqrt(1 + 2*sqrt(r2 + r5 + 3))
+
+    assert sqrtdenest(sqrt(5*r3 + 6*r2)) == \
+        sqrt(2)*root(3, 4) + root(3, 4)**3
+
+    assert sqrtdenest(sqrt(((1 + r5 + sqrt(1 + r3))**2).expand())) == \
+        1 + r5 + sqrt(1 + r3)
+
+    assert sqrtdenest(sqrt(((1 + r5 + r7 + sqrt(1 + r3))**2).expand())) == \
+        1 + sqrt(1 + r3) + r5 + r7
+
+    e = sqrt(((1 + cos(2) + cos(3) + sqrt(1 + r3))**2).expand())
+    assert sqrtdenest(e) == cos(3) + cos(2) + 1 + sqrt(1 + r3)
+
+    e = sqrt(-2*r10 + 2*r2*sqrt(-2*r10 + 11) + 14)
+    assert sqrtdenest(e) == sqrt(-2*r10 - 2*r2 + 4*r5 + 14)
+
+    # check that the result is not more complicated than the input
+    z = sqrt(-2*r29 + cos(2) + 2*sqrt(-10*r29 + 55) + 16)
+    assert sqrtdenest(z) == z
+
+    assert sqrtdenest(sqrt(r6 + sqrt(15))) == sqrt(r6 + sqrt(15))
+
+    z = sqrt(15 - 2*sqrt(31) + 2*sqrt(55 - 10*r29))
+    assert sqrtdenest(z) == z
+
+【相关测试 3】
+测试文件：sympy/simplify/tests/test_sqrtdenest.py
+测试名称：test_issue_6241
+测试代码：
+def test_issue_6241():
+    z = sqrt( -320 + 32*sqrt(5) + 64*r15)
+    assert sqrtdenest(z) == z
+
+【相关测试 4】
+测试文件：sympy/simplify/tests/test_sqrtdenest.py
+测试名称：test_issue_5653
+测试代码：
+def test_issue_5653():
+    assert sqrtdenest(
+        sqrt(2 + sqrt(2 + sqrt(2)))) == sqrt(2 + sqrt(2 + sqrt(2)))
+
+【相关测试 5】
+测试文件：sympy/simplify/tests/test_sqrtdenest.py
+测试名称：test_issue_5857
+测试代码：
+def test_issue_5857():
+    from sympy.abc import x, y
+    z = sqrt(1/(4*r3 + 7) + 1)
+    ans = (r2 + r6)/(r3 + 2)
+    assert sqrtdenest(z) == ans
+    assert sqrtdenest(1 + z) == 1 + ans
+    assert sqrtdenest(Integral(z + 1, (x, 1, 2))) == \
+        Integral(1 + ans, (x, 1, 2))
+    assert sqrtdenest(x + sqrt(y)) == x + sqrt(y)
+    ans = (r2 + r6)/(r3 + 2)
+    assert sqrtdenest(z) == ans
+    assert sqrtdenest(1 + z) == 1 + ans
+    assert sqrtdenest(Integral(z + 1, (x, 1, 2))) == \
+        Integral(1 + ans, (x, 1, 2))
+    assert sqrtdenest(x + sqrt(y)) == x + sqrt(y)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

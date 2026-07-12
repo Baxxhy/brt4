@@ -1,0 +1,246 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Symlinked directories not collected since pytest 6.1.0
+When there is a symlink to a directory in a test directory, is is just skipped over, but it should be followed and collected as usual.
+
+This regressed in b473e515bc57ff1133fe650f1e7e6d7e22e5d841 (included in 6.1.0). For some reason I added a `follow_symlinks=False` in there, I don't remember why, but it does not match the previous behavior and should be removed.
+
+PR for this is coming up.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：testing/test_collection.py
+测试名称：test_collect_sub_with_symlinks
+测试代码：
+@pytest.mark.parametrize("use_pkg", (True, False))
+def test_collect_sub_with_symlinks(use_pkg, testdir):
+    """Collection works with symlinked files and broken symlinks"""
+    sub = testdir.mkdir("sub")
+    if use_pkg:
+        sub.ensure("__init__.py")
+    sub.join("test_file.py").write("def test_file(): pass")
+
+    # Create a broken symlink.
+    symlink_or_skip("test_doesnotexist.py", sub.join("test_broken.py"))
+
+    # Symlink that gets collected.
+    symlink_or_skip("test_file.py", sub.join("test_symlink.py"))
+
+    result = testdir.runpytest("-v", str(sub))
+    result.stdout.fnmatch_lines(
+        [
+            "sub/test_file.py::test_file PASSED*",
+            "sub/test_symlink.py::test_file PASSED*",
+            "*2 passed in*",
+        ]
+    )
+
+【相关测试 2】
+测试文件：testing/test_collection.py
+测试名称：test_collect_symlink_file_arg
+测试代码：
+def test_collect_symlink_file_arg(testdir):
+    """Collect a direct symlink works even if it does not match python_files (#4325)."""
+    real = testdir.makepyfile(
+        real="""
+        def test_nodeid(request):
+            assert request.node.nodeid == "symlink.py::test_nodeid"
+        """
+    )
+    symlink = testdir.tmpdir.join("symlink.py")
+    symlink_or_skip(real, symlink)
+    result = testdir.runpytest("-v", symlink)
+    result.stdout.fnmatch_lines(["symlink.py::test_nodeid PASSED*", "*1 passed in*"])
+    assert result.ret == 0
+
+【相关测试 3】
+测试文件：testing/test_collection.py
+测试名称：test_collect_symlink_out_of_tree
+测试代码：
+def test_collect_symlink_out_of_tree(testdir):
+    """Test collection of symlink via out-of-tree rootdir."""
+    sub = testdir.tmpdir.join("sub")
+    real = sub.join("test_real.py")
+    real.write(
+        textwrap.dedent(
+            """
+        def test_nodeid(request):
+            # Should not contain sub/ prefix.
+            assert request.node.nodeid == "test_real.py::test_nodeid"
+        """
+        ),
+        ensure=True,
+    )
+
+    out_of_tree = testdir.tmpdir.join("out_of_tree").ensure(dir=True)
+    symlink_to_sub = out_of_tree.join("symlink_to_sub")
+    symlink_or_skip(sub, symlink_to_sub)
+    sub.chdir()
+    result = testdir.runpytest("-vs", "--rootdir=%s" % sub, symlink_to_sub)
+    result.stdout.fnmatch_lines(
+        [
+            # Should not contain "sub/"!
+            "test_real.py::test_nodeid PASSED"
+        ]
+    )
+    assert result.ret == 0
+
+【相关测试 4】
+测试文件：testing/test_link_resolve.py
+测试名称：test_link_resolve
+测试代码：
+def test_link_resolve(testdir: pytester.Testdir) -> None:
+    """See: https://github.com/pytest-dev/pytest/issues/5965."""
+    sub1 = testdir.mkpydir("sub1")
+    p = sub1.join("test_foo.py")
+    p.write(
+        textwrap.dedent(
+            """
+        import pytest
+        def test_foo():
+            raise AssertionError()
+        """
+        )
+    )
+
+    subst = subst_path_linux
+    if sys.platform == "win32":
+        subst = subst_path_windows
+
+    with subst(p) as subst_p:
+        result = testdir.runpytest(str(subst_p), "-v")
+        # i.e.: Make sure that the error is reported as a relative path, not as a
+        # resolved path.
+        # See: https://github.com/pytest-dev/pytest/issues/5965
+        stdout = result.stdout.str()
+        assert "sub1/test_foo.py" not in stdout
+
+        # i.e.: Expect drive on windows because we just have drive:filename, whereas
+        # we expect a relative path on Linux.
+        expect = f"*{subst_p}*" if sys.platform == "win32" else "*sub2/test_foo.py*"
+        result.stdout.fnmatch_lines([expect])
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

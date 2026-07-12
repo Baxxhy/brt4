@@ -1,0 +1,102 @@
+instance_id: sphinx-doc__sphinx-10449
+
+issue_summary: 使用 autodoc_typehints = "description" 配置时，autoclass 会错误地为类生成 "Return type" 部分。
+
+trigger_condition:
+{
+  "text": "在 Sphinx 配置中设置 autodoc_typehints = \"description\"，并使用 autoclass 指令生成一个包含 __init__ 方法的类的文档。",
+  "evidence": [
+    "Issue 描述：`autodoc_typehints = \"description\"` causes autoclass to put a return type",
+    "Issue 的 How to Reproduce 步骤中明确设置了 `autodoc_typehints = \"description\"` 并使用了 `.. autoclass:: sample_package.Square`"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "生成的类文档中包含了 \"Return type\" 部分（例如显示为 \"Return type: None\"），而类本身不应有返回类型。",
+  "symptom_type": "wrong_type",
+  "evidence": [
+    "Issue 标题和描述明确指出此配置导致 autoclass 包含类的 \"return type\"",
+    "Issue 的 Expected behavior 表明期望没有返回类型列出"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "使用 autodoc_typehints = \"description\" 配置时，autoclass 生成的类文档中不应包含 \"Return type\" 部分。",
+  "evidence": [
+    "Issue 的 Expected behavior: \"I expected there to be no return type listed for the class.\""
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "sphinx.ext.autodoc",
+    "kind": "module",
+    "source_path": "",
+    "reason": "Issue 涉及 Sphinx 的 autodoc 扩展及其配置选项 autodoc_typehints。"
+  },
+  {
+    "name": "autoclass",
+    "kind": "unknown",
+    "source_path": "",
+    "reason": "Issue 明确指出是 autoclass 指令在特定配置下产生错误行为。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "相关测试中使用了 `confoverrides={'autodoc_typehints': \"description\"}`，有时还结合 `'autodoc_typehints_description_target': 'documented'`。",
+    "target_pattern": "仅使用 `confoverrides={'autodoc_typehints': \"description\"}`，不设置 `autodoc_typehints_description_target`。",
+    "reason": "Issue 的复现步骤中只设置了 `autodoc_typehints = \"description\"`，没有设置 `autodoc_typehints_description_target`。这可能是触发错误行为的关键配置差异。",
+    "confidence": "medium"
+  },
+  {
+    "slot": "input",
+    "current_pattern": "相关测试中测试的类是 `target.typehints._ClassWithDocumentedInit`，其 __init__ 方法有文档字符串。",
+    "target_pattern": "测试一个类似 `Square` 的类，其 __init__ 方法没有文档字符串（或只有简单文档）。",
+    "reason": "Issue 中的示例类 `Square` 的 __init__ 方法没有文档字符串。文档字符串的存在与否可能影响类型提示的渲染逻辑。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "file_output",
+    "expression_hint": "生成的文档文本内容，特别是其中是否包含 \"Return type:\" 字符串。",
+    "reason": "Issue 的核心错误现象是输出中错误地包含了 \"Return type\" 部分。观察生成的文本内容可以直接判断缺陷是否被触发。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证生成的类文档文本中不包含 \"Return type:\" 字符串。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "避免断言完整的、具体的输出字符串相等，因为输出格式可能因 Sphinx 版本或主题而变化。",
+    "reason": "Issue 的期望行为是 \"no return type listed\"。不包含特定片段是更稳定、更符合语义的断言方式。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 `pytest.mark.sphinx` fixture 来创建 Sphinx 应用 (`app`)，并通过 `confoverrides` 设置配置。需要一个临时的源码目录 (`srcdir`) 来放置 `.rst` 和 `.py` 文件。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "导致错误的确切源码位置和逻辑尚不明确。检索出的相关源码片段 (`sphinx/domains/cpp.py`) 与 Python 类的 autodoc 处理可能没有直接关系。",
+  "`autodoc_typehints_description_target` 配置的默认值及其对问题的影响不确定。",
+  "除了 `__init__` 方法外，类的其他特殊方法（如 `__new__`）是否也会导致类似问题不确定。"
+]

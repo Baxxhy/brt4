@@ -1,0 +1,313 @@
+{
+  "instance_id": "django__django-13569",
+  "issue_summary": "使用 order_by('?') 进行随机排序时，会意外破坏带有聚合注解（如 Count）的查询集的分组行为，导致 GROUP BY 子句包含 RANDOM() 函数，从而产生错误的聚合结果。",
+  "trigger_condition": {
+    "text": "对一个带有聚合注解（例如 Count('related')）的 QuerySet 调用 .order_by('?') 进行随机排序，然后调用 .values('id', 'rc') 获取特定字段。",
+    "evidence": [
+      "Issue 中描述了使用 Thing.objects.annotate(rc=Count('related')).order_by('?').values('id', 'rc') 的步骤。",
+      "Issue 中打印的 SQL 显示 GROUP BY 子句中包含了 RANDOM() 函数。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "聚合查询的结果不正确。预期每个 Thing 对象返回一行聚合结果（例如 {'id': 1, 'rc': 2}），但实际返回了多行重复的聚合结果（例如 [{'id': 1, 'rc': 1}, {'id': 1, 'rc': 1}]），导致聚合计数被错误地拆分。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 中展示了错误的查询结果：<QuerySet [{'id': 1, 'rc': 1}, {'id': 1, 'rc': 1}]>。",
+      "Issue 中打印的 SQL 显示 GROUP BY \"thing\".\"id\", RANDOM()，这破坏了按 id 的正确分组。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "使用 order_by('?') 进行随机排序不应影响聚合查询的分组逻辑。查询应保持按主键（或相关字段）正确分组，并返回正确的聚合值（例如每个 Thing 对应一个正确的计数）。",
+    "evidence": [
+      "Issue 作者认为随机函数调用与聚合无关，不应破坏分组。",
+      "Issue 中展示了 order_by('rc') 和 order_by('related') 的行为作为对比，暗示 order_by('?') 应类似地不影响分组。",
+      "Issue 中作者提出的补丁旨在从 group_by 表达式中排除 Random 表达式。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "QuerySet.annotate",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "用于向查询集添加聚合注解（如 Count），是触发缺陷的 API 链的一部分。"
+    },
+    {
+      "name": "Count",
+      "kind": "class",
+      "source_path": "django/db/models/aggregates.py",
+      "reason": "聚合函数，用于计算相关对象的数量，是缺陷场景中的关键聚合操作。"
+    },
+    {
+      "name": "QuerySet.order_by",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "用于对查询集进行排序，特别是 order_by('?') 触发了缺陷。"
+    },
+    {
+      "name": "QuerySet.values",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "用于限制查询返回的字段，是观察错误结果的 API 链的最后一步。"
+    },
+    {
+      "name": "Random",
+      "kind": "class",
+      "source_path": "",
+      "reason": "order_by('?') 内部使用的函数，Issue 中提到的补丁直接处理了 Random 表达式。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/sql/compiler.py",
+      "object": "get_group_by",
+      "lines": "",
+      "reason": "Issue 作者明确指出问题在 get_group_by 函数中，该函数将非聚合、非引用的 order_by 表达式合并到 group_by 中，错误地包含了 Random 表达式。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "AggregateTestCase.test_annotate_ordering",
+      "test_file": "tests/aggregation/tests.py",
+      "why_relevant": "该测试涉及带聚合注解的查询集的排序（order_by），与缺陷场景的核心操作（annotate + order_by）相似。",
+      "reusable_parts": [
+        "使用 annotate 和 order_by 的组合",
+        "使用 values 和聚合字段",
+        "使用 assertEqual 比较查询结果列表"
+      ],
+      "possible_gap": "该测试使用确定性字段（如 'oldest', 'rating'）进行排序，而非随机排序（'?'），因此不会触发与 Random 表达式相关的分组错误。"
+    },
+    {
+      "test_name": "OrderingTests.test_random_ordering",
+      "test_file": "tests/ordering/tests.py",
+      "why_relevant": "该测试直接使用了 order_by('?') 进行随机排序，是缺陷触发条件的关键部分。",
+      "reusable_parts": [
+        "使用 order_by('?')",
+        "基本的 QuerySet 操作和断言"
+      ],
+      "possible_gap": "该测试没有涉及聚合注解（annotate），因此不会触发分组破坏的问题。"
+    },
+    {
+      "test_name": "AggregateTestCase.test_aggregation_order_by_not_selected_annotation_values",
+      "test_file": "tests/aggregation/tests.py",
+      "why_relevant": "该测试结合了聚合注解、排序和 values 操作，与缺陷的 API 调用链高度相似。",
+      "reusable_parts": [
+        "annotate 与 order_by 的组合",
+        "使用 values_list 获取特定字段",
+        "使用子测试进行多场景验证"
+      ],
+      "possible_gap": "该测试的排序依据是注解字段或 F 表达式，而非随机排序（'?'），因此不会触发特定缺陷。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中使用确定性字段（如 'oldest', 'rating', F('min_related_age')）进行 order_by。",
+      "target_pattern": "将 order_by 的参数改为 '?' 以实现随机排序。",
+      "reason": "根据 Issue，order_by('?') 是触发分组错误的关键输入变异。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "相似测试中可能缺少 .values('id', 'rc') 这样的调用以观察具体字段和聚合值。",
+      "target_pattern": "在 annotate 和 order_by 之后添加 .values('id', 'rc') 调用。",
+      "reason": "Issue 中通过 .values 展示了错误的聚合结果，这是观察症状的必要步骤。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "sql",
+      "expression_hint": "生成的 SQL 查询字符串，特别是 GROUP BY 子句的内容。",
+      "reason": "Issue 中通过打印 .query 发现 GROUP BY 子句中错误地包含了 RANDOM()，这是缺陷的直接证据。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "QuerySet 执行后返回的结果列表，特别是聚合值（rc）和对应的 id。",
+      "reason": "可以观察到聚合计数是否被错误拆分（返回多行重复结果），而不是正确的单行聚合结果。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证聚合查询在 order_by('?') 后，每个唯一 id 对应的聚合值（rc）是正确的总数，且结果集的行数等于唯一 id 的数量。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的、包含随机生成的 RANDOM() 值的 SQL 字符串相等。避免断言结果的具体顺序。",
+      "reason": "缺陷的核心是聚合值错误，而非顺序。断言聚合值的正确性（例如计数总和）是稳定且与 Issue 对齐的。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要创建具有一对多关系的简单模型（如 Thing 和 Related），并插入测试数据（一个 Thing 对应多个 Related）。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试应继承自 django.test.TestCase 以确保数据库事务支持。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "缺陷是否在所有数据库后端（SQLite, PostgreSQL, MySQL）上表现一致。",
+    "除了 Count，其他聚合函数（如 Sum, Avg）是否也会受此影响。",
+    "get_group_by 函数中处理 order_by 表达式的完整逻辑和边界条件。"
+  ],
+  "raw": {
+    "issue_summary": "使用 order_by('?') 进行随机排序时，会意外破坏带有聚合注解（如 Count）的查询集的分组行为，导致 GROUP BY 子句包含 RANDOM() 函数，从而产生错误的聚合结果。",
+    "trigger_condition": {
+      "text": "对一个带有聚合注解（例如 Count('related')）的 QuerySet 调用 .order_by('?') 进行随机排序，然后调用 .values('id', 'rc') 获取特定字段。",
+      "evidence": [
+        "Issue 中描述了使用 Thing.objects.annotate(rc=Count('related')).order_by('?').values('id', 'rc') 的步骤。",
+        "Issue 中打印的 SQL 显示 GROUP BY 子句中包含了 RANDOM() 函数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "聚合查询的结果不正确。预期每个 Thing 对象返回一行聚合结果（例如 {'id': 1, 'rc': 2}），但实际返回了多行重复的聚合结果（例如 [{'id': 1, 'rc': 1}, {'id': 1, 'rc': 1}]），导致聚合计数被错误地拆分。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中展示了错误的查询结果：<QuerySet [{'id': 1, 'rc': 1}, {'id': 1, 'rc': 1}]>。",
+        "Issue 中打印的 SQL 显示 GROUP BY \"thing\".\"id\", RANDOM()，这破坏了按 id 的正确分组。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "使用 order_by('?') 进行随机排序不应影响聚合查询的分组逻辑。查询应保持按主键（或相关字段）正确分组，并返回正确的聚合值（例如每个 Thing 对应一个正确的计数）。",
+      "evidence": [
+        "Issue 作者认为随机函数调用与聚合无关，不应破坏分组。",
+        "Issue 中展示了 order_by('rc') 和 order_by('related') 的行为作为对比，暗示 order_by('?') 应类似地不影响分组。",
+        "Issue 中作者提出的补丁旨在从 group_by 表达式中排除 Random 表达式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "用于向查询集添加聚合注解（如 Count），是触发缺陷的 API 链的一部分。"
+      },
+      {
+        "name": "Count",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "聚合函数，用于计算相关对象的数量，是缺陷场景中的关键聚合操作。"
+      },
+      {
+        "name": "QuerySet.order_by",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "用于对查询集进行排序，特别是 order_by('?') 触发了缺陷。"
+      },
+      {
+        "name": "QuerySet.values",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "用于限制查询返回的字段，是观察错误结果的 API 链的最后一步。"
+      },
+      {
+        "name": "Random",
+        "kind": "class",
+        "source_path": "",
+        "reason": "order_by('?') 内部使用的函数，Issue 中提到的补丁直接处理了 Random 表达式。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/compiler.py",
+        "object": "get_group_by",
+        "lines": "",
+        "reason": "Issue 作者明确指出问题在 get_group_by 函数中，该函数将非聚合、非引用的 order_by 表达式合并到 group_by 中，错误地包含了 Random 表达式。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AggregateTestCase.test_annotate_ordering",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "该测试涉及带聚合注解的查询集的排序（order_by），与缺陷场景的核心操作（annotate + order_by）相似。",
+        "reusable_parts": [
+          "使用 annotate 和 order_by 的组合",
+          "使用 values 和聚合字段",
+          "使用 assertEqual 比较查询结果列表"
+        ],
+        "possible_gap": "该测试使用确定性字段（如 'oldest', 'rating'）进行排序，而非随机排序（'?'），因此不会触发与 Random 表达式相关的分组错误。"
+      },
+      {
+        "test_name": "OrderingTests.test_random_ordering",
+        "test_file": "tests/ordering/tests.py",
+        "why_relevant": "该测试直接使用了 order_by('?') 进行随机排序，是缺陷触发条件的关键部分。",
+        "reusable_parts": [
+          "使用 order_by('?')",
+          "基本的 QuerySet 操作和断言"
+        ],
+        "possible_gap": "该测试没有涉及聚合注解（annotate），因此不会触发分组破坏的问题。"
+      },
+      {
+        "test_name": "AggregateTestCase.test_aggregation_order_by_not_selected_annotation_values",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "该测试结合了聚合注解、排序和 values 操作，与缺陷的 API 调用链高度相似。",
+        "reusable_parts": [
+          "annotate 与 order_by 的组合",
+          "使用 values_list 获取特定字段",
+          "使用子测试进行多场景验证"
+        ],
+        "possible_gap": "该测试的排序依据是注解字段或 F 表达式，而非随机排序（'?'），因此不会触发特定缺陷。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用确定性字段（如 'oldest', 'rating', F('min_related_age')）进行 order_by。",
+        "target_pattern": "将 order_by 的参数改为 '?' 以实现随机排序。",
+        "reason": "根据 Issue，order_by('?') 是触发分组错误的关键输入变异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中可能缺少 .values('id', 'rc') 这样的调用以观察具体字段和聚合值。",
+        "target_pattern": "在 annotate 和 order_by 之后添加 .values('id', 'rc') 调用。",
+        "reason": "Issue 中通过 .values 展示了错误的聚合结果，这是观察症状的必要步骤。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，特别是 GROUP BY 子句的内容。",
+        "reason": "Issue 中通过打印 .query 发现 GROUP BY 子句中错误地包含了 RANDOM()，这是缺陷的直接证据。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "QuerySet 执行后返回的结果列表，特别是聚合值（rc）和对应的 id。",
+        "reason": "可以观察到聚合计数是否被错误拆分（返回多行重复结果），而不是正确的单行聚合结果。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证聚合查询在 order_by('?') 后，每个唯一 id 对应的聚合值（rc）是正确的总数，且结果集的行数等于唯一 id 的数量。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、包含随机生成的 RANDOM() 值的 SQL 字符串相等。避免断言结果的具体顺序。",
+        "reason": "缺陷的核心是聚合值错误，而非顺序。断言聚合值的正确性（例如计数总和）是稳定且与 Issue 对齐的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要创建具有一对多关系的简单模型（如 Thing 和 Related），并插入测试数据（一个 Thing 对应多个 Related）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应继承自 django.test.TestCase 以确保数据库事务支持。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否在所有数据库后端（SQLite, PostgreSQL, MySQL）上表现一致。",
+      "除了 Count，其他聚合函数（如 Sum, Avg）是否也会受此影响。",
+      "get_group_by 函数中处理 order_by 表达式的完整逻辑和边界条件。"
+    ]
+  }
+}

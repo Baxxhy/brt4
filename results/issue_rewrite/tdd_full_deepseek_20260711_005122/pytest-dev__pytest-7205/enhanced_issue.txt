@@ -1,0 +1,130 @@
+instance_id: pytest-dev__pytest-7205
+
+issue_summary: 当使用 --setup-show 选项且参数为 bytes 类型时，会触发 BytesWarning 异常。
+
+trigger_condition:
+{
+  "text": "使用 pytest 运行测试，启用 Python 的 -bb 选项（将 BytesWarning 视为错误），并使用 --setup-show 选项，同时测试函数通过 @pytest.mark.parametrize 装饰器参数化为 bytes 值。",
+  "evidence": [
+    "Issue 中提供的测试代码：@pytest.mark.parametrize('data', [b'Hello World'])",
+    "Issue 中描述的命令行：python3 -bb -m pytest --setup-show",
+    "Issue 中错误堆栈指向 _show_fixture_action 函数"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "在测试的 setup 阶段抛出 BytesWarning 异常，错误信息为 'str() on a bytes instance'。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中错误堆栈的最后一行：E           BytesWarning: str() on a bytes instance",
+    "Issue 中错误堆栈指向 src/_pytest/setuponly.py:69: BytesWarning"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "即使使用 -bb 选项和 --setup-show 选项，当参数化值为 bytes 类型时，测试的 setup 阶段应正常执行，不引发 BytesWarning 异常。",
+  "evidence": [
+    "Issue 中提问者的建议：'Shouldn't that be using saferepr or something rather than (implicitly) str()?'",
+    "相关测试代码表明 --setup-show 功能应正常显示参数化值，包括字符串参数。"
+  ],
+  "confidence": "medium"
+}
+
+target_apis:
+[
+  {
+    "name": "_show_fixture_action",
+    "kind": "function",
+    "source_path": "src/_pytest/setuponly.py",
+    "reason": "错误堆栈直接指向此函数，它负责在 --setup-show 模式下显示 fixture 信息，并在其中尝试格式化 fixturedef.cached_param。"
+  },
+  {
+    "name": "FixtureDef",
+    "kind": "class",
+    "source_path": "src/_pytest/fixtures.py",
+    "reason": "Issue 中错误堆栈显示 _show_fixture_action 函数访问了 fixturedef.cached_param 属性。"
+  },
+  {
+    "name": "parametrize",
+    "kind": "method",
+    "source_path": "src/_pytest/python.py",
+    "reason": "Issue 中触发 bug 的测试使用了 @pytest.mark.parametrize 装饰器，该方法负责处理参数化。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中使用字符串（如 'foo', 'bar'）作为参数化值。",
+    "target_pattern": "将参数化值改为 bytes 类型（如 b'Hello World'）。",
+    "reason": "Issue 表明 bytes 类型的参数化值在 --setup-show 模式下会导致隐式调用 str() 并触发 BytesWarning。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "相似测试中运行 pytest 时可能未启用 Python 的 -bb 选项。",
+    "target_pattern": "在运行 pytest 时启用 Python 的 -bb 选项（将 BytesWarning 视为错误）。",
+    "reason": "Issue 中触发错误需要 -bb 选项将 BytesWarning 升级为异常。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "在运行测试时捕获 BytesWarning 异常（或任何异常）。",
+    "reason": "Issue 的核心错误现象是 BytesWarning 异常被抛出。"
+  },
+  {
+    "kind": "warning",
+    "expression_hint": "在测试运行期间观察是否有 BytesWarning 产生（即使未升级为异常）。",
+    "reason": "即使没有 -bb 选项，也可能产生 BytesWarning，这有助于诊断问题。"
+  },
+  {
+    "kind": "repr",
+    "expression_hint": "观察 fixturedef.cached_param 的值和类型，以及尝试对其调用 str() 或 format() 的结果。",
+    "reason": "Issue 表明问题在于对 bytes 类型的 cached_param 进行了隐式的字符串格式化。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证在启用 -bb 和 --setup-show 选项，且参数为 bytes 类型时，测试运行不引发 BytesWarning 或其他异常。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言完整的输出字符串内容，因为修复可能改变 bytes 的显示格式（例如使用 saferepr）。",
+    "reason": "Issue 的核心是异常被触发，因此断言不引发异常是直接且稳定的验证方式。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "使用 testdir fixture 来创建和运行测试文件。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要模拟在子进程中运行 pytest 并传递 -bb 命令行选项给 Python 解释器。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "使用 @pytest.mark.parametrize 装饰器，并将 bytes 值作为参数。",
+    "source": "issue",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "fixturedef.cached_param 在何种情况下被设置为 bytes 值，以及其确切的数据流来源。",
+  "修复方案是否确实使用 saferepr 或其他安全表示方法，以及修复后 bytes 参数的预期显示格式。",
+  "除了参数化的 bytes 值，其他 bytes 类型的 fixture 或测试数据是否也会触发相同问题。"
+]

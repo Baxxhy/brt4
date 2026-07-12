@@ -1,0 +1,140 @@
+```json
+{
+    "issue_summary": "使用 cross_val_predict(method='predict_proba') 与 MultiOutputClassifier 时出现 AttributeError，因为代码错误地访问了 MultiOutputClassifier 的 classes_ 属性。",
+    "trigger_condition": {
+        "text": "使用 MultiOutputClassifier 包装一个支持 predict_proba 的基分类器（如 LinearDiscriminantAnalysis），然后调用 cross_val_predict 并设置 method='predict_proba'。",
+        "evidence": ["Issue 的 Steps/Code to Reproduce 部分提供了完整的触发代码。", "源码片段 2 显示 cross_val_predict 函数有一个 method 参数，当 method 为 'predict_proba' 时会触发编码逻辑。", "Issue 描述指出问题出现在访问 estimator.classes_ 时。"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "抛出 AttributeError: 'MultiOutputClassifier' object has no attribute 'classes_'。",
+        "symptom_type": "exception",
+        "evidence": ["Issue 的 Actual Results 部分显示了确切的错误信息。", "Issue 描述推测问题在于错误地访问了 MultiOutputClassifier.classes_ 而不是其内部 estimators_[i].classes_。"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "cross_val_predict 应能成功调用 MultiOutputClassifier 的 predict_proba 方法，并返回预测概率数组。",
+        "evidence": ["Issue 的 Expected Results 部分说明期望结果是概率数组。", "源码片段 3 显示 MultiOutputClassifier 确实实现了 predict_proba 方法，并返回每个输出的概率列表。", "相关测试 1 和 2 表明 cross_val_predict 与 predict_proba 方法可以用于多标签分类场景。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "cross_val_predict",
+            "kind": "function",
+            "source_path": "sklearn/model_selection/_validation.py",
+            "reason": "Issue 的核心是调用此函数时触发的错误。"
+        },
+        {
+            "name": "MultiOutputClassifier",
+            "kind": "class",
+            "source_path": "sklearn/multioutput.py",
+            "reason": "Issue 中导致错误的包装器类。"
+        },
+        {
+            "name": "MultiOutputClassifier.predict_proba",
+            "kind": "method",
+            "source_path": "sklearn/multioutput.py",
+            "reason": "Issue 中期望被调用的方法，也是 cross_val_predict 的 method 参数目标。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "sklearn/model_selection/_validation.py",
+            "object": "cross_val_predict",
+            "lines": "857-866",
+            "reason": "Issue 描述明确指出了问题可能出现在该行号范围，涉及对 estimator.classes_ 的访问。虽然检索的源码片段 2 未包含该精确行号，但 Issue 提供了链接。"
+        },
+        {
+            "path": "sklearn/multioutput.py",
+            "object": "MultiOutputClassifier",
+            "lines": "",
+            "reason": "MultiOutputClassifier 没有 classes_ 属性，但其内部 estimators_ 列表中的每个估计器可能有。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_cross_val_predict_with_method_multilabel_rf",
+            "test_file": "sklearn/model_selection/tests/test_validation.py",
+            "why_relevant": "该测试使用 RandomForest 测试了 cross_val_predict 与 predict_proba 在多标签分类场景下的工作，场景与 Issue 相似。",
+            "reusable_parts": ["使用 make_multilabel_classification 生成数据", "调用 cross_val_predict 并设置 method='predict_proba'", "使用 check_cross_val_predict_multilabel 辅助函数"],
+            "possible_gap": "该测试使用的基分类器（RFWithDecisionFunction）可能本身具有 classes_ 属性，或者测试逻辑绕过了对 MultiOutputClassifier.classes_ 的直接访问。"
+        },
+        {
+            "test_name": "test_multi_output_predict_proba",
+            "test_file": "sklearn/tests/test_multioutput.py",
+            "why_relevant": "该测试直接测试了 MultiOutputClassifier 的 predict_proba 方法，验证了其正确调用内部估计器的 predict_proba。",
+            "reusable_parts": ["MultiOutputClassifier 的构造和拟合", "直接调用 predict_proba 方法", "对不支持 predict_proba 的基分类器抛出 ValueError 的断言"],
+            "possible_gap": "该测试没有结合 cross_val_predict 使用，因此没有触发 cross_val_predict 内部的编码逻辑和 classes_ 属性访问。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "object_state",
+            "current_pattern": "相关测试 1 使用 RFWithDecisionFunction（可能具有 classes_ 属性）或 OneVsRestClassifier（可能具有 classes_ 属性）。",
+            "target_pattern": "使用 MultiOutputClassifier 包装一个支持 predict_proba 但本身没有 classes_ 属性的基分类器（如 LinearDiscriminantAnalysis）。",
+            "reason": "MultiOutputClassifier 本身没有 classes_ 属性，但 cross_val_predict 内部逻辑可能错误地假设传入的 estimator 有 classes_ 属性。",
+            "confidence": "high"
+        },
+        {
+            "slot": "call_chain",
+            "current_pattern": "相关测试 1 和 2 可能通过辅助函数（如 check_cross_val_predict_multilabel）间接调用 cross_val_predict，内部逻辑可能处理了属性访问。",
+            "target_pattern": "直接调用 cross_val_predict(estimator=MultiOutputClassifier(...), method='predict_proba')，不经过可能隐藏问题的包装。",
+            "reason": "直接调用能更准确地复现用户代码路径，暴露 cross_val_predict 内部对 estimator.classes_ 的直接访问。",
+            "confidence": "medium"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "exception",
+            "expression_hint": "调用 cross_val_predict(method='predict_proba') 时是否抛出 AttributeError 及其消息。",
+            "reason": "Issue 的核心错误现象就是 AttributeError，观测此异常是判断缺陷是否触发的直接方式。"
+        },
+        {
+            "kind": "return_value",
+            "expression_hint": "如果调用成功，观察返回值的类型和形状，是否为概率数组或列表。",
+            "reason": "Issue 期望返回概率数组，观测返回值可以验证修复后的正确行为。"
+        },
+        {
+            "kind": "type",
+            "expression_hint": "在 cross_val_predict 内部，观察 estimator 的类型以及是否具有 classes_ 属性。",
+            "reason": "缺陷根源在于对 estimator 类型的假设错误，观测其属性能帮助定位问题。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "使用 MultiOutputClassifier 和 method='predict_proba' 调用 cross_val_predict 不应抛出 AttributeError。",
+            "preferred_assertion_style": "raises",
+            "avoid": "断言完整的错误消息字符串，因为消息可能因版本或实现细节而微调。",
+            "reason": "Issue 的核心是 AttributeError 异常，修复后该异常应消失。使用 pytest.raises 并匹配错误类型是合适的，但最终修复后应不再抛出异常。"
+        },
+        {
+            "assertion_goal": "cross_val_predict 调用应成功并返回与 MultiOutputClassifier.predict_proba 输出结构兼容的结果（如概率列表）。",
+            "preferred_assertion_style": "isinstance",
+            "avoid": "断言返回值的精确数值，因为随机性可能导致变化。",
+            "reason": "修复后，函数应正常返回，且返回值类型应与 predict_proba 方法文档描述一致（列表或数组）。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要使用 make_multilabel_classification 生成多标签分类数据。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要构造 MultiOutputClassifier 实例，并传入一个支持 predict_proba 的基分类器（如 LinearDiscriminantAnalysis 或 LogisticRegression）。",
+            "source": "issue",
+            "confidence": "high"
+        },
+        {
+            "hint": "可能需要使用 pytest 的异常断言上下文管理器。",
+            "source": "retrieved_test",
+            "confidence": "medium"
+        }
+    ],
+    "uncertainties": [
+        "cross_val_predict 内部具体哪一行代码（Issue 提到的 857-866 行）直接访问了 estimator.classes_，以及其上下文逻辑。",
+        "MultiOutputClassifier 的内部估计器（如 LinearDiscriminantAnalysis）是否都有 classes_ 属性，或者这是否是问题的必要条件。",
+        "修复方案是修改 cross_val_predict 以正确处理 MultiOutputClassifier，还是修改 MultiOutputClassifier 以暴露一个 classes_ 属性。"
+    ]
+}
+```

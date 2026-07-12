@@ -1,0 +1,444 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+LassoLarsIC: unintuitive copy_X behaviour
+Hi, I would like to report what seems to be a bug in the treatment of the `copy_X` parameter of the `LassoLarsIC` class. Because it's a simple bug, it's much easier to see in the code directly than in the execution, so I am not posting steps to reproduce it.
+
+As you can see here, LassoLarsIC accepts a copy_X parameter.
+https://github.com/scikit-learn/scikit-learn/blob/7389dbac82d362f296dc2746f10e43ffa1615660/sklearn/linear_model/least_angle.py#L1487
+
+However, it also takes a copy_X parameter a few lines below, in the definition of ```fit```.
+    ```def fit(self, X, y, copy_X=True):```
+
+Now there are two values (potentially contradicting each other) for copy_X and each one is used once. Therefore ```fit``` can have a mixed behaviour. Even worse, this can be completely invisible to the user, since copy_X has a default value of True. Let's assume that I'd like it to be False, and have set it to False in the initialization, `my_lasso = LassoLarsIC(copy_X=False)`. I then call ```my_lasso.fit(X, y)``` and my choice will be silently overwritten. 
+
+Ideally I think that copy_X should be removed as an argument in ```fit```. No other estimator seems to have a duplication in class parameters and fit arguments (I've checked more than ten in the linear models module). However, this would break existing code. Therefore I propose that ```fit``` takes a default value of `None` and only overwrites the existing value if the user has explicitly passed it as an argument to ```fit```. I will submit a PR to that effect.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sklearn/linear_model/least_angle.py
+对象名称：LassoLarsIC
+节点类型：class
+父节点：least_angle
+行号范围：1351-1546
+代码：
+class LassoLarsIC(LassoLars):
+    """Lasso model fit with Lars using BIC or AIC for model selection
+
+    The optimization objective for Lasso is::
+
+    (1 / (2 * n_samples)) * ||y - Xw||^2_2 + alpha * ||w||_1
+
+    AIC is the Akaike information criterion and BIC is the Bayes
+    Information criterion. Such criteria are useful to select the value
+    of the regularization parameter by making a trade-off between the
+    goodness of fit and the complexity of the model. A good model should
+    explain well the data while being simple.
+
+    Read more in the :ref:`User Guide <least_angle_regression>`.
+
+    Parameters
+    ----------
+    criterion : 'bic' | 'aic'
+        The type of criterion to use.
+
+    fit_intercept : boolean
+        whether to calculate the intercept for this model. If set
+        to false, no intercept will be used in calculations
+        (e.g. data is expected to be already centered).
+
+    verbose : boolean or integer, optional
+        Sets the verbosity amount
+
+    normalize : boolean, optional, default True
+        This parameter is ignored when ``fit_intercept`` is set to False.
+        If True, the regressors X will be normalized before regression by
+        subtracting the mean and dividing by the l2-norm.
+        If you wish to standardize, please use
+        :class:`sklearn.preprocessing.StandardScaler` before calling ``fit``
+        on an estimator with ``normalize=False``.
+
+    precompute : True | False | 'auto' | array-like
+        Whether to use a precomputed Gram matrix to speed up
+        calculations. If set to ``'auto'`` let us decide. The Gram
+        matrix can also be passed as argument.
+
+    max_iter : integer, optional
+        Maximum number of iterations to perform. Can be used for
+        early stopping.
+
+    eps : float, optional
+        The machine-precision regularization in the computation of the
+        Cholesky diagonal factors. Increase this for very ill-conditioned
+        systems. Unlike the ``tol`` parameter in some iterative
+        optimization-based algorithms, this parameter does not control
+        the tolerance of the optimization.
+
+    copy_X : boolean, optional, default True
+        If True, X will be copied; else, it may be overwritten.
+
+    positive : boolean (default=False)
+        Restrict coefficients to be >= 0. Be aware that you might want to
+        remove fit_intercept which is set True by default.
+        Under the positive restriction the model coefficients do not converge
+        to the ordinary-least-squares solution for small values of alpha.
+        Only coefficients up to the smallest alpha value (``alphas_[alphas_ >
+        0.].min()`` when fit_path=True) reached by the stepwise Lars-Lasso
+        algorithm are typically in congruence with the solution of the
+        coordinate descent Lasso estimator.
+        As a consequence using LassoLarsIC only makes sense for problems where
+        a sparse solution is expected and/or reached.
+
+
+    Attributes
+    ----------
+    coef_ : array, shape (n_features,)
+        parameter vector (w in the formulation formula)
+
+    intercept_ : float
+        independent term in decision function.
+
+    alpha_ : float
+        the alpha parameter chosen by the information criterion
+
+    n_iter_ : int
+        number of iterations run by lars_path to find the grid of
+        alphas.
+
+    criterion_ : array, shape (n_alphas,)
+        The value of the information criteria ('aic', 'bic') across all
+        alphas. The alpha which has the smallest information criterion is
+        chosen. This value is larger by a factor of ``n_samples`` compared to
+        Eqns. 2.15 and 2.16 in (Zou et al, 2007).
+
+
+    Examples
+    --------
+    >>> from sklearn import linear_model
+    >>> reg = linear_model.LassoLarsIC(criterion='bic')
+    >>> reg.fit([[-1, 1], [0, 0], [1, 1]], [-1.1111, 0, -1.1111])
+    ... # doctest: +ELLIPSIS, +NORMALIZE_WHITESPACE
+    LassoLarsIC(copy_X=True, criterion='bic', eps=..., fit_intercept=True,
+          max_iter=500, normalize=True, positive=False, precompute='auto',
+          verbose=False)
+    >>> print(reg.coef_) # doctest: +ELLIPSIS, +NORMALIZE_WHITESPACE
+    [ 0.  -1.11...]
+
+    Notes
+    -----
+    The estimation of the number of degrees of freedom is given by:
+
+    "On the degrees of freedom of the lasso"
+    Hui Zou, Trevor Hastie, and Robert Tibshirani
+    Ann. Statist. Volume 35, Number 5 (2007), 2173-2192.
+
+    https://en.wikipedia.org/wiki/Akaike_information_criterion
+    https://en.wikipedia.org/wiki/Bayesian_information_criterion
+
+    See also
+    --------
+    lars_path, LassoLars, LassoLarsCV
+    """
+    def __init__(self, criterion='aic', fit_intercept=True, verbose=False,
+                 normalize=True, precompute='auto', max_iter=500,
+                 eps=np.finfo(np.float).eps, copy_X=True, positive=False):
+    def fit(self, X, y, copy_X=True):
+
+
+【源码片段 2】
+文件路径：sklearn/linear_model/least_angle.py
+对象名称：fit
+节点类型：class_function
+父节点：LassoLarsIC
+行号范围：1482-1546
+代码：
+    def fit(self, X, y, copy_X=True):
+        """Fit the model using X, y as training data.
+
+        Parameters
+        ----------
+        X : array-like, shape (n_samples, n_features)
+            training data.
+
+        y : array-like, shape (n_samples,)
+            target values. Will be cast to X's dtype if necessary
+
+        copy_X : boolean, optional, default True
+            If ``True``, X will be copied; else, it may be overwritten.
+
+        Returns
+        -------
+        self : object
+            returns an instance of self.
+        """
+        X, y = check_X_y(X, y, y_numeric=True)
+
+        X, y, Xmean, ymean, Xstd = LinearModel._preprocess_data(
+            X, y, self.fit_intercept, self.normalize, self.copy_X)
+        max_iter = self.max_iter
+
+        Gram = self.precompute
+
+        alphas_, active_, coef_path_, self.n_iter_ = lars_path(
+            X, y, Gram=Gram, copy_X=copy_X, copy_Gram=True, alpha_min=0.0,
+            method='lasso', verbose=self.verbose, max_iter=max_iter,
+            eps=self.eps, return_n_iter=True, positive=self.positive)
+
+        n_samples = X.shape[0]
+
+        if self.criterion == 'aic':
+            K = 2  # AIC
+        elif self.criterion == 'bic':
+            K = log(n_samples)  # BIC
+        else:
+            raise ValueError('criterion should be either bic or aic')
+
+        R = y[:, np.newaxis] - np.dot(X, coef_path_)  # residuals
+        mean_squared_error = np.mean(R ** 2, axis=0)
+        sigma2 = np.var(y)
+
+        df = np.zeros(coef_path_.shape[1], dtype=np.int)  # Degrees of freedom
+        for k, coef in enumerate(coef_path_.T):
+            mask = np.abs(coef) > np.finfo(coef.dtype).eps
+            if not np.any(mask):
+                continue
+            # get the number of degrees of freedom equal to:
+            # Xc = X[:, mask]
+            # Trace(Xc * inv(Xc.T, Xc) * Xc.T) ie the number of non-zero coefs
+            df[k] = np.sum(mask)
+
+        self.alphas_ = alphas_
+        eps64 = np.finfo('float64').eps
+        self.criterion_ = (n_samples * mean_squared_error / (sigma2 + eps64) +
+                           K * df)  # Eqns. 2.15--16 in (Zou et al, 2007)
+        n_best = np.argmin(self.criterion_)
+
+        self.alpha_ = alphas_[n_best]
+        self.coef_ = coef_path_[:, n_best]
+        self._set_intercept(Xmean, ymean, Xstd)
+        return self
+
+
+【源码片段 3】
+文件路径：examples/exercises/plot_iris_exercise.py
+对象名称：X
+节点类型：global_var
+父节点：plot_iris_exercise
+行号范围：19-19
+代码：
+X = iris.data
+
+
+【源码片段 4】
+文件路径：examples/exercises/plot_iris_exercise.py
+对象名称：y
+节点类型：global_var
+父节点：plot_iris_exercise
+行号范围：20-20
+代码：
+y = iris.target
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sklearn/linear_model/tests/test_least_angle.py
+测试名称：test_lasso_lars_ic
+测试代码：
+def test_lasso_lars_ic():
+    # Test the LassoLarsIC object by checking that
+    # - some good features are selected.
+    # - alpha_bic > alpha_aic
+    # - n_nonzero_bic < n_nonzero_aic
+    lars_bic = linear_model.LassoLarsIC('bic')
+    lars_aic = linear_model.LassoLarsIC('aic')
+    rng = np.random.RandomState(42)
+    X = diabetes.data
+    y = diabetes.target
+    X = np.c_[X, rng.randn(X.shape[0], 5)]  # add 5 bad features
+    lars_bic.fit(X, y)
+    lars_aic.fit(X, y)
+    nonzero_bic = np.where(lars_bic.coef_)[0]
+    nonzero_aic = np.where(lars_aic.coef_)[0]
+    assert_greater(lars_bic.alpha_, lars_aic.alpha_)
+    assert_less(len(nonzero_bic), len(nonzero_aic))
+    assert_less(np.max(nonzero_bic), diabetes.data.shape[1])
+
+    # test error on unknown IC
+    lars_broken = linear_model.LassoLarsIC('<unknown>')
+    assert_raises(ValueError, lars_broken.fit, X, y)
+
+【相关测试 2】
+测试文件：sklearn/linear_model/tests/test_coordinate_descent.py
+测试名称：test_enet_copy_X_True
+测试代码：
+@pytest.mark.parametrize("check_input", [True, False])
+def test_enet_copy_X_True(check_input):
+    X, y, _, _ = build_dataset()
+    X = X.copy(order='F')
+
+    original_X = X.copy()
+    enet = ElasticNet(copy_X=True)
+    enet.fit(X, y, check_input=check_input)
+
+    assert_array_equal(original_X, X)
+
+【相关测试 3】
+测试文件：sklearn/linear_model/tests/test_coordinate_descent.py
+测试名称：test_enet_copy_X_False_check_input_False
+测试代码：
+def test_enet_copy_X_False_check_input_False():
+    X, y, _, _ = build_dataset()
+    X = X.copy(order='F')
+
+    original_X = X.copy()
+    enet = ElasticNet(copy_X=False)
+    enet.fit(X, y, check_input=False)
+
+    # No copying, X is overwritten
+    assert np.any(np.not_equal(original_X, X))
+
+【相关测试 4】
+测试文件：sklearn/preprocessing/tests/test_data.py
+测试名称：test_scaler_without_copy
+测试代码：
+def test_scaler_without_copy():
+    # Check that StandardScaler.fit does not change input
+    rng = np.random.RandomState(42)
+    X = rng.randn(4, 5)
+    X[:, 0] = 0.0  # first feature is always of zero
+    X_csr = sparse.csr_matrix(X)
+    X_csc = sparse.csc_matrix(X)
+
+    X_copy = X.copy()
+    StandardScaler(copy=False).fit(X)
+    assert_array_equal(X, X_copy)
+
+    X_csr_copy = X_csr.copy()
+    StandardScaler(with_mean=False, copy=False).fit(X_csr)
+    assert_array_equal(X_csr.toarray(), X_csr_copy.toarray())
+
+    X_csc_copy = X_csc.copy()
+    StandardScaler(with_mean=False, copy=False).fit(X_csc)
+    assert_array_equal(X_csc.toarray(), X_csc_copy.toarray())
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

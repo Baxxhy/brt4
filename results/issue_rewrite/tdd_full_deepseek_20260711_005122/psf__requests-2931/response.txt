@@ -1,0 +1,129 @@
+{
+  "issue_summary": "使用二进制数据负载的请求因调用 to_native_string 而失败。",
+  "trigger_condition": {
+    "text": "使用 requests.put 发送一个编码为字节（bytes）的字符串作为 data 参数。",
+    "evidence": ["Issue 中代码：requests.put(\"http://httpbin.org/put\", data=u\"ööö\".encode(\"utf-8\"))", "Issue 描述指出在 2.9 版本中失败。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "请求失败，可能抛出异常。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 标题 \"Request with binary payload fails\" 和描述 \"This works with 2.8.1, but not with 2.9.\" 表明在 2.9 版本中操作失败。"],
+    "confidence": "medium"
+  },
+  "expected_behavior": {
+    "text": "requests.put 应能成功发送字节（bytes）类型的数据负载。",
+    "evidence": ["Issue 指出该操作在 2.8.1 版本中正常工作。", "相关测试 2 和 3 表明 requests 库支持发送 bytes 和 bytearray 对象。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "requests.put",
+      "kind": "function",
+      "source_path": "requests/api.py",
+      "reason": "Issue 中触发 bug 的直接 API 调用。"
+    },
+    {
+      "name": "requests.request",
+      "kind": "function",
+      "source_path": "",
+      "reason": "api.py 中的 put 函数调用了 request 函数。"
+    },
+    {
+      "name": "to_native_string",
+      "kind": "function",
+      "source_path": "requests/utils.py",
+      "reason": "Issue 标题和源码片段 2 表明此函数可能与处理二进制数据失败有关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "requests/utils.py",
+      "object": "to_native_string",
+      "lines": "686-702",
+      "reason": "Issue 标题直接提及此函数，且其代码处理字符串编码/解码，可能与字节输入不兼容有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "TestRequests.test_HTTP_200_OK_PUT",
+      "test_file": "test_requests.py",
+      "why_relevant": "这是针对 PUT 请求的基本测试，提供了调用 requests.put 的框架。",
+      "reusable_parts": ["测试类结构", "httpbin fixture 使用", "requests.put 调用", "assert 状态码"],
+      "possible_gap": "它没有使用字节数据作为负载。"
+    },
+    {
+      "test_name": "TestRequests.test_can_send_bytes_bytearray_objects_with_files",
+      "test_file": "test_requests.py",
+      "why_relevant": "它测试了 requests 库发送 bytes 和 bytearray 对象的能力，与 Issue 中发送字节数据相关。",
+      "reusable_parts": ["bytes 和 bytearray 对象的构造", "requests.Request 的创建和准备", "assert 检查 Content-Type"],
+      "possible_gap": "它是在 files 参数中发送 bytes，而不是在 data 参数中。"
+    },
+    {
+      "test_name": "TestRequests.test_params_bytes_are_encoded",
+      "test_file": "test_requests.py",
+      "why_relevant": "它测试了 bytes 类型作为 params 参数的处理，涉及对字节数据的编码。",
+      "reusable_parts": ["bytes 输入的使用", "requests.Request 的创建和准备", "assert 检查 URL"],
+      "possible_gap": "它测试的是 params 参数，而不是 data 参数。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "相似测试中 data 参数使用字符串或字典。",
+      "target_pattern": "将 data 参数设置为字节对象，例如 b'...' 或 .encode('utf-8') 的结果。",
+      "reason": "Issue 表明使用字节数据作为 data 参数会触发失败。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "测试直接调用 requests.put 或 requests.Request。",
+      "target_pattern": "保持调用 requests.put，但传入字节数据。",
+      "reason": "Issue 中的失败案例是通过 requests.put 调用的。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "requests.put(...) 调用是否引发异常及其类型和消息。",
+      "reason": "Issue 表明请求失败，可能抛出异常，这是最直接的错误信号。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "在请求准备过程中，data 参数或其转换后值的类型。",
+      "reason": "bug 可能与 to_native_string 函数对字节类型的处理有关。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "请求的响应状态码或响应体。",
+      "reason": "如果请求成功，应返回正常响应；失败则可能没有响应或返回错误。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "使用字节数据作为 data 参数的 PUT 请求应成功完成（例如，返回 2xx 状态码）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的响应体内容或特定的异常消息字符串。",
+      "reason": "Issue 的核心是功能是否正常工作，而非具体的输出内容。断言状态码是稳定且与 Issue 相关的。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "可能需要 httpbin fixture 来模拟接收 PUT 请求的端点。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能需要导入 requests 模块。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "失败时抛出的具体异常类型和消息是什么？",
+    "to_native_string 函数在请求处理流程中的确切调用位置和上下文是什么？",
+    "除了 data 参数为字节外，是否还需要特定的 headers 或配置来触发 bug？",
+    "bug 是否也影响其他 HTTP 方法（如 POST）或其他类型的二进制输入？"
+  ]
+}

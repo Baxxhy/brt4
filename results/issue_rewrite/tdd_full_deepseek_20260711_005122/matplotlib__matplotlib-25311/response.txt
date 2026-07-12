@@ -1,0 +1,127 @@
+{
+  "issue_summary": "无法对设置了可拖拽图例的图形进行 pickle 序列化。",
+  "trigger_condition": {
+    "text": "创建一个图形，添加图例，并调用 `legend.set_draggable(True)` 使其可拖拽，然后尝试 pickle 序列化该图形。",
+    "evidence": ["Issue 中的代码示例：`leg=ax.legend()` 和 `leg.set_draggable(True)` 后调用 `pickle.dumps(fig)`。", "Issue 描述：'Unable to pickle figure with draggable legend'。", "相关测试 test_legend_draggable 和 test_get_set_draggable 展示了设置 draggable 属性的模式。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "尝试 pickle 序列化时抛出 TypeError: cannot pickle 'FigureCanvasQTAgg' object。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 中的 'Actual outcome': `TypeError: cannot pickle 'FigureCanvasQTAgg' object`。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "对设置了可拖拽图例的图形进行 pickle 序列化应该成功，不抛出异常。",
+    "evidence": ["Issue 中的 'Expected outcome': 'Pickling successful'。", "相关测试 test_simple 和 test_gcf 展示了正常图形（未设置可拖拽图例）可以成功 pickle 序列化。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "matplotlib.figure.Figure",
+      "kind": "class",
+      "source_path": "",
+      "reason": "Issue 中 pickle 的目标对象是 fig。"
+    },
+    {
+      "name": "matplotlib.axes.Axes.legend",
+      "kind": "method",
+      "source_path": "lib/matplotlib/legend.py",
+      "reason": "用于创建图例。"
+    },
+    {
+      "name": "matplotlib.legend.Legend.set_draggable",
+      "kind": "method",
+      "source_path": "lib/matplotlib/legend.py",
+      "reason": "Issue 中触发 bug 的关键调用，使图例可拖拽。"
+    },
+    {
+      "name": "pickle.dumps",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 中用于序列化的函数。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "lib/matplotlib/legend.py",
+      "object": "Legend.set_draggable",
+      "lines": "1173-1205",
+      "reason": "该方法创建了 DraggableLegend 对象，可能引入了不可 pickle 的属性或引用（如与 GUI 后端相关的对象）。"
+    },
+    {
+      "path": "lib/matplotlib/backends/backend_qtagg.py",
+      "object": "FigureCanvasQTAgg",
+      "lines": "16-76",
+      "reason": "错误信息直接提到了 'FigureCanvasQTAgg' 对象，表明序列化失败可能与该后端画布对象或其关联有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_simple",
+      "test_file": "lib/matplotlib/tests/test_pickle.py",
+      "why_relevant": "该测试验证了基本图形和包含图例的图形的 pickle 序列化能力，提供了 pickle 测试的框架和断言模式。",
+      "reusable_parts": ["imports (pickle, BytesIO)", "使用 plt.figure() 和 plt.subplot() 创建图形和坐标轴", "使用 pickle.dump 进行序列化的调用模式", "使用 BytesIO 作为序列化目标的模式"],
+      "possible_gap": "该测试没有设置图例为可拖拽（draggable），因此不会触发当前 Issue 中的错误。"
+    },
+    {
+      "test_name": "test_legend_draggable",
+      "test_file": "lib/matplotlib/tests/test_legend.py",
+      "why_relevant": "该测试专门测试了图例的 draggable 属性设置和获取，提供了创建可拖拽图例的代码模式。",
+      "reusable_parts": ["使用 ax.plot 和 ax.legend 创建图例", "使用 draggable 参数或 set_draggable 方法设置可拖拽属性", "使用 assert 验证 draggable 状态"],
+      "possible_gap": "该测试不涉及 pickle 序列化操作，因此无法复现序列化错误。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试 test_simple 中创建的图例是默认的（不可拖拽）。",
+      "target_pattern": "在 pickle 序列化之前，将图例的状态设置为可拖拽（通过 `legend.set_draggable(True)` 或 `ax.legend(draggable=True)`）。",
+      "reason": "Issue 明确指出，在设置 draggable=True 后 pickle 失败，而移除该行则成功。因此，将图例状态变异为可拖拽是触发缺陷的关键。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "调用 `pickle.dumps(fig)` 或 `pickle.dump(fig, buffer)` 时是否抛出 TypeError。",
+      "reason": "Issue 的核心错误是序列化时抛出 TypeError，观测此调用点可以直接判断缺陷是否被触发。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "图例对象的 `_draggable` 属性或其内部状态（例如 `legend._draggable` 的类型或内容）。",
+      "reason": "设置 draggable 可能引入了不可序列化的对象（如 DraggableLegend），观测此属性有助于理解序列化失败的原因。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "对设置了可拖拽图例的图形进行 pickle 序列化操作不应抛出异常。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言完整的 pickle 字节流内容或反序列化后对象的完全相等，因为修复可能涉及内部状态调整。",
+      "reason": "Issue 的期望是序列化成功（无异常）。使用 `pytest.raises` 来验证没有 TypeError 抛出，这与 expected_behavior 一致。修复后，raises 断言应失败（即无异常）。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 BytesIO 作为 pickle 序列化的内存缓冲区，避免文件 I/O。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要导入 pickle 和 matplotlib.pyplot (as plt)。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试应在不依赖特定 GUI 后端的环境下运行，因为 pickle 问题可能涉及后端对象。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "错误是否只发生在特定的后端（如 Qt）？Issue 提到了 FigureCanvasQTAgg，但未指定后端。",
+    "DraggableLegend 对象内部具体哪个属性或引用导致了不可 pickle？",
+    "除了图例，其他可拖拽对象（如注释）是否也有相同问题？Issue 提到 'Same error comes for draggable annotations'，但未提供代码。",
+    "修复后的正确行为是否意味着 `_draggable` 属性在序列化时被忽略、设为 None 还是以其他方式处理？"
+  ]
+}

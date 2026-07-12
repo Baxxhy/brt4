@@ -1,0 +1,602 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Rational calc value error
+python 3.11, sympy 1.11.1
+when calc Rational('0.5', '100'), the value is 1/100100; but Rational(0.5, 100) the value is 1/200, this value is the true value, and the version of sympy 1.8 is normal
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/core/numbers.py
+对象名称：Rational
+节点类型：class
+父节点：numbers
+行号范围：1483-2043
+代码：
+class Rational(Number):
+    """Represents rational numbers (p/q) of any size.
+
+    Examples
+    ========
+
+    >>> from sympy import Rational, nsimplify, S, pi
+    >>> Rational(1, 2)
+    1/2
+
+    Rational is unprejudiced in accepting input. If a float is passed, the
+    underlying value of the binary representation will be returned:
+
+    >>> Rational(.5)
+    1/2
+    >>> Rational(.2)
+    3602879701896397/18014398509481984
+
+    If the simpler representation of the float is desired then consider
+    limiting the denominator to the desired value or convert the float to
+    a string (which is roughly equivalent to limiting the denominator to
+    10**12):
+
+    >>> Rational(str(.2))
+    1/5
+    >>> Rational(.2).limit_denominator(10**12)
+    1/5
+
+    An arbitrarily precise Rational is obtained when a string literal is
+    passed:
+
+    >>> Rational("1.23")
+    123/100
+    >>> Rational('1e-2')
+    1/100
+    >>> Rational(".1")
+    1/10
+    >>> Rational('1e-2/3.2')
+    1/320
+
+    The conversion of other types of strings can be handled by
+    the sympify() function, and conversion of floats to expressions
+    or simple fractions can be handled with nsimplify:
+
+    >>> S('.[3]')  # repeating digits in brackets
+    1/3
+    >>> S('3**2/10')  # general expressions
+    9/10
+    >>> nsimplify(.3)  # numbers that have a simple form
+    3/10
+
+    But if the input does not reduce to a literal Rational, an error will
+    be raised:
+
+    >>> Rational(pi)
+    Traceback (most recent call last):
+    ...
+    TypeError: invalid input: pi
+
+
+    Low-level
+    ---------
+
+    Access numerator and denominator as .p and .q:
+
+    >>> r = Rational(3, 4)
+    >>> r
+    3/4
+    >>> r.p
+    3
+    >>> r.q
+    4
+
+    Note that p and q return integers (not SymPy Integers) so some care
+    is needed when using them in expressions:
+
+    >>> r.p/r.q
+    0.75
+
+    If an unevaluated Rational is desired, ``gcd=1`` can be passed and
+    this will keep common divisors of the numerator and denominator
+    from being eliminated. It is not possible, however, to leave a
+    negative value in the denominator.
+
+    >>> Rational(2, 4, gcd=1)
+    2/4
+    >>> Rational(2, -4, gcd=1).q
+    4
+
+    See Also
+    ========
+    sympy.core.sympify.sympify, sympy.simplify.simplify.nsimplify
+    """
+    is_real = True
+    is_integer = False
+    is_rational = True
+    is_number = True
+    __slots__ = ('p', 'q')
+    is_Rational = True
+    @cacheit
+    def __new__(cls, p, q=None, gcd=None):
+    def limit_denominator(self, max_denominator=1000000):
+    def __getnewargs__(self):
+    def _hashable_content(self):
+    def _eval_is_positive(self):
+    def _eval_is_zero(self):
+    def __neg__(self):
+    @_sympifyit('other', NotImplemented)
+    def __add__(self, other):
+    __radd__ = __add__
+    @_sympifyit('other', NotImplemented)
+    def __sub__(self, other):
+    @_sympifyit('other', NotImplemented)
+    def __rsub__(self, other):
+    @_sympifyit('other', NotImplemented)
+    def __mul__(self, other):
+    __rmul__ = __mul__
+    @_sympifyit('other', NotImplemented)
+    def __truediv__(self, other):
+    @_sympifyit('other', NotImplemented)
+    def __rtruediv__(self, other):
+    @_sympifyit('other', NotImplemented)
+    def __mod__(self, other):
+    @_sympifyit('other', NotImplemented)
+    def __rmod__(self, other):
+    def _eval_power(self, expt):
+    def _as_mpf_val(self, prec):
+    def _mpmath_(self, prec, rnd):
+    def __abs__(self):
+    def __int__(self):
+    def floor(self):
+    def ceiling(self):
+    def __floor__(self):
+    def __ceil__(self):
+    def __eq__(self, other):
+    def __ne__(self, other):
+    def _Rrel(self, other, attr):
+    def __gt__(self, other):
+    def __ge__(self, other):
+    def __lt__(self, other):
+    def __le__(self, other):
+    def __hash__(self):
+    def factors(self, limit=None, use_trial=True, use_rho=False,
+                use_pm1=False, verbose=False, visual=False):
+    @property
+    def numerator(self):
+    @property
+    def denominator(self):
+    @_sympifyit('other', NotImplemented)
+    def gcd(self, other):
+    @_sympifyit('other', NotImplemented)
+    def lcm(self, other):
+    def as_numer_denom(self):
+    def as_content_primitive(self, radical=False, clear=True):
+    def as_coeff_Mul(self, rational=False):
+    def as_coeff_Add(self, rational=False):
+
+
+【源码片段 2】
+文件路径：sympy/parsing/autolev/_antlr/autolevparser.py
+对象名称：__init__
+节点类型：class_function
+父节点：AutolevParser
+行号范围：295-299
+代码：
+    def __init__(self, input:TokenStream, output:TextIO = sys.stdout):
+        super().__init__(input, output)
+        self.checkVersion("4.11.1")
+        self._interp = ParserATNSimulator(self, self.atn, self.decisionsToDFA, self.sharedContextCache)
+        self._predicates = None
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/core/tests/test_numbers.py
+测试名称：test_Rational_new
+测试代码：
+def test_Rational_new():
+    """"
+    Test for Rational constructor
+    """
+    _test_rational_new(Rational)
+
+    n1 = S.Half
+    assert n1 == Rational(Integer(1), 2)
+    assert n1 == Rational(Integer(1), Integer(2))
+    assert n1 == Rational(1, Integer(2))
+    assert n1 == Rational(S.Half)
+    assert 1 == Rational(n1, n1)
+    assert Rational(3, 2) == Rational(S.Half, Rational(1, 3))
+    assert Rational(3, 1) == Rational(1, Rational(1, 3))
+    n3_4 = Rational(3, 4)
+    assert Rational('3/4') == n3_4
+    assert -Rational('-3/4') == n3_4
+    assert Rational('.76').limit_denominator(4) == n3_4
+    assert Rational(19, 25).limit_denominator(4) == n3_4
+    assert Rational('19/25').limit_denominator(4) == n3_4
+    assert Rational(1.0, 3) == Rational(1, 3)
+    assert Rational(1, 3.0) == Rational(1, 3)
+    assert Rational(Float(0.5)) == S.Half
+    assert Rational('1e2/1e-2') == Rational(10000)
+    assert Rational('1 234') == Rational(1234)
+    assert Rational('1/1 234') == Rational(1, 1234)
+    assert Rational(-1, 0) is S.ComplexInfinity
+    assert Rational(1, 0) is S.ComplexInfinity
+    # Make sure Rational doesn't lose precision on Floats
+    assert Rational(pi.evalf(100)).evalf(100) == pi.evalf(100)
+    raises(TypeError, lambda: Rational('3**3'))
+    raises(TypeError, lambda: Rational('1/2 + 2/3'))
+
+    # handle fractions.Fraction instances
+    try:
+        import fractions
+        assert Rational(fractions.Fraction(1, 2)) == S.Half
+    except ImportError:
+        pass
+
+    assert Rational(mpq(2, 6)) == Rational(1, 3)
+    assert Rational(PythonRational(2, 6)) == Rational(1, 3)
+
+    assert Rational(2, 4, gcd=1).q == 4
+    n = Rational(2, -4, gcd=1)
+    assert n.q == 4
+    assert n.p == -2
+
+【相关测试 2】
+测试文件：sympy/core/tests/test_numbers.py
+测试名称：test_powers_Rational
+测试代码：
+def test_powers_Rational():
+    """Test Rational._eval_power"""
+    # check infinity
+    assert S.Half ** S.Infinity == 0
+    assert Rational(3, 2) ** S.Infinity is S.Infinity
+    assert Rational(-1, 2) ** S.Infinity == 0
+    assert Rational(-3, 2) ** S.Infinity == zoo
+
+    # check Nan
+    assert Rational(3, 4) ** S.NaN is S.NaN
+    assert Rational(-2, 3) ** S.NaN is S.NaN
+
+    # exact roots on numerator
+    assert sqrt(Rational(4, 3)) == 2 * sqrt(3) / 3
+    assert Rational(4, 3) ** Rational(3, 2) == 8 * sqrt(3) / 9
+    assert sqrt(Rational(-4, 3)) == I * 2 * sqrt(3) / 3
+    assert Rational(-4, 3) ** Rational(3, 2) == - I * 8 * sqrt(3) / 9
+    assert Rational(27, 2) ** Rational(1, 3) == 3 * (2 ** Rational(2, 3)) / 2
+    assert Rational(5**3, 8**3) ** Rational(4, 3) == Rational(5**4, 8**4)
+
+    # exact root on denominator
+    assert sqrt(Rational(1, 4)) == S.Half
+    assert sqrt(Rational(1, -4)) == I * S.Half
+    assert sqrt(Rational(3, 4)) == sqrt(3) / 2
+    assert sqrt(Rational(3, -4)) == I * sqrt(3) / 2
+    assert Rational(5, 27) ** Rational(1, 3) == (5 ** Rational(1, 3)) / 3
+
+    # not exact roots
+    assert sqrt(S.Half) == sqrt(2) / 2
+    assert sqrt(Rational(-4, 7)) == I * sqrt(Rational(4, 7))
+    assert Rational(-3, 2)**Rational(-7, 3) == \
+        -4*(-1)**Rational(2, 3)*2**Rational(1, 3)*3**Rational(2, 3)/27
+    assert Rational(-3, 2)**Rational(-2, 3) == \
+        -(-1)**Rational(1, 3)*2**Rational(2, 3)*3**Rational(1, 3)/3
+    assert Rational(-3, 2)**Rational(-10, 3) == \
+        8*(-1)**Rational(2, 3)*2**Rational(1, 3)*3**Rational(2, 3)/81
+    assert abs(Pow(Rational(-2, 3), Rational(-7, 4)).n() -
+        Pow(Rational(-2, 3), Rational(-7, 4), evaluate=False).n()) < 1e-16
+
+    # negative integer power and negative rational base
+    assert Rational(-2, 3) ** Rational(-2, 1) == Rational(9, 4)
+
+    a = Rational(1, 10)
+    assert a**Float(a, 2) == Float(a, 2)**Float(a, 2)
+    assert Rational(-2, 3)**Symbol('', even=True) == \
+        Rational(2, 3)**Symbol('', even=True)
+
+【相关测试 3】
+测试文件：sympy/simplify/tests/test_simplify.py
+测试名称：test_nsimplify
+测试代码：
+def test_nsimplify():
+    x = Symbol("x")
+    assert nsimplify(0) == 0
+    assert nsimplify(-1) == -1
+    assert nsimplify(1) == 1
+    assert nsimplify(1 + x) == 1 + x
+    assert nsimplify(2.7) == Rational(27, 10)
+    assert nsimplify(1 - GoldenRatio) == (1 - sqrt(5))/2
+    assert nsimplify((1 + sqrt(5))/4, [GoldenRatio]) == GoldenRatio/2
+    assert nsimplify(2/GoldenRatio, [GoldenRatio]) == 2*GoldenRatio - 2
+    assert nsimplify(exp(pi*I*Rational(5, 3), evaluate=False)) == \
+        sympify('1/2 - sqrt(3)*I/2')
+    assert nsimplify(sin(pi*Rational(3, 5), evaluate=False)) == \
+        sympify('sqrt(sqrt(5)/8 + 5/8)')
+    assert nsimplify(sqrt(atan('1', evaluate=False))*(2 + I), [pi]) == \
+        sqrt(pi) + sqrt(pi)/2*I
+    assert nsimplify(2 + exp(2*atan('1/4')*I)) == sympify('49/17 + 8*I/17')
+    assert nsimplify(pi, tolerance=0.01) == Rational(22, 7)
+    assert nsimplify(pi, tolerance=0.001) == Rational(355, 113)
+    assert nsimplify(0.33333, tolerance=1e-4) == Rational(1, 3)
+    assert nsimplify(2.0**(1/3.), tolerance=0.001) == Rational(635, 504)
+    assert nsimplify(2.0**(1/3.), tolerance=0.001, full=True) == \
+        2**Rational(1, 3)
+    assert nsimplify(x + .5, rational=True) == S.Half + x
+    assert nsimplify(1/.3 + x, rational=True) == Rational(10, 3) + x
+    assert nsimplify(log(3).n(), rational=True) == \
+        sympify('109861228866811/100000000000000')
+    assert nsimplify(Float(0.272198261287950), [pi, log(2)]) == pi*log(2)/8
+    assert nsimplify(Float(0.272198261287950).n(3), [pi, log(2)]) == \
+        -pi/4 - log(2) + Rational(7, 4)
+    assert nsimplify(x/7.0) == x/7
+    assert nsimplify(pi/1e2) == pi/100
+    assert nsimplify(pi/1e2, rational=False) == pi/100.0
+    assert nsimplify(pi/1e-7) == 10000000*pi
+    assert not nsimplify(
+        factor(-3.0*z**2*(z**2)**(-2.5) + 3*(z**2)**(-1.5))).atoms(Float)
+    e = x**0.0
+    assert e.is_Pow and nsimplify(x**0.0) == 1
+    assert nsimplify(3.333333, tolerance=0.1, rational=True) == Rational(10, 3)
+    assert nsimplify(3.333333, tolerance=0.01, rational=True) == Rational(10, 3)
+    assert nsimplify(3.666666, tolerance=0.1, rational=True) == Rational(11, 3)
+    assert nsimplify(3.666666, tolerance=0.01, rational=True) == Rational(11, 3)
+    assert nsimplify(33, tolerance=10, rational=True) == Rational(33)
+    assert nsimplify(33.33, tolerance=10, rational=True) == Rational(30)
+    assert nsimplify(37.76, tolerance=10, rational=True) == Rational(40)
+    assert nsimplify(-203.1) == Rational(-2031, 10)
+    assert nsimplify(.2, tolerance=0) == Rational(1, 5)
+    assert nsimplify(-.2, tolerance=0) == Rational(-1, 5)
+    assert nsimplify(.2222, tolerance=0) == Rational(1111, 5000)
+    assert nsimplify(-.2222, tolerance=0) == Rational(-1111, 5000)
+    # issue 7211, PR 4112
+    assert nsimplify(S(2e-8)) == Rational(1, 50000000)
+    # issue 7322 direct test
+    assert nsimplify(1e-42, rational=True) != 0
+    # issue 10336
+    inf = Float('inf')
+    infs = (-oo, oo, inf, -inf)
+    for zi in infs:
+        ans = sign(zi)*oo
+        assert nsimplify(zi) == ans
+        assert nsimplify(zi + x) == x + ans
+
+    assert nsimplify(0.33333333, rational=True, rational_conversion='exact') == Rational(0.33333333)
+
+    # Make sure nsimplify on expressions uses full precision
+    assert nsimplify(pi.evalf(100)*x, rational_conversion='exact').evalf(100) == pi.evalf(100)*x
+
+【相关测试 4】
+测试文件：sympy/core/tests/test_numbers.py
+测试名称：test_mod
+测试代码：
+def test_mod():
+    x = S.Half
+    y = Rational(3, 4)
+    z = Rational(5, 18043)
+
+    assert x % x == 0
+    assert x % y == S.Half
+    assert x % z == Rational(3, 36086)
+    assert y % x == Rational(1, 4)
+    assert y % y == 0
+    assert y % z == Rational(9, 72172)
+    assert z % x == Rational(5, 18043)
+    assert z % y == Rational(5, 18043)
+    assert z % z == 0
+
+    a = Float(2.6)
+
+    assert (a % .2) == 0.0
+    assert (a % 2).round(15) == 0.6
+    assert (a % 0.5).round(15) == 0.1
+
+    p = Symbol('p', infinite=True)
+
+    assert oo % oo is nan
+    assert zoo % oo is nan
+    assert 5 % oo is nan
+    assert p % 5 is nan
+
+    # In these two tests, if the precision of m does
+    # not match the precision of the ans, then it is
+    # likely that the change made now gives an answer
+    # with degraded accuracy.
+    r = Rational(500, 41)
+    f = Float('.36', 3)
+    m = r % f
+    ans = Float(r % Rational(f), 3)
+    assert m == ans and m._prec == ans._prec
+    f = Float('8.36', 3)
+    m = f % r
+    ans = Float(Rational(f) % r, 3)
+    assert m == ans and m._prec == ans._prec
+
+    s = S.Zero
+
+    assert s % float(1) == 0.0
+
+    # No rounding required since these numbers can be represented
+    # exactly.
+    assert Rational(3, 4) % Float(1.1) == 0.75
+    assert Float(1.5) % Rational(5, 4) == 0.25
+    assert Rational(5, 4).__rmod__(Float('1.5')) == 0.25
+    assert Float('1.5').__rmod__(Float('2.75')) == Float('1.25')
+    assert 2.75 % Float('1.5') == Float('1.25')
+
+    a = Integer(7)
+    b = Integer(4)
+
+    assert type(a % b) == Integer
+    assert a % b == Integer(3)
+    assert Integer(1) % Rational(2, 3) == Rational(1, 3)
+    assert Rational(7, 5) % Integer(1) == Rational(2, 5)
+    assert Integer(2) % 1.5 == 0.5
+
+    assert Integer(3).__rmod__(Integer(10)) == Integer(1)
+    assert Integer(10) % 4 == Integer(2)
+    assert 15 % Integer(4) == Integer(3)
+
+【相关测试 5】
+测试文件：sympy/core/tests/test_sympify.py
+测试名称：test_sympify1
+测试代码：
+def test_sympify1():
+    assert sympify("x") == Symbol("x")
+    assert sympify("   x") == Symbol("x")
+    assert sympify("   x   ") == Symbol("x")
+    # issue 4877
+    n1 = S.Half
+    assert sympify('--.5') == n1
+    assert sympify('-1/2') == -n1
+    assert sympify('-+--.5') == -n1
+    assert sympify('-.[3]') == Rational(-1, 3)
+    assert sympify('.[3]') == Rational(1, 3)
+    assert sympify('+.[3]') == Rational(1, 3)
+    assert sympify('+0.[3]*10**-2') == Rational(1, 300)
+    assert sympify('.[052631578947368421]') == Rational(1, 19)
+    assert sympify('.0[526315789473684210]') == Rational(1, 19)
+    assert sympify('.034[56]') == Rational(1711, 49500)
+    # options to make reals into rationals
+    assert sympify('1.22[345]', rational=True) == \
+        1 + Rational(22, 100) + Rational(345, 99900)
+    assert sympify('2/2.6', rational=True) == Rational(10, 13)
+    assert sympify('2.6/2', rational=True) == Rational(13, 10)
+    assert sympify('2.6e2/17', rational=True) == Rational(260, 17)
+    assert sympify('2.6e+2/17', rational=True) == Rational(260, 17)
+    assert sympify('2.6e-2/17', rational=True) == Rational(26, 17000)
+    assert sympify('2.1+3/4', rational=True) == \
+        Rational(21, 10) + Rational(3, 4)
+    assert sympify('2.234456', rational=True) == Rational(279307, 125000)
+    assert sympify('2.234456e23', rational=True) == 223445600000000000000000
+    assert sympify('2.234456e-23', rational=True) == \
+        Rational(279307, 12500000000000000000000000000)
+    assert sympify('-2.234456e-23', rational=True) == \
+        Rational(-279307, 12500000000000000000000000000)
+    assert sympify('12345678901/17', rational=True) == \
+        Rational(12345678901, 17)
+    assert sympify('1/.3 + x', rational=True) == Rational(10, 3) + x
+    # make sure longs in fractions work
+    assert sympify('222222222222/11111111111') == \
+        Rational(222222222222, 11111111111)
+    # ... even if they come from repetend notation
+    assert sympify('1/.2[123456789012]') == Rational(333333333333, 70781892967)
+    # ... or from high precision reals
+    assert sympify('.1234567890123456', rational=True) == \
+        Rational(19290123283179, 156250000000000)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

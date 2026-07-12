@@ -1,0 +1,186 @@
+```json
+{
+    "issue_summary": "当 Q 对象使用 __or__ 组合且包含 `__in` 查找时，`get_default_columns` 错误地选择了所有字段，导致子查询返回多列并引发 ProgrammingError。",
+    "trigger_condition": {
+        "text": "在 QuerySet 的 filter 方法中，使用 `|` 运算符组合两个 Q 对象，其中一个 Q 对象包含跨关系的 `__in` 查找（例如 `agent__property_groups__in=property_groups`），另一个 Q 对象包含聚合注解的查找（例如 `agent__property_groups__count=0`）。",
+        "evidence": ["Issue 中提供了两个对比示例：使用 `agent__property_groups__id__in` 的查询正常工作，而使用 `agent__property_groups__in` 的查询失败。", "Issue 中展示了失败的查询构造：`Q(agent__property_groups__in=property_groups) | Q(agent__property_groups__count=0)`。", "Issue 中展示了生成的错误 SQL，其中子查询 `SELECT U0.\"id\", U0.\"created\", ...` 返回了多列。"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "执行查询时抛出 `django.db.utils.ProgrammingError: subquery must return only one column` 异常。",
+        "symptom_type": "exception",
+        "evidence": ["Issue 中明确给出了错误堆栈和错误信息：`django.db.utils.ProgrammingError: subquery must return only one column`。", "Issue 中展示了生成的 SQL，其中子查询 `SELECT U0.\"id\", U0.\"created\", U0.\"updated\", U0.\"create_by\", U0.\"update_by\", U0.\"tenant_objs\", U0.\"name\"` 返回了多个列。"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "当使用 `|` 组合 Q 对象时，对于包含 `__in` 查找的子查询，`get_default_columns` 应只选择必要的列（例如主键），使得子查询只返回一列，查询能够正常执行。",
+        "evidence": ["Issue 中提到使用 `agent__property_groups__id__in` 的查询可以正常工作，这表明期望的行为是子查询只返回一列（id）。", "Issue 中展示了手动修复的思路：检查 `cols[0].alias` 并只保留第一个列，这暗示了期望的列选择逻辑。", "Issue 中对比了工作与非工作情况下 `select_fields` 的值：工作情况下为 `[0]`（仅 id），非工作情况下为 `[0, 1, 2, 3, 4, 5, 6]`（所有字段）。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "django.db.models.Q",
+            "kind": "class",
+            "source_path": "django/db/models/query_utils.py",
+            "reason": "Issue 的核心是关于 Q 对象使用 `|` 运算符时的行为。"
+        },
+        {
+            "name": "django.db.models.sql.query.Query.add_q",
+            "kind": "method",
+            "source_path": "django/db/models/sql/query.py",
+            "reason": "Q 对象在查询中的解析和处理涉及此方法。"
+        },
+        {
+            "name": "django.db.models.sql.compiler.SQLCompiler.get_default_columns",
+            "kind": "method",
+            "source_path": "django/db/models/sql/compiler.py",
+            "reason": "Issue 明确指出问题与 `get_default_columns` 方法相关，它错误地选择了所有字段。"
+        },
+        {
+            "name": "django.db.models.Count",
+            "kind": "class",
+            "source_path": "django/db/models/aggregates.py",
+            "reason": "Issue 中使用了 `Count` 注解，并且查询中包含 `agent__property_groups__count` 查找。"
+        },
+        {
+            "name": "django.db.models.query.QuerySet.annotate",
+            "kind": "method",
+            "source_path": "django/db/models/query.py",
+            "reason": "Issue 中的查询使用了 `annotate` 方法来添加聚合计数。"
+        },
+        {
+            "name": "django.db.models.query.QuerySet.filter",
+            "kind": "method",
+            "source_path": "django/db/models/query.py",
+            "reason": "触发缺陷的查询是通过 `filter` 方法执行的。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/db/models/sql/compiler.py",
+            "object": "SQLCompiler.get_default_columns",
+            "lines": "675-717",
+            "reason": "Issue 描述明确指出 `get_default_columns` 方法在 Q 对象被 OR 组合时，为 `__in` 查找错误地选择了所有默认列，而不是仅选择必要的列（如主键）。"
+        },
+        {
+            "path": "django/db/models/sql/query.py",
+            "object": "Query._add_q",
+            "lines": "",
+            "reason": "Q 对象的解析和组合逻辑可能在此方法中，影响后续列选择。Issue 中提到的 `cols` 变量可能在此处被设置。"
+        },
+        {
+            "path": "django/db/models/sql/query.py",
+            "object": "Query.build_filter",
+            "lines": "",
+            "reason": "构建过滤器时可能决定了如何处理 `__in` 查找以及相关的列选择。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "GenericRelationTests.test_q_object_or",
+            "test_file": "tests/generic_relations_regress/tests.py",
+            "why_relevant": "该测试直接涉及使用 `|` 运算符组合 Q 对象，并验证查询结果是否正确。这与 Issue 中触发缺陷的模式（Q 对象 OR 组合）高度相关。",
+            "reusable_parts": ["使用 Q 对象和 `|` 运算符的语法结构", "使用 `filter` 方法组合 Q 对象", "使用 `assertIn` 进行结果断言"],
+            "possible_gap": "该测试使用的是 `__icontains` 查找，而不是 Issue 中的 `__in` 查找和跨关系聚合注解。它没有触发 `get_default_columns` 中关于子查询列选择的特定路径。"
+        },
+        {
+            "test_name": "NullJoinPromotionOrTest.test_ticket_21748_double_negated_or",
+            "test_file": "tests/queries/tests.py",
+            "why_relevant": "该测试涉及复杂的 Q 对象组合（OR 和双否定），并检查生成的 SQL JOIN 类型。这展示了 Django 如何处理 Q 对象组合的查询构造。",
+            "reusable_parts": ["使用 Q 对象和 `|` 运算符", "跨多个关系的查询", "检查生成的 SQL 字符串（`str(query)`）"],
+            "possible_gap": "该测试关注的是 JOIN 类型，而不是子查询的列选择。它没有涉及 `__in` 查找或 `get_default_columns` 方法。"
+        },
+        {
+            "test_name": "SubqueryTests.test_distinct_ordered_sliced_subquery",
+            "test_file": "tests/queries/tests.py",
+            "why_relevant": "该测试涉及 `__in` 查找与子查询，并验证子查询的行为。这与 Issue 中导致错误的子查询生成部分相关。",
+            "reusable_parts": ["使用 `__in` 查找和子查询", "使用 `values` 或 `values_list` 限制子查询列", "使用 `assertSequenceEqual` 进行结果断言"],
+            "possible_gap": "该测试中的子查询是显式使用 `values('id')` 限制列的，而 Issue 中的问题是隐式子查询错误地选择了所有列。测试没有涉及 Q 对象的 OR 组合。"
+        },
+        {
+            "test_name": "ToFieldTests.test_in_subquery",
+            "test_file": "tests/queries/tests.py",
+            "why_relevant": "该测试直接测试 `__in` 查找与子查询，并验证查询结果。这与 Issue 中 `agent__property_groups__in` 查找的行为相关。",
+            "reusable_parts": ["使用 `__in` 查找", "使用 `filter` 方法", "使用 `assertEqual` 和集合比较进行结果断言"],
+            "possible_gap": "该测试没有使用 Q 对象，也没有涉及 OR 组合或聚合注解。它使用的是简单的 `filter(field__in=queryset)` 模式。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "input",
+            "current_pattern": "相似测试中通常使用 `filter(field__in=queryset.values('id'))` 或 `filter(field__in=queryset.values_list('id', flat=True))` 来确保子查询只返回一列。",
+            "target_pattern": "使用 `filter(Q(relation__in=queryset) | Q(other_condition))`，其中 `relation__in` 的参数是一个完整的 QuerySet 对象，而不是显式限制列的 QuerySet。",
+            "reason": "Issue 表明，当 `__in` 查找的参数是完整 QuerySet 且该 Q 对象与其他 Q 对象通过 `|` 组合时，会触发 `get_default_columns` 的错误列选择逻辑。",
+            "confidence": "high"
+        },
+        {
+            "slot": "call_chain",
+            "current_pattern": "相似测试通常直接使用 `filter` 或使用简单的 Q 对象组合，不涉及跨多级关系的 `__in` 查找与聚合注解的组合。",
+            "target_pattern": "构建一个查询链：先 `annotate` 一个跨关系的 `Count`，然后在 `filter` 中使用 `|` 组合一个包含跨关系 `__in` 查找的 Q 对象和一个使用该聚合注解的 Q 对象。",
+            "reason": "Issue 中的缺陷场景需要特定的查询构造：跨多级关系的 `__in` 查找、聚合注解以及 Q 对象的 OR 组合。这可能会影响查询编译过程中别名和列的选择。",
+            "confidence": "medium"
+        },
+        {
+            "slot": "operator",
+            "current_pattern": "相似测试可能使用单个 Q 对象或简单的 AND 组合。",
+            "target_pattern": "在 `filter` 中使用 `|` 运算符连接两个 Q 对象。",
+            "reason": "Issue 明确指出问题出现在 Q 对象被 OR'd (`|`) 时，`__in` 查找的别名设置方式存在差异。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "sql",
+            "expression_hint": "生成的 SQL 字符串，特别是子查询部分。观察子查询是 `SELECT U0.\"id\"` 还是 `SELECT U0.\"id\", U0.\"created\", ...`。",
+            "reason": "Issue 的核心错误是子查询返回了多列。检查生成的 SQL 可以直接确认缺陷是否被触发。"
+        },
+        {
+            "kind": "return_value",
+            "expression_hint": "查询执行是否成功，或者是否抛出 `ProgrammingError` 异常。",
+            "reason": "缺陷的直接表现是查询执行失败并抛出特定异常。"
+        },
+        {
+            "kind": "repr",
+            "expression_hint": "Q 对象和查询内部结构（如 `select_fields`、`cols`）的表示。例如，Issue 中展示了 `select_fields` 的值在工作与非工作场景下的差异。",
+            "reason": "这可以帮助理解在查询编译过程中，`get_default_columns` 选择了哪些列。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "验证使用 `Q(relation__in=queryset) | Q(other_condition)` 模式的查询能够成功执行，不抛出 `ProgrammingError` 异常。",
+            "preferred_assertion_style": "raises",
+            "avoid": "断言完整的、具体的 SQL 字符串，因为 SQL 生成可能因数据库后端或 Django 版本而异。",
+            "reason": "缺陷的直接表现是异常。修复后，查询应正常执行。使用 `assertNotRaises` 或执行查询并验证无异常是稳定的断言方式。"
+        },
+        {
+            "assertion_goal": "验证生成的 SQL 中，与 `__in` 查找对应的子查询只选择了一列（例如主键列）。",
+            "preferred_assertion_style": "contains_fragment",
+            "avoid": "断言整个 SQL 字符串。",
+            "reason": "Issue 的根本原因是子查询选择了多列。检查 SQL 是否包含类似 `SELECT U0.\"id\"`（单列）而不是 `SELECT U0.\"id\", U0.\"created\", ...`（多列）的片段，可以更稳定地验证修复。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要 Django 的测试数据库设置。使用 `TestCase` 作为基类。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要定义具有多级关系的模型（例如 `ModelA` -> `ForeignKey` to `ModelB` -> `ManyToMany` to `ModelC`），以模拟 `agent__property_groups__in` 这样的查找路径。",
+            "source": "issue",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要在数据库中创建一些测试数据，以便执行查询并得到非空结果或触发错误。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "触发缺陷的确切 Django 版本范围（Issue 提到 2.2.5 工作，3.2 不工作，但具体引入版本未知）。",
+        "`get_default_columns` 方法中导致错误列选择的具体逻辑条件。Issue 中只提到了 `cols[0].alias == 'U0'` 的手动修复线索。",
+        "是否只有 `__in` 查找与特定类型的其他 Q 对象（如聚合注解条件）通过 `|` 组合时才会触发此缺陷，还是其他查找类型组合也会。",
+        "缺陷是否与特定的数据库后端有关。"
+    ]
+}
+```

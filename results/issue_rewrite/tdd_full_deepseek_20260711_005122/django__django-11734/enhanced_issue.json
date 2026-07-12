@@ -1,0 +1,383 @@
+{
+  "instance_id": "django__django-11734",
+  "issue_summary": "在 QuerySet 的 exclude() 或 ~Q() 中使用 OuterRef 会导致 ValueError 异常，提示该查询集包含对外部查询的引用，只能用于子查询。",
+  "trigger_condition": {
+    "text": "在 QuerySet 的 exclude() 方法或 filter(~Q(...)) 中使用 OuterRef 表达式，且该查询集被用于 Exists 子查询的构造中。",
+    "evidence": [
+      "Issue 中展示了三个测试场景：使用 filter() 配合 OuterRef 正常，但使用 exclude() 或 filter(~Q(...)) 配合 OuterRef 会崩溃。",
+      "相关测试 2 显示，直接对包含 OuterRef 的查询集调用 exists() 会引发 ValueError，提示只能用于子查询。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "抛出 ValueError 异常，消息为 'This queryset contains a reference to an outer query and may only be used in a subquery'。",
+    "symptom_type": "exception",
+    "evidence": [
+      "Issue 中明确给出了错误信息：'ValueError: This queryset contains a reference to an outer query and may only be used in a subquery'。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "在 QuerySet 的 exclude() 方法或 filter(~Q(...)) 中使用 OuterRef 表达式时，应能正确构建查询，而不会引发 ValueError 异常。",
+    "evidence": [
+      "Issue 中展示了使用 filter() 配合 OuterRef 可以正常工作，暗示 exclude() 和 filter(~Q(...)) 也应具有类似能力。",
+      "相关测试 3 和 4 展示了在 filter() 中成功使用 OuterRef 构建子查询的示例。"
+    ],
+    "confidence": "medium"
+  },
+  "target_apis": [
+    {
+      "name": "OuterRef",
+      "kind": "class",
+      "source_path": "django/db/models/expressions.py",
+      "reason": "Issue 的核心是 OuterRef 在特定上下文（exclude, ~Q）中的使用问题。"
+    },
+    {
+      "name": "QuerySet.exclude",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 中触发 bug 的 API 调用之一。"
+    },
+    {
+      "name": "Q",
+      "kind": "class",
+      "source_path": "django/db/models/query_utils.py",
+      "reason": "Issue 中触发 bug 的另一个场景涉及 ~Q() 表达式。"
+    },
+    {
+      "name": "Exists",
+      "kind": "class",
+      "source_path": "django/db/models/expressions.py",
+      "reason": "Issue 中 OuterRef 被用于构建 Exists 子查询。"
+    },
+    {
+      "name": "QuerySet.annotate",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 中测试代码使用 annotate 来添加 Exists 注解。"
+    },
+    {
+      "name": "QuerySet.filter",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 中测试代码使用 filter 来筛选注解结果，并且是触发 bug 的另一个场景（filter(~Q(...))）。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/query.py",
+      "object": "QuerySet.exclude",
+      "lines": "896-902",
+      "reason": "Issue 中 exclude() 方法配合 OuterRef 会崩溃，而源码显示 exclude 调用了 _filter_or_exclude，可能在此过程中未正确处理 OuterRef。"
+    },
+    {
+      "path": "django/db/models/query_utils.py",
+      "object": "Q",
+      "lines": "47-111",
+      "reason": "Issue 中 filter(~Q(...)) 配合 OuterRef 会崩溃，可能与 Q 对象的求反（__invert__）或解析逻辑有关。"
+    },
+    {
+      "path": "django/db/models/expressions.py",
+      "object": "OuterRef",
+      "lines": "565-570",
+      "reason": "OuterRef 是问题的核心表达式，其 resolve_expression 方法可能在与 exclude 或 ~Q 交互时出现问题。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "BasicExpressionsTests.test_outerref",
+      "test_file": "tests/expressions/tests.py",
+      "why_relevant": "该测试直接涉及 OuterRef 和 Exists 的使用，并捕获了与 Issue 中相同的 ValueError 异常（当直接调用 exists() 时）。",
+      "reusable_parts": [
+        "TestCase 框架",
+        "OuterRef 和 Exists 的导入",
+        "使用 assertRaisesMessage 捕获特定 ValueError 的模式",
+        "构建包含 OuterRef 的查询集的方法"
+      ],
+      "possible_gap": "该测试主要验证直接对包含 OuterRef 的查询集调用 exists() 会失败，而 Issue 中的失败发生在更复杂的 annotate + exclude/filter(~Q) 上下文中。"
+    },
+    {
+      "test_name": "DistanceTest.test_dwithin_subquery",
+      "test_file": "tests/gis_tests/distapp/tests.py",
+      "why_relevant": "该测试展示了在 filter() 中成功使用 OuterRef 构建 Exists 子查询的模式，这与 Issue 中第一个正常工作的例子类似。",
+      "reusable_parts": [
+        "在 annotate 中使用 Exists 和 OuterRef 的模式",
+        "使用 filter() 配合 OuterRef",
+        "最终的 assert 断言风格"
+      ],
+      "possible_gap": "该测试没有涉及 exclude() 或 ~Q()，而这正是 Issue 中触发 bug 的关键变异。"
+    },
+    {
+      "test_name": "LookupTests.test_nested_outerref_lhs",
+      "test_file": "tests/lookup/tests.py",
+      "why_relevant": "该测试展示了嵌套使用 OuterRef 和 Exists 的复杂场景，证明了 OuterRef 在 filter() 中的正常使用。",
+      "reusable_parts": [
+        "复杂的 annotate + Exists + OuterRef 查询构建",
+        "相关的模型导入和对象创建",
+        "使用 get() 和断言进行验证"
+      ],
+      "possible_gap": "该测试同样只使用了 filter()，没有测试 exclude() 或 ~Q()。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "call_chain",
+      "current_pattern": "在 filter() 方法中使用 OuterRef 作为参数。",
+      "target_pattern": "在 exclude() 方法中使用 OuterRef 作为参数。",
+      "reason": "Issue 表明将 filter 替换为 exclude 会触发错误。",
+      "confidence": "high"
+    },
+    {
+      "slot": "operator",
+      "current_pattern": "在 filter() 中使用 Q 对象（如 Q(tags__category_id=OuterRef('pk'))）。",
+      "target_pattern": "在 filter() 中使用求反的 Q 对象（如 ~Q(tags__category_id=OuterRef('pk'))）。",
+      "reason": "Issue 表明在 filter 中使用 ~Q() 配合 OuterRef 会触发错误。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "构建查询集（如调用 annotate().filter(foo=True)）时是否抛出 ValueError。",
+      "reason": "Issue 的核心错误现象是抛出特定 ValueError 异常。"
+    },
+    {
+      "kind": "sql",
+      "expression_hint": "生成的 SQL 查询字符串（例如通过 str(qs.query) 或 connection.queries 观察）。",
+      "reason": "可以观察 exclude 或 ~Q 是否导致 OuterRef 被错误地解析或放置在无效的 SQL 上下文中。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "查询集执行后的结果（例如 list(qs) 或 qs.exists() 的返回值）。",
+      "reason": "在修复后，查询应能正常执行并返回预期结果，而非崩溃。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证在 exclude() 或 filter(~Q(...)) 中使用 OuterRef 构建的查询集能够正常执行，不抛出 ValueError。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言完整的 SQL 字符串或异常消息的精确匹配，因为具体实现可能变化。",
+      "reason": "Issue 的核心是特定操作不应引发异常。初始测试可以使用 assertRaises 来复现 bug，修复后的测试应使用 assertNotRaises 或直接执行查询并断言结果。"
+    },
+    {
+      "assertion_goal": "验证使用 exclude() 或 filter(~Q(...)) 配合 OuterRef 的查询语义正确（例如，返回预期的对象集合）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言无关的模型字段或数量，应聚焦于由 OuterRef 逻辑过滤出的结果。",
+      "reason": "修复后，查询的逻辑结果应与使用 filter() 的对应逻辑（取反后）一致。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要 Django TestCase 和相关的测试模型（如 Issue 中提到的 Number 和 Item，或相关测试中的类似模型）。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要创建测试数据来演示 OuterRef 的关联关系（如 Category, Tag, Item）。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    },
+    {
+      "hint": "测试应在支持子查询的数据库上运行。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "导致 exclude() 和 ~Q() 中 OuterRef 处理失败的确切代码路径是什么？",
+    "OuterRef 在 exclude() 和 filter(~Q()) 中的解析过程与在 filter() 中有何不同？",
+    "修复后，exclude(OuterRef(...)) 和 filter(~Q(OuterRef(...))) 生成的 SQL 应该是什么样子？",
+    "除了 ValueError，是否还有其他潜在的错误行为（如错误的查询结果）？"
+  ],
+  "raw": {
+    "issue_summary": "在 QuerySet 的 exclude() 或 ~Q() 中使用 OuterRef 会导致 ValueError 异常，提示该查询集包含对外部查询的引用，只能用于子查询。",
+    "trigger_condition": {
+      "text": "在 QuerySet 的 exclude() 方法或 filter(~Q(...)) 中使用 OuterRef 表达式，且该查询集被用于 Exists 子查询的构造中。",
+      "evidence": [
+        "Issue 中展示了三个测试场景：使用 filter() 配合 OuterRef 正常，但使用 exclude() 或 filter(~Q(...)) 配合 OuterRef 会崩溃。",
+        "相关测试 2 显示，直接对包含 OuterRef 的查询集调用 exists() 会引发 ValueError，提示只能用于子查询。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError 异常，消息为 'This queryset contains a reference to an outer query and may only be used in a subquery'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中明确给出了错误信息：'ValueError: This queryset contains a reference to an outer query and may only be used in a subquery'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在 QuerySet 的 exclude() 方法或 filter(~Q(...)) 中使用 OuterRef 表达式时，应能正确构建查询，而不会引发 ValueError 异常。",
+      "evidence": [
+        "Issue 中展示了使用 filter() 配合 OuterRef 可以正常工作，暗示 exclude() 和 filter(~Q(...)) 也应具有类似能力。",
+        "相关测试 3 和 4 展示了在 filter() 中成功使用 OuterRef 构建子查询的示例。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "OuterRef",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 的核心是 OuterRef 在特定上下文（exclude, ~Q）中的使用问题。"
+      },
+      {
+        "name": "QuerySet.exclude",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发 bug 的 API 调用之一。"
+      },
+      {
+        "name": "Q",
+        "kind": "class",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 中触发 bug 的另一个场景涉及 ~Q() 表达式。"
+      },
+      {
+        "name": "Exists",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中 OuterRef 被用于构建 Exists 子查询。"
+      },
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中测试代码使用 annotate 来添加 Exists 注解。"
+      },
+      {
+        "name": "QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中测试代码使用 filter 来筛选注解结果，并且是触发 bug 的另一个场景（filter(~Q(...))）。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.exclude",
+        "lines": "896-902",
+        "reason": "Issue 中 exclude() 方法配合 OuterRef 会崩溃，而源码显示 exclude 调用了 _filter_or_exclude，可能在此过程中未正确处理 OuterRef。"
+      },
+      {
+        "path": "django/db/models/query_utils.py",
+        "object": "Q",
+        "lines": "47-111",
+        "reason": "Issue 中 filter(~Q(...)) 配合 OuterRef 会崩溃，可能与 Q 对象的求反（__invert__）或解析逻辑有关。"
+      },
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "OuterRef",
+        "lines": "565-570",
+        "reason": "OuterRef 是问题的核心表达式，其 resolve_expression 方法可能在与 exclude 或 ~Q 交互时出现问题。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "BasicExpressionsTests.test_outerref",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "该测试直接涉及 OuterRef 和 Exists 的使用，并捕获了与 Issue 中相同的 ValueError 异常（当直接调用 exists() 时）。",
+        "reusable_parts": [
+          "TestCase 框架",
+          "OuterRef 和 Exists 的导入",
+          "使用 assertRaisesMessage 捕获特定 ValueError 的模式",
+          "构建包含 OuterRef 的查询集的方法"
+        ],
+        "possible_gap": "该测试主要验证直接对包含 OuterRef 的查询集调用 exists() 会失败，而 Issue 中的失败发生在更复杂的 annotate + exclude/filter(~Q) 上下文中。"
+      },
+      {
+        "test_name": "DistanceTest.test_dwithin_subquery",
+        "test_file": "tests/gis_tests/distapp/tests.py",
+        "why_relevant": "该测试展示了在 filter() 中成功使用 OuterRef 构建 Exists 子查询的模式，这与 Issue 中第一个正常工作的例子类似。",
+        "reusable_parts": [
+          "在 annotate 中使用 Exists 和 OuterRef 的模式",
+          "使用 filter() 配合 OuterRef",
+          "最终的 assert 断言风格"
+        ],
+        "possible_gap": "该测试没有涉及 exclude() 或 ~Q()，而这正是 Issue 中触发 bug 的关键变异。"
+      },
+      {
+        "test_name": "LookupTests.test_nested_outerref_lhs",
+        "test_file": "tests/lookup/tests.py",
+        "why_relevant": "该测试展示了嵌套使用 OuterRef 和 Exists 的复杂场景，证明了 OuterRef 在 filter() 中的正常使用。",
+        "reusable_parts": [
+          "复杂的 annotate + Exists + OuterRef 查询构建",
+          "相关的模型导入和对象创建",
+          "使用 get() 和断言进行验证"
+        ],
+        "possible_gap": "该测试同样只使用了 filter()，没有测试 exclude() 或 ~Q()。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在 filter() 方法中使用 OuterRef 作为参数。",
+        "target_pattern": "在 exclude() 方法中使用 OuterRef 作为参数。",
+        "reason": "Issue 表明将 filter 替换为 exclude 会触发错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "operator",
+        "current_pattern": "在 filter() 中使用 Q 对象（如 Q(tags__category_id=OuterRef('pk'))）。",
+        "target_pattern": "在 filter() 中使用求反的 Q 对象（如 ~Q(tags__category_id=OuterRef('pk'))）。",
+        "reason": "Issue 表明在 filter 中使用 ~Q() 配合 OuterRef 会触发错误。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "构建查询集（如调用 annotate().filter(foo=True)）时是否抛出 ValueError。",
+        "reason": "Issue 的核心错误现象是抛出特定 ValueError 异常。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串（例如通过 str(qs.query) 或 connection.queries 观察）。",
+        "reason": "可以观察 exclude 或 ~Q 是否导致 OuterRef 被错误地解析或放置在无效的 SQL 上下文中。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "查询集执行后的结果（例如 list(qs) 或 qs.exists() 的返回值）。",
+        "reason": "在修复后，查询应能正常执行并返回预期结果，而非崩溃。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在 exclude() 或 filter(~Q(...)) 中使用 OuterRef 构建的查询集能够正常执行，不抛出 ValueError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 SQL 字符串或异常消息的精确匹配，因为具体实现可能变化。",
+        "reason": "Issue 的核心是特定操作不应引发异常。初始测试可以使用 assertRaises 来复现 bug，修复后的测试应使用 assertNotRaises 或直接执行查询并断言结果。"
+      },
+      {
+        "assertion_goal": "验证使用 exclude() 或 filter(~Q(...)) 配合 OuterRef 的查询语义正确（例如，返回预期的对象集合）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言无关的模型字段或数量，应聚焦于由 OuterRef 逻辑过滤出的结果。",
+        "reason": "修复后，查询的逻辑结果应与使用 filter() 的对应逻辑（取反后）一致。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要 Django TestCase 和相关的测试模型（如 Issue 中提到的 Number 和 Item，或相关测试中的类似模型）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建测试数据来演示 OuterRef 的关联关系（如 Category, Tag, Item）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试应在支持子查询的数据库上运行。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "导致 exclude() 和 ~Q() 中 OuterRef 处理失败的确切代码路径是什么？",
+      "OuterRef 在 exclude() 和 filter(~Q()) 中的解析过程与在 filter() 中有何不同？",
+      "修复后，exclude(OuterRef(...)) 和 filter(~Q(OuterRef(...))) 生成的 SQL 应该是什么样子？",
+      "除了 ValueError，是否还有其他潜在的错误行为（如错误的查询结果）？"
+    ]
+  }
+}

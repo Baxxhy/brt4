@@ -1,0 +1,148 @@
+instance_id: django__django-13012
+
+issue_summary: ExpressionWrapper 包装的常量表达式在 GROUP BY 子句中错误地出现，导致 PostgreSQL 查询异常。
+
+trigger_condition:
+{
+  "text": "使用 ExpressionWrapper 包装一个常量表达式（如 Value(3)），然后通过 annotate 和 values 进行查询，并包含聚合函数（如 Sum）。",
+  "evidence": [
+    "Issue 描述：'when the given expr is a constant expression (e.g., Value(3))'，'Django generates an SQL query that contains this constant expression in its GROUP BY clause'。",
+    "Issue 中提供的 execQuery 函数代码。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "生成的 SQL 查询在 GROUP BY 子句中包含了常量表达式（如 3），导致 PostgreSQL 抛出 ProgrammingError: aggregate functions are not allowed in GROUP BY。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 描述：'django.db.utils.ProgrammingError: aggregate functions are not allowed in GROUP BY'。",
+    "Issue 中展示的错误 SQL 片段：'GROUP BY \"model\".\"column_a\", 3'。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "常量表达式（如 Value(3)）在 GROUP BY 子句中应被正确识别并省略，仅对非常量字段进行分组。",
+  "evidence": [
+    "Issue 描述：'when the given query expression is not wrapped by the ExpressionWrapper object, Django correctly identifies and omits the constant from the GROUP BY clause'。",
+    "Issue 中展示的正确 SQL 示例：'GROUP BY \"model\".\"column_a\"'。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "ExpressionWrapper",
+    "kind": "class",
+    "source_path": "django/db/models/expressions.py",
+    "reason": "Issue 的核心是 ExpressionWrapper 包装常量表达式导致 GROUP BY 行为异常。"
+  },
+  {
+    "name": "Value",
+    "kind": "class",
+    "source_path": "django/db/models/expressions.py",
+    "reason": "Issue 中用作常量表达式的示例。"
+  },
+  {
+    "name": "QuerySet.annotate",
+    "kind": "method",
+    "source_path": "django/db/models/query.py",
+    "reason": "Issue 中用于添加注解的方法。"
+  },
+  {
+    "name": "QuerySet.values",
+    "kind": "method",
+    "source_path": "django/db/models/query.py",
+    "reason": "Issue 中用于选择字段并影响分组的方法。"
+  },
+  {
+    "name": "Sum",
+    "kind": "class",
+    "source_path": "django/db/models/aggregates.py",
+    "reason": "Issue 中使用的聚合函数。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中 annotate 的参数通常是字段（F）或简单表达式。",
+    "target_pattern": "将 annotate 的参数改为 ExpressionWrapper(Value(3, output_field=IntegerField()))。",
+    "reason": "Issue 表明，当常量表达式被 ExpressionWrapper 包装时，bug 被触发。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "相似测试中常见的调用链是 .values(...).annotate(...) 或 .annotate(...).values(...).annotate(...)。",
+    "target_pattern": "采用 Issue 中的模式：.annotate(expr_res=ExpressionWrapper(Value(...))).values('expr_res', ...).annotate(sum=Sum(...))。",
+    "reason": "Issue 中的 bug 出现在这个特定的调用序列中。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "sql",
+    "expression_hint": "生成的 SQL 字符串，特别是 GROUP BY 子句部分。",
+    "reason": "Issue 的核心错误是 GROUP BY 子句中错误地包含了常量。观察 SQL 可以确认 bug 是否被触发。"
+  },
+  {
+    "kind": "exception",
+    "expression_hint": "执行查询时是否抛出 django.db.utils.ProgrammingError。",
+    "reason": "Issue 中报告了此异常。如果修复后，查询应正常执行。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "查询结果的正确性（例如，聚合值）。",
+    "reason": "即使 SQL 语法正确，也需要确保分组逻辑正确，返回预期的聚合结果。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "生成的 SQL GROUP BY 子句中不应包含常量字面量（如 '3'）。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言完整的 SQL 字符串相等，因为具体表名、别名可能变化。",
+    "reason": "Issue 的根源是常量错误地出现在 GROUP BY 中。修复后，常量应被省略。"
+  },
+  {
+    "assertion_goal": "查询应成功执行而不抛出 ProgrammingError。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言特定的错误消息字符串，因为数据库或版本可能不同。",
+    "reason": "当前行为会抛出异常，修复后应不再抛出。注意：此断言的极性在修复后需要反转（即不应 raises）。当前用于检测 bug。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要一个支持聚合和 GROUP BY 的数据库后端（如 PostgreSQL）。可能需要使用 @skipUnlessDBFeature 或配置测试数据库。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要一个简单的模型，包含 column_a 和 column_b 等字段，用于构建查询。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  },
+  {
+    "hint": "测试应继承自 django.test.TestCase 以确保数据库事务。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "ExpressionWrapper 内部具体是哪个方法（如 get_group_by_cols, resolve_expression）导致了常量被错误传播。",
+  "除了 Value，其他类型的常量表达式（如 RawSQL 中的常量）是否也会受此 bug 影响。",
+  "在 SQLite 或 MySQL 等其他数据库后端上，此 bug 的表现是否相同（可能语法错误不同或容忍度不同）。",
+  "修复后，ExpressionWrapper 包装的非常量表达式（如涉及字段的表达式）在 GROUP BY 中的行为是否应保持不变。"
+]

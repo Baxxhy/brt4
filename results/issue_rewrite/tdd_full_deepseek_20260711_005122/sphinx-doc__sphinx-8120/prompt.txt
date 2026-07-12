@@ -1,0 +1,417 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+locale/<language>/LC_MESSAGES/sphinx.po translation ignored
+**Describe the bug**
+I read [1] as it should be possible to add a file ``locale/<language>/LC_MESSAGES/sphinx.mo`` to the source dir (same dir as the ``Makefile``) and through that change translations or add additional translation to <language>. 
+
+When I add ``locale/da/LC_MESSAGES/sphinx.po``, with updated entries for ``Fig. %s`` and ``Listing %s``, a ``locale/da/LC_MESSAGES/sphinx.mo`` is created (because of ``gettext_auto_build = True``), but the translations are not used. The translations from the official ``da`` translation [2] is used. Of course ``language = 'da'`` is in ``conf.py``.
+
+[1] http://www.sphinx-doc.org/en/master/usage/configuration.html#confval-locale_dirs
+[2] https://github.com/sphinx-doc/sphinx/blob/master/sphinx/locale/da/LC_MESSAGES/sphinx.po
+
+**To Reproduce**
+Steps to reproduce the behavior:
+```
+$ git clone https://github.com/jonascj/sphinx-test-locale-override.git
+$ cd sphinx-test-locale-override
+$ git checkout 8dea4cd # EDIT: current master showcases workaround, so revert back to see the bug
+$ # make python venv however you like
+$ pip install sphinx
+$ make html
+```
+Notice that ``locale/da/LC_MESSAGES/sphinx.mo`` has been created. Open ``_build/html/index.html``. 
+
+**Expected behavior**
+The caption label for the figure ``figur 1`` should have been ``Foobar 1`` (for the sake of testing) and the caption label for the code block ``Viser 1`` should have been ``Whatever 1`` (again for the sake of testing).
+
+**Your project**
+https://github.com/jonascj/sphinx-test-locale-override.git
+
+**Screenshots**
+![Screenshot of index.html](https://yapb.in/exUE.png "Screenshot of index.html")
+
+**Environment info**
+- OS: Arch Linux 
+- Python version: 3.7.3
+- Sphinx version: 2.1.2
+- Sphinx extensions:  none
+- Extra tools: none
+
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sphinx/util/i18n.py
+对象名称：locale_dirs
+节点类型：class_function
+父节点：CatalogRepository
+行号范围：89-96
+代码：
+    def locale_dirs(self) -> Generator[str, None, None]:
+        if not self.language:
+            return
+
+        for locale_dir in self._locale_dirs:
+            locale_dir = path.join(self.basedir, locale_dir)
+            if path.exists(path.join(locale_dir, self.language, 'LC_MESSAGES')):
+                yield locale_dir
+
+
+【源码片段 2】
+文件路径：sphinx/domains/cpp.py
+对象名称：language
+节点类型：class_function
+父节点：DefinitionParser
+行号范围：4771-4772
+代码：
+    def language(self) -> str:
+        return 'C++'
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/test_intl.py
+测试名称：test_additional_targets_should_be_translated
+测试代码：
+@sphinx_intl
+@pytest.mark.sphinx(
+    'html',
+    srcdir='test_additional_targets_should_be_translated',
+    confoverrides={
+        'language': 'xx', 'locale_dirs': ['.'],
+        'gettext_compact': False,
+        'gettext_additional_targets': [
+            'index',
+            'literal-block',
+            'doctest-block',
+            'raw',
+            'image',
+        ],
+    }
+)
+def test_additional_targets_should_be_translated(app):
+    app.build()
+    # [literalblock.txt]
+    result = (app.outdir / 'literalblock.html').read_text()
+
+    # title should be translated
+    expected_expr = 'CODE-BLOCKS'
+    assert_count(expected_expr, result, 2)
+
+    # ruby code block should be translated and be highlighted
+    expected_expr = """<span class="s1">&#39;RESULT&#39;</span>"""
+    assert_count(expected_expr, result, 1)
+
+    # C code block without lang should be translated and *ruby* highlighted
+    expected_expr = """<span class="c1">#include &lt;STDLIB.H&gt;</span>"""
+    assert_count(expected_expr, result, 1)
+
+    # C code block with lang should be translated and be *C* highlighted
+    expected_expr = ("""<span class="cp">#include</span> """
+                     """<span class="cpf">&lt;STDIO.H&gt;</span>""")
+    assert_count(expected_expr, result, 1)
+
+    # literal block in list item should be translated
+    expected_expr = ("""<span class="no">LITERAL</span>"""
+                     """<span class="o">-</span>"""
+                     """<span class="no">BLOCK</span>\n"""
+                     """<span class="no">IN</span> """
+                     """<span class="no">LIST</span>""")
+    assert_count(expected_expr, result, 1)
+
+    # doctest block should not be translated but be highlighted
+    expected_expr = (
+        """<span class="gp">&gt;&gt;&gt; </span>"""
+        """<span class="kn">import</span> <span class="nn">sys</span>  """
+        """<span class="c1"># SYS IMPORTING</span>""")
+    assert_count(expected_expr, result, 1)
+
+    # [raw.txt]
+
+    result = (app.outdir / 'raw.html').read_text()
+
+    # raw block should be translated
+    expected_expr = """<iframe src="HTTP://SPHINX-DOC.ORG"></iframe></div>"""
+    assert_count(expected_expr, result, 1)
+
+    # [figure.txt]
+
+    result = (app.outdir / 'figure.html').read_text()
+
+    # alt and src for image block should be translated
+    expected_expr = """<img alt="I18N -&gt; IMG" src="_images/img.png" />"""
+    assert_count(expected_expr, result, 1)
+
+    # alt and src for figure block should be translated
+    expected_expr = """<img alt="IMG -&gt; I18N" src="_images/i18n.png" />"""
+    assert_count(expected_expr, result, 1)
+
+【相关测试 2】
+测试文件：tests/test_intl.py
+测试名称：test_additional_targets_should_not_be_translated
+测试代码：
+@sphinx_intl
+@pytest.mark.sphinx('html')
+@pytest.mark.test_params(shared_result='test_intl_basic')
+def test_additional_targets_should_not_be_translated(app):
+    app.build()
+    # [literalblock.txt]
+    result = (app.outdir / 'literalblock.html').read_text()
+
+    # title should be translated
+    expected_expr = 'CODE-BLOCKS'
+    assert_count(expected_expr, result, 2)
+
+    # ruby code block should not be translated but be highlighted
+    expected_expr = """<span class="s1">&#39;result&#39;</span>"""
+    assert_count(expected_expr, result, 1)
+
+    # C code block without lang should not be translated and *ruby* highlighted
+    expected_expr = """<span class="c1">#include &lt;stdlib.h&gt;</span>"""
+    assert_count(expected_expr, result, 1)
+
+    # C code block with lang should not be translated but be *C* highlighted
+    expected_expr = ("""<span class="cp">#include</span> """
+                     """<span class="cpf">&lt;stdio.h&gt;</span>""")
+    assert_count(expected_expr, result, 1)
+
+    # literal block in list item should not be translated
+    expected_expr = ("""<span class="n">literal</span>"""
+                     """<span class="o">-</span>"""
+                     """<span class="n">block</span>\n"""
+                     """<span class="k">in</span> """
+                     """<span class="n">list</span>""")
+    assert_count(expected_expr, result, 1)
+
+    # doctest block should not be translated but be highlighted
+    expected_expr = (
+        """<span class="gp">&gt;&gt;&gt; </span>"""
+        """<span class="kn">import</span> <span class="nn">sys</span>  """
+        """<span class="c1"># sys importing</span>""")
+    assert_count(expected_expr, result, 1)
+
+    # [raw.txt]
+
+    result = (app.outdir / 'raw.html').read_text()
+
+    # raw block should not be translated
+    expected_expr = """<iframe src="http://sphinx-doc.org"></iframe></div>"""
+    assert_count(expected_expr, result, 1)
+
+    # [figure.txt]
+
+    result = (app.outdir / 'figure.html').read_text()
+
+    # alt and src for image block should not be translated
+    expected_expr = """<img alt="i18n" src="_images/i18n.png" />"""
+    assert_count(expected_expr, result, 1)
+
+    # alt and src for figure block should not be translated
+    expected_expr = """<img alt="img" src="_images/img.png" />"""
+    assert_count(expected_expr, result, 1)
+
+【相关测试 3】
+测试文件：tests/test_locale.py
+测试名称：test_add_message_catalog
+测试代码：
+def test_add_message_catalog(app, rootdir):
+    app.config.language = 'en'
+    app.add_message_catalog('myext', rootdir / 'test-locale' / 'locale1')
+    _ = locale.get_translation('myext')
+    assert _('Hello world') == 'HELLO WORLD'
+    assert _('Hello sphinx') == 'Hello sphinx'
+    assert _('Hello reST') == 'Hello reST'
+
+【相关测试 4】
+测试文件：tests/test_locale.py
+测试名称：test_init
+测试代码：
+def test_init(rootdir):
+    # not initialized yet
+    _ = locale.get_translation('myext')
+    assert _('Hello world') == 'Hello world'
+    assert _('Hello sphinx') == 'Hello sphinx'
+    assert _('Hello reST') == 'Hello reST'
+
+    # load locale1
+    locale.init([rootdir / 'test-locale' / 'locale1'], 'en', 'myext')
+    _ = locale.get_translation('myext')
+    assert _('Hello world') == 'HELLO WORLD'
+    assert _('Hello sphinx') == 'Hello sphinx'
+    assert _('Hello reST') == 'Hello reST'
+
+    # load a catalog to unrelated namespace
+    locale.init([rootdir / 'test-locale' / 'locale2'], 'en', 'myext', 'mynamespace')
+    _ = locale.get_translation('myext')
+    assert _('Hello world') == 'HELLO WORLD'
+    assert _('Hello sphinx') == 'Hello sphinx'  # nothing changed here
+    assert _('Hello reST') == 'Hello reST'
+
+    # load locale2 in addition
+    locale.init([rootdir / 'test-locale' / 'locale2'], 'en', 'myext')
+    _ = locale.get_translation('myext')
+    assert _('Hello world') == 'HELLO WORLD'
+    assert _('Hello sphinx') == 'HELLO SPHINX'
+    assert _('Hello reST') == 'Hello reST'
+
+【相关测试 5】
+测试文件：tests/test_build_latex.py
+测试名称：test_numref
+测试代码：
+@pytest.mark.sphinx('latex', testroot='numfig',
+                    confoverrides={'numfig': True})
+def test_numref(app, status, warning):
+    app.builder.build_all()
+    result = (app.outdir / 'python.tex').read_text()
+    print(result)
+    print(status.getvalue())
+    print(warning.getvalue())
+    assert ('\\hyperref[\\detokenize{index:fig1}]'
+            '{Fig.\\@ \\ref{\\detokenize{index:fig1}}}') in result
+    assert ('\\hyperref[\\detokenize{baz:fig22}]'
+            '{Figure\\ref{\\detokenize{baz:fig22}}}') in result
+    assert ('\\hyperref[\\detokenize{index:table-1}]'
+            '{Table \\ref{\\detokenize{index:table-1}}}') in result
+    assert ('\\hyperref[\\detokenize{baz:table22}]'
+            '{Table:\\ref{\\detokenize{baz:table22}}}') in result
+    assert ('\\hyperref[\\detokenize{index:code-1}]'
+            '{Listing \\ref{\\detokenize{index:code-1}}}') in result
+    assert ('\\hyperref[\\detokenize{baz:code22}]'
+            '{Code\\sphinxhyphen{}\\ref{\\detokenize{baz:code22}}}') in result
+    assert ('\\hyperref[\\detokenize{foo:foo}]'
+            '{Section \\ref{\\detokenize{foo:foo}}}') in result
+    assert ('\\hyperref[\\detokenize{bar:bar-a}]'
+            '{Section \\ref{\\detokenize{bar:bar-a}}}') in result
+    assert ('\\hyperref[\\detokenize{index:fig1}]{Fig.\\ref{\\detokenize{index:fig1}} '
+            '\\nameref{\\detokenize{index:fig1}}}') in result
+    assert ('\\hyperref[\\detokenize{foo:foo}]{Sect.\\ref{\\detokenize{foo:foo}} '
+            '\\nameref{\\detokenize{foo:foo}}}') in result
+
+    # sphinxmessages.sty
+    result = (app.outdir / 'sphinxmessages.sty').read_text()
+    print(result)
+    assert r'\addto\captionsenglish{\renewcommand{\figurename}{Fig.\@{} }}' in result
+    assert r'\addto\captionsenglish{\renewcommand{\tablename}{Table }}' in result
+    assert r'\addto\captionsenglish{\renewcommand{\literalblockname}{Listing}}' in result
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

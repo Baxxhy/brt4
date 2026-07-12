@@ -1,0 +1,148 @@
+instance_id: django__django-11066
+
+issue_summary: RenameContentType._rename() 在保存重命名的 ContentType 时使用了错误的数据库连接。
+
+trigger_condition:
+{
+  "text": "在运行包含 RenameModel 操作的迁移时，使用非默认数据库（例如通过自定义数据库路由器或 --database 参数指定）。",
+  "evidence": [
+    "Issue 描述：'when attempting to run a migration which contains a call to migrations.RenameModel, and while specifying the database parameters to the migrate command'",
+    "Issue 描述：'the actual database operation is being attempted on the default database (which in our case does not exist) rather than the database specified via schema_editor.connection.alias'",
+    "源码片段 1 第 15 行：'db = schema_editor.connection.alias'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "迁移失败，抛出 OperationalError，提示 'no such table: django_content_types'，因为操作尝试在默认（可能不存在）的数据库上执行。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 描述：'the migration fails with an OperationalError, stating that no such table: django_content_types exists.'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "RenameContentType._rename() 方法应将重命名后的 ContentType 保存到由 schema_editor.connection.alias 指定的数据库，而不是默认数据库。",
+  "evidence": [
+    "Issue 描述：'the actual database operation is being attempted on the default database ... rather than the database specified via schema_editor.connection.alias'",
+    "Issue 建议：'content_type.save(using=db, update_fields={\"model\"})'",
+    "源码片段 1 第 15 行：'db = schema_editor.connection.alias'"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "RenameContentType._rename",
+    "kind": "method",
+    "source_path": "django/contrib/contenttypes/management/__init__.py",
+    "reason": "这是 Issue 直接报告的有缺陷的方法。"
+  },
+  {
+    "name": "ContentType.save",
+    "kind": "method",
+    "source_path": "",
+    "reason": "Issue 指出该方法调用时缺少 `using` 参数，导致使用了错误的数据库。"
+  },
+  {
+    "name": "transaction.atomic",
+    "kind": "function",
+    "source_path": "django/db/transaction.py",
+    "reason": "缺陷代码位于 `with transaction.atomic(using=db):` 块内，但内部的 save 调用未继承该数据库上下文。"
+  },
+  {
+    "name": "RenameModel",
+    "kind": "class",
+    "source_path": "django/db/migrations/operations/models.py",
+    "reason": "触发缺陷的迁移操作是 RenameModel，它会调用 RenameContentType._rename。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "相关测试中使用默认数据库（database='default'）或简单的多数据库配置。",
+    "target_pattern": "配置一个动态数据库路由器，使得默认数据库不可用或不存在，并指定一个非默认的数据库（例如通过 --database 参数或路由器逻辑）来执行迁移。",
+    "reason": "Issue 描述的场景依赖于一个动态路由器，且默认数据库不存在，这迫使代码路径必须使用指定的数据库别名（db）。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "测试直接调用迁移命令或 ContentType 的 CRUD 操作。",
+    "target_pattern": "构造一个包含 RenameModel 操作的迁移，并在执行迁移时明确指定目标数据库（非默认）。",
+    "reason": "缺陷仅在执行 RenameModel 迁移且使用非默认数据库时触发。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "sql",
+    "expression_hint": "在 content_type.save() 调用前后，观察生成的 SQL 查询及其目标数据库别名（connection.alias）。",
+    "reason": "Issue 的核心是 SQL 操作被发送到了错误的数据库。观测 SQL 可以确认是否使用了正确的数据库连接。"
+  },
+  {
+    "kind": "exception",
+    "expression_hint": "观察在执行迁移过程中是否抛出 OperationalError，并检查其错误信息是否包含 'no such table: django_content_types' 或类似内容。",
+    "reason": "这是 Issue 中观察到的直接错误现象。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "在迁移执行前后，分别检查目标数据库（由 db 指定）和默认数据库中的 django_content_type 表内容。",
+    "reason": "可以验证 ContentType 记录是否在正确的数据库中被更新，以及在错误的数据库中是否发生了不应有的操作。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证迁移成功执行，没有抛出 OperationalError，且 ContentType 记录在指定的非默认数据库中被正确重命名。",
+    "preferred_assertion_style": "before_after_relation",
+    "avoid": "断言完整的 SQL 字符串或精确的异常消息，因为数据库后端可能不同。",
+    "reason": "修复后，迁移应成功，且数据状态应在正确的数据库中发生变化。"
+  },
+  {
+    "assertion_goal": "验证在默认（可能不存在）的数据库上没有尝试执行保存 ContentType 的 SQL 操作。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言默认数据库连接上没有发生任何查询（可能过于严格，因为其他操作可能产生查询）。",
+    "reason": "Issue 表明操作错误地使用了默认数据库。修复后，针对默认数据库的 django_content_type 表操作应该消失。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要一个支持多数据库的 Django 测试环境，可能包括配置 DATABASE_ROUTERS 和多个 DATABASES 设置。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要创建一个自定义的动态数据库路由器，模拟 Issue 中描述的“默认数据库不存在”的场景。",
+    "source": "issue",
+    "confidence": "medium"
+  },
+  {
+    "hint": "需要使用 TransactionTestCase 或类似基类，因为测试涉及数据库迁移和事务。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要设置 MIGRATION_MODULES 指向包含 RenameModel 操作的自定义迁移文件。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "Issue 中描述的动态数据库路由器的具体实现细节和配置方式不完全明确。",
+  "除了缺少 `using` 参数外，`transaction.atomic(using=db)` 上下文管理器是否完全不能影响内部 `save()` 调用的数据库选择？",
+  "在修复后，`content_type.save(using=db, ...)` 是否是与 `transaction.atomic(using=db)` 正确交互的唯一或最佳方式？",
+  "是否还有其他迁移操作或代码路径存在类似的数据库指定问题？"
+]

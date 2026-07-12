@@ -1,0 +1,247 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+URLValidator tests failing on Python versions patched for bpo-43882
+Description
+	
+On Python versions with a fix for ​bpo-43882 (i.e. 3.10.0b1 and the 3.9 git branch, not released yet) the following tests fail:
+======================================================================
+FAIL: test_validators (validators.tests.TestValidators) [URLValidator] (value='http://www.djangoproject.com/\n')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+ File "/usr/lib/python3.7/unittest/case.py", line 59, in testPartExecutor
+	yield
+ File "/usr/lib/python3.7/unittest/case.py", line 546, in subTest
+	yield
+ File "/tmp/portage/dev-python/django-3.2.1/work/Django-3.2.1/tests/validators/tests.py", line 328, in test_validators
+	validator(value)
+ File "/usr/lib/python3.7/unittest/case.py", line 203, in __exit__
+	self._raiseFailure("{} not raised".format(exc_name))
+ File "/usr/lib/python3.7/unittest/case.py", line 135, in _raiseFailure
+	raise self.test_case.failureException(msg)
+AssertionError: ValidationError not raised
+======================================================================
+FAIL: test_validators (validators.tests.TestValidators) [URLValidator] (value='http://[::ffff:192.9.5.5]\n')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+ File "/usr/lib/python3.7/unittest/case.py", line 59, in testPartExecutor
+	yield
+ File "/usr/lib/python3.7/unittest/case.py", line 546, in subTest
+	yield
+ File "/tmp/portage/dev-python/django-3.2.1/work/Django-3.2.1/tests/validators/tests.py", line 328, in test_validators
+	validator(value)
+ File "/usr/lib/python3.7/unittest/case.py", line 203, in __exit__
+	self._raiseFailure("{} not raised".format(exc_name))
+ File "/usr/lib/python3.7/unittest/case.py", line 135, in _raiseFailure
+	raise self.test_case.failureException(msg)
+AssertionError: ValidationError not raised
+FWICS, the project is that django rejects URLs based on the split URL components. However, the bpo-43882 fix changes URL splitting behavior to strip all instances of LF, CR and tab characters before splitting, so they never reach the validator.
+I'm not sure what the best fix is. One option is to reject URLs containing the forbidden characters early. Another is to go with the new recommendation and assume that LF, CR and tabs are to stripped silently.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/core/validators.py
+对象名称：URLValidator
+节点类型：class
+父节点：validators
+行号范围：65-142
+代码：
+class URLValidator(RegexValidator):
+    ul = '\u00a1-\uffff'  # Unicode letters range (must not be a raw string).
+    ipv4_re = r'(?:25[0-5]|2[0-4]\d|[0-1]?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|[0-1]?\d?\d)){3}'
+    ipv6_re = r'\[[0-9a-f:.]+\]'  # (simple regex, validated later)
+    hostname_re = r'[a-z' + ul + r'0-9](?:[a-z' + ul + r'0-9-]{0,61}[a-z' + ul + r'0-9])?'
+    domain_re = r'(?:\.(?!-)[a-z' + ul + r'0-9-]{1,63}(?<!-))*'
+    tld_re = (
+        r'\.'                                # dot
+        r'(?!-)'                             # can't start with a dash
+        r'(?:[a-z' + ul + '-]{2,63}'         # domain label
+        r'|xn--[a-z0-9]{1,59})'              # or punycode label
+        r'(?<!-)'                            # can't end with a dash
+        r'\.?'                               # may have a trailing dot
+    )
+    host_re = '(' + hostname_re + domain_re + tld_re + '|localhost)'
+    regex = _lazy_re_compile(
+        r'^(?:[a-z0-9.+-]*)://'  # scheme is validated separately
+        r'(?:[^\s:@/]+(?::[^\s:@/]*)?@)?'  # user:pass authentication
+        r'(?:' + ipv4_re + '|' + ipv6_re + '|' + host_re + ')'
+        r'(?::\d{2,5})?'  # port
+        r'(?:[/?#][^\s]*)?'  # resource path
+        r'\Z', re.IGNORECASE)
+    message = _('Enter a valid URL.')
+    schemes = ['http', 'https', 'ftp', 'ftps']
+    def __init__(self, schemes=None, **kwargs):
+    def __call__(self, value):
+
+
+【源码片段 2】
+文件路径：django/contrib/admin/tests.py
+对象名称：tests
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 3】
+文件路径：django/core/exceptions.py
+对象名称：ValidationError
+节点类型：class
+父节点：exceptions
+行号范围：107-207
+代码：
+class ValidationError(Exception):
+    """An error while validating data."""
+    def __init__(self, message, code=None, params=None):
+    @property
+    def message_dict(self):
+    @property
+    def messages(self):
+    def update_error_dict(self, error_dict):
+    def __iter__(self):
+    def __str__(self):
+    def __repr__(self):
+    def __eq__(self, other):
+    def __hash__(self):
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/validators/tests.py
+测试名称：test_validators
+测试代码：
+class TestValidators(SimpleTestCase):
+    def test_validators(self):
+        for validator, value, expected in TEST_DATA:
+            name = validator.__name__ if isinstance(validator, types.FunctionType) else validator.__class__.__name__
+            exception_expected = expected is not None and issubclass(expected, Exception)
+            with self.subTest(name, value=value):
+                if validator is validate_image_file_extension and not PILLOW_IS_INSTALLED:
+                    self.skipTest('Pillow is required to test validate_image_file_extension.')
+                if exception_expected:
+                    with self.assertRaises(expected):
+                        validator(value)
+                else:
+                    self.assertEqual(expected, validator(value))
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

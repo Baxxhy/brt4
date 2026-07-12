@@ -1,0 +1,123 @@
+instance_id: django__django-15022
+
+issue_summary: 在 Django admin changelist 搜索时，搜索词过多会导致不必要的 JOIN 操作，造成查询性能问题甚至停滞。
+
+trigger_condition:
+{
+  "text": "在 Django admin 中，为 ModelAdmin 配置了跨模型（如 ForeignKey）的 search_fields，并使用包含多个单词（例如超过三个）的搜索词进行搜索。",
+  "evidence": [
+    "Issue 描述：'search_fields = (\\'name\\', \\'name2\\', \\'contact_person\\', \\'clientoffice__name\\', \\'clientoffice__name2\\')'",
+    "Issue 描述：'if we try searching for clients in admin by a search query containig several words (>3), got django/admin stalled.'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "Admin 界面停滞或无响应，查询性能极差。",
+  "symptom_type": "performance",
+  "evidence": [
+    "Issue 描述：'got django/admin stalled.'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "使用包含多个单词的搜索词进行 admin changelist 搜索时，查询应能高效执行，不应因不必要的 JOIN 操作而导致性能问题或停滞。",
+  "evidence": [
+    "Issue 描述暗示了问题在于不必要的 JOIN，期望修复后查询能正常执行。",
+    "相关测试代码展示了 search_fields 的正常使用场景，表明搜索功能应正常工作。"
+  ],
+  "confidence": "medium"
+}
+
+target_apis:
+[
+  {
+    "name": "ModelAdmin.get_search_results",
+    "kind": "method",
+    "source_path": "django/contrib/admin/options.py",
+    "reason": "Issue 涉及 admin changelist 搜索功能，该方法负责处理搜索逻辑。"
+  },
+  {
+    "name": "ModelAdmin.get_changelist_instance",
+    "kind": "method",
+    "source_path": "django/contrib/admin/options.py",
+    "reason": "相关测试中用于获取 changelist 并执行搜索查询。"
+  },
+  {
+    "name": "QuerySet.count",
+    "kind": "method",
+    "source_path": "django/db/models/query.py",
+    "reason": "Issue 和测试中都使用了 count() 来检查查询结果数量。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中使用较短的搜索字符串（如 'Duo Concert'）。",
+    "target_pattern": "使用包含多个单词（例如超过三个）的搜索字符串。",
+    "reason": "Issue 明确指出当搜索查询包含多个单词（>3）时会触发问题，因为每个单词可能导致额外的 JOIN。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "相似测试中 search_fields 可能包含较少的跨模型字段。",
+    "target_pattern": "配置 search_fields 包含多个跨模型（ForeignKey）的字段，如 Issue 中的 'clientoffice__name', 'clientoffice__name2'。",
+    "reason": "跨模型字段是导致 JOIN 的原因，配置多个此类字段可能加剧问题。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "sql",
+    "expression_hint": "生成的 SQL 查询字符串（例如 str(queryset.query)），观察 JOIN 子句的数量。",
+    "reason": "Issue 的核心是每个搜索词导致不必要的 JOIN，观察 SQL 可以确认 JOIN 数量是否异常增多。"
+  },
+  {
+    "kind": "performance",
+    "expression_hint": "查询执行时间或 changelist 响应时间。",
+    "reason": "Issue 现象是界面停滞，观测性能可以确认问题是否被触发。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证使用包含多个单词的搜索词时，查询能够正常执行且结果正确（或至少不因 JOIN 过多而停滞）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的 SQL 查询字符串，因为具体实现可能变化。",
+    "reason": "应关注功能正确性（能返回结果）而非具体的 SQL 结构，但 Issue 描述的性能问题可能需要在特定数据量下观测。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要创建 Django 项目环境，包含 Client 和 ClientOffice 模型（或类似结构），并配置相应的 ModelAdmin 和 search_fields。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要向数据库插入一定数量的 Client 和 ClientOffice 实例，以放大性能问题。",
+    "source": "issue",
+    "confidence": "medium"
+  },
+  {
+    "hint": "使用 TestCase 和 override_settings 来配置 ROOT_URLCONF，并模拟 admin 请求。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "导致性能问题的确切单词数量阈值（Issue 提到 >3，但可能因数据和配置而异）。",
+  "修复后的预期 SQL 结构具体如何优化（例如，是否应合并 JOIN）。",
+  "除了 JOIN 数量，是否还有其他因素（如数据库后端）影响问题表现。"
+]

@@ -1,0 +1,110 @@
+{
+  "issue_summary": "pylint 在通过 runpy 运行时错误地移除了 sys.path 的第一个条目，即使该条目不是空字符串、点号或当前工作目录。",
+  "trigger_condition": {
+    "text": "通过 runpy.run_module 以编程方式运行 pylint，且 sys.path 的第一个条目被插入了一个非空字符串、非点号、非当前工作目录的值。",
+    "evidence": ["Issue 中的命令：`runpy.run_module('pylint', run_name=\"__main__\", alter_sys=True)`", "Issue 中的描述：`sys.path.insert(0, \"something\")`"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "pylint 移除了 sys.path 的第一个条目，导致依赖于该路径条目的扩展（如捆绑库的扩展）加载失败。",
+    "symptom_type": "state_not_updated",
+    "evidence": ["Issue 描述：`Pylint removes the first entry from sys path causing it to fail to load.`"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "pylint 在移除 sys.path 的第一个条目之前，应检查该条目是否为表示当前目录的空字符串、点号或当前工作目录。",
+    "evidence": ["Issue 中的预期行为：`Check if \"\", \".\" or os.getcwd() before removing the first item from sys.path`"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "pylint.__init__",
+      "kind": "module",
+      "source_path": "pylint/__init__.py",
+      "reason": "Issue 中引用的代码行位于此模块中，该行移除了 sys.path 的第一个条目。"
+    },
+    {
+      "name": "runpy.run_module",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 中触发 bug 的方式是通过 runpy.run_module 运行 pylint。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "pylint/__init__.py",
+      "object": "",
+      "lines": "99",
+      "reason": "Issue 中明确指出了该行代码移除了 sys.path 的第一个条目，且建议在此处添加检查。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test__test_sys_path",
+      "test_file": "tests/testutils/test_testutils_utils.py",
+      "why_relevant": "该测试使用上下文管理器操作 sys.path，并断言其状态变化，与 Issue 中 sys.path 被修改的场景相关。",
+      "reusable_parts": ["sys.path 状态保存与恢复的模式", "使用上下文管理器", "assert sys.path == expected 的断言风格"],
+      "possible_gap": "该测试操作的是 sys.path 的整体赋值，而非针对其第一个条目的特定删除操作，也未涉及 runpy 的运行方式。"
+    },
+    {
+      "test_name": "test_one_arg",
+      "test_file": "tests/lint/unittest_lint.py",
+      "why_relevant": "该测试使用了 `lint.fix_import_path` 上下文管理器，该管理器可能内部操作 sys.path，与 Issue 中 pylint 修改 sys.path 的行为相关。",
+      "reusable_parts": ["使用 `with lint.fix_import_path(...):` 的上下文管理器模式", "在临时目录中创建文件", "断言 sys.path 在上下文内外是否一致"],
+      "possible_gap": "该测试关注的是为特定参数修复导入路径，而非在 pylint 主入口点（如通过 runpy 调用）处无条件删除 sys.path 的第一个条目。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "call_chain",
+      "current_pattern": "直接导入并调用 pylint 函数，或在测试中使用 `lint.fix_import_path` 上下文管理器。",
+      "target_pattern": "通过 `runpy.run_module('pylint', run_name=\"__main__\", alter_sys=True)` 启动 pylint。",
+      "reason": "Issue 表明 bug 仅在通过 runpy 运行 pylint 时触发，这改变了程序的入口点和 sys.path 的处理上下文。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试中 sys.path 的初始状态通常是默认值或由 fixture 设置。",
+      "target_pattern": "在调用 runpy.run_module 之前，先执行 `sys.path.insert(0, \"something\")`，其中 \"something\" 不是空字符串、点号或当前工作目录。",
+      "reason": "Issue 表明，当 sys.path 的第一个条目是特定值时，pylint 会错误地将其移除。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "state",
+      "expression_hint": "在调用 runpy.run_module 前后，观察 sys.path[0] 的值。",
+      "reason": "Issue 的核心是 sys.path 的第一个条目被不当移除。观察其变化可以直接验证 bug 是否触发。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "观察 sys.path 的整体长度和内容。",
+      "reason": "可以确认是第一个条目被删除，而不是其他修改。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证在通过 runpy 运行 pylint 后，sys.path 的第一个条目（如果它是非空、非点号、非当前工作目录的值）没有被移除。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的 sys.path 列表与某个硬编码值完全相等，因为系统环境可能不同。",
+      "reason": "应稳定地断言插入的特定条目仍然存在，而不是依赖于完整的路径列表。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "可能需要使用临时目录或模拟来设置 sys.path 的初始状态，避免污染全局环境。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    },
+    {
+      "hint": "测试需要模拟通过 runpy 运行 pylint 的场景，而不是直接导入。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "pylint/__init__.py 第 99 行移除 sys.path 第一个条目的确切上下文和条件尚不完全清楚。",
+    "`lint.fix_import_path` 上下文管理器是否与触发 bug 的代码路径有关联。",
+    "除了 runpy 调用，是否还有其他方式会触发相同的 bug。"
+  ]
+}

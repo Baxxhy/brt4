@@ -1,0 +1,98 @@
+instance_id: django__django-14559
+
+issue_summary: bulk_update() 方法目前返回 None，而 update() 方法返回匹配的行数，Issue 建议 bulk_update() 也应返回匹配的行数。
+
+trigger_condition:
+{
+  "text": "调用 QuerySet.bulk_update() 方法更新一批对象。",
+  "evidence": [
+    "Issue 描述指出 bulk_update() 目前返回 None。",
+    "源码片段 1 显示 bulk_update() 方法没有 return 语句返回行数。",
+    "相关测试 2、3、4 展示了 bulk_update() 的调用方式。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "bulk_update() 方法返回 None，而不是像 update() 那样返回匹配的行数。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 明确说明 'Currently, bulk_update() returns None, unlike update(), which returns the number of rows matched.'",
+    "源码片段 1 中 bulk_update() 方法在最后没有 return 语句，隐式返回 None。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "bulk_update() 方法应返回所有批次更新操作中匹配的总行数。",
+  "evidence": [
+    "Issue 建议 'the return values could simply be added and returned.'，即汇总内部 update() 调用的返回值并返回。",
+    "源码片段 2 显示 update() 方法返回 `rows` 变量，即匹配的行数。",
+    "相关测试 1 和 5 验证了 update() 的返回值是匹配的行数。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "QuerySet.bulk_update",
+    "kind": "method",
+    "source_path": "django/db/models/query.py",
+    "reason": "这是 Issue 报告的直接目标方法，需要修改其返回值。"
+  },
+  {
+    "name": "QuerySet.update",
+    "kind": "method",
+    "source_path": "django/db/models/query.py",
+    "reason": "bulk_update() 内部调用了 update()，其返回值需要被汇总。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "return_value",
+    "current_pattern": "相似测试中调用 bulk_update() 后，没有对其返回值进行断言或使用。",
+    "target_pattern": "在调用 bulk_update() 后，捕获其返回值并进行断言，验证其是否为整数（匹配的行数）。",
+    "reason": "Issue 的核心是 bulk_update() 缺少返回值，变异测试以检查返回值可以触发对缺失功能的验证。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "bulk_update() 的调用结果，例如 `result = queryset.bulk_update(...)` 中的 `result`。",
+    "reason": "直接观察该方法的返回值是 None 还是整数，是判断 Issue 是否存在的关键。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证 bulk_update() 的返回值是一个整数，并且等于所有被更新对象的总数（或匹配的行数）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言具体的 SQL 查询字符串或完整的 repr 输出。",
+    "reason": "Issue 期望的语义是返回匹配的行数，这与 update() 的行为一致。断言返回值等于预期更新的对象数量（假设所有对象都匹配并更新）是稳定且与 Issue 对齐的。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要 Django 的 TestCase 和数据库支持，以创建和更新模型对象。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "当 bulk_update() 内部 update() 调用影响零行时（例如对象不存在），返回值应该是 0 还是其他值？",
+  "批量更新时，如果某些对象的主键不在数据库中，update() 的返回值行为是什么？这会影响总行数的计算。",
+  "bulk_update() 的返回值是否应该与 update() 完全一致（即匹配的行数，可能不等于传入的对象数）？"
+]

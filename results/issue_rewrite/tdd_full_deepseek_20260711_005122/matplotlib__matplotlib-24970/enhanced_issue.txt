@@ -1,0 +1,116 @@
+instance_id: matplotlib__matplotlib-24970
+
+issue_summary: 使用 NumPy 1.24 时，调用 plt.get_cmap() 并传入一个空 uint8 数组会触发多个关于整数转换的弃用警告。
+
+trigger_condition:
+{
+  "text": "调用 plt.get_cmap() 返回的 colormap 对象，并传入一个空的、dtype 为 np.uint8 的 NumPy 数组。",
+  "evidence": [
+    "Issue 中的复现代码：`plt.get_cmap()(np.empty((0, ), dtype=np.uint8))`"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "出现多个 DeprecationWarning，提示 NumPy 将停止允许将超出范围的 Python 整数转换为整数数组。",
+  "symptom_type": "warning",
+  "evidence": [
+    "Issue 中的 Actual outcome 部分显示了三个 DeprecationWarning 堆栈跟踪，指向 matplotlib/colors.py 的第 730-732 行。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "执行相同的操作时，不应产生任何弃用警告。",
+  "evidence": [
+    "Issue 中的 Expected outcome 部分：\"No warnings.\""
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "plt.get_cmap",
+    "kind": "function",
+    "source_path": "lib/matplotlib/cm.py",
+    "reason": "Issue 复现代码中直接调用了此函数。"
+  },
+  {
+    "name": "matplotlib.colormaps",
+    "kind": "module",
+    "source_path": "",
+    "reason": "相关源码片段 3 显示 get_cmap 已被弃用，并建议使用 matplotlib.colormaps。"
+  },
+  {
+    "name": "matplotlib.colors.Colormap.__call__",
+    "kind": "method",
+    "source_path": "",
+    "reason": "Issue 中警告来自 colors.py，表明 colormap 对象被调用时触发了内部逻辑。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中传入 colormap 的是浮点数标量或数组（如 `vals = [-1, 0.5, 2]` 或 `x = np.ones(4)`）。",
+    "target_pattern": "传入一个空的、dtype 为 np.uint8 的 NumPy 数组（如 `np.empty((0, ), dtype=np.uint8)`）。",
+    "reason": "Issue 表明，传入空的 uint8 数组会触发内部对超出范围整数的赋值操作，从而引发警告。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "相似测试中直接使用 `mpl.colormaps['name']` 获取 colormap。",
+    "target_pattern": "使用 `plt.get_cmap()` 获取默认 colormap（根据源码，此函数已被弃用，但 Issue 中使用了它）。",
+    "reason": "Issue 的复现代码使用了 `plt.get_cmap()`，这可能影响获取的 colormap 对象或其行为。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "warning",
+    "expression_hint": "调用 `warnings.catch_warnings(record=True)` 来捕获 DeprecationWarning。",
+    "reason": "Issue 的核心症状是出现了弃用警告，观测警告是判断缺陷是否触发的直接方式。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "colormap 调用后的返回值，例如 `result = cmap(data)`。",
+    "reason": "即使有警告，函数可能仍会返回一个值（可能是空数组），检查返回值有助于理解行为。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证在执行触发操作后，没有产生任何 DeprecationWarning。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言完整的警告消息字符串相等，因为警告文本可能随 NumPy 版本变化。",
+    "reason": "Issue 的期望结果是“No warnings.”，因此断言警告列表为空是稳定且与 Issue 对齐的。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "可能需要导入 warnings 模块来捕获警告。",
+    "source": "inference",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要设置特定的 NumPy 版本（如 1.24）或警告过滤器来重现问题。",
+    "source": "issue",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "警告是否仅在数组为空时触发，还是与 uint8 数据类型和内部赋值逻辑的特定交互有关。",
+  "使用 `plt.get_cmap()` 与直接使用 `mpl.colormaps['viridis']` 在触发条件上是否有本质区别。",
+  "除了警告，该操作是否还有其他副作用或返回值异常。"
+]

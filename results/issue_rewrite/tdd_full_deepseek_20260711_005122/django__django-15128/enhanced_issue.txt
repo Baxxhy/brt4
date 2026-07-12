@@ -1,0 +1,152 @@
+instance_id: django__django-15128
+
+issue_summary: QuerySet 的 OR 操作在某些情况下会导致 Query.change_aliases 方法抛出 AssertionError，因为生成的 change_map 的键和值存在交集。
+
+trigger_condition:
+{
+  "text": "对两个 QuerySet 执行按位或 (|) 操作，其中右侧 QuerySet 的查询包含顺序别名（如 T4, T5），且这些别名对应的表名也存在于左侧 QuerySet 的 table_map 中。具体操作是：先创建两个 QuerySet (qs1 和 qs2)，然后执行 qs1 | qs2。",
+  "evidence": [
+    "Issue 中提供了可复现的模型定义和代码：`qs1 = qux.foos.all()` 和 `qs2 = Foo.objects.filter(...)`，然后执行 `qs1 | qs2`。",
+    "Issue 描述指出，当 rhs 的 Query 有顺序别名且相关表名存在于 lhs.table_map 时，调用 Query.table_alias 会导致别名冲突。",
+    "源码片段 3 (combine 方法) 显示在合并查询时会生成 change_map 并调用 change_aliases。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "执行 qs1 | qs2 时，在 Query.change_aliases 方法的第一行抛出 AssertionError。错误信息指向 change_map 的键和值存在交集，例如 {'T4': 'T5', 'T5': 'T6'}。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中明确说明：'AssertionError'，并给出了错误位置：'/django/db/models/sql/query.py', line 854, in Query.change_aliases。",
+    "Issue 中给出了具体的 change_map 示例：`change_map = {'T4': 'T5', 'T5': 'T6'}`。",
+    "源码片段 2 (change_aliases 方法) 的第一行是 `assert set(change_map).isdisjoint(change_map.values())`，这正是断言失败的地方。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "对两个 QuerySet 执行按位或 (|) 操作应该成功，生成一个合并后的 QuerySet，而不会因为别名映射冲突而抛出 AssertionError。",
+  "evidence": [
+    "Issue 的 'Expectation' 部分提到：'Could you please fix this bug?'，隐含了操作应该成功。",
+    "相关测试 1 (test_combine_join_reuse) 和 相关测试 2 (test_ticket_10790_combine) 展示了 QuerySet 的 OR 操作在正常情况下应该成功执行并返回正确结果。",
+    "Issue 中提到 `qs2 | qs1` 可以正常工作，这表明 OR 操作在特定顺序下是可行的，修复后应支持两种顺序。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "django.db.models.QuerySet.__or__",
+    "kind": "method",
+    "source_path": "django/db/models/query.py",
+    "reason": "Issue 的核心是 QuerySet 的 OR 操作 (|) 触发了 bug。"
+  },
+  {
+    "name": "django.db.models.sql.query.Query.combine",
+    "kind": "method",
+    "source_path": "django/db/models/sql/query.py",
+    "reason": "QuerySet 的 OR 操作最终会调用 Query.combine 方法，该方法负责合并两个查询并生成 change_map。"
+  },
+  {
+    "name": "django.db.models.sql.query.Query.change_aliases",
+    "kind": "method",
+    "source_path": "django/db/models/sql/query.py",
+    "reason": "错误直接发生在这个方法中，它负责根据 change_map 重命名别名。"
+  },
+  {
+    "name": "django.db.models.sql.query.Query.table_alias",
+    "kind": "method",
+    "source_path": "django/db/models/sql/query.py",
+    "reason": "Issue 分析指出，在 combine 过程中调用 table_alias 可能导致创建冲突的别名。"
+  },
+  {
+    "name": "django.db.models.sql.query.Query.join",
+    "kind": "method",
+    "source_path": "django/db/models/sql/query.py",
+    "reason": "Issue 提到在 Query.join 中会调用 table_alias。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "call_chain",
+    "current_pattern": "相关测试通常构建两个相对简单的 QuerySet（例如基于同一模型的不同过滤条件）然后进行 OR 操作。",
+    "target_pattern": "构建两个 QuerySet，其中右侧 QuerySet (rhs) 的查询涉及连接并生成顺序别名（如 T4, T5），且这些别名对应的基础表名也存在于左侧 QuerySet (lhs) 的 table_map 中。然后执行 lhs | rhs。",
+    "reason": "根据 Issue 分析，只有当 rhs 有顺序别名且相关表名在 lhs.table_map 中时，在 combine 过程中调用 table_alias 才会创建导致键值相交的 change_map。",
+    "confidence": "medium"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "相似测试中，两个 QuerySet 的底层 Query 对象的别名映射（alias_map）和表映射（table_map）可能没有特定的重叠模式。",
+    "target_pattern": "确保在执行 OR 操作前，lhs Query 的 table_map 包含与 rhs Query 中顺序别名（如 T4, T5）对应的表名。同时，rhs Query 的 alias_map 中包含这些顺序别名。",
+    "reason": "Issue 明确指出，当 'rhs's Query currently have sequential aliases (e.g. T4 and T5) and related table_names also exist in lhs.table_map' 时，bug 会被触发。",
+    "confidence": "medium"
+  },
+  {
+    "slot": "operator",
+    "current_pattern": "相似测试中，OR 操作的操作数顺序可能不影响结果（测试中有时会交换顺序进行验证）。",
+    "target_pattern": "特意使用 `qs1 | qs2` 的顺序，其中 qs1 是 `qux.foos.all()`，qs2 是 `Foo.objects.filter(...)`。根据 Issue，`qs2 | qs1` 能正常工作，但 `qs1 | qs2` 会触发错误。",
+    "reason": "Issue 表明 OR 操作不是可交换的（至少在触发 bug 的上下文中），特定的操作数顺序是触发条件的一部分。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "在执行 `combined = qs1 | qs2` 时，捕获并检查是否抛出 AssertionError，特别是来自 `Query.change_aliases` 的异常。",
+    "reason": "Issue 的核心错误现象就是 AssertionError。观测此异常是判断 bug 是否被触发的直接方式。"
+  },
+  {
+    "kind": "sql",
+    "expression_hint": "在执行 OR 操作前后，检查 `str(qs1.query)` 和 `str(qs2.query)`，特别是它们的别名（如 T4, T5）。也可以检查合并后 Query 的 `change_map`（如果能在测试中访问到）。",
+    "reason": "Issue 与 SQL 查询的别名生成和映射直接相关。观察别名结构有助于理解触发条件。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "在执行 OR 操作前，检查 `qs2.query.alias_map` 和 `qs1.query.table_map` 的内容，确认是否存在 Issue 描述的顺序别名和表名重叠。",
+    "reason": "这有助于验证是否满足了触发 bug 的特定状态条件。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证 `qs1 | qs2` 操作不会抛出 AssertionError（或任何异常），并且能够成功创建一个 QuerySet 对象。",
+    "preferred_assertion_style": "raises",
+    "avoid": "避免断言完整的 SQL 字符串或特定的别名命名，因为这些是内部实现细节，可能在修复后改变。",
+    "reason": "Issue 的核心是操作因断言失败而异常终止。修复后，操作应正常完成。使用 `assertNotRaises` 或 `try/except` 来验证无异常更稳定。"
+  },
+  {
+    "assertion_goal": "验证 `qs1 | qs2` 和 `qs2 | qs1` 都返回相同的结果集（可能顺序不同），以确认 OR 操作在修复后具有一致的语义。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言结果的具体顺序，除非模型有明确的默认排序。",
+    "reason": "Issue 提到 OR 操作似乎不是可交换的。修复后，两个方向的操作应该产生相同的结果（集合意义上），这是用户对 OR 操作的合理期望。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 TestCase 类，并设置测试数据库。需要创建 Issue 中定义的 Foo, Bar, Baz, Qux 模型实例，特别是建立它们之间的外键和 ManyToMany 关系。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要放在 `tests/queries/tests.py` 文件中的一个类似 `Queries4Tests` 或 `QuerySetBitwiseOperationTests` 的测试类中，以复用现有的测试基础设施。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "Issue 中提供的模型和代码是触发 bug 的最小示例，但不确定是否还有其他模型关系或查询模式也能触发相同的 AssertionError。",
+  "不确定在 combine 方法中，生成冲突 change_map 的确切代码路径和逻辑条件。需要进一步分析源码或通过插桩确认。",
+  "Issue 中建议的修复方案（在 Query.join 和 Query.table_alias 中考虑 rhs.alias_map）是否是正确的修复方向，或者是否存在其他根本原因。"
+]

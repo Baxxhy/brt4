@@ -1,0 +1,263 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Nominal scale should be drawn the same way as categorical scales
+Three distinctive things happen on the categorical axis in seaborn's categorical plots:
+
+1. The scale is drawn to +/- 0.5 from the first and last tick, rather than using the normal margin logic
+2. A grid is not shown, even when it otherwise would be with the active style
+3. If on the y axis, the axis is inverted
+
+It probably makes sense to have `so.Nominal` scales (including inferred ones) do this too. Some comments on implementation:
+
+1. This is actually trickier than you'd think; I may have posted an issue over in matplotlib about this at one point, or just discussed on their gitter. I believe the suggested approach is to add an invisible artist with sticky edges and set the margin to 0. Feels like a hack! I might have looked into setting the sticky edges _on the spine artist_ at one point?
+
+2. Probably straightforward to do in `Plotter._finalize_figure`. Always a good idea? How do we defer to the theme if the user wants to force a grid? Should the grid be something that is set in the scale object itself
+
+3. Probably straightforward to implement but I am not exactly sure where would be best.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：seaborn/_core/scales.py
+对象名称：Nominal
+节点类型：class
+父节点：scales
+行号范围：138-295
+代码：
+class Nominal(Scale):
+    """
+    A categorical scale without relative importance / magnitude.
+    """
+    def _setup(
+        self, data: Series, prop: Property, axis: Axis | None = None,
+    ) -> Scale:
+
+    def tick(self, locator: Locator | None = None):
+    def label(self, formatter: Formatter | None = None):
+    def _get_locators(self, locator):
+
+    def _get_formatter(self, locator, formatter):
+
+
+
+【源码片段 2】
+文件路径：seaborn/_core/plot.py
+对象名称：_finalize_figure
+节点类型：class_function
+父节点：Plotter
+行号范围：1628-1649
+代码：
+    def _finalize_figure(self, p: Plot) -> None:
+
+        for sub in self._subplots:
+            ax = sub["ax"]
+            for axis in "xy":
+                axis_key = sub[axis]
+
+                # Axis limits
+                if axis_key in p._limits:
+                    convert_units = getattr(ax, f"{axis}axis").convert_units
+                    a, b = p._limits[axis_key]
+                    lo = a if a is None else convert_units(a)
+                    hi = b if b is None else convert_units(b)
+                    if isinstance(a, str):
+                        lo = cast(float, lo) - 0.5
+                    if isinstance(b, str):
+                        hi = cast(float, hi) + 0.5
+                    ax.set(**{f"{axis}lim": (lo, hi)})
+
+        engine_default = None if p._target is not None else "tight"
+        layout_engine = p._layout_spec.get("engine", engine_default)
+        set_layout_engine(self._figure, layout_engine)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/_core/test_scales.py
+测试名称：TestNominal.test_coordinate_axis
+测试代码：
+class TestNominal:
+    def test_coordinate_axis(self, x):
+
+        ax = mpl.figure.Figure().subplots()
+        s = Nominal()._setup(x, Coordinate(), ax.xaxis)
+        assert_array_equal(s(x), np.array([0, 1, 2, 1], float))
+        f = ax.xaxis.get_major_formatter()
+        assert f.format_ticks([0, 1, 2]) == ["a", "c", "b"]
+
+【相关测试 2】
+测试文件：tests/_core/test_scales.py
+测试名称：TestNominal.test_coordinate_axis_with_order
+测试代码：
+class TestNominal:
+    def test_coordinate_axis_with_order(self, x):
+
+        order = ["a", "b", "c"]
+        ax = mpl.figure.Figure().subplots()
+        s = Nominal(order=order)._setup(x, Coordinate(), ax.xaxis)
+        assert_array_equal(s(x), np.array([0, 2, 1, 2], float))
+        f = ax.xaxis.get_major_formatter()
+        assert f.format_ticks([0, 1, 2]) == order
+
+【相关测试 3】
+测试文件：tests/_core/test_scales.py
+测试名称：TestNominal.test_coordinate_axis_with_category_dtype
+测试代码：
+class TestNominal:
+    def test_coordinate_axis_with_category_dtype(self, x):
+
+        order = ["b", "a", "d", "c"]
+        x = x.astype(pd.CategoricalDtype(order))
+        ax = mpl.figure.Figure().subplots()
+        s = Nominal()._setup(x, Coordinate(), ax.xaxis)
+        assert_array_equal(s(x), np.array([1, 3, 0, 3], float))
+        f = ax.xaxis.get_major_formatter()
+        assert f.format_ticks([0, 1, 2, 3]) == order
+
+【相关测试 4】
+测试文件：tests/_core/test_scales.py
+测试名称：TestNominal.test_coordinate_axis_with_subset_order
+测试代码：
+class TestNominal:
+    def test_coordinate_axis_with_subset_order(self, x):
+
+        order = ["c", "a"]
+        ax = mpl.figure.Figure().subplots()
+        s = Nominal(order=order)._setup(x, Coordinate(), ax.xaxis)
+        assert_array_equal(s(x), np.array([1, 0, np.nan, 0], float))
+        f = ax.xaxis.get_major_formatter()
+        assert f.format_ticks([0, 1, 2]) == [*order, ""]
+
+【相关测试 5】
+测试文件：tests/test_categorical.py
+测试名称：SharedAxesLevelTests.test_two_calls
+测试代码：
+class SharedAxesLevelTests:
+    def test_two_calls(self):
+
+        ax = plt.figure().subplots()
+        self.func(x=["a", "b", "c"], y=[1, 2, 3], ax=ax)
+        self.func(x=["e", "f"], y=[4, 5], ax=ax)
+        assert ax.get_xlim() == (-.5, 4.5)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

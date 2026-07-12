@@ -1,0 +1,568 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Class methods from nested classes cannot be used as Field.default.
+Description
+	 
+		(last modified by Mariusz Felisiak)
+	 
+Given the following model:
+ 
+class Profile(models.Model):
+	class Capability(models.TextChoices):
+		BASIC = ("BASIC", "Basic")
+		PROFESSIONAL = ("PROFESSIONAL", "Professional")
+		
+		@classmethod
+		def default(cls) -> list[str]:
+			return [cls.BASIC]
+	capabilities = ArrayField(
+		models.CharField(choices=Capability.choices, max_length=30, blank=True),
+		null=True,
+		default=Capability.default
+	)
+The resulting migration contained the following:
+ # ...
+	 migrations.AddField(
+		 model_name='profile',
+		 name='capabilities',
+		 field=django.contrib.postgres.fields.ArrayField(base_field=models.CharField(blank=True, choices=[('BASIC', 'Basic'), ('PROFESSIONAL', 'Professional')], max_length=30), default=appname.models.Capability.default, null=True, size=None),
+	 ),
+ # ...
+As you can see, migrations.AddField is passed as argument "default" a wrong value "appname.models.Capability.default", which leads to an error when trying to migrate. The right value should be "appname.models.Profile.Capability.default".
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/db/models/base.py
+对象名称：Model
+节点类型：class
+父节点：base
+行号范围：459-2530
+代码：
+class Model(AltersData, metaclass=ModelBase):
+    def __init__(self, *args, **kwargs):
+    @classmethod
+    def from_db(cls, db, field_names, values):
+    def __repr__(self):
+    def __str__(self):
+    def __eq__(self, other):
+    def __hash__(self):
+    def __reduce__(self):
+    def __getstate__(self):
+    def __setstate__(self, state):
+    def _get_pk_val(self, meta=None):
+    def _set_pk_val(self, value):
+    pk = property(_get_pk_val, _set_pk_val)
+    def get_deferred_fields(self):
+    def refresh_from_db(self, using=None, fields=None):
+    async def arefresh_from_db(self, using=None, fields=None):
+    def serializable_value(self, field_name):
+    def save(
+        self, force_insert=False, force_update=False, using=None, update_fields=None
+    ):
+    save.alters_data = True
+    async def asave(
+        self, force_insert=False, force_update=False, using=None, update_fields=None
+    ):
+    asave.alters_data = True
+    @classmethod
+    def _validate_force_insert(cls, force_insert):
+    def save_base(
+        self,
+        raw=False,
+        force_insert=False,
+        force_update=False,
+        using=None,
+        update_fields=None,
+    ):
+    save_base.alters_data = True
+    def _save_parents(
+        self, cls, using, update_fields, force_insert, updated_parents=None
+    ):
+    def _save_table(
+        self,
+        raw=False,
+        cls=None,
+        force_insert=False,
+        force_update=False,
+        using=None,
+        update_fields=None,
+    ):
+    def _do_update(self, base_qs, using, pk_val, values, update_fields, forced_update):
+    def _do_insert(self, manager, using, fields, returning_fields, raw):
+    def _prepare_related_fields_for_save(self, operation_name, fields=None):
+    def delete(self, using=None, keep_parents=False):
+    delete.alters_data = True
+    async def adelete(self, using=None, keep_parents=False):
+    adelete.alters_data = True
+    def _get_FIELD_display(self, field):
+    def _get_next_or_previous_by_FIELD(self, field, is_next, **kwargs):
+    def _get_next_or_previous_in_order(self, is_next):
+    def _get_field_value_map(self, meta, exclude=None):
+    def prepare_database_save(self, field):
+    def clean(self):
+    def validate_unique(self, exclude=None):
+    def _get_unique_checks(self, exclude=None, include_meta_constraints=False):
+    def _perform_unique_checks(self, unique_checks):
+    def _perform_date_checks(self, date_checks):
+    def date_error_message(self, lookup_type, field_name, unique_for):
+    def unique_error_message(self, model_class, unique_check):
+    def get_constraints(self):
+    def validate_constraints(self, exclude=None):
+    def full_clean(self, exclude=None, validate_unique=True, validate_constraints=True):
+    def clean_fields(self, exclude=None):
+    @classmethod
+    def check(cls, **kwargs):
+    @classmethod
+    def _check_default_pk(cls):
+    @classmethod
+    def _check_db_table_comment(cls, databases):
+    @classmethod
+    def _check_swappable(cls):
+    @classmethod
+    def _check_model(cls):
+    @classmethod
+    def _check_managers(cls, **kwargs):
+    @classmethod
+    def _check_fields(cls, **kwargs):
+    @classmethod
+    def _check_m2m_through_same_relationship(cls):
+    @classmethod
+    def _check_id_field(cls):
+    @classmethod
+    def _check_field_name_clashes(cls):
+    @classmethod
+    def _check_column_name_clashes(cls):
+    @classmethod
+    def _check_model_name_db_lookup_clashes(cls):
+    @classmethod
+    def _check_property_name_related_field_accessor_clashes(cls):
+    @classmethod
+    def _check_single_primary_key(cls):
+    @classmethod
+    def _check_index_together(cls):
+    @classmethod
+    def _check_unique_together(cls):
+    @classmethod
+    def _check_indexes(cls, databases):
+    @classmethod
+    def _check_local_fields(cls, fields, option):
+    @classmethod
+    def _check_ordering(cls):
+    @classmethod
+    def _check_long_column_names(cls, databases):
+    @classmethod
+    def _get_expr_references(cls, expr):
+    @classmethod
+    def _check_constraints(cls, databases):
+
+
+【源码片段 2】
+文件路径：django/contrib/postgres/fields/array.py
+对象名称：ArrayField
+节点类型：class
+父节点：array
+行号范围：18-235
+代码：
+class ArrayField(CheckFieldDefaultMixin, Field):
+    empty_strings_allowed = False
+    default_error_messages = {
+        "item_invalid": _("Item %(nth)s in the array did not validate:"),
+        "nested_array_mismatch": _("Nested arrays must have the same length."),
+    }
+    _default_hint = ("list", "[]")
+    def __init__(self, base_field, size=None, **kwargs):
+    @property
+    def model(self):
+    @model.setter
+    def model(self, model):
+    @classmethod
+    def _choices_is_value(cls, value):
+    def check(self, **kwargs):
+    def set_attributes_from_name(self, name):
+    @property
+    def description(self):
+    def db_type(self, connection):
+    def cast_db_type(self, connection):
+    def db_parameters(self, connection):
+    def get_placeholder(self, value, compiler, connection):
+    def get_db_prep_value(self, value, connection, prepared=False):
+    def deconstruct(self):
+    def to_python(self, value):
+    def _from_db_value(self, value, expression, connection):
+    def value_to_string(self, obj):
+    def get_transform(self, name):
+    def validate(self, value, model_instance):
+    def run_validators(self, value):
+    def formfield(self, **kwargs):
+
+
+【源码片段 3】
+文件路径：django/db/models/fields/__init__.py
+对象名称：CharField
+节点类型：class
+父节点：__init__
+行号范围：1194-1305
+代码：
+class CharField(Field):
+    def __init__(self, *args, db_collation=None, **kwargs):
+    @property
+    def description(self):
+    def check(self, **kwargs):
+    def _check_max_length_attribute(self, **kwargs):
+    def _check_db_collation(self, databases):
+    def cast_db_type(self, connection):
+    def db_parameters(self, connection):
+    def get_internal_type(self):
+    def to_python(self, value):
+    def get_prep_value(self, value):
+    def formfield(self, **kwargs):
+    def deconstruct(self):
+
+
+【源码片段 4】
+文件路径：django/contrib/messages/storage/cookie.py
+对象名称：default
+节点类型：class_function
+父节点：MessageEncoder
+行号范围：18-26
+代码：
+    def default(self, obj):
+        if isinstance(obj, Message):
+            # Using 0/1 here instead of False/True to produce more compact json
+            is_safedata = 1 if isinstance(obj.message, SafeData) else 0
+            message = [self.message_key, is_safedata, obj.level, obj.message]
+            if obj.extra_tags is not None:
+                message.append(obj.extra_tags)
+            return message
+        return super().default(obj)
+
+
+【源码片段 5】
+文件路径：django/db/migrations/operations/fields.py
+对象名称：AddField
+节点类型：class
+父节点：fields
+行号范围：75-151
+代码：
+class AddField(FieldOperation):
+    """Add a field to a model."""
+    def __init__(self, model_name, name, field, preserve_default=True):
+    def deconstruct(self):
+    def state_forwards(self, app_label, state):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+    def database_backwards(self, app_label, schema_editor, from_state, to_state):
+    def describe(self):
+    @property
+    def migration_name_fragment(self):
+    def reduce(self, operation, app_label):
+
+
+【源码片段 6】
+文件路径：django/db/models/enums.py
+对象名称：TextChoices
+节点类型：class
+父节点：enums
+行号范围：88-92
+代码：
+class TextChoices(str, Choices):
+    """Class for creating enumerated string choices."""
+    def _generate_next_value_(name, start, count, last_values):
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/migrations/test_writer.py
+测试名称：WriterTests.test_serialize_nested_class
+测试代码：
+class WriterTests(SimpleTestCase):
+    def test_serialize_nested_class(self):
+        for nested_cls in [self.NestedEnum, self.NestedChoices]:
+            cls_name = nested_cls.__name__
+            with self.subTest(cls_name):
+                self.assertSerializedResultEqual(
+                    nested_cls,
+                    (
+                        "migrations.test_writer.WriterTests.%s" % cls_name,
+                        {"import migrations.test_writer"},
+                    ),
+                )
+
+【相关测试 2】
+测试文件：tests/migrations/test_writer.py
+测试名称：WriterTests.test_serialize_enums
+测试代码：
+class WriterTests(SimpleTestCase):
+    def test_serialize_enums(self):
+        self.assertSerializedResultEqual(
+            TextEnum.A,
+            ("migrations.test_writer.TextEnum['A']", {"import migrations.test_writer"}),
+        )
+        self.assertSerializedResultEqual(
+            TextTranslatedEnum.A,
+            (
+                "migrations.test_writer.TextTranslatedEnum['A']",
+                {"import migrations.test_writer"},
+            ),
+        )
+        self.assertSerializedResultEqual(
+            BinaryEnum.A,
+            (
+                "migrations.test_writer.BinaryEnum['A']",
+                {"import migrations.test_writer"},
+            ),
+        )
+        self.assertSerializedResultEqual(
+            IntEnum.B,
+            ("migrations.test_writer.IntEnum['B']", {"import migrations.test_writer"}),
+        )
+        self.assertSerializedResultEqual(
+            self.NestedEnum.A,
+            (
+                "migrations.test_writer.WriterTests.NestedEnum['A']",
+                {"import migrations.test_writer"},
+            ),
+        )
+        self.assertSerializedEqual(self.NestedEnum.A)
+
+        field = models.CharField(
+            default=TextEnum.B, choices=[(m.value, m) for m in TextEnum]
+        )
+        string = MigrationWriter.serialize(field)[0]
+        self.assertEqual(
+            string,
+            "models.CharField(choices=["
+            "('a-value', migrations.test_writer.TextEnum['A']), "
+            "('value-b', migrations.test_writer.TextEnum['B'])], "
+            "default=migrations.test_writer.TextEnum['B'])",
+        )
+        field = models.CharField(
+            default=TextTranslatedEnum.A,
+            choices=[(m.value, m) for m in TextTranslatedEnum],
+        )
+        string = MigrationWriter.serialize(field)[0]
+        self.assertEqual(
+            string,
+            "models.CharField(choices=["
+            "('a-value', migrations.test_writer.TextTranslatedEnum['A']), "
+            "('value-b', migrations.test_writer.TextTranslatedEnum['B'])], "
+            "default=migrations.test_writer.TextTranslatedEnum['A'])",
+        )
+        field = models.CharField(
+            default=BinaryEnum.B, choices=[(m.value, m) for m in BinaryEnum]
+        )
+        string = MigrationWriter.serialize(field)[0]
+        self.assertEqual(
+            string,
+            "models.CharField(choices=["
+            "(b'a-value', migrations.test_writer.BinaryEnum['A']), "
+            "(b'value-b', migrations.test_writer.BinaryEnum['B'])], "
+            "default=migrations.test_writer.BinaryEnum['B'])",
+        )
+        field = models.IntegerField(
+            default=IntEnum.A, choices=[(m.value, m) for m in IntEnum]
+        )
+        string = MigrationWriter.serialize(field)[0]
+        self.assertEqual(
+            string,
+            "models.IntegerField(choices=["
+            "(1, migrations.test_writer.IntEnum['A']), "
+            "(2, migrations.test_writer.IntEnum['B'])], "
+            "default=migrations.test_writer.IntEnum['A'])",
+        )
+
+【相关测试 3】
+测试文件：tests/migrations/test_writer.py
+测试名称：WriterTests.test_deconstruct_class_arguments
+测试代码：
+class WriterTests(SimpleTestCase):
+    def test_deconstruct_class_arguments(self):
+        # Yes, it doesn't make sense to use a class as a default for a
+        # CharField. It does make sense for custom fields though, for example
+        # an enumfield that takes the enum class as an argument.
+        string = MigrationWriter.serialize(
+            models.CharField(default=DeconstructibleInstances)
+        )[0]
+        self.assertEqual(
+            string,
+            "models.CharField(default=migrations.test_writer.DeconstructibleInstances)",
+        )
+
+【相关测试 4】
+测试文件：tests/migrations/test_writer.py
+测试名称：WriterTests.test_serialize_choices
+测试代码：
+class WriterTests(SimpleTestCase):
+    def test_serialize_choices(self):
+        class TextChoices(models.TextChoices):
+            A = "A", "A value"
+            B = "B", "B value"
+
+        class IntegerChoices(models.IntegerChoices):
+            A = 1, "One"
+            B = 2, "Two"
+
+        class DateChoices(datetime.date, models.Choices):
+            DATE_1 = 1969, 7, 20, "First date"
+            DATE_2 = 1969, 11, 19, "Second date"
+
+        self.assertSerializedResultEqual(TextChoices.A, ("'A'", set()))
+        self.assertSerializedResultEqual(IntegerChoices.A, ("1", set()))
+        self.assertSerializedResultEqual(
+            DateChoices.DATE_1,
+            ("datetime.date(1969, 7, 20)", {"import datetime"}),
+        )
+        field = models.CharField(default=TextChoices.B, choices=TextChoices)
+        string = MigrationWriter.serialize(field)[0]
+        self.assertEqual(
+            string,
+            "models.CharField(choices=[('A', 'A value'), ('B', 'B value')], "
+            "default='B')",
+        )
+        field = models.IntegerField(default=IntegerChoices.B, choices=IntegerChoices)
+        string = MigrationWriter.serialize(field)[0]
+        self.assertEqual(
+            string,
+            "models.IntegerField(choices=[(1, 'One'), (2, 'Two')], default=2)",
+        )
+        field = models.DateField(default=DateChoices.DATE_2, choices=DateChoices)
+        string = MigrationWriter.serialize(field)[0]
+        self.assertEqual(
+            string,
+            "models.DateField(choices=["
+            "(datetime.date(1969, 7, 20), 'First date'), "
+            "(datetime.date(1969, 11, 19), 'Second date')], "
+            "default=datetime.date(1969, 11, 19))",
+        )
+
+【相关测试 5】
+测试文件：tests/model_fields/tests.py
+测试名称：BasicFieldTests.test_deconstruct_nested_field
+测试代码：
+class BasicFieldTests(SimpleTestCase):
+    def test_deconstruct_nested_field(self):
+        """deconstruct() uses __qualname__ for nested class support."""
+        name, path, args, kwargs = Nested.Field().deconstruct()
+        self.assertEqual(path, "model_fields.tests.Nested.Field")
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

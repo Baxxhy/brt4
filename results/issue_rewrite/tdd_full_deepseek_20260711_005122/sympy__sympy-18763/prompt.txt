@@ -1,0 +1,558 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Incorrect parenthesizing of Subs
+Here is an example.
+```python
+>>> from sympy import Subs
+>>> from sympy.abc import x,y
+>>> 3*Subs(-x+y, (x,),(1,))
+```
+LaTeX printing of this gives:  
+```python
+'3 \\left. - x + y \\right|_{\\substack{ x=1 }}'
+```
+
+![image](https://quicklatex.com/cache3/76/ql_9672fd7e62c909ff3d9ac8543c2e2576_l3.png)
+
+
+It would be better to be parenthesized to:  
+```python
+'3 \\left. \\left(- x + y\\right) \\right|_{\\substack{ x=1 }}'
+```
+
+![image](https://quicklatex.com/cache3/bf/ql_936ffdb876e784206d4c54bb93d28dbf_l3.png)
+
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/core/function.py
+对象名称：Subs
+节点类型：class
+父节点：function
+行号范围：2071-2381
+代码：
+class Subs(Expr):
+    """
+    Represents unevaluated substitutions of an expression.
+
+    ``Subs(expr, x, x0)`` receives 3 arguments: an expression, a variable or
+    list of distinct variables and a point or list of evaluation points
+    corresponding to those variables.
+
+    ``Subs`` objects are generally useful to represent unevaluated derivatives
+    calculated at a point.
+
+    The variables may be expressions, but they are subjected to the limitations
+    of subs(), so it is usually a good practice to use only symbols for
+    variables, since in that case there can be no ambiguity.
+
+    There's no automatic expansion - use the method .doit() to effect all
+    possible substitutions of the object and also of objects inside the
+    expression.
+
+    When evaluating derivatives at a point that is not a symbol, a Subs object
+    is returned. One is also able to calculate derivatives of Subs objects - in
+    this case the expression is always expanded (for the unevaluated form, use
+    Derivative()).
+
+    Examples
+    ========
+
+    >>> from sympy import Subs, Function, sin, cos
+    >>> from sympy.abc import x, y, z
+    >>> f = Function('f')
+
+    Subs are created when a particular substitution cannot be made. The
+    x in the derivative cannot be replaced with 0 because 0 is not a
+    valid variables of differentiation:
+
+    >>> f(x).diff(x).subs(x, 0)
+    Subs(Derivative(f(x), x), x, 0)
+
+    Once f is known, the derivative and evaluation at 0 can be done:
+
+    >>> _.subs(f, sin).doit() == sin(x).diff(x).subs(x, 0) == cos(0)
+    True
+
+    Subs can also be created directly with one or more variables:
+
+    >>> Subs(f(x)*sin(y) + z, (x, y), (0, 1))
+    Subs(z + f(x)*sin(y), (x, y), (0, 1))
+    >>> _.doit()
+    z + f(0)*sin(1)
+
+    Notes
+    =====
+
+    In order to allow expressions to combine before doit is done, a
+    representation of the Subs expression is used internally to make
+    expressions that are superficially different compare the same:
+
+    >>> a, b = Subs(x, x, 0), Subs(y, y, 0)
+    >>> a + b
+    2*Subs(x, x, 0)
+
+    This can lead to unexpected consequences when using methods
+    like `has` that are cached:
+
+    >>> s = Subs(x, x, 0)
+    >>> s.has(x), s.has(y)
+    (True, False)
+    >>> ss = s.subs(x, y)
+    >>> ss.has(x), ss.has(y)
+    (True, False)
+    >>> s, ss
+    (Subs(x, x, 0), Subs(y, y, 0))
+    """
+    def __new__(cls, expr, variables, point, **assumptions):
+    def _eval_is_commutative(self):
+    def doit(self, **hints):
+    def evalf(self, prec=None, **options):
+    n = evalf
+    @property
+    def variables(self):
+    bound_symbols = variables
+    @property
+    def expr(self):
+    @property
+    def point(self):
+    @property
+    def free_symbols(self):
+    @property
+    def expr_free_symbols(self):
+    def __eq__(self, other):
+    def __ne__(self, other):
+    def __hash__(self):
+    def _hashable_content(self):
+    def _eval_subs(self, old, new):
+    def _eval_derivative(self, s):
+    def _eval_nseries(self, x, n, logx):
+    def _eval_as_leading_term(self, x):
+
+
+【源码片段 2】
+文件路径：sympy/abc.py
+对象名称：abc
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 3】
+文件路径：sympy/geometry/point.py
+对象名称：x
+节点类型：class_function
+父节点：Point2D
+行号范围：1033-1045
+代码：
+    def x(self):
+        """
+        Returns the X coordinate of the Point.
+
+        Examples
+        ========
+
+        >>> from sympy import Point2D
+        >>> p = Point2D(0, 1)
+        >>> p.x
+        0
+        """
+        return self.args[0]
+
+
+【源码片段 4】
+文件路径：sympy/geometry/point.py
+对象名称：y
+节点类型：class_function
+父节点：Point2D
+行号范围：1048-1060
+代码：
+    def y(self):
+        """
+        Returns the Y coordinate of the Point.
+
+        Examples
+        ========
+
+        >>> from sympy import Point2D
+        >>> p = Point2D(0, 1)
+        >>> p.y
+        1
+        """
+        return self.args[1]
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/printing/tests/test_latex.py
+测试名称：test_latex_subs
+测试代码：
+def test_latex_subs():
+    assert latex(Subs(x*y, (
+        x, y), (1, 2))) == r'\left. x y \right|_{\substack{ x=1\\ y=2 }}'
+
+【相关测试 2】
+测试文件：sympy/printing/tests/test_str.py
+测试名称：test_Subs_printing
+测试代码：
+def test_Subs_printing():
+    assert str(Subs(x, (x,), (1,))) == 'Subs(x, x, 1)'
+    assert str(Subs(x + y, (x, y), (1, 2))) == 'Subs(x + y, (x, y), (1, 2))'
+
+【相关测试 3】
+测试文件：sympy/printing/tests/test_latex.py
+测试名称：test_Mul
+测试代码：
+def test_Mul():
+    e = Mul(-2, x + 1, evaluate=False)
+    assert latex(e) == r'- 2 \left(x + 1\right)'
+    e = Mul(2, x + 1, evaluate=False)
+    assert latex(e) == r'2 \left(x + 1\right)'
+    e = Mul(S.Half, x + 1, evaluate=False)
+    assert latex(e) == r'\frac{x + 1}{2}'
+    e = Mul(y, x + 1, evaluate=False)
+    assert latex(e) == r'y \left(x + 1\right)'
+    e = Mul(-y, x + 1, evaluate=False)
+    assert latex(e) == r'- y \left(x + 1\right)'
+    e = Mul(-2, x + 1)
+    assert latex(e) == r'- 2 x - 2'
+    e = Mul(2, x + 1)
+    assert latex(e) == r'2 x + 2'
+
+【相关测试 4】
+测试文件：sympy/printing/tests/test_latex.py
+测试名称：test_latex_basic
+测试代码：
+def test_latex_basic():
+    assert latex(1 + x) == "x + 1"
+    assert latex(x**2) == "x^{2}"
+    assert latex(x**(1 + x)) == "x^{x + 1}"
+    assert latex(x**3 + x + 1 + x**2) == "x^{3} + x^{2} + x + 1"
+
+    assert latex(2*x*y) == "2 x y"
+    assert latex(2*x*y, mul_symbol='dot') == r"2 \cdot x \cdot y"
+    assert latex(3*x**2*y, mul_symbol='\\,') == r"3\,x^{2}\,y"
+    assert latex(1.5*3**x, mul_symbol='\\,') == r"1.5 \cdot 3^{x}"
+
+    assert latex(1/x) == r"\frac{1}{x}"
+    assert latex(1/x, fold_short_frac=True) == "1 / x"
+    assert latex(-S(3)/2) == r"- \frac{3}{2}"
+    assert latex(-S(3)/2, fold_short_frac=True) == r"- 3 / 2"
+    assert latex(1/x**2) == r"\frac{1}{x^{2}}"
+    assert latex(1/(x + y)/2) == r"\frac{1}{2 \left(x + y\right)}"
+    assert latex(x/2) == r"\frac{x}{2}"
+    assert latex(x/2, fold_short_frac=True) == "x / 2"
+    assert latex((x + y)/(2*x)) == r"\frac{x + y}{2 x}"
+    assert latex((x + y)/(2*x), fold_short_frac=True) == \
+        r"\left(x + y\right) / 2 x"
+    assert latex((x + y)/(2*x), long_frac_ratio=0) == \
+        r"\frac{1}{2 x} \left(x + y\right)"
+    assert latex((x + y)/x) == r"\frac{x + y}{x}"
+    assert latex((x + y)/x, long_frac_ratio=3) == r"\frac{x + y}{x}"
+    assert latex((2*sqrt(2)*x)/3) == r"\frac{2 \sqrt{2} x}{3}"
+    assert latex((2*sqrt(2)*x)/3, long_frac_ratio=2) == \
+        r"\frac{2 x}{3} \sqrt{2}"
+
+    assert latex(2*Integral(x, x)/3) == r"\frac{2 \int x\, dx}{3}"
+    assert latex(2*Integral(x, x)/3, fold_short_frac=True) == \
+        r"\left(2 \int x\, dx\right) / 3"
+
+    assert latex(sqrt(x)) == r"\sqrt{x}"
+    assert latex(x**Rational(1, 3)) == r"\sqrt[3]{x}"
+    assert latex(x**Rational(1, 3), root_notation=False) == r"x^{\frac{1}{3}}"
+    assert latex(sqrt(x)**3) == r"x^{\frac{3}{2}}"
+    assert latex(sqrt(x), itex=True) == r"\sqrt{x}"
+    assert latex(x**Rational(1, 3), itex=True) == r"\root{3}{x}"
+    assert latex(sqrt(x)**3, itex=True) == r"x^{\frac{3}{2}}"
+    assert latex(x**Rational(3, 4)) == r"x^{\frac{3}{4}}"
+    assert latex(x**Rational(3, 4), fold_frac_powers=True) == "x^{3/4}"
+    assert latex((x + 1)**Rational(3, 4)) == \
+        r"\left(x + 1\right)^{\frac{3}{4}}"
+    assert latex((x + 1)**Rational(3, 4), fold_frac_powers=True) == \
+        r"\left(x + 1\right)^{3/4}"
+
+    assert latex(1.5e20*x) == r"1.5 \cdot 10^{20} x"
+    assert latex(1.5e20*x, mul_symbol='dot') == r"1.5 \cdot 10^{20} \cdot x"
+    assert latex(1.5e20*x, mul_symbol='times') == \
+        r"1.5 \times 10^{20} \times x"
+
+    assert latex(1/sin(x)) == r"\frac{1}{\sin{\left(x \right)}}"
+    assert latex(sin(x)**-1) == r"\frac{1}{\sin{\left(x \right)}}"
+    assert latex(sin(x)**Rational(3, 2)) == \
+        r"\sin^{\frac{3}{2}}{\left(x \right)}"
+    assert latex(sin(x)**Rational(3, 2), fold_frac_powers=True) == \
+        r"\sin^{3/2}{\left(x \right)}"
+
+    assert latex(~x) == r"\neg x"
+    assert latex(x & y) == r"x \wedge y"
+    assert latex(x & y & z) == r"x \wedge y \wedge z"
+    assert latex(x | y) == r"x \vee y"
+    assert latex(x | y | z) == r"x \vee y \vee z"
+    assert latex((x & y) | z) == r"z \vee \left(x \wedge y\right)"
+    assert latex(Implies(x, y)) == r"x \Rightarrow y"
+    assert latex(~(x >> ~y)) == r"x \not\Rightarrow \neg y"
+    assert latex(Implies(Or(x,y), z)) == r"\left(x \vee y\right) \Rightarrow z"
+    assert latex(Implies(z, Or(x,y))) == r"z \Rightarrow \left(x \vee y\right)"
+    assert latex(~(x & y)) == r"\neg \left(x \wedge y\right)"
+
+    assert latex(~x, symbol_names={x: "x_i"}) == r"\neg x_i"
+    assert latex(x & y, symbol_names={x: "x_i", y: "y_i"}) == \
+        r"x_i \wedge y_i"
+    assert latex(x & y & z, symbol_names={x: "x_i", y: "y_i", z: "z_i"}) == \
+        r"x_i \wedge y_i \wedge z_i"
+    assert latex(x | y, symbol_names={x: "x_i", y: "y_i"}) == r"x_i \vee y_i"
+    assert latex(x | y | z, symbol_names={x: "x_i", y: "y_i", z: "z_i"}) == \
+        r"x_i \vee y_i \vee z_i"
+    assert latex((x & y) | z, symbol_names={x: "x_i", y: "y_i", z: "z_i"}) == \
+        r"z_i \vee \left(x_i \wedge y_i\right)"
+    assert latex(Implies(x, y), symbol_names={x: "x_i", y: "y_i"}) == \
+        r"x_i \Rightarrow y_i"
+
+    p = Symbol('p', positive=True)
+    assert latex(exp(-p)*log(p)) == r"e^{- p} \log{\left(p \right)}"
+
+【相关测试 5】
+测试文件：sympy/printing/tests/test_latex.py
+测试名称：test_set_operators_parenthesis
+测试代码：
+def test_set_operators_parenthesis():
+    a, b, c, d = symbols('a:d')
+    A = FiniteSet(a)
+    B = FiniteSet(b)
+    C = FiniteSet(c)
+    D = FiniteSet(d)
+
+    U1 = Union(A, B, evaluate=False)
+    U2 = Union(C, D, evaluate=False)
+    I1 = Intersection(A, B, evaluate=False)
+    I2 = Intersection(C, D, evaluate=False)
+    C1 = Complement(A, B, evaluate=False)
+    C2 = Complement(C, D, evaluate=False)
+    D1 = SymmetricDifference(A, B, evaluate=False)
+    D2 = SymmetricDifference(C, D, evaluate=False)
+    # XXX ProductSet does not support evaluate keyword
+    P1 = ProductSet(A, B)
+    P2 = ProductSet(C, D)
+
+    assert latex(Intersection(A, U2, evaluate=False)) == \
+        '\\left\\{a\\right\\} \\cap ' \
+        '\\left(\\left\\{c\\right\\} \\cup \\left\\{d\\right\\}\\right)'
+    assert latex(Intersection(U1, U2, evaluate=False)) == \
+        '\\left(\\left\\{a\\right\\} \\cup \\left\\{b\\right\\}\\right) ' \
+        '\\cap \\left(\\left\\{c\\right\\} \\cup \\left\\{d\\right\\}\\right)'
+    assert latex(Intersection(C1, C2, evaluate=False)) == \
+        '\\left(\\left\\{a\\right\\} \\setminus ' \
+        '\\left\\{b\\right\\}\\right) \\cap \\left(\\left\\{c\\right\\} ' \
+        '\\setminus \\left\\{d\\right\\}\\right)'
+    assert latex(Intersection(D1, D2, evaluate=False)) == \
+        '\\left(\\left\\{a\\right\\} \\triangle ' \
+        '\\left\\{b\\right\\}\\right) \\cap \\left(\\left\\{c\\right\\} ' \
+        '\\triangle \\left\\{d\\right\\}\\right)'
+    assert latex(Intersection(P1, P2, evaluate=False)) == \
+        '\\left(\\left\\{a\\right\\} \\times \\left\\{b\\right\\}\\right) ' \
+        '\\cap \\left(\\left\\{c\\right\\} \\times ' \
+        '\\left\\{d\\right\\}\\right)'
+
+    assert latex(Union(A, I2, evaluate=False)) == \
+        '\\left\\{a\\right\\} \\cup ' \
+        '\\left(\\left\\{c\\right\\} \\cap \\left\\{d\\right\\}\\right)'
+    assert latex(Union(I1, I2, evaluate=False)) == \
+        '\\left(\\left\\{a\\right\\} \\cap ''\\left\\{b\\right\\}\\right) ' \
+        '\\cup \\left(\\left\\{c\\right\\} \\cap \\left\\{d\\right\\}\\right)'
+    assert latex(Union(C1, C2, evaluate=False)) == \
+        '\\left(\\left\\{a\\right\\} \\setminus ' \
+        '\\left\\{b\\right\\}\\right) \\cup \\left(\\left\\{c\\right\\} ' \
+        '\\setminus \\left\\{d\\right\\}\\right)'
+    assert latex(Union(D1, D2, evaluate=False)) == \
+        '\\left(\\left\\{a\\right\\} \\triangle ' \
+        '\\left\\{b\\right\\}\\right) \\cup \\left(\\left\\{c\\right\\} ' \
+        '\\triangle \\left\\{d\\right\\}\\right)'
+    assert latex(Union(P1, P2, evaluate=False)) == \
+        '\\left(\\left\\{a\\right\\} \\times \\left\\{b\\right\\}\\right) ' \
+        '\\cup \\left(\\left\\{c\\right\\} \\times ' \
+        '\\left\\{d\\right\\}\\right)'
+
+    assert latex(Complement(A, C2, evaluate=False)) == \
+        '\\left\\{a\\right\\} \\setminus \\left(\\left\\{c\\right\\} ' \
+        '\\setminus \\left\\{d\\right\\}\\right)'
+    assert latex(Complement(U1, U2, evaluate=False)) == \
+        '\\left(\\left\\{a\\right\\} \\cup \\left\\{b\\right\\}\\right) ' \
+        '\\setminus \\left(\\left\\{c\\right\\} \\cup ' \
+        '\\left\\{d\\right\\}\\right)'
+    assert latex(Complement(I1, I2, evaluate=False)) == \
+        '\\left(\\left\\{a\\right\\} \\cap \\left\\{b\\right\\}\\right) ' \
+        '\\setminus \\left(\\left\\{c\\right\\} \\cap ' \
+        '\\left\\{d\\right\\}\\right)'
+    assert latex(Complement(D1, D2, evaluate=False)) == \
+        '\\left(\\left\\{a\\right\\} \\triangle ' \
+        '\\left\\{b\\right\\}\\right) \\setminus ' \
+        '\\left(\\left\\{c\\right\\} \\triangle \\left\\{d\\right\\}\\right)'
+    assert latex(Complement(P1, P2, evaluate=False)) == \
+        '\\left(\\left\\{a\\right\\} \\times \\left\\{b\\right\\}\\right) '\
+        '\\setminus \\left(\\left\\{c\\right\\} \\times '\
+        '\\left\\{d\\right\\}\\right)'
+
+    assert latex(SymmetricDifference(A, D2, evaluate=False)) == \
+        '\\left\\{a\\right\\} \\triangle \\left(\\left\\{c\\right\\} ' \
+        '\\triangle \\left\\{d\\right\\}\\right)'
+    assert latex(SymmetricDifference(U1, U2, evaluate=False)) == \
+        '\\left(\\left\\{a\\right\\} \\cup \\left\\{b\\right\\}\\right) ' \
+        '\\triangle \\left(\\left\\{c\\right\\} \\cup ' \
+        '\\left\\{d\\right\\}\\right)'
+    assert latex(SymmetricDifference(I1, I2, evaluate=False)) == \
+        '\\left(\\left\\{a\\right\\} \\cap \\left\\{b\\right\\}\\right) ' \
+        '\\triangle \\left(\\left\\{c\\right\\} \\cap ' \
+        '\\left\\{d\\right\\}\\right)'
+    assert latex(SymmetricDifference(C1, C2, evaluate=False)) == \
+        '\\left(\\left\\{a\\right\\} \\setminus ' \
+        '\\left\\{b\\right\\}\\right) \\triangle ' \
+        '\\left(\\left\\{c\\right\\} \\setminus \\left\\{d\\right\\}\\right)'
+    assert latex(SymmetricDifference(P1, P2, evaluate=False)) == \
+        '\\left(\\left\\{a\\right\\} \\times \\left\\{b\\right\\}\\right) ' \
+        '\\triangle \\left(\\left\\{c\\right\\} \\times ' \
+        '\\left\\{d\\right\\}\\right)'
+
+    # XXX This can be incorrect since cartesian product is not associative
+    assert latex(ProductSet(A, P2).flatten()) == \
+        '\\left\\{a\\right\\} \\times \\left\\{c\\right\\} \\times ' \
+        '\\left\\{d\\right\\}'
+    assert latex(ProductSet(U1, U2)) == \
+        '\\left(\\left\\{a\\right\\} \\cup \\left\\{b\\right\\}\\right) ' \
+        '\\times \\left(\\left\\{c\\right\\} \\cup ' \
+        '\\left\\{d\\right\\}\\right)'
+    assert latex(ProductSet(I1, I2)) == \
+        '\\left(\\left\\{a\\right\\} \\cap \\left\\{b\\right\\}\\right) ' \
+        '\\times \\left(\\left\\{c\\right\\} \\cap ' \
+        '\\left\\{d\\right\\}\\right)'
+    assert latex(ProductSet(C1, C2)) == \
+        '\\left(\\left\\{a\\right\\} \\setminus ' \
+        '\\left\\{b\\right\\}\\right) \\times \\left(\\left\\{c\\right\\} ' \
+        '\\setminus \\left\\{d\\right\\}\\right)'
+    assert latex(ProductSet(D1, D2)) == \
+        '\\left(\\left\\{a\\right\\} \\triangle ' \
+        '\\left\\{b\\right\\}\\right) \\times \\left(\\left\\{c\\right\\} ' \
+        '\\triangle \\left\\{d\\right\\}\\right)'
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

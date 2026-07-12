@@ -1,0 +1,116 @@
+instance_id: pytest-dev__pytest-7982
+
+issue_summary: pytest 6.1.0 版本后，测试目录中的符号链接目录被跳过而未被收集。
+
+trigger_condition:
+{
+  "text": "在测试目录中存在指向目录的符号链接，运行 pytest 收集测试。",
+  "evidence": [
+    "Issue 描述：'When there is a symlink to a directory in a test directory, is is just skipped over'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "符号链接目录被跳过，其中的测试未被收集和执行。",
+  "symptom_type": "unknown",
+  "evidence": [
+    "Issue 描述：'it is just skipped over'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "符号链接目录应被正常跟随并收集其中的测试。",
+  "evidence": [
+    "Issue 描述：'but it should be followed and collected as usual'"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "symlink_or_skip",
+    "kind": "function",
+    "source_path": "",
+    "reason": "相关测试中用于创建符号链接的辅助函数，与触发条件相关。"
+  },
+  {
+    "name": "testdir.runpytest",
+    "kind": "method",
+    "source_path": "",
+    "reason": "相关测试中用于运行 pytest 并收集测试的方法。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相关测试中创建符号链接文件（如 test_file.py）或链接到文件。",
+    "target_pattern": "创建指向目录的符号链接，并将测试文件放在该目录内。",
+    "reason": "Issue 明确指出问题是符号链接目录被跳过，而非符号链接文件。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "相关测试中可能未显式设置 follow_symlinks 参数。",
+    "target_pattern": "可能需要模拟或触发导致 follow_symlinks=False 的代码路径。",
+    "reason": "Issue 提到回归是由于添加了 `follow_symlinks=False`。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "pytest 收集到的测试列表或结果输出中的测试项。",
+    "reason": "通过观察哪些测试被收集和执行，可以判断符号链接目录是否被正确处理。"
+  },
+  {
+    "kind": "file_output",
+    "expression_hint": "pytest 运行的标准输出，特别是显示收集到的测试文件路径的行。",
+    "reason": "Issue 的症状是符号链接目录被跳过，这会在输出中体现为缺少预期测试。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证位于符号链接目录内的测试被成功收集和执行。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "避免断言完整的、可能包含解析后绝对路径的输出字符串。",
+    "reason": "应关注测试是否出现，而非其精确的路径表示形式。"
+  },
+  {
+    "assertion_goal": "验证测试运行结果包含来自符号链接目录的测试通过信息。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "避免断言不相关的测试数量或顺序。",
+    "reason": "核心是符号链接目录中的测试被包含，而非所有测试的精确计数。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "testdir fixture (pytester)",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "创建临时目录和符号链接（可能需要处理平台差异）",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "导致 `follow_symlinks=False` 被设置的具体代码位置和上下文。",
+  "符号链接目录的嵌套深度或结构是否会影响 bug 的触发。",
+  "除了基本的收集失败外，是否还有其他副作用（如错误信息）。"
+]

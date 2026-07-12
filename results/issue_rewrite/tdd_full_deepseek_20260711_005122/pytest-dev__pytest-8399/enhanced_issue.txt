@@ -1,0 +1,108 @@
+instance_id: pytest-dev__pytest-8399
+
+issue_summary: 从 v6.2.0 开始，unittest 的 setUpClass fixture 名称不再以 '_' 开头，导致在运行 pytest --fixtures 时被公开显示，而预期行为是它应被视为私有 fixture 且仅在 -v 标志下显示。
+
+trigger_condition:
+{
+  "text": "使用 unittest.TestCase 并定义了 setUpClass 类方法，然后运行 pytest --fixtures 命令（不带 -v 标志）。",
+  "evidence": [
+    "Issue 中的最小示例：包含 setUpClass 的 unittest.TestCase 类。",
+    "Issue 描述：'pytest --fixtures' 命令显示了该 fixture。",
+    "相关测试 2 展示了包含 setUpClass 的 unittest.TestCase 结构。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "运行 pytest --fixtures 时，unittest_setUpClass_fixture_Tests 被显示出来，且没有文档字符串。预期行为是它以 '_' 开头，因此默认不显示。",
+  "symptom_type": "unknown",
+  "evidence": [
+    "Issue 描述：'The expected (and previously implemented behavior) is that this fixture's name would start with an underscore, and would therefore only get printed if the additional `-v` flag was used.'",
+    "Issue 中 pytest --fixtures 的输出示例显示了该 fixture。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "由 unittest 的 setUpClass 方法生成的 fixture 名称应以 '_' 开头，使得在运行 pytest --fixtures（不带 -v 标志）时默认隐藏，仅在添加 -v 标志时显示。",
+  "evidence": [
+    "Issue 描述：'The expected (and previously implemented behavior) is that this fixture's name would start with an underscore, and would therefore only get printed if the additional `-v` flag was used.'"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "unittest.TestCase.setUpClass",
+    "kind": "method",
+    "source_path": "",
+    "reason": "Issue 的核心是关于 unittest 的 setUpClass 类方法被 pytest 处理为 fixture 时的命名行为。"
+  },
+  {
+    "name": "pytest --fixtures",
+    "kind": "function",
+    "source_path": "",
+    "reason": "触发问题的命令，用于列出 fixtures。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "相关测试 1 中测试了普通 pytest fixture 的显示/隐藏。",
+    "target_pattern": "测试一个包含 setUpClass 的 unittest.TestCase，并运行 pytest --fixtures（不带 -v）。",
+    "reason": "Issue 表明，当配置为默认（无 -v）时，setUpClass 生成的 fixture 被不当显示。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "相关测试 2 中 setUpClass 被正常调用以设置类状态。",
+    "target_pattern": "关注 setUpClass 方法本身被 pytest 识别和命名为 fixture 的元数据状态。",
+    "reason": "缺陷在于 fixture 的命名（是否以 '_' 开头），而不是其执行逻辑。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "file_output",
+    "expression_hint": "pytest --fixtures 命令的标准输出内容。",
+    "reason": "Issue 的核心错误现象是 fixture 名称在输出中不当显示。观察输出中是否包含 'unittest_setUpClass_fixture_' 且是否以 '_' 开头。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证运行 pytest --fixtures（不带 -v）时，由 unittest setUpClass 生成的 fixture 名称不出现在输出中（或以 '_' 开头，从而被默认过滤）。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言完整的、具体的输出字符串，因为输出格式可能变化。",
+    "reason": "Issue 关注的是 fixture 的可见性，而非其具体文档或精确格式。断言输出中不包含相关 fixture 名称片段更稳定。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要一个包含 setUpClass 方法的 unittest.TestCase 子类。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "使用 pytester 工具来创建临时测试文件并运行 pytest 命令。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "缺陷是否也影响其他 unittest 类方法（如 tearDownClass）生成的 fixture。",
+  "pytest --fixtures 命令的确切输出格式和过滤逻辑。",
+  "修复后，带有 -v 标志时该 fixture 是否应显示其（可能为空的）文档字符串。"
+]

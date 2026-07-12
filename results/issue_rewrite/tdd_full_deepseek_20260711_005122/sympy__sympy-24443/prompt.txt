@@ -1,0 +1,829 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+`_check_homomorphism` is broken on PermutationGroups
+```python
+In [1]: from sympy.combinatorics import *
+   ...: from sympy.combinatorics.homomorphisms import homomorphism
+   ...: D3 = DihedralGroup(3)
+   ...: T = homomorphism(D3, D3, D3.generators, D3.generators)
+
+ValueError: The given images do not define a homomorphism
+```
+
+The issue is in the internal `_image()` function, where it handles the case of a `PermutationGroup`:
+
+https://github.com/sympy/sympy/blob/809c53c077485ca48a206cee78340389cb83b7f1/sympy/combinatorics/homomorphisms.py#L336-L337
+
+When `r[i]` is an inverted generator, the `in gens` test fails.
+
+I think the whole thing can be greatly simplified.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/combinatorics/homomorphisms.py
+对象名称：_check_homomorphism
+节点类型：top-level function
+父节点：homomorphisms
+行号范围：310-368
+代码：
+def _check_homomorphism(domain, codomain, images):
+    if hasattr(domain, 'relators'):
+        rels = domain.relators
+    else:
+        gens = domain.presentation().generators
+        rels = domain.presentation().relators
+    identity = codomain.identity
+
+    def _image(r):
+        if r.is_identity:
+            return identity
+        else:
+            w = identity
+            r_arr = r.array_form
+            i = 0
+            j = 0
+            # i is the index for r and j is for
+            # r_arr. r_arr[j] is the tuple (sym, p)
+            # where sym is the generator symbol
+            # and p is the power to which it is
+            # raised while r[i] is a generator
+            # (not just its symbol) or the inverse of
+            # a generator - hence the need for
+            # both indices
+            while i < len(r):
+                power = r_arr[j][1]
+                if isinstance(domain, PermutationGroup) and r[i] in gens:
+                    s = domain.generators[gens.index(r[i])]
+                else:
+                    s = r[i]
+                if s in images:
+                    w = w*images[s]**power
+                elif s**-1 in images:
+                    w = w*images[s**-1]**power
+                i += abs(power)
+                j += 1
+            return w
+
+    for r in rels:
+        if isinstance(codomain, FpGroup):
+            s = codomain.equals(_image(r), identity)
+            if s is None:
+                # only try to make the rewriting system
+                # confluent when it can't determine the
+                # truth of equality otherwise
+                success = codomain.make_confluent()
+                s = codomain.equals(_image(r), identity)
+                if s is None and not success:
+                    raise RuntimeError("Can't determine if the images "
+                        "define a homomorphism. Try increasing "
+                        "the maximum number of rewriting rules "
+                        "(group._rewriting_system.set_max(new_value); "
+                        "the current value is stored in group._rewriting"
+                        "_system.maxeqns)")
+        else:
+            s = _image(r).is_identity
+        if not s:
+            return False
+    return True
+
+
+【源码片段 2】
+文件路径：sympy/combinatorics/homomorphisms.py
+对象名称：homomorphism
+节点类型：top-level function
+父节点：homomorphisms
+行号范围：269-308
+代码：
+def homomorphism(domain, codomain, gens, images=(), check=True):
+    '''
+    Create (if possible) a group homomorphism from the group ``domain``
+    to the group ``codomain`` defined by the images of the domain's
+    generators ``gens``. ``gens`` and ``images`` can be either lists or tuples
+    of equal sizes. If ``gens`` is a proper subset of the group's generators,
+    the unspecified generators will be mapped to the identity. If the
+    images are not specified, a trivial homomorphism will be created.
+
+    If the given images of the generators do not define a homomorphism,
+    an exception is raised.
+
+    If ``check`` is ``False``, do not check whether the given images actually
+    define a homomorphism.
+
+    '''
+    if not isinstance(domain, (PermutationGroup, FpGroup, FreeGroup)):
+        raise TypeError("The domain must be a group")
+    if not isinstance(codomain, (PermutationGroup, FpGroup, FreeGroup)):
+        raise TypeError("The codomain must be a group")
+
+    generators = domain.generators
+    if not all(g in generators for g in gens):
+        raise ValueError("The supplied generators must be a subset of the domain's generators")
+    if not all(g in codomain for g in images):
+        raise ValueError("The images must be elements of the codomain")
+
+    if images and len(images) != len(gens):
+        raise ValueError("The number of images must be equal to the number of generators")
+
+    gens = list(gens)
+    images = list(images)
+
+    images.extend([codomain.identity]*(len(generators)-len(images)))
+    gens.extend([g for g in generators if g not in gens])
+    images = dict(zip(gens,images))
+
+    if check and not _check_homomorphism(domain, codomain, images):
+        raise ValueError("The given images do not define a homomorphism")
+    return GroupHomomorphism(domain, codomain, images)
+
+
+【源码片段 3】
+文件路径：sympy/combinatorics/perm_groups.py
+对象名称：PermutationGroup
+节点类型：class
+父节点：perm_groups
+行号范围：26-5044
+代码：
+class PermutationGroup(Basic):
+    r"""The class defining a Permutation group.
+
+    Explanation
+    ===========
+
+    ``PermutationGroup([p1, p2, ..., pn])`` returns the permutation group
+    generated by the list of permutations. This group can be supplied
+    to Polyhedron if one desires to decorate the elements to which the
+    indices of the permutation refer.
+
+    Examples
+    ========
+
+    >>> from sympy.combinatorics import Permutation, PermutationGroup
+    >>> from sympy.combinatorics import Polyhedron
+
+    The permutations corresponding to motion of the front, right and
+    bottom face of a $2 \times 2$ Rubik's cube are defined:
+
+    >>> F = Permutation(2, 19, 21, 8)(3, 17, 20, 10)(4, 6, 7, 5)
+    >>> R = Permutation(1, 5, 21, 14)(3, 7, 23, 12)(8, 10, 11, 9)
+    >>> D = Permutation(6, 18, 14, 10)(7, 19, 15, 11)(20, 22, 23, 21)
+
+    These are passed as permutations to PermutationGroup:
+
+    >>> G = PermutationGroup(F, R, D)
+    >>> G.order()
+    3674160
+
+    The group can be supplied to a Polyhedron in order to track the
+    objects being moved. An example involving the $2 \times 2$ Rubik's cube is
+    given there, but here is a simple demonstration:
+
+    >>> a = Permutation(2, 1)
+    >>> b = Permutation(1, 0)
+    >>> G = PermutationGroup(a, b)
+    >>> P = Polyhedron(list('ABC'), pgroup=G)
+    >>> P.corners
+    (A, B, C)
+    >>> P.rotate(0) # apply permutation 0
+    >>> P.corners
+    (A, C, B)
+    >>> P.reset()
+    >>> P.corners
+    (A, B, C)
+
+    Or one can make a permutation as a product of selected permutations
+    and apply them to an iterable directly:
+
+    >>> P10 = G.make_perm([0, 1])
+    >>> P10('ABC')
+    ['C', 'A', 'B']
+
+    See Also
+    ========
+
+    sympy.combinatorics.polyhedron.Polyhedron,
+    sympy.combinatorics.permutations.Permutation
+
+    References
+    ==========
+
+    .. [1] Holt, D., Eick, B., O'Brien, E.
+           "Handbook of Computational Group Theory"
+
+    .. [2] Seress, A.
+           "Permutation Group Algorithms"
+
+    .. [3] https://en.wikipedia.org/wiki/Schreier_vector
+
+    .. [4] https://en.wikipedia.org/wiki/Nielsen_transformation#Product_replacement_algorithm
+
+    .. [5] Frank Celler, Charles R.Leedham-Green, Scott H.Murray,
+           Alice C.Niemeyer, and E.A.O'Brien. "Generating Random
+           Elements of a Finite Group"
+
+    .. [6] https://en.wikipedia.org/wiki/Block_%28permutation_group_theory%29
+
+    .. [7] http://www.algorithmist.com/index.php/Union_Find
+
+    .. [8] https://en.wikipedia.org/wiki/Multiply_transitive_group#Multiply_transitive_groups
+
+    .. [9] https://en.wikipedia.org/wiki/Center_%28group_theory%29
+
+    .. [10] https://en.wikipedia.org/wiki/Centralizer_and_normalizer
+
+    .. [11] http://groupprops.subwiki.org/wiki/Derived_subgroup
+
+    .. [12] https://en.wikipedia.org/wiki/Nilpotent_group
+
+    .. [13] http://www.math.colostate.edu/~hulpke/CGT/cgtnotes.pdf
+
+    .. [14] https://www.gap-system.org/Manuals/doc/ref/manual.pdf
+
+    """
+    is_group = True
+    def __new__(cls, *args, dups=True, **kwargs):
+    def __init__(self, *args, **kwargs):
+    def __getitem__(self, i):
+    def __contains__(self, i):
+    def __len__(self):
+    def equals(self, other):
+    def __mul__(self, other):
+    def _random_pr_init(self, r, n, _random_prec_n=None):
+    def _union_find_merge(self, first, second, ranks, parents, not_rep):
+    def _union_find_rep(self, num, parents):
+    @property
+    def base(self):
+    def baseswap(self, base, strong_gens, pos, randomized=False,
+                 transversals=None, basic_orbits=None, strong_gens_distr=None):
+    @property
+    def basic_orbits(self):
+    @property
+    def basic_stabilizers(self):
+    @property
+    def basic_transversals(self):
+    def composition_series(self):
+    def coset_transversal(self, H):
+    def _coset_representative(self, g, H):
+    def coset_table(self, H):
+    def center(self):
+    def centralizer(self, other):
+    def commutator(self, G, H):
+    def coset_factor(self, g, factor_index=False):
+    def generator_product(self, g, original=False):
+    def coset_rank(self, g):
+    def coset_unrank(self, rank, af=False):
+    @property
+    def degree(self):
+    @property
+    def identity(self):
+    @property
+    def elements(self):
+    @property
+    def _elements(self):
+    def derived_series(self):
+    def derived_subgroup(self):
+    def generate(self, method="coset", af=False):
+    def generate_dimino(self, af=False):
+    def generate_schreier_sims(self, af=False):
+    @property
+    def generators(self):
+    def contains(self, g, strict=True):
+    @property
+    def is_perfect(self):
+    @property
+    def is_abelian(self):
+    def abelian_invariants(self):
+    def is_elementary(self, p):
+    def _eval_is_alt_sym_naive(self, only_sym=False, only_alt=False):
+    def _eval_is_alt_sym_monte_carlo(self, eps=0.05, perms=None):
+    def is_alt_sym(self, eps=0.05, _random_prec=None):
+    @property
+    def is_nilpotent(self):
+    def is_normal(self, gr, strict=True):
+    def is_primitive(self, randomized=True):
+    def minimal_blocks(self, randomized=True):
+    @property
+    def is_solvable(self):
+    def is_subgroup(self, G, strict=True):
+    @property
+    def is_polycyclic(self):
+    def is_transitive(self, strict=True):
+    @property
+    def is_trivial(self):
+    def lower_central_series(self):
+    @property
+    def max_div(self):
+    def minimal_block(self, points):
+    def conjugacy_class(self, x):
+    def conjugacy_classes(self):
+    def normal_closure(self, other, k=10):
+    def orbit(self, alpha, action='tuples'):
+    def orbit_rep(self, alpha, beta, schreier_vector=None):
+    def orbit_transversal(self, alpha, pairs=False):
+    def orbits(self, rep=False):
+    def order(self):
+    def index(self, H):
+    @property
+    def is_symmetric(self):
+    @property
+    def is_alternating(self):
+    @classmethod
+    def _distinct_primes_lemma(cls, primes):
+    @property
+    def is_cyclic(self):
+    @property
+    def is_dihedral(self):
+    def pointwise_stabilizer(self, points, incremental=True):
+    def make_perm(self, n, seed=None):
+    def random(self, af=False):
+    def random_pr(self, gen_count=11, iterations=50, _random_prec=None):
+    def random_stab(self, alpha, schreier_vector=None, _random_prec=None):
+    def schreier_sims(self):
+    def _schreier_sims(self, base=None):
+    def schreier_sims_incremental(self, base=None, gens=None, slp_dict=False):
+    def schreier_sims_random(self, base=None, gens=None, consec_succ=10,
+                             _random_prec=None):
+    def schreier_vector(self, alpha):
+    def stabilizer(self, alpha):
+    @property
+    def strong_gens(self):
+    def subgroup(self, gens):
+    def subgroup_search(self, prop, base=None, strong_gens=None, tests=None,
+                        init_subgroup=None):
+    @property
+    def transitivity_degree(self):
+    def _p_elements_group(self, p):
+    def _sylow_alt_sym(self, p):
+    def sylow_subgroup(self, p):
+    def _block_verify(self, L, alpha):
+    def _verify(H, K, phi, z, alpha):
+    def strong_presentation(self):
+    def presentation(self, eliminate_gens=True):
+    def polycyclic_group(self):
+
+
+【源码片段 4】
+文件路径：sympy/polys/agca/homomorphisms.py
+对象名称：_image
+节点类型：class_function
+父节点：ModuleHomomorphism
+行号范围：118-120
+代码：
+    def _image(self):
+        """Compute the image of ``self``."""
+        raise NotImplementedError
+
+
+【源码片段 5】
+文件路径：sympy/combinatorics/named_groups.py
+对象名称：DihedralGroup
+节点类型：top-level function
+父节点：named_groups
+行号范围：176-241
+代码：
+def DihedralGroup(n):
+    r"""
+    Generates the dihedral group `D_n` as a permutation group.
+
+    Explanation
+    ===========
+
+    The dihedral group `D_n` is the group of symmetries of the regular
+    ``n``-gon. The generators taken are the ``n``-cycle ``a = (0 1 2 ... n-1)``
+    (a rotation of the ``n``-gon) and ``b = (0 n-1)(1 n-2)...``
+    (a reflection of the ``n``-gon) in cycle rotation. It is easy to see that
+    these satisfy ``a**n = b**2 = 1`` and ``bab = ~a`` so they indeed generate
+    `D_n` (See [1]). After the group is generated, some of its basic properties
+    are set.
+
+    Examples
+    ========
+
+    >>> from sympy.combinatorics.named_groups import DihedralGroup
+    >>> G = DihedralGroup(5)
+    >>> G.is_group
+    True
+    >>> a = list(G.generate_dimino())
+    >>> [perm.cyclic_form for perm in a]
+    [[], [[0, 1, 2, 3, 4]], [[0, 2, 4, 1, 3]],
+    [[0, 3, 1, 4, 2]], [[0, 4, 3, 2, 1]], [[0, 4], [1, 3]],
+    [[1, 4], [2, 3]], [[0, 1], [2, 4]], [[0, 2], [3, 4]],
+    [[0, 3], [1, 2]]]
+
+    See Also
+    ========
+
+    SymmetricGroup, CyclicGroup, AlternatingGroup
+
+    References
+    ==========
+
+    .. [1] https://en.wikipedia.org/wiki/Dihedral_group
+
+    """
+    # small cases are special
+    if n == 1:
+        return PermutationGroup([Permutation([1, 0])])
+    if n == 2:
+        return PermutationGroup([Permutation([1, 0, 3, 2]),
+               Permutation([2, 3, 0, 1]), Permutation([3, 2, 1, 0])])
+
+    a = list(range(1, n))
+    a.append(0)
+    gen1 = _af_new(a)
+    a = list(range(n))
+    a.reverse()
+    gen2 = _af_new(a)
+    G = PermutationGroup([gen1, gen2])
+    # if n is a power of 2, group is nilpotent
+    if n & (n-1) == 0:
+        G._is_nilpotent = True
+    else:
+        G._is_nilpotent = False
+    G._is_dihedral = True
+    G._is_abelian = False
+    G._is_solvable = True
+    G._degree = n
+    G._is_transitive = True
+    G._order = 2*n
+    return G
+
+
+【源码片段 6】
+文件路径：sympy/combinatorics/homomorphisms.py
+对象名称：homomorphisms
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/combinatorics/tests/test_homomorphisms.py
+测试名称：test_homomorphism
+测试代码：
+def test_homomorphism():
+    # FpGroup -> PermutationGroup
+    F, a, b = free_group("a, b")
+    G = FpGroup(F, [a**3, b**3, (a*b)**2])
+
+    c = Permutation(3)(0, 1, 2)
+    d = Permutation(3)(1, 2, 3)
+    A = AlternatingGroup(4)
+    T = homomorphism(G, A, [a, b], [c, d])
+    assert T(a*b**2*a**-1) == c*d**2*c**-1
+    assert T.is_isomorphism()
+    assert T(T.invert(Permutation(3)(0, 2, 3))) == Permutation(3)(0, 2, 3)
+
+    T = homomorphism(G, AlternatingGroup(4), G.generators)
+    assert T.is_trivial()
+    assert T.kernel().order() == G.order()
+
+    E, e = free_group("e")
+    G = FpGroup(E, [e**8])
+    P = PermutationGroup([Permutation(0, 1, 2, 3), Permutation(0, 2)])
+    T = homomorphism(G, P, [e], [Permutation(0, 1, 2, 3)])
+    assert T.image().order() == 4
+    assert T(T.invert(Permutation(0, 2)(1, 3))) == Permutation(0, 2)(1, 3)
+
+    T = homomorphism(E, AlternatingGroup(4), E.generators, [c])
+    assert T.invert(c**2) == e**-1 #order(c) == 3 so c**2 == c**-1
+
+    # FreeGroup -> FreeGroup
+    T = homomorphism(F, E, [a], [e])
+    assert T(a**-2*b**4*a**2).is_identity
+
+    # FreeGroup -> FpGroup
+    G = FpGroup(F, [a*b*a**-1*b**-1])
+    T = homomorphism(F, G, F.generators, G.generators)
+    assert T.invert(a**-1*b**-1*a**2) == a*b**-1
+
+    # PermutationGroup -> PermutationGroup
+    D = DihedralGroup(8)
+    p = Permutation(0, 1, 2, 3, 4, 5, 6, 7)
+    P = PermutationGroup(p)
+    T = homomorphism(P, D, [p], [p])
+    assert T.is_injective()
+    assert not T.is_isomorphism()
+    assert T.invert(p**3) == p**3
+
+    T2 = homomorphism(F, P, [F.generators[0]], P.generators)
+    T = T.compose(T2)
+    assert T.domain == F
+    assert T.codomain == D
+    assert T(a*b) == p
+
+【相关测试 2】
+测试文件：sympy/combinatorics/tests/test_homomorphisms.py
+测试名称：test_check_homomorphism
+测试代码：
+def test_check_homomorphism():
+    a = Permutation(1,2,3,4)
+    b = Permutation(1,3)
+    G = PermutationGroup([a, b])
+    raises(ValueError, lambda: homomorphism(G, G, [a], [a]))
+
+【相关测试 3】
+测试文件：sympy/combinatorics/tests/test_homomorphisms.py
+测试名称：test_isomorphisms
+测试代码：
+def test_isomorphisms():
+
+    F, a, b = free_group("a, b")
+    E, c, d = free_group("c, d")
+    # Infinite groups with differently ordered relators.
+    G = FpGroup(F, [a**2, b**3])
+    H = FpGroup(F, [b**3, a**2])
+    assert is_isomorphic(G, H)
+
+    # Trivial Case
+    # FpGroup -> FpGroup
+    H = FpGroup(F, [a**3, b**3, (a*b)**2])
+    F, c, d = free_group("c, d")
+    G = FpGroup(F, [c**3, d**3, (c*d)**2])
+    check, T =  group_isomorphism(G, H)
+    assert check
+    assert T(c**3*d**2) == a**3*b**2
+
+    # FpGroup -> PermutationGroup
+    # FpGroup is converted to the equivalent isomorphic group.
+    F, a, b = free_group("a, b")
+    G = FpGroup(F, [a**3, b**3, (a*b)**2])
+    H = AlternatingGroup(4)
+    check, T = group_isomorphism(G, H)
+    assert check
+    assert T(b*a*b**-1*a**-1*b**-1) == Permutation(0, 2, 3)
+    assert T(b*a*b*a**-1*b**-1) == Permutation(0, 3, 2)
+
+    # PermutationGroup -> PermutationGroup
+    D = DihedralGroup(8)
+    p = Permutation(0, 1, 2, 3, 4, 5, 6, 7)
+    P = PermutationGroup(p)
+    assert not is_isomorphic(D, P)
+
+    A = CyclicGroup(5)
+    B = CyclicGroup(7)
+    assert not is_isomorphic(A, B)
+
+    # Two groups of the same prime order are isomorphic to each other.
+    G = FpGroup(F, [a, b**5])
+    H = CyclicGroup(5)
+    assert G.order() == H.order()
+    assert is_isomorphic(G, H)
+
+【相关测试 4】
+测试文件：sympy/polys/agca/tests/test_homomorphisms.py
+测试名称：test_creation
+测试代码：
+def test_creation():
+    F = QQ.old_poly_ring(x).free_module(3)
+    G = QQ.old_poly_ring(x).free_module(2)
+    SM = F.submodule([1, 1, 1])
+    Q = F / SM
+    SQ = Q.submodule([1, 0, 0])
+
+    matrix = [[1, 0], [0, 1], [-1, -1]]
+    h = homomorphism(F, G, matrix)
+    h2 = homomorphism(Q, G, matrix)
+    assert h.quotient_domain(SM) == h2
+    raises(ValueError, lambda: h.quotient_domain(F.submodule([1, 0, 0])))
+    assert h2.restrict_domain(SQ) == homomorphism(SQ, G, matrix)
+    raises(ValueError, lambda: h.restrict_domain(G))
+    raises(ValueError, lambda: h.restrict_codomain(G.submodule([1, 0])))
+    raises(ValueError, lambda: h.quotient_codomain(F))
+
+    im = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    for M in [F, SM, Q, SQ]:
+        assert M.identity_hom() == homomorphism(M, M, im)
+    assert SM.inclusion_hom() == homomorphism(SM, F, im)
+    assert SQ.inclusion_hom() == homomorphism(SQ, Q, im)
+    assert Q.quotient_hom() == homomorphism(F, Q, im)
+    assert SQ.quotient_hom() == homomorphism(SQ.base, SQ, im)
+
+    class conv:
+        def convert(x, y=None):
+            return x
+
+    class dummy:
+        container = conv()
+
+        def submodule(*args):
+            return None
+    raises(TypeError, lambda: homomorphism(dummy(), G, matrix))
+    raises(TypeError, lambda: homomorphism(F, dummy(), matrix))
+    raises(
+        ValueError, lambda: homomorphism(QQ.old_poly_ring(x, y).free_module(3), G, matrix))
+    raises(ValueError, lambda: homomorphism(F, G, [0, 0]))
+
+【相关测试 5】
+测试文件：sympy/utilities/tests/test_pickling.py
+测试名称：test_pickling_polys_errors
+测试代码：
+def test_pickling_polys_errors():
+    from sympy.polys.polyerrors import (HeuristicGCDFailed,
+        HomomorphismFailed, IsomorphismFailed, ExtraneousFactors,
+        EvaluationFailed, RefinementFailed, CoercionFailed, NotInvertible,
+        NotReversible, NotAlgebraic, DomainError, PolynomialError,
+        UnificationFailed, GeneratorsError, GeneratorsNeeded,
+        UnivariatePolynomialError, MultivariatePolynomialError, OptionError,
+        FlagError)
+    # from sympy.polys.polyerrors import (ExactQuotientFailed,
+    #         OperationNotSupported, ComputationFailed, PolificationFailed)
+
+    # x = Symbol('x')
+
+    # TODO: TypeError: __init__() takes at least 3 arguments (1 given)
+    # for c in (ExactQuotientFailed, ExactQuotientFailed(x, 3*x, ZZ)):
+    #    check(c)
+
+    # TODO: TypeError: can't pickle instancemethod objects
+    # for c in (OperationNotSupported, OperationNotSupported(Poly(x), Poly.gcd)):
+    #    check(c)
+
+    for c in (HeuristicGCDFailed, HeuristicGCDFailed()):
+        check(c)
+
+    for c in (HomomorphismFailed, HomomorphismFailed()):
+        check(c)
+
+    for c in (IsomorphismFailed, IsomorphismFailed()):
+        check(c)
+
+    for c in (ExtraneousFactors, ExtraneousFactors()):
+        check(c)
+
+    for c in (EvaluationFailed, EvaluationFailed()):
+        check(c)
+
+    for c in (RefinementFailed, RefinementFailed()):
+        check(c)
+
+    for c in (CoercionFailed, CoercionFailed()):
+        check(c)
+
+    for c in (NotInvertible, NotInvertible()):
+        check(c)
+
+    for c in (NotReversible, NotReversible()):
+        check(c)
+
+    for c in (NotAlgebraic, NotAlgebraic()):
+        check(c)
+
+    for c in (DomainError, DomainError()):
+        check(c)
+
+    for c in (PolynomialError, PolynomialError()):
+        check(c)
+
+    for c in (UnificationFailed, UnificationFailed()):
+        check(c)
+
+    for c in (GeneratorsError, GeneratorsError()):
+        check(c)
+
+    for c in (GeneratorsNeeded, GeneratorsNeeded()):
+        check(c)
+
+    # TODO: PicklingError: Can't pickle <function <lambda> at 0x38578c0>: it's not found as __main__.<lambda>
+    # for c in (ComputationFailed, ComputationFailed(lambda t: t, 3, None)):
+    #    check(c)
+
+    for c in (UnivariatePolynomialError, UnivariatePolynomialError()):
+        check(c)
+
+    for c in (MultivariatePolynomialError, MultivariatePolynomialError()):
+        check(c)
+
+    # TODO: TypeError: __init__() takes at least 3 arguments (1 given)
+    # for c in (PolificationFailed, PolificationFailed({}, x, x, False)):
+    #    check(c)
+
+    for c in (OptionError, OptionError()):
+        check(c)
+
+    for c in (FlagError, FlagError()):
+        check(c)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

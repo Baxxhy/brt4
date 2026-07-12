@@ -1,0 +1,432 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+BaseForm's _clean_fields() and changed_data should access values via BoundField
+Description
+	 
+		(last modified by Chris Jerdonek)
+	 
+While working on #32917, I noticed that ​BaseForm._clean_fields() and ​BaseForm.changed_data don't currently access their values through a BoundField object. It would be better for consistency if they did, and to reduce the number of code paths.
+One consequence of the current code is that form._clean_fields() can return a different value from form[name].initial when they should be the same. This case is almost, but not quite, covered by ​test_datetime_clean_initial_callable_disabled() (the test can be adjusted to cover this case).
+As part of this ticket and in line with accessing data through the BoundField objects, I noticed that the code would also be simpler if the per-field logic of changed_data() were moved into a method of the BoundField class. It could be called something like bf.did_change(). This would be more appropriate because whether form data changed for a field is a property of its BoundField (as it depends on the underlying form data), as opposed to the unbound field. With this change, the method could change from its current ~20 lines to something like this--
+@cached_property
+def changed_data(self):
+	return [name for name, bf in self._bound_items() if bf._did_change()]
+A similar change could be made to BaseForm._clean_fields().
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/forms/forms.py
+对象名称：BaseForm
+节点类型：class
+父节点：forms
+行号范围：52-498
+代码：
+class BaseForm:
+    """
+    The main implementation of all the Form logic. Note that this class is
+    different than Form. See the comments by the Form class for more info. Any
+    improvements to the form API should be made to this class, not to the Form
+    class.
+    """
+    default_renderer = None
+    field_order = None
+    prefix = None
+    use_required_attribute = True
+    def __init__(self, data=None, files=None, auto_id='id_%s', prefix=None,
+                 initial=None, error_class=ErrorList, label_suffix=None,
+                 empty_permitted=False, field_order=None, use_required_attribute=None, renderer=None):
+    def order_fields(self, field_order):
+    def __str__(self):
+    def __repr__(self):
+    def __iter__(self):
+    def __getitem__(self, name):
+    @property
+    def errors(self):
+    def is_valid(self):
+    def add_prefix(self, field_name):
+    def add_initial_prefix(self, field_name):
+    def _widget_data_value(self, widget, html_name):
+    def _field_data_value(self, field, html_name):
+    def _html_output(self, normal_row, error_row, row_ender, help_text_html, errors_on_separate_row):
+    def as_table(self):
+    def as_ul(self):
+    def as_p(self):
+    def non_field_errors(self):
+    def add_error(self, field, error):
+    def has_error(self, field, code=None):
+    def full_clean(self):
+    def _clean_fields(self):
+    def _clean_form(self):
+    def _post_clean(self):
+    def clean(self):
+    def has_changed(self):
+    @cached_property
+    def changed_data(self):
+    @property
+    def media(self):
+    def is_multipart(self):
+    def hidden_fields(self):
+    def visible_fields(self):
+    def get_initial_for_field(self, field, field_name):
+
+
+【源码片段 2】
+文件路径：django/forms/forms.py
+对象名称：_clean_fields
+节点类型：class_function
+父节点：BaseForm
+行号范围：389-406
+代码：
+    def _clean_fields(self):
+        for name, field in self.fields.items():
+            if field.disabled:
+                value = self.get_initial_for_field(field, name)
+            else:
+                value = self._field_data_value(field, self.add_prefix(name))
+            try:
+                if isinstance(field, FileField):
+                    initial = self.get_initial_for_field(field, name)
+                    value = field.clean(value, initial)
+                else:
+                    value = field.clean(value)
+                self.cleaned_data[name] = value
+                if hasattr(self, 'clean_%s' % name):
+                    value = getattr(self, 'clean_%s' % name)()
+                    self.cleaned_data[name] = value
+            except ValidationError as e:
+                self.add_error(name, e)
+
+
+【源码片段 3】
+文件路径：django/forms/forms.py
+对象名称：changed_data
+节点类型：class_function
+父节点：BaseForm
+行号范围：438-459
+代码：
+    def changed_data(self):
+        data = []
+        for name, field in self.fields.items():
+            data_value = self._field_data_value(field, self.add_prefix(name))
+            if not field.show_hidden_initial:
+                # Use the BoundField's initial as this is the value passed to
+                # the widget.
+                initial_value = self[name].initial
+            else:
+                initial_prefixed_name = self.add_initial_prefix(name)
+                hidden_widget = field.hidden_widget()
+                try:
+                    initial_value = field.to_python(
+                        self._widget_data_value(hidden_widget, initial_prefixed_name)
+                    )
+                except ValidationError:
+                    # Always assume data has changed if validation fails.
+                    data.append(name)
+                    continue
+            if field.has_changed(initial_value, data_value):
+                data.append(name)
+        return data
+
+
+【源码片段 4】
+文件路径：django/forms/boundfield.py
+对象名称：BoundField
+节点类型：class
+父节点：boundfield
+行号范围：15-233
+代码：
+class BoundField:
+    "A Field plus data"
+    def __init__(self, form, field, name):
+    def __str__(self):
+    @cached_property
+    def subwidgets(self):
+    def __bool__(self):
+    def __iter__(self):
+    def __len__(self):
+    def __getitem__(self, idx):
+    @property
+    def errors(self):
+    def as_widget(self, widget=None, attrs=None, only_initial=False):
+    def as_text(self, attrs=None, **kwargs):
+    def as_textarea(self, attrs=None, **kwargs):
+    def as_hidden(self, attrs=None, **kwargs):
+    @property
+    def data(self):
+    def value(self):
+    def label_tag(self, contents=None, attrs=None, label_suffix=None):
+    def css_classes(self, extra_classes=None):
+    @property
+    def is_hidden(self):
+    @property
+    def auto_id(self):
+    @property
+    def id_for_label(self):
+    @cached_property
+    def initial(self):
+    def build_widget_attrs(self, attrs, widget=None):
+    @property
+    def widget_type(self):
+
+
+【源码片段 5】
+文件路径：django/forms/boundfield.py
+对象名称：initial
+节点类型：class_function
+父节点：BoundField
+行号范围：213-220
+代码：
+    def initial(self):
+        data = self.form.get_initial_for_field(self.field, self.name)
+        # If this is an auto-generated default date, nix the microseconds for
+        # standardized handling. See #22502.
+        if (isinstance(data, (datetime.datetime, datetime.time)) and
+                not self.field.widget.supports_microseconds):
+            data = data.replace(microsecond=0)
+        return data
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/forms_tests/tests/test_forms.py
+测试名称：test_datetime_clean_initial_callable_disabled
+测试代码：
+class FormsTestCase(SimpleTestCase):
+    def test_datetime_clean_initial_callable_disabled(self):
+        now = datetime.datetime(2006, 10, 25, 14, 30, 45, 123456)
+
+        class DateTimeForm(forms.Form):
+            dt = DateTimeField(initial=lambda: now, disabled=True)
+
+        form = DateTimeForm({})
+        self.assertEqual(form.errors, {})
+        self.assertEqual(form.cleaned_data, {'dt': now})
+
+【相关测试 2】
+测试文件：tests/forms_tests/tests/test_forms.py
+测试名称：test_boundfield_value_disabled_callable_initial
+测试代码：
+class FormsTestCase(SimpleTestCase):
+    def test_boundfield_value_disabled_callable_initial(self):
+        class PersonForm(Form):
+            name = CharField(initial=lambda: 'John Doe', disabled=True)
+
+        # Without form data.
+        form = PersonForm()
+        self.assertEqual(form['name'].value(), 'John Doe')
+
+        # With form data. As the field is disabled, the value should not be
+        # affected by the form data.
+        form = PersonForm({})
+        self.assertEqual(form['name'].value(), 'John Doe')
+
+【相关测试 3】
+测试文件：tests/forms_tests/tests/test_forms.py
+测试名称：test_datetime_changed_data_callable_with_microseconds
+测试代码：
+class FormsTestCase(SimpleTestCase):
+    def test_datetime_changed_data_callable_with_microseconds(self):
+        class DateTimeForm(forms.Form):
+            dt = DateTimeField(initial=lambda: datetime.datetime(2006, 10, 25, 14, 30, 45, 123456), disabled=True)
+
+        form = DateTimeForm({'dt': '2006-10-25 14:30:45'})
+        self.assertEqual(form.changed_data, [])
+
+【相关测试 4】
+测试文件：tests/forms_tests/tests/test_forms.py
+测试名称：test_changed_data
+测试代码：
+class FormsTestCase(SimpleTestCase):
+    def test_changed_data(self):
+        class Person(Form):
+            first_name = CharField(initial='Hans')
+            last_name = CharField(initial='Greatel')
+            birthday = DateField(initial=datetime.date(1974, 8, 16))
+
+        p = Person(data={'first_name': 'Hans', 'last_name': 'Scrmbl', 'birthday': '1974-08-16'})
+        self.assertTrue(p.is_valid())
+        self.assertNotIn('first_name', p.changed_data)
+        self.assertIn('last_name', p.changed_data)
+        self.assertNotIn('birthday', p.changed_data)
+
+        # A field raising ValidationError is always in changed_data
+        class PedanticField(forms.Field):
+            def to_python(self, value):
+                raise ValidationError('Whatever')
+
+        class Person2(Person):
+            pedantic = PedanticField(initial='whatever', show_hidden_initial=True)
+
+        p = Person2(data={
+            'first_name': 'Hans', 'last_name': 'Scrmbl', 'birthday': '1974-08-16',
+            'initial-pedantic': 'whatever',
+        })
+        self.assertFalse(p.is_valid())
+        self.assertIn('pedantic', p.changed_data)
+
+【相关测试 5】
+测试文件：tests/forms_tests/tests/test_forms.py
+测试名称：test_form_with_disabled_fields
+测试代码：
+class FormsTestCase(SimpleTestCase):
+    def test_form_with_disabled_fields(self):
+        class PersonForm(Form):
+            name = CharField()
+            birthday = DateField(disabled=True)
+
+        class PersonFormFieldInitial(Form):
+            name = CharField()
+            birthday = DateField(disabled=True, initial=datetime.date(1974, 8, 16))
+
+        # Disabled fields are generally not transmitted by user agents.
+        # The value from the form's initial data is used.
+        f1 = PersonForm({'name': 'John Doe'}, initial={'birthday': datetime.date(1974, 8, 16)})
+        f2 = PersonFormFieldInitial({'name': 'John Doe'})
+        for form in (f1, f2):
+            self.assertTrue(form.is_valid())
+            self.assertEqual(
+                form.cleaned_data,
+                {'birthday': datetime.date(1974, 8, 16), 'name': 'John Doe'}
+            )
+
+        # Values provided in the form's data are ignored.
+        data = {'name': 'John Doe', 'birthday': '1984-11-10'}
+        f1 = PersonForm(data, initial={'birthday': datetime.date(1974, 8, 16)})
+        f2 = PersonFormFieldInitial(data)
+        for form in (f1, f2):
+            self.assertTrue(form.is_valid())
+            self.assertEqual(
+                form.cleaned_data,
+                {'birthday': datetime.date(1974, 8, 16), 'name': 'John Doe'}
+            )
+
+        # Initial data remains present on invalid forms.
+        data = {}
+        f1 = PersonForm(data, initial={'birthday': datetime.date(1974, 8, 16)})
+        f2 = PersonFormFieldInitial(data)
+        for form in (f1, f2):
+            self.assertFalse(form.is_valid())
+            self.assertEqual(form['birthday'].value(), datetime.date(1974, 8, 16))
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

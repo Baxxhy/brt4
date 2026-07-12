@@ -1,0 +1,512 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Subclassed SkyCoord gives misleading attribute access message
+I'm trying to subclass `SkyCoord`, and add some custom properties. This all seems to be working fine, but when I have a custom property (`prop` below) that tries to access a non-existent attribute (`random_attr`) below, the error message is misleading because it says `prop` doesn't exist, where it should say `random_attr` doesn't exist.
+
+```python
+import astropy.coordinates as coord
+
+
+class custom_coord(coord.SkyCoord):
+    @property
+    def prop(self):
+        return self.random_attr
+
+
+c = custom_coord('00h42m30s', '+41d12m00s', frame='icrs')
+c.prop
+```
+
+raises
+```
+Traceback (most recent call last):
+  File "test.py", line 11, in <module>
+    c.prop
+  File "/Users/dstansby/miniconda3/lib/python3.7/site-packages/astropy/coordinates/sky_coordinate.py", line 600, in __getattr__
+    .format(self.__class__.__name__, attr))
+AttributeError: 'custom_coord' object has no attribute 'prop'
+```
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：astropy/coordinates/sky_coordinate.py
+对象名称：SkyCoord
+节点类型：class
+父节点：sky_coordinate
+行号范围：168-2223
+代码：
+class SkyCoord(ShapedLikeNDArray):
+    """High-level object providing a flexible interface for celestial coordinate
+    representation, manipulation, and transformation between systems.
+
+    The `SkyCoord` class accepts a wide variety of inputs for initialization. At
+    a minimum these must provide one or more celestial coordinate values with
+    unambiguous units.  Inputs may be scalars or lists/tuples/arrays, yielding
+    scalar or array coordinates (can be checked via ``SkyCoord.isscalar``).
+    Typically one also specifies the coordinate frame, though this is not
+    required. The general pattern for spherical representations is::
+
+      SkyCoord(COORD, [FRAME], keyword_args ...)
+      SkyCoord(LON, LAT, [FRAME], keyword_args ...)
+      SkyCoord(LON, LAT, [DISTANCE], frame=FRAME, unit=UNIT, keyword_args ...)
+      SkyCoord([FRAME], <lon_attr>=LON, <lat_attr>=LAT, keyword_args ...)
+
+    It is also possible to input coordinate values in other representations
+    such as cartesian or cylindrical.  In this case one includes the keyword
+    argument ``representation_type='cartesian'`` (for example) along with data
+    in ``x``, ``y``, and ``z``.
+
+    See also: https://docs.astropy.org/en/stable/coordinates/
+
+    Examples
+    --------
+    The examples below illustrate common ways of initializing a `SkyCoord`
+    object.  For a complete description of the allowed syntax see the
+    full coordinates documentation.  First some imports::
+
+      >>> from astropy.coordinates import SkyCoord  # High-level coordinates
+      >>> from astropy.coordinates import ICRS, Galactic, FK4, FK5  # Low-level frames
+      >>> from astropy.coordinates import Angle, Latitude, Longitude  # Angles
+      >>> import astropy.units as u
+
+    The coordinate values and frame specification can now be provided using
+    positional and keyword arguments::
+
+      >>> c = SkyCoord(10, 20, unit="deg")  # defaults to ICRS frame
+      >>> c = SkyCoord([1, 2, 3], [-30, 45, 8], frame="icrs", unit="deg")  # 3 coords
+
+      >>> coords = ["1:12:43.2 +31:12:43", "1 12 43.2 +31 12 43"]
+      >>> c = SkyCoord(coords, frame=FK4, unit=(u.hourangle, u.deg), obstime="J1992.21")
+
+      >>> c = SkyCoord("1h12m43.2s +1d12m43s", frame=Galactic)  # Units from string
+      >>> c = SkyCoord(frame="galactic", l="1h12m43.2s", b="+1d12m43s")
+
+      >>> ra = Longitude([1, 2, 3], unit=u.deg)  # Could also use Angle
+      >>> dec = np.array([4.5, 5.2, 6.3]) * u.deg  # Astropy Quantity
+      >>> c = SkyCoord(ra, dec, frame='icrs')
+      >>> c = SkyCoord(frame=ICRS, ra=ra, dec=dec, obstime='2001-01-02T12:34:56')
+
+      >>> c = FK4(1 * u.deg, 2 * u.deg)  # Uses defaults for obstime, equinox
+      >>> c = SkyCoord(c, obstime='J2010.11', equinox='B1965')  # Override defaults
+
+      >>> c = SkyCoord(w=0, u=1, v=2, unit='kpc', frame='galactic',
+      ...              representation_type='cartesian')
+
+      >>> c = SkyCoord([ICRS(ra=1*u.deg, dec=2*u.deg), ICRS(ra=3*u.deg, dec=4*u.deg)])
+
+    Velocity components (proper motions or radial velocities) can also be
+    provided in a similar manner::
+
+      >>> c = SkyCoord(ra=1*u.deg, dec=2*u.deg, radial_velocity=10*u.km/u.s)
+
+      >>> c = SkyCoord(ra=1*u.deg, dec=2*u.deg, pm_ra_cosdec=2*u.mas/u.yr, pm_dec=1*u.mas/u.yr)
+
+    As shown, the frame can be a `~astropy.coordinates.BaseCoordinateFrame`
+    class or the corresponding string alias.  The frame classes that are built in
+    to astropy are `ICRS`, `FK5`, `FK4`, `FK4NoETerms`, and `Galactic`.
+    The string aliases are simply lower-case versions of the class name, and
+    allow for creating a `SkyCoord` object and transforming frames without
+    explicitly importing the frame classes.
+
+    Parameters
+    ----------
+    frame : `~astropy.coordinates.BaseCoordinateFrame` class or string, optional
+        Type of coordinate frame this `SkyCoord` should represent. Defaults to
+        to ICRS if not given or given as None.
+    unit : `~astropy.units.Unit`, string, or tuple of :class:`~astropy.units.Unit` or str, optional
+        Units for supplied coordinate values.
+        If only one unit is supplied then it applies to all values.
+        Note that passing only one unit might lead to unit conversion errors
+        if the coordinate values are expected to have mixed physical meanings
+        (e.g., angles and distances).
+    obstime : time-like, optional
+        Time(s) of observation.
+    equinox : time-like, optional
+        Coordinate frame equinox time.
+    representation_type : str or Representation class
+        Specifies the representation, e.g. 'spherical', 'cartesian', or
+        'cylindrical'.  This affects the positional args and other keyword args
+        which must correspond to the given representation.
+    copy : bool, optional
+        If `True` (default), a copy of any coordinate data is made.  This
+        argument can only be passed in as a keyword argument.
+    **keyword_args
+        Other keyword arguments as applicable for user-defined coordinate frames.
+        Common options include:
+
+        ra, dec : angle-like, optional
+            RA and Dec for frames where ``ra`` and ``dec`` are keys in the
+            frame's ``representation_component_names``, including `ICRS`,
+            `FK5`, `FK4`, and `FK4NoETerms`.
+        pm_ra_cosdec, pm_dec  : `~astropy.units.Quantity` ['angular speed'], optional
+            Proper motion components, in angle per time units.
+        l, b : angle-like, optional
+            Galactic ``l`` and ``b`` for for frames where ``l`` and ``b`` are
+            keys in the frame's ``representation_component_names``, including
+            the `Galactic` frame.
+        pm_l_cosb, pm_b : `~astropy.units.Quantity` ['angular speed'], optional
+            Proper motion components in the `Galactic` frame, in angle per time
+            units.
+        x, y, z : float or `~astropy.units.Quantity` ['length'], optional
+            Cartesian coordinates values
+        u, v, w : float or `~astropy.units.Quantity` ['length'], optional
+            Cartesian coordinates values for the Galactic frame.
+        radial_velocity : `~astropy.units.Quantity` ['speed'], optional
+            The component of the velocity along the line-of-sight (i.e., the
+            radial direction), in velocity units.
+    """
+    info = SkyCoordInfo()
+    def __init__(self, *args, copy=True, **kwargs):
+    @property
+    def frame(self):
+    @property
+    def representation_type(self):
+    @representation_type.setter
+    def representation_type(self, value):
+    @property
+    def representation(self):
+    @representation.setter
+    def representation(self, value):
+    @property
+    def shape(self):
+    def __eq__(self, value):
+    def __ne__(self, value):
+    def _apply(self, method, *args, **kwargs):
+    def __setitem__(self, item, value):
+    def insert(self, obj, values, axis=0):
+    def is_transformable_to(self, new_frame):
+    def transform_to(self, frame, merge_attributes=True):
+    def apply_space_motion(self, new_obstime=None, dt=None):
+    def _is_name(self, string):
+    def __getattr__(self, attr):
+    def __setattr__(self, attr, val):
+    def __delattr__(self, attr):
+    def __dir__(self):
+    def __repr__(self):
+    def to_string(self, style="decimal", **kwargs):
+    def to_table(self):
+    def is_equivalent_frame(self, other):
+    def separation(self, other):
+    def separation_3d(self, other):
+    def spherical_offsets_to(self, tocoord):
+    def spherical_offsets_by(self, d_lon, d_lat):
+    def directional_offset_by(self, position_angle, separation):
+    def match_to_catalog_sky(self, catalogcoord, nthneighbor=1):
+    def match_to_catalog_3d(self, catalogcoord, nthneighbor=1):
+    def search_around_sky(self, searcharoundcoords, seplimit):
+    def search_around_3d(self, searcharoundcoords, distlimit):
+    def position_angle(self, other):
+    def skyoffset_frame(self, rotation=None):
+    def get_constellation(self, short_name=False, constellation_list="iau"):
+    def to_pixel(self, wcs, origin=0, mode="all"):
+    @classmethod
+    def from_pixel(cls, xp, yp, wcs, origin=0, mode="all"):
+    def contained_by(self, wcs, image=None, **kwargs):
+    def radial_velocity_correction(
+        self, kind="barycentric", obstime=None, location=None
+    ):
+    @classmethod
+    def guess_from_table(cls, table, **coord_kwargs):
+    @classmethod
+    def from_name(cls, name, frame="icrs", parse=False, cache=True):
+
+
+【源码片段 2】
+文件路径：astropy/coordinates/sky_coordinate.py
+对象名称：__getattr__
+节点类型：class_function
+父节点：SkyCoord
+行号范围：869-900
+代码：
+    def __getattr__(self, attr):
+        """
+        Overrides getattr to return coordinates that this can be transformed
+        to, based on the alias attr in the primary transform graph.
+        """
+        if "_sky_coord_frame" in self.__dict__:
+            if self._is_name(attr):
+                return self  # Should this be a deepcopy of self?
+
+            # Anything in the set of all possible frame_attr_names is handled
+            # here. If the attr is relevant for the current frame then delegate
+            # to self.frame otherwise get it from self._<attr>.
+            if attr in frame_transform_graph.frame_attributes:
+                if attr in self.frame.frame_attributes:
+                    return getattr(self.frame, attr)
+                else:
+                    return getattr(self, "_" + attr, None)
+
+            # Some attributes might not fall in the above category but still
+            # are available through self._sky_coord_frame.
+            if not attr.startswith("_") and hasattr(self._sky_coord_frame, attr):
+                return getattr(self._sky_coord_frame, attr)
+
+            # Try to interpret as a new frame for transforming.
+            frame_cls = frame_transform_graph.lookup_name(attr)
+            if frame_cls is not None and self.frame.is_transformable_to(frame_cls):
+                return self.transform_to(attr)
+
+        # Fail
+        raise AttributeError(
+            f"'{self.__class__.__name__}' object has no attribute '{attr}'"
+        )
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：astropy/coordinates/tests/test_frames.py
+测试名称：test_component_error_useful
+测试代码：
+def test_component_error_useful():
+    """
+    Check that a data-less frame gives useful error messages about not having
+    data when the attributes asked for are possible coordinate components
+    """
+
+    i = ICRS()
+
+    with pytest.raises(ValueError) as excinfo:
+        i.ra
+    assert "does not have associated data" in str(excinfo.value)
+
+    with pytest.raises(AttributeError) as excinfo1:
+        i.foobar
+    with pytest.raises(AttributeError) as excinfo2:
+        i.lon  # lon is *not* the component name despite being the underlying representation's name
+    assert "object has no attribute 'foobar'" in str(excinfo1.value)
+    assert "object has no attribute 'lon'" in str(excinfo2.value)
+
+【相关测试 2】
+测试文件：astropy/coordinates/tests/test_sky_coord.py
+测试名称：test_attr_conflicts
+测试代码：
+def test_attr_conflicts():
+    """
+    Check conflicts resolution between coordinate attributes and init kwargs.
+    """
+    sc = SkyCoord(1, 2, frame="icrs", unit="deg", equinox="J1999", obstime="J2001")
+
+    # OK if attrs both specified but with identical values
+    SkyCoord(sc, equinox="J1999", obstime="J2001")
+
+    # OK because sc.frame doesn't have obstime
+    SkyCoord(sc.frame, equinox="J1999", obstime="J2100")
+
+    # Not OK if attrs don't match
+    with pytest.raises(ValueError) as err:
+        SkyCoord(sc, equinox="J1999", obstime="J2002")
+    assert "Coordinate attribute 'obstime'=" in str(err.value)
+
+    # Same game but with fk4 which has equinox and obstime frame attrs
+    sc = SkyCoord(1, 2, frame="fk4", unit="deg", equinox="J1999", obstime="J2001")
+
+    # OK if attrs both specified but with identical values
+    SkyCoord(sc, equinox="J1999", obstime="J2001")
+
+    # Not OK if SkyCoord attrs don't match
+    with pytest.raises(ValueError) as err:
+        SkyCoord(sc, equinox="J1999", obstime="J2002")
+    assert "Frame attribute 'obstime' has conflicting" in str(err.value)
+
+    # Not OK because sc.frame has different attrs
+    with pytest.raises(ValueError) as err:
+        SkyCoord(sc.frame, equinox="J1999", obstime="J2002")
+    assert "Frame attribute 'obstime' has conflicting" in str(err.value)
+
+【相关测试 3】
+测试文件：astropy/coordinates/tests/test_sky_coord.py
+测试名称：test_frame_attr_getattr
+测试代码：
+def test_frame_attr_getattr():
+    """
+    When accessing frame attributes like equinox, the value should come
+    from self.frame when that object has the relevant attribute, otherwise
+    from self.
+    """
+    sc = SkyCoord(1, 2, frame="icrs", unit="deg", equinox="J1999", obstime="J2001")
+    assert sc.equinox == "J1999"  # Just the raw value (not validated)
+    assert sc.obstime == "J2001"
+
+    sc = SkyCoord(1, 2, frame="fk4", unit="deg", equinox="J1999", obstime="J2001")
+    assert sc.equinox == Time("J1999")  # Coming from the self.frame object
+    assert sc.obstime == Time("J2001")
+
+    sc = SkyCoord(1, 2, frame="fk4", unit="deg", equinox="J1999")
+    assert sc.equinox == Time("J1999")
+    assert sc.obstime == Time("J1999")
+
+【相关测试 4】
+测试文件：astropy/coordinates/tests/test_sky_coord.py
+测试名称：test_set_attribute_exceptions
+测试代码：
+def test_set_attribute_exceptions():
+    """Ensure no attrbute for any frame can be set directly.
+
+    Though it is fine if the current frame does not have it."""
+    sc = SkyCoord(1.0 * u.deg, 2.0 * u.deg, frame="fk5")
+    assert hasattr(sc.frame, "equinox")
+    with pytest.raises(AttributeError):
+        sc.equinox = "B1950"
+
+    assert sc.relative_humidity is None
+    sc.relative_humidity = 0.5
+    assert sc.relative_humidity == 0.5
+    assert not hasattr(sc.frame, "relative_humidity")
+
+【相关测试 5】
+测试文件：astropy/coordinates/tests/test_sky_coord.py
+测试名称：test_extra_attributes
+测试代码：
+def test_extra_attributes():
+    """Ensure any extra attributes are dealt with correctly.
+
+    Regression test against #5743.
+    """
+    obstime_string = ["2017-01-01T00:00", "2017-01-01T00:10"]
+    obstime = Time(obstime_string)
+    sc = SkyCoord([5, 10], [20, 30], unit=u.deg, obstime=obstime_string)
+    assert not hasattr(sc.frame, "obstime")
+    assert type(sc.obstime) is Time
+    assert sc.obstime.shape == (2,)
+    assert np.all(sc.obstime == obstime)
+    # ensure equivalency still works for more than one obstime.
+    assert sc.is_equivalent_frame(sc)
+    sc_1 = sc[1]
+    assert sc_1.obstime == obstime[1]
+    # Transforming to FK4 should use sc.obstime.
+    sc_fk4 = sc.transform_to("fk4")
+    assert np.all(sc_fk4.frame.obstime == obstime)
+    # And transforming back should not loose it.
+    sc2 = sc_fk4.transform_to("icrs")
+    assert not hasattr(sc2.frame, "obstime")
+    assert np.all(sc2.obstime == obstime)
+    # Ensure obstime get taken from the SkyCoord if passed in directly.
+    # (regression test for #5749).
+    sc3 = SkyCoord([0.0, 1.0], [2.0, 3.0], unit="deg", frame=sc)
+    assert np.all(sc3.obstime == obstime)
+    # Finally, check that we can delete such attributes.
+    del sc3.obstime
+    assert sc3.obstime is None
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

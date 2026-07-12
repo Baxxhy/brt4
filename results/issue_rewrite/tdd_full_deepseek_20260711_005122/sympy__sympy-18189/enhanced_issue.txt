@@ -1,0 +1,113 @@
+instance_id: sympy__sympy-18189
+
+issue_summary: diophantine 函数在 permute=True 时，syms 参数顺序不同会导致返回的解集不完整。
+
+trigger_condition:
+{
+  "text": "调用 diophantine 函数，传入一个多项式方程（如 n**4 + m**4 - 2**4 - 3**4），设置 permute=True，但交换 syms 参数的顺序（如 (m,n) 与 (n,m)）。",
+  "evidence": [
+    "Issue 中展示了两个调用示例：syms=(m,n) 和 syms=(n,m)，结果不同。",
+    "相关测试 test_diophantine_permute_sign 和 test_diophantine 中使用了 permute=True 参数。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "当 syms 参数顺序为 (n,m) 时，返回的解集 {(3, 2)} 不完整，缺少了符号排列和符号变化产生的其他解（如 (-3, -2), (-3, 2) 等）。而当 syms 参数顺序为 (m,n) 时，返回了完整的解集。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 中展示了 Out[10] 和 Out[11] 的对比，Out[11] 的结果集明显小于 Out[10]。",
+    "相关测试 test_diophantine_permute_sign 表明，当 permute=True 时，应返回完整解集（complete_soln）。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "对于相同的方程和 permute=True 参数，无论 syms 参数中符号的顺序如何，diophantine 函数都应返回相同且完整的解集（包含所有符号排列和符号变化）。",
+  "evidence": [
+    "Issue 标题和描述暗示了 syms 顺序不应影响结果的完整性。",
+    "相关测试 test_diophantine_permute_sign 中，对 eq = a**4 + b**4 - (2**4 + 3**4) 调用 diophantine(eq, permute=True) 并断言其等于 complete_soln，该 complete_soln 是通过对基础解进行 signed_permutations 生成的，这暗示了 permute=True 的预期行为是返回所有符号排列和符号变化的解。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "diophantine",
+    "kind": "function",
+    "source_path": "sympy/solvers/diophantine.py",
+    "reason": "Issue 直接报告了此函数的问题，是缺陷复现测试的核心调用目标。"
+  },
+  {
+    "name": "signed_permutations",
+    "kind": "function",
+    "source_path": "",
+    "reason": "相关测试中使用它来生成 permute=True 时的预期完整解集，可能与内部实现或预期行为验证相关。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "相似测试中调用 diophantine 时，或不指定 syms（使用默认顺序），或指定 syms 但顺序固定（如 test_issue_9538 中的 [y,x]），且 permute=True 时未测试顺序影响。",
+    "target_pattern": "在调用 diophantine(eq, permute=True) 时，显式指定 syms 参数，并尝试两种不同的符号顺序（如 (m,n) 和 (n,m)）。",
+    "reason": "Issue 表明，在 permute=True 时，syms 参数的顺序是触发不完整结果的关键变量。",
+    "confidence": "high"
+  },
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中使用的方程多为简单平方和或特定形式（如 a**4 + b**4 - (2**4 + 3**4)）。",
+    "target_pattern": "使用与 Issue 中完全相同的方程：n**4 + m**4 - 2**4 - 3**4（或等价的符号形式）。",
+    "reason": "Issue 使用该方程复现了问题，该方程可能触发了特定的求解路径，使得符号顺序的影响显现。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "diophantine(eq, syms=(m,n), permute=True) 和 diophantine(eq, syms=(n,m), permute=True) 的返回值（解集）。",
+    "reason": "直接比较两个调用返回的解集大小和内容，可以判断是否因 syms 顺序不同而导致结果不一致/不完整。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "在 diophantine 函数内部，处理 syms 参数和生成排列解时的中间变量或逻辑分支。",
+    "reason": "有助于定位是符号顺序影响了方程的分类、求解过程，还是影响了后续排列（permute）生成步骤。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "对于相同的方程和 permute=True，使用不同 syms 顺序（如 (m,n) 和 (n,m)）调用 diophantine 应返回相同大小的解集（且内容应通过某种转换等价）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "直接断言返回的解集字符串完全相等，因为解集中元组的顺序可能不同。应比较解集（set）的内容。",
+    "reason": "Issue 的核心是完整性（解集大小），而非解的内部表示顺序。使用 set 比较可以忽略顺序差异，聚焦于内容是否一致。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要从 sympy.abc 或 symbols 函数导入方程中使用的符号（如 m, n）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要在 sympy/solvers/tests/test_diophantine.py 的上下文中运行，以利用已有的导入和工具函数（如 signed_permutations）。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "signed_permutations 函数的确切来源和语义（是测试工具还是库函数），以及它是否完全定义了 permute=True 的预期行为。",
+  "diophantine 函数内部，syms 参数顺序具体影响哪个处理阶段（方程预处理、求解器选择、解的后处理/排列）。",
+  "除了解集大小，两个结果集之间是否存在确定的可转换关系（例如，对应解元组中元素的顺序交换）。"
+]

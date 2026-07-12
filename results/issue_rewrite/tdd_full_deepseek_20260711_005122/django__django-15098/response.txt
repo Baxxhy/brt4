@@ -1,0 +1,153 @@
+```json
+{
+    "issue_summary": "Django 的 i18n_patterns 不支持同时包含 script 和 region 的语言 locale（如 en-latn-us），导致相关 URL 返回 404 错误。",
+    "trigger_condition": {
+        "text": "在 LANGUAGES 设置中包含同时有 script 和 region 的语言标签（如 'en-latn-us' 或 'en-Latn-US'），并访问使用 i18n_patterns 生成的对应语言前缀的 URL。",
+        "evidence": ["Issue 描述中给出了 LANGUAGES 设置包含 'en-latn-us' 和 'en-Latn-US'，并访问 /en-latn-us/ 和 /en-Latn-US/ URL 的步骤。", "Issue 中明确说明访问 /en-us/ 返回 200，但访问 /en-latn-us/ 和 /en-Latn-US/ 返回 404。"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "访问包含 script 和 region 的语言标签前缀的 URL 时，返回 HTTP 404 状态码（未找到），而不是预期的 200 状态码和正确响应。",
+        "symptom_type": "wrong_return",
+        "evidence": ["Issue 中明确说明：'The response of http://localhost:8000/en-lat-us/ is 404 not found.' 和 'The response of http://localhost:8000/en-Latn-US/ is 404 not found.'"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "访问符合 RFC 5646 格式、同时包含 script 和 region 的语言标签前缀的 URL（如 /en-latn-us/ 和 /en-Latn-US/）应返回 HTTP 200 状态码和正确的响应内容。",
+        "evidence": ["Issue 的 'Expect to happen instead' 部分明确指出：'The response of http://localhost:8000/en-latn-us/ and http://localhost:8000/en-Latn-US/ should be 200 U!.'", "Issue 引用了 RFC 5646 标准，说明 'en-Latn-US' 是有效的语言标签格式。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "i18n_patterns",
+            "kind": "function",
+            "source_path": "django/conf/urls/i18n.py",
+            "reason": "Issue 的核心是关于 i18n_patterns 在处理特定语言标签时的行为。"
+        },
+        {
+            "name": "LocalePrefixPattern",
+            "kind": "class",
+            "source_path": "",
+            "reason": "i18n_patterns 内部使用了 URLResolver 和 LocalePrefixPattern，后者负责处理语言前缀匹配，可能与缺陷直接相关。"
+        },
+        {
+            "name": "LocaleMiddleware",
+            "kind": "class",
+            "source_path": "django/middleware/locale.py",
+            "reason": "Issue 的复现步骤要求添加 LocaleMiddleware 到 MIDDLEWARE，它负责处理请求的语言检测和设置。"
+        },
+        {
+            "name": "to_locale",
+            "kind": "function",
+            "source_path": "",
+            "reason": "相关测试 1 (test_to_locale) 测试了此函数，该函数可能用于语言标签的转换，与 Issue 中提到的语言格式处理相关。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/conf/urls/i18n.py",
+            "object": "i18n_patterns",
+            "lines": "8-20",
+            "reason": "这是生成国际化 URL 模式的核心函数，其内部使用的 LocalePrefixPattern 可能无法正确解析包含 script 和 region 的复杂语言标签。"
+        },
+        {
+            "path": "",
+            "object": "LocalePrefixPattern",
+            "lines": "",
+            "reason": "该模式负责匹配 URL 中的语言前缀，Issue 中 URL 无法匹配，问题很可能出在该类的匹配逻辑上。"
+        },
+        {
+            "path": "django/middleware/locale.py",
+            "object": "LocaleMiddleware",
+            "lines": "10-66",
+            "reason": "中间件负责设置请求的语言上下文，可能影响 URL 解析或语言代码的规范化过程。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "URLResponseTests.test_pt_br_url",
+            "test_file": "tests/i18n/patterns/tests.py",
+            "why_relevant": "该测试验证了包含 region 的语言标签（pt-br）在 i18n_patterns 下的 URL 访问能返回 200。它与当前 Issue 场景相似，都是测试特定语言标签前缀的 URL 响应。",
+            "reusable_parts": ["测试类结构 (URLTestCaseBase)", "使用 self.client.get 访问带语言前缀的 URL", "断言 response.status_code 为 200", "断言 response.headers['content-language'] 和 response.context['LANGUAGE_CODE']"],
+            "possible_gap": "该测试只使用了简单的 language-region 格式（pt-br），没有测试 language-script-region 格式（如 en-latn-us）。"
+        },
+        {
+            "test_name": "TranslationTests.test_to_locale",
+            "test_file": "tests/i18n/tests.py",
+            "why_relevant": "该测试直接验证了 to_locale 函数对各种语言标签（包括包含 script 的 'sr-latn'）的转换。Issue 中语言标签的处理可能涉及类似的转换逻辑。",
+            "reusable_parts": ["测试用例结构 (SimpleTestCase)", "使用 with self.subTest", "使用 self.assertEqual 断言转换结果", "包含多种大小写和格式的语言标签测试数据"],
+            "possible_gap": "该测试是单元测试，测试的是 to_locale 函数本身，而不是 i18n_patterns 在完整 HTTP 请求上下文中的集成行为。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "config",
+            "current_pattern": "相关测试可能使用默认的 LANGUAGES 设置或简单的语言标签（如 'en', 'nl', 'pt-br'）。",
+            "target_pattern": "将 LANGUAGES 配置修改为包含同时有 script 和 region 的语言标签，如 'en-latn-us' 和 'en-Latn-US'。",
+            "reason": "Issue 的触发条件依赖于 LANGUAGES 设置中包含特定格式的语言标签。",
+            "confidence": "high"
+        },
+        {
+            "slot": "input",
+            "current_pattern": "相似测试（如 test_pt_br_url）访问的 URL 路径为 '/pt-br/conta/registre-se/'，即 language-region 格式。",
+            "target_pattern": "将访问的 URL 路径变异为包含 language-script-region 格式的前缀，如 '/en-latn-us/' 或 '/en-Latn-US/'。",
+            "reason": "Issue 中错误现象发生在访问此类格式的 URL 时。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "return_value",
+            "expression_hint": "response.status_code",
+            "reason": "Issue 的核心错误现象是 HTTP 状态码错误（应为 200 但得到 404）。"
+        },
+        {
+            "kind": "config",
+            "expression_hint": "settings.LANGUAGES",
+            "reason": "需要确认测试设置中包含了 Issue 中提到的语言标签。"
+        },
+        {
+            "kind": "state",
+            "expression_hint": "request.LANGUAGE_CODE 或 response.context['LANGUAGE_CODE']",
+            "reason": "观察请求处理过程中实际设置的语言代码，以判断语言检测或匹配是否正确。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "访问包含 language-script-region 格式前缀的 URL 应返回 HTTP 200 状态码。",
+            "preferred_assertion_style": "equals",
+            "avoid": "断言完整的响应体内容字符串，除非 Issue 明确指定。避免断言与语言代码无关的上下文变量。",
+            "reason": "Issue 明确期望状态码为 200，这是最直接、稳定的断言目标。"
+        },
+        {
+            "assertion_goal": "响应的 content-language 头或上下文中的 LANGUAGE_CODE 应正确反映请求的语言标签（可能经过规范化）。",
+            "preferred_assertion_style": "equals",
+            "avoid": "断言语言标签的精确大小写，因为 RFC 5646 规定语言部分小写，但脚本和地区部分有大小写规范。",
+            "reason": "Issue 引用了 RFC 5646 和大小写规范，验证语言代码的正确设置有助于确认功能正常。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要使用 Django 的 TestCase 或 SimpleTestCase，并可能通过 override_settings 来修改 LANGUAGES 设置。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要启用 USE_I18N 设置，并可能需要在测试中模拟包含 LocaleMiddleware 的中间件栈。",
+            "source": "issue",
+            "confidence": "medium"
+        },
+        {
+            "hint": "需要配置一个使用 i18n_patterns 的 URLconf，并定义一个简单的视图函数用于测试。",
+            "source": "issue",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "缺陷的确切位置是在 LocalePrefixPattern 的匹配逻辑、to_locale 的转换逻辑，还是在 LocaleMiddleware 的语言检测逻辑中？",
+        "对于 'en-Latn-US' 这种混合大小写的输入，Django 内部预期的规范化形式是什么？",
+        "除了返回 404，是否还有其他错误现象（如日志、异常）？",
+        "是否所有符合 RFC 5646 的 language-script-region 变体都会失败，还是仅特定组合？"
+    ]
+}
+```

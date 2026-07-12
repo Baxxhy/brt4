@@ -1,0 +1,309 @@
+{
+  "instance_id": "django__django-14434",
+  "issue_summary": "在 _create_unique_sql 中，当 Table 实例被作为参数传递给 Columns 时，会导致 references_column 方法总是返回 false。",
+  "trigger_condition": {
+    "text": "调用 _create_unique_sql 方法时，其内部逻辑将一个 Table 实例（而非预期的字符串）传递给了 Columns 的构造函数。",
+    "evidence": [
+      "Issue 描述：\"This is due to an instance of Table is passed as an argument to Columns when a string is expected.\"",
+      "源码片段 1 显示 _create_unique_sql 内部创建了 Table 实例并可能将其用于构造 columns。",
+      "源码片段 3 显示 Columns 类的 __init__ 方法接收 `table` 和 `columns` 参数。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "Statement 对象的 references_column 方法总是返回 false，无法正确识别对特定列的引用。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 标题：\"Statement created by _create_unique_sql makes references_column always false\"",
+      "相关测试 1 和 2 展示了 references_column 方法在正常情况下应返回 True 或 False 的场景。",
+      "相关测试 3 展示了在 deferred_sql 中检查 references_column 返回 False 的预期正确行为。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "由 _create_unique_sql 创建的 Statement 对象，其 references_column 方法应能根据传入的列名参数，正确判断是否引用了指定的表和列。",
+    "evidence": [
+      "相关测试 1 和 2 定义了 Columns 对象 references_column 方法的预期行为：对于引用的列返回 True，否则返回 False。",
+      "相关测试 3 展示了在 schema 变更后，deferred_sql 中的 statement 应能正确报告其不再引用已重命名的列（即返回 False）。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "_create_unique_sql",
+      "kind": "method",
+      "source_path": "django/db/backends/base/schema.py",
+      "reason": "Issue 明确指出该方法是创建有问题的 Statement 的源头。"
+    },
+    {
+      "name": "Columns",
+      "kind": "class",
+      "source_path": "django/db/backends/ddl_references.py",
+      "reason": "Issue 提到 Table 实例被错误地传递给了 Columns 的构造函数。"
+    },
+    {
+      "name": "references_column",
+      "kind": "method",
+      "source_path": "django/db/backends/ddl_references.py",
+      "reason": "这是 Issue 中观察到的错误行为发生的方法。"
+    },
+    {
+      "name": "Statement",
+      "kind": "class",
+      "source_path": "",
+      "reason": "Issue 中提到的有问题的对象是由 _create_unique_sql 返回的 Statement。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/backends/base/schema.py",
+      "object": "_create_unique_sql",
+      "lines": "1225-1265",
+      "reason": "Issue 描述的问题源于此方法创建的 Statement。该方法内部创建了 Table 对象，并可能将其用于构造 columns 参数。"
+    },
+    {
+      "path": "django/db/backends/ddl_references.py",
+      "object": "Columns.__init__",
+      "lines": "",
+      "reason": "Issue 提到 Table 实例被作为参数传递给 Columns，而预期是字符串。问题可能在于 Columns 的初始化逻辑或其调用方。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "ColumnsTests.test_references_column",
+      "test_file": "tests/backends/test_ddl_references.py",
+      "why_relevant": "它直接测试了 Columns 对象的 references_column 方法，这是 Issue 的核心错误点。",
+      "reusable_parts": [
+        "测试类结构 (ColumnsTests)",
+        "assertIs 断言风格",
+        "references_column 方法的调用方式"
+      ],
+      "possible_gap": "该测试直接构造 Columns 对象进行测试，而 Issue 中的问题是通过 _create_unique_sql 间接创建的 Statement/Columns。它没有覆盖通过 schema 编辑器创建唯一约束的完整流程。"
+    },
+    {
+      "test_name": "SchemaTests.test_rename_column_renames_deferred_sql_references",
+      "test_file": "tests/schema/tests.py",
+      "why_relevant": "它测试了在 schema 变更（重命名字段）后，deferred_sql 中的 statement 的 references_column 行为。这涉及到通过 _create_unique_sql 等 schema 编辑器方法创建的对象。",
+      "reusable_parts": [
+        "使用 connection.schema_editor()",
+        "创建和修改模型 (Author, Book)",
+        "检查 editor.deferred_sql",
+        "对 statement.references_column 的断言"
+      ],
+      "possible_gap": "该测试主要关注重命名字段后的行为，可能没有直接触发导致 references_column 总是返回 false 的特定 Table 实例传递路径。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "相关测试中，Columns 对象可能通过明确的列名字符串列表构造。",
+      "target_pattern": "构造 Columns 对象时，其 `table` 参数可能被错误地传递了一个 Table 类的实例，而不是预期的表名字符串。",
+      "reason": "Issue 明确指出问题在于 Table 实例被传递给了 Columns，而预期是字符串。这种参数类型的错配可能导致 references_column 的内部逻辑失效。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "测试可能直接测试 Columns 类或 Statement 的最终行为。",
+      "target_pattern": "通过调用 _create_unique_sql（可能作为创建索引或唯一约束的一部分）来间接创建 Columns 对象，并检查生成的 Statement。",
+      "reason": "Issue 中的问题出现在由 _create_unique_sql 创建的 Statement 中，因此需要复现这个特定的创建路径。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "statement.references_column('some_table', 'some_column') 的返回值",
+      "reason": "Issue 的核心症状是 references_column 总是返回 false。观察其返回值可以直接判断缺陷是否被触发。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "传递给 Columns.__init__ 的 `table` 参数的类型",
+      "reason": "Issue 指出问题在于传递了 Table 实例而非字符串。观察参数类型可以确认错误的传递是否发生。"
+    },
+    {
+      "kind": "sql",
+      "expression_hint": "生成的 deferred_sql 或 Statement 的字符串表示",
+      "reason": "错误的参数传递可能影响最终生成的 SQL 语句的结构或内容。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证由 _create_unique_sql 创建的 Statement 对象，对于它实际引用的列，其 references_column 方法应返回 True。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的 SQL 字符串或复杂的 repr。避免依赖于特定数据库后端的 SQL 方言细节。",
+      "reason": "Issue 的核心是 references_column 的逻辑错误，而非 SQL 生成。直接断言其返回值是否与预期列引用匹配，是稳定且与 Issue 对齐的验证方式。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 Django 的 TestCase 或 TransactionTestCase，并配置数据库连接。可能需要创建简单的模型并应用迁移（或使用 schema_editor 直接操作）。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要模拟或调用涉及创建唯一约束或索引的 schema 操作，例如 add_index 或 add_constraint。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "触发缺陷所需的确切 API 调用序列（例如，是调用 add_constraint、add_index，还是其他方法最终会调用 _create_unique_sql）。",
+    "导致 Table 实例被错误传递的具体代码位置是在 _create_unique_sql 内部，还是在调用 _create_unique_sql 的上游方法中。",
+    "除了 references_column 返回 false 之外，是否还有其他副作用（如错误的 SQL 生成）。",
+    "哪些特定的模型字段配置（如 unique=True, ForeignKey）会最终调用到有问题的代码路径。"
+  ],
+  "raw": {
+    "issue_summary": "在 _create_unique_sql 中，当 Table 实例被作为参数传递给 Columns 时，会导致 references_column 方法总是返回 false。",
+    "trigger_condition": {
+      "text": "调用 _create_unique_sql 方法时，其内部逻辑将一个 Table 实例（而非预期的字符串）传递给了 Columns 的构造函数。",
+      "evidence": [
+        "Issue 描述：\"This is due to an instance of Table is passed as an argument to Columns when a string is expected.\"",
+        "源码片段 1 显示 _create_unique_sql 内部创建了 Table 实例并可能将其用于构造 columns。",
+        "源码片段 3 显示 Columns 类的 __init__ 方法接收 `table` 和 `columns` 参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Statement 对象的 references_column 方法总是返回 false，无法正确识别对特定列的引用。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 标题：\"Statement created by _create_unique_sql makes references_column always false\"",
+        "相关测试 1 和 2 展示了 references_column 方法在正常情况下应返回 True 或 False 的场景。",
+        "相关测试 3 展示了在 deferred_sql 中检查 references_column 返回 False 的预期正确行为。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "由 _create_unique_sql 创建的 Statement 对象，其 references_column 方法应能根据传入的列名参数，正确判断是否引用了指定的表和列。",
+      "evidence": [
+        "相关测试 1 和 2 定义了 Columns 对象 references_column 方法的预期行为：对于引用的列返回 True，否则返回 False。",
+        "相关测试 3 展示了在 schema 变更后，deferred_sql 中的 statement 应能正确报告其不再引用已重命名的列（即返回 False）。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "_create_unique_sql",
+        "kind": "method",
+        "source_path": "django/db/backends/base/schema.py",
+        "reason": "Issue 明确指出该方法是创建有问题的 Statement 的源头。"
+      },
+      {
+        "name": "Columns",
+        "kind": "class",
+        "source_path": "django/db/backends/ddl_references.py",
+        "reason": "Issue 提到 Table 实例被错误地传递给了 Columns 的构造函数。"
+      },
+      {
+        "name": "references_column",
+        "kind": "method",
+        "source_path": "django/db/backends/ddl_references.py",
+        "reason": "这是 Issue 中观察到的错误行为发生的方法。"
+      },
+      {
+        "name": "Statement",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中提到的有问题的对象是由 _create_unique_sql 返回的 Statement。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/base/schema.py",
+        "object": "_create_unique_sql",
+        "lines": "1225-1265",
+        "reason": "Issue 描述的问题源于此方法创建的 Statement。该方法内部创建了 Table 对象，并可能将其用于构造 columns 参数。"
+      },
+      {
+        "path": "django/db/backends/ddl_references.py",
+        "object": "Columns.__init__",
+        "lines": "",
+        "reason": "Issue 提到 Table 实例被作为参数传递给 Columns，而预期是字符串。问题可能在于 Columns 的初始化逻辑或其调用方。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ColumnsTests.test_references_column",
+        "test_file": "tests/backends/test_ddl_references.py",
+        "why_relevant": "它直接测试了 Columns 对象的 references_column 方法，这是 Issue 的核心错误点。",
+        "reusable_parts": [
+          "测试类结构 (ColumnsTests)",
+          "assertIs 断言风格",
+          "references_column 方法的调用方式"
+        ],
+        "possible_gap": "该测试直接构造 Columns 对象进行测试，而 Issue 中的问题是通过 _create_unique_sql 间接创建的 Statement/Columns。它没有覆盖通过 schema 编辑器创建唯一约束的完整流程。"
+      },
+      {
+        "test_name": "SchemaTests.test_rename_column_renames_deferred_sql_references",
+        "test_file": "tests/schema/tests.py",
+        "why_relevant": "它测试了在 schema 变更（重命名字段）后，deferred_sql 中的 statement 的 references_column 行为。这涉及到通过 _create_unique_sql 等 schema 编辑器方法创建的对象。",
+        "reusable_parts": [
+          "使用 connection.schema_editor()",
+          "创建和修改模型 (Author, Book)",
+          "检查 editor.deferred_sql",
+          "对 statement.references_column 的断言"
+        ],
+        "possible_gap": "该测试主要关注重命名字段后的行为，可能没有直接触发导致 references_column 总是返回 false 的特定 Table 实例传递路径。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试中，Columns 对象可能通过明确的列名字符串列表构造。",
+        "target_pattern": "构造 Columns 对象时，其 `table` 参数可能被错误地传递了一个 Table 类的实例，而不是预期的表名字符串。",
+        "reason": "Issue 明确指出问题在于 Table 实例被传递给了 Columns，而预期是字符串。这种参数类型的错配可能导致 references_column 的内部逻辑失效。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试可能直接测试 Columns 类或 Statement 的最终行为。",
+        "target_pattern": "通过调用 _create_unique_sql（可能作为创建索引或唯一约束的一部分）来间接创建 Columns 对象，并检查生成的 Statement。",
+        "reason": "Issue 中的问题出现在由 _create_unique_sql 创建的 Statement 中，因此需要复现这个特定的创建路径。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "statement.references_column('some_table', 'some_column') 的返回值",
+        "reason": "Issue 的核心症状是 references_column 总是返回 false。观察其返回值可以直接判断缺陷是否被触发。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "传递给 Columns.__init__ 的 `table` 参数的类型",
+        "reason": "Issue 指出问题在于传递了 Table 实例而非字符串。观察参数类型可以确认错误的传递是否发生。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 deferred_sql 或 Statement 的字符串表示",
+        "reason": "错误的参数传递可能影响最终生成的 SQL 语句的结构或内容。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证由 _create_unique_sql 创建的 Statement 对象，对于它实际引用的列，其 references_column 方法应返回 True。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 字符串或复杂的 repr。避免依赖于特定数据库后端的 SQL 方言细节。",
+        "reason": "Issue 的核心是 references_column 的逻辑错误，而非 SQL 生成。直接断言其返回值是否与预期列引用匹配，是稳定且与 Issue 对齐的验证方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 Django 的 TestCase 或 TransactionTestCase，并配置数据库连接。可能需要创建简单的模型并应用迁移（或使用 schema_editor 直接操作）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟或调用涉及创建唯一约束或索引的 schema 操作，例如 add_index 或 add_constraint。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "触发缺陷所需的确切 API 调用序列（例如，是调用 add_constraint、add_index，还是其他方法最终会调用 _create_unique_sql）。",
+      "导致 Table 实例被错误传递的具体代码位置是在 _create_unique_sql 内部，还是在调用 _create_unique_sql 的上游方法中。",
+      "除了 references_column 返回 false 之外，是否还有其他副作用（如错误的 SQL 生成）。",
+      "哪些特定的模型字段配置（如 unique=True, ForeignKey）会最终调用到有问题的代码路径。"
+    ]
+  }
+}

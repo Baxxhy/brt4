@@ -1,0 +1,766 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Retrieving time to refit the estimator in BaseSearchCV
+Basically, I'm trying to figure out how much time it takes to refit the best model on the full data after doing grid/random search. What I can so far do is retrieve the time it takes to fit and score each model:
+```
+import sklearn.datasets
+import sklearn.model_selection
+import sklearn.ensemble
+
+X, y = sklearn.datasets.load_iris(return_X_y=True)
+
+rs = sklearn.model_selection.GridSearchCV(
+    estimator=sklearn.ensemble.RandomForestClassifier(),
+    param_grid={'n_estimators': [2, 3, 4, 5]}
+)
+rs.fit(X, y)
+print(rs.cv_results_['mean_fit_time'])
+print(rs.cv_results_['mean_score_time'])
+```
+In case I run this on a single core, I could time the whole search procedure and subtract the time it took to fit the single folds during hyperparameter optimization. Nevertheless, this isn't possible any more when setting `n_jobs != 1`.
+
+Thus, it would be great to have an attribute `refit_time_` which is simply the time it took to refit the best model.
+
+Usecase: for [OpenML.org](https://openml.org) we want to support uploading the results of hyperparameter optimization, including the time it takes to do the hyperparameter optimization. 
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sklearn/grid_search.py
+对象名称：BaseSearchCV
+节点类型：class
+父节点：grid_search
+行号范围：380-624
+代码：
+class BaseSearchCV(six.with_metaclass(ABCMeta, BaseEstimator,
+                                      MetaEstimatorMixin)):
+                                      MetaEstimatorMixin)):
+    @abstractmethod
+    def __init__(self, estimator, scoring=None,
+                 fit_params=None, n_jobs=1, iid=True,
+                 refit=True, cv=None, verbose=0, pre_dispatch='2*n_jobs',
+                 error_score='raise'):
+
+    @property
+    def _estimator_type(self):
+    @property
+    def classes_(self):
+    def score(self, X, y=None):
+    @if_delegate_has_method(delegate=('best_estimator_', 'estimator'))
+    def predict(self, X):
+    @if_delegate_has_method(delegate=('best_estimator_', 'estimator'))
+    def predict_proba(self, X):
+    @if_delegate_has_method(delegate=('best_estimator_', 'estimator'))
+    def predict_log_proba(self, X):
+    @if_delegate_has_method(delegate=('best_estimator_', 'estimator'))
+    def decision_function(self, X):
+    @if_delegate_has_method(delegate=('best_estimator_', 'estimator'))
+    def transform(self, X):
+    @if_delegate_has_method(delegate=('best_estimator_', 'estimator'))
+    def inverse_transform(self, Xt):
+    def _fit(self, X, y, parameter_iterable):
+
+
+【源码片段 2】
+文件路径：sklearn/grid_search.py
+对象名称：GridSearchCV
+节点类型：class
+父节点：grid_search
+行号范围：627-838
+代码：
+class GridSearchCV(BaseSearchCV):
+    """Exhaustive search over specified parameter values for an estimator.
+
+    .. deprecated:: 0.18
+        This module will be removed in 0.20.
+        Use :class:`sklearn.model_selection.GridSearchCV` instead.
+
+    Important members are fit, predict.
+
+    GridSearchCV implements a "fit" and a "score" method.
+    It also implements "predict", "predict_proba", "decision_function",
+    "transform" and "inverse_transform" if they are implemented in the
+    estimator used.
+
+    The parameters of the estimator used to apply these methods are optimized
+    by cross-validated grid-search over a parameter grid.
+
+    Read more in the :ref:`User Guide <grid_search>`.
+
+    Parameters
+    ----------
+    estimator : estimator object.
+        A object of that type is instantiated for each grid point.
+        This is assumed to implement the scikit-learn estimator interface.
+        Either estimator needs to provide a ``score`` function,
+        or ``scoring`` must be passed.
+
+    param_grid : dict or list of dictionaries
+        Dictionary with parameters names (string) as keys and lists of
+        parameter settings to try as values, or a list of such
+        dictionaries, in which case the grids spanned by each dictionary
+        in the list are explored. This enables searching over any sequence
+        of parameter settings.
+
+    scoring : string, callable or None, default=None
+        A string (see model evaluation documentation) or
+        a scorer callable object / function with signature
+        ``scorer(estimator, X, y)``.
+        If ``None``, the ``score`` method of the estimator is used.
+
+    fit_params : dict, optional
+        Parameters to pass to the fit method.
+
+    n_jobs: int, default: 1 :
+        The maximum number of estimators fit in parallel.
+
+            - If -1 all CPUs are used.
+
+            - If 1 is given, no parallel computing code is used at all,
+              which is useful for debugging.
+
+            - For ``n_jobs`` below -1, ``(n_cpus + n_jobs + 1)`` are used.
+              For example, with ``n_jobs = -2`` all CPUs but one are used.
+
+        .. versionchanged:: 0.17
+           Upgraded to joblib 0.9.3.
+
+    pre_dispatch : int, or string, optional
+        Controls the number of jobs that get dispatched during parallel
+        execution. Reducing this number can be useful to avoid an
+        explosion of memory consumption when more jobs get dispatched
+        than CPUs can process. This parameter can be:
+
+            - None, in which case all the jobs are immediately
+              created and spawned. Use this for lightweight and
+              fast-running jobs, to avoid delays due to on-demand
+              spawning of the jobs
+
+            - An int, giving the exact number of total jobs that are
+              spawned
+
+            - A string, giving an expression as a function of n_jobs,
+              as in '2*n_jobs'
+
+    iid : boolean, default=True
+        If True, the data is assumed to be identically distributed across
+        the folds, and the loss minimized is the total loss per sample,
+        and not the mean loss across the folds.
+
+    cv : int, cross-validation generator or an iterable, optional
+        Determines the cross-validation splitting strategy.
+        Possible inputs for cv are:
+
+        - None, to use the default 3-fold cross-validation,
+        - integer, to specify the number of folds.
+        - An object to be used as a cross-validation generator.
+        - An iterable yielding train/test splits.
+
+        For integer/None inputs, if the estimator is a classifier and ``y`` is
+        either binary or multiclass,
+        :class:`sklearn.model_selection.StratifiedKFold` is used. In all
+        other cases, :class:`sklearn.model_selection.KFold` is used.
+
+        Refer :ref:`User Guide <cross_validation>` for the various
+        cross-validation strategies that can be used here.
+
+    refit : boolean, default=True
+        Refit the best estimator with the entire dataset.
+        If "False", it is impossible to make predictions using
+        this GridSearchCV instance after fitting.
+
+    verbose : integer
+        Controls the verbosity: the higher, the more messages.
+
+    error_score : 'raise' (default) or numeric
+        Value to assign to the score if an error occurs in estimator fitting.
+        If set to 'raise', the error is raised. If a numeric value is given,
+        FitFailedWarning is raised. This parameter does not affect the refit
+        step, which will always raise the error.
+
+
+    Examples
+    --------
+    >>> from sklearn import svm, grid_search, datasets
+    >>> iris = datasets.load_iris()
+    >>> parameters = {'kernel':('linear', 'rbf'), 'C':[1, 10]}
+    >>> svr = svm.SVC(gamma="scale")
+    >>> clf = grid_search.GridSearchCV(svr, parameters)
+    >>> clf.fit(iris.data, iris.target)
+    ...                             # doctest: +NORMALIZE_WHITESPACE +ELLIPSIS
+    GridSearchCV(cv=None, error_score=...,
+           estimator=SVC(C=1.0, cache_size=..., class_weight=..., coef0=...,
+                         decision_function_shape='ovr', degree=..., gamma=...,
+                         kernel='rbf', max_iter=-1, probability=False,
+                         random_state=None, shrinking=True, tol=...,
+                         verbose=False),
+           fit_params={}, iid=..., n_jobs=1,
+           param_grid=..., pre_dispatch=..., refit=...,
+           scoring=..., verbose=...)
+
+
+    Attributes
+    ----------
+    grid_scores_ : list of namedtuples
+        Contains scores for all parameter combinations in param_grid.
+        Each entry corresponds to one parameter setting.
+        Each namedtuple has the attributes:
+
+            * ``parameters``, a dict of parameter settings
+            * ``mean_validation_score``, the mean score over the
+              cross-validation folds
+            * ``cv_validation_scores``, the list of scores for each fold
+
+    best_estimator_ : estimator
+        Estimator that was chosen by the search, i.e. estimator
+        which gave highest score (or smallest loss if specified)
+        on the left out data. Not available if refit=False.
+
+    best_score_ : float
+        Score of best_estimator on the left out data.
+
+    best_params_ : dict
+        Parameter setting that gave the best results on the hold out data.
+
+    scorer_ : function
+        Scorer function used on the held out data to choose the best
+        parameters for the model.
+
+    Notes
+    ------
+    The parameters selected are those that maximize the score of the left out
+    data, unless an explicit score is passed in which case it is used instead.
+
+    If `n_jobs` was set to a value higher than one, the data is copied for each
+    point in the grid (and not `n_jobs` times). This is done for efficiency
+    reasons if individual jobs take very little time, but may raise errors if
+    the dataset is large and not enough memory is available.  A workaround in
+    this case is to set `pre_dispatch`. Then, the memory is copied only
+    `pre_dispatch` many times. A reasonable value for `pre_dispatch` is `2 *
+    n_jobs`.
+
+    See Also
+    ---------
+    :class:`ParameterGrid`:
+        generates all the combinations of a hyperparameter grid.
+
+    :func:`sklearn.cross_validation.train_test_split`:
+        utility function to split the data into a development set usable
+        for fitting a GridSearchCV instance and an evaluation set for
+        its final evaluation.
+
+    :func:`sklearn.metrics.make_scorer`:
+        Make a scorer from a performance metric or loss function.
+
+    """
+    def __init
+...[TRUNCATED]...
+n `min_samples_leaf` is a fraction and
+          `ceil(min_samples_leaf * n_samples)` are the minimum
+          number of samples for each node.
+
+        .. versionchanged:: 0.18
+           Added float values for fractions.
+
+    min_weight_fraction_leaf : float, optional (default=0.)
+        The minimum weighted fraction of the sum total of weights (of all
+        the input samples) required to be at a leaf node. Samples have
+        equal weight when sample_weight is not provided.
+
+    max_leaf_nodes : int or None, optional (default=None)
+        Grow trees with ``max_leaf_nodes`` in best-first fashion.
+        Best nodes are defined as relative reduction in impurity.
+        If None then unlimited number of leaf nodes.
+
+    min_impurity_split : float,
+        Threshold for early stopping in tree growth. A node will split
+        if its impurity is above the threshold, otherwise it is a leaf.
+
+        .. deprecated:: 0.19
+           ``min_impurity_split`` has been deprecated in favor of
+           ``min_impurity_decrease`` in 0.19 and will be removed in 0.21.
+           Use ``min_impurity_decrease`` instead.
+
+    min_impurity_decrease : float, optional (default=0.)
+        A node will be split if this split induces a decrease of the impurity
+        greater than or equal to this value.
+
+        The weighted impurity decrease equation is the following::
+
+            N_t / N * (impurity - N_t_R / N_t * right_impurity
+                                - N_t_L / N_t * left_impurity)
+
+        where ``N`` is the total number of samples, ``N_t`` is the number of
+        samples at the current node, ``N_t_L`` is the number of samples in the
+        left child, and ``N_t_R`` is the number of samples in the right child.
+
+        ``N``, ``N_t``, ``N_t_R`` and ``N_t_L`` all refer to the weighted sum,
+        if ``sample_weight`` is passed.
+
+        .. versionadded:: 0.19
+
+    bootstrap : boolean, optional (default=True)
+        Whether bootstrap samples are used when building trees.
+
+    oob_score : bool (default=False)
+        Whether to use out-of-bag samples to estimate
+        the generalization accuracy.
+
+    n_jobs : integer, optional (default=1)
+        The number of jobs to run in parallel for both `fit` and `predict`.
+        If -1, then the number of jobs is set to the number of cores.
+
+    random_state : int, RandomState instance or None, optional (default=None)
+        If int, random_state is the seed used by the random number generator;
+        If RandomState instance, random_state is the random number generator;
+        If None, the random number generator is the RandomState instance used
+        by `np.random`.
+
+    verbose : int, optional (default=0)
+        Controls the verbosity when fitting and predicting.
+
+    warm_start : bool, optional (default=False)
+        When set to ``True``, reuse the solution of the previous call to fit
+        and add more estimators to the ensemble, otherwise, just fit a whole
+        new forest. See :term:`the Glossary <warm_start>`.
+
+    class_weight : dict, list of dicts, "balanced", "balanced_subsample" or \
+    None, optional (default=None)
+        Weights associated with classes in the form ``{class_label: weight}``.
+        If not given, all classes are supposed to have weight one. For
+        multi-output problems, a list of dicts can be provided in the same
+        order as the columns of y.
+
+        Note that for multioutput (including multilabel) weights should be
+        defined for each class of every column in its own dict. For example,
+        for four-class multilabel classification weights should be
+        [{0: 1, 1: 1}, {0: 1, 1: 5}, {0: 1, 1: 1}, {0: 1, 1: 1}] instead of
+        [{1:1}, {2:5}, {3:1}, {4:1}].
+
+        The "balanced" mode uses the values of y to automatically adjust
+        weights inversely proportional to class frequencies in the input data
+        as ``n_samples / (n_classes * np.bincount(y))``
+
+        The "balanced_subsample" mode is the same as "balanced" except that
+        weights are computed based on the bootstrap sample for every tree
+        grown.
+
+        For multi-output, the weights of each column of y will be multiplied.
+
+        Note that these weights will be multiplied with sample_weight (passed
+        through the fit method) if sample_weight is specified.
+
+    Attributes
+    ----------
+    estimators_ : list of DecisionTreeClassifier
+        The collection of fitted sub-estimators.
+
+    classes_ : array of shape = [n_classes] or a list of such arrays
+        The classes labels (single output problem), or a list of arrays of
+        class labels (multi-output problem).
+
+    n_classes_ : int or list
+        The number of classes (single output problem), or a list containing the
+        number of classes for each output (multi-output problem).
+
+    n_features_ : int
+        The number of features when ``fit`` is performed.
+
+    n_outputs_ : int
+        The number of outputs when ``fit`` is performed.
+
+    feature_importances_ : array of shape = [n_features]
+        The feature importances (the higher, the more important the feature).
+
+    oob_score_ : float
+        Score of the training dataset obtained using an out-of-bag estimate.
+
+    oob_decision_function_ : array of shape = [n_samples, n_classes]
+        Decision function computed with out-of-bag estimate on the training
+        set. If n_estimators is small it might be possible that a data point
+        was never left out during the bootstrap. In this case,
+        `oob_decision_function_` might contain NaN.
+
+    Examples
+    --------
+    >>> from sklearn.ensemble import RandomForestClassifier
+    >>> from sklearn.datasets import make_classification
+    >>>
+    >>> X, y = make_classification(n_samples=1000, n_features=4,
+    ...                            n_informative=2, n_redundant=0,
+    ...                            random_state=0, shuffle=False)
+    >>> clf = RandomForestClassifier(max_depth=2, random_state=0)
+    >>> clf.fit(X, y)
+    RandomForestClassifier(bootstrap=True, class_weight=None, criterion='gini',
+                max_depth=2, max_features='auto', max_leaf_nodes=None,
+                min_impurity_decrease=0.0, min_impurity_split=None,
+                min_samples_leaf=1, min_samples_split=2,
+                min_weight_fraction_leaf=0.0, n_estimators=10, n_jobs=1,
+                oob_score=False, random_state=0, verbose=0, warm_start=False)
+    >>> print(clf.feature_importances_)
+    [0.17287856 0.80608704 0.01884792 0.00218648]
+    >>> print(clf.predict([[0, 0, 0, 0]]))
+    [1]
+
+    Notes
+    -----
+    The default values for the parameters controlling the size of the trees
+    (e.g. ``max_depth``, ``min_samples_leaf``, etc.) lead to fully grown and
+    unpruned trees which can potentially be very large on some data sets. To
+    reduce memory consumption, the complexity and size of the trees should be
+    controlled by setting those parameter values.
+
+    The features are always randomly permuted at each split. Therefore,
+    the best found split may vary, even with the same training data,
+    ``max_features=n_features`` and ``bootstrap=False``, if the improvement
+    of the criterion is identical for several splits enumerated during the
+    search of the best split. To obtain a deterministic behaviour during
+    fitting, ``random_state`` has to be fixed.
+
+    References
+    ----------
+
+    .. [1] L. Breiman, "Random Forests", Machine Learning, 45(1), 5-32, 2001.
+
+    See also
+    --------
+    DecisionTreeClassifier, ExtraTreesClassifier
+    def __init__(self,
+                 n_estimators=10,
+                 criterion="gini",
+                 max_depth=None,
+                 min_samples_split=2,
+                 min_samples_leaf=1,
+                 min_weight_fraction_leaf=0.,
+                 max_features="auto",
+                 max_leaf_nodes=None,
+                 min_impurity_decrease=0.,
+                 min_impurity_split=None,
+                 bootstrap=True,
+                 oob_score=False,
+                 n_jobs=1,
+                 random_state=None,
+                 verbose=0,
+                 warm_start=False,
+                 class_weight=None):
+
+
+【源码片段 4】
+文件路径：examples/ensemble/plot_forest_importances_faces.py
+对象名称：n_jobs
+节点类型：global_var
+父节点：plot_forest_importances_faces
+行号范围：22-22
+代码：
+n_jobs = 1
+
+
+【源码片段 5】
+文件路径：sklearn/grid_search.py
+对象名称：fit
+节点类型：class_function
+父节点：GridSearchCV
+行号范围：823-838
+代码：
+    def fit(self, X, y=None):
+        """Run fit with all sets of parameters.
+
+        Parameters
+        ----------
+
+        X : array-like, shape = [n_samples, n_features]
+            Training vector, where n_samples is the number of samples and
+            n_features is the number of features.
+
+        y : array-like, shape = [n_samples] or [n_samples, n_output], optional
+            Target relative to X for classification or regression;
+            None for unsupervised learning.
+
+        """
+        return self._fit(X, y, ParameterGrid(self.param_grid))
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sklearn/model_selection/tests/test_search.py
+测试名称：test_search_cv_timing
+测试代码：
+@ignore_warnings()
+def test_search_cv_timing():
+    svc = LinearSVC(random_state=0)
+
+    X = [[1, ], [2, ], [3, ], [4, ]]
+    y = [0, 1, 1, 0]
+
+    gs = GridSearchCV(svc, {'C': [0, 1]}, cv=2, error_score=0)
+    rs = RandomizedSearchCV(svc, {'C': [0, 1]}, cv=2, error_score=0, n_iter=2)
+
+    for search in (gs, rs):
+        search.fit(X, y)
+        for key in ['mean_fit_time', 'std_fit_time']:
+            # NOTE The precision of time.time in windows is not high
+            # enough for the fit/score times to be non-zero for trivial X and y
+            assert_true(np.all(search.cv_results_[key] >= 0))
+            assert_true(np.all(search.cv_results_[key] < 1))
+
+        for key in ['mean_score_time', 'std_score_time']:
+            assert_true(search.cv_results_[key][1] >= 0)
+            assert_true(search.cv_results_[key][0] == 0.0)
+            assert_true(np.all(search.cv_results_[key] < 1))
+
+【相关测试 2】
+测试文件：sklearn/model_selection/tests/test_search.py
+测试名称：test_grid_search_cv_results
+测试代码：
+def test_grid_search_cv_results():
+    X, y = make_classification(n_samples=50, n_features=4,
+                               random_state=42)
+
+    n_splits = 3
+    n_grid_points = 6
+    params = [dict(kernel=['rbf', ], C=[1, 10], gamma=[0.1, 1]),
+              dict(kernel=['poly', ], degree=[1, 2])]
+
+    param_keys = ('param_C', 'param_degree', 'param_gamma', 'param_kernel')
+    score_keys = ('mean_test_score', 'mean_train_score',
+                  'rank_test_score',
+                  'split0_test_score', 'split1_test_score',
+                  'split2_test_score',
+                  'split0_train_score', 'split1_train_score',
+                  'split2_train_score',
+                  'std_test_score', 'std_train_score',
+                  'mean_fit_time', 'std_fit_time',
+                  'mean_score_time', 'std_score_time')
+    n_candidates = n_grid_points
+
+    for iid in (False, True):
+        search = GridSearchCV(SVC(gamma='scale'), cv=n_splits, iid=iid,
+                              param_grid=params)
+        search.fit(X, y)
+        assert_equal(iid, search.iid)
+        cv_results = search.cv_results_
+        # Check if score and timing are reasonable
+        assert_true(all(cv_results['rank_test_score'] >= 1))
+        assert_true(all(cv_results[k] >= 0) for k in score_keys
+                    if k is not 'rank_test_score')
+        assert_true(all(cv_results[k] <= 1) for k in score_keys
+                    if 'time' not in k and
+                    k is not 'rank_test_score')
+        # Check cv_results structure
+        check_cv_results_array_types(search, param_keys, score_keys)
+        check_cv_results_keys(cv_results, param_keys, score_keys, n_candidates)
+        # Check masking
+        cv_results = search.cv_results_
+        n_candidates = len(search.cv_results_['params'])
+        assert_true(all((cv_results['param_C'].mask[i] and
+                         cv_results['param_gamma'].mask[i] and
+                         not cv_results['param_degree'].mask[i])
+                        for i in range(n_candidates)
+                        if cv_results['param_kernel'][i] == 'linear'))
+        assert_true(all((not cv_results['param_C'].mask[i] and
+                         not cv_results['param_gamma'].mask[i] and
+                         cv_results['param_degree'].mask[i])
+                        for i in range(n_candidates)
+                        if cv_results['param_kernel'][i] == 'rbf'))
+        check_cv_results_grid_scores_consistency(search)
+
+【相关测试 3】
+测试文件：sklearn/model_selection/tests/test_search.py
+测试名称：test_fit_grid_point
+测试代码：
+def test_fit_grid_point():
+    X, y = make_classification(random_state=0)
+    cv = StratifiedKFold(random_state=0)
+    svc = LinearSVC(random_state=0)
+    scorer = make_scorer(accuracy_score)
+
+    for params in ({'C': 0.1}, {'C': 0.01}, {'C': 0.001}):
+        for train, test in cv.split(X, y):
+            this_scores, this_params, n_test_samples = fit_grid_point(
+                X, y, clone(svc), params, train, test,
+                scorer, verbose=False)
+
+            est = clone(svc).set_params(**params)
+            est.fit(X[train], y[train])
+            expected_score = scorer(est, X[test], y[test])
+
+            # Test the return values of fit_grid_point
+            assert_almost_equal(this_scores, expected_score)
+            assert_equal(params, this_params)
+            assert_equal(n_test_samples, test.size)
+
+    # Should raise an error upon multimetric scorer
+    assert_raise_message(ValueError, "For evaluating multiple scores, use "
+                         "sklearn.model_selection.cross_validate instead.",
+                         fit_grid_point, X, y, svc, params, train, test,
+                         {'score': scorer}, verbose=True)
+
+【相关测试 4】
+测试文件：sklearn/model_selection/tests/test_search.py
+测试名称：test_refit
+测试代码：
+@ignore_warnings
+def test_refit():
+    # Regression test for bug in refitting
+    # Simulates re-fitting a broken estimator; this used to break with
+    # sparse SVMs.
+    X = np.arange(100).reshape(10, 10)
+    y = np.array([0] * 5 + [1] * 5)
+
+    clf = GridSearchCV(BrokenClassifier(), [{'parameter': [0, 1]}],
+                       scoring="precision", refit=True)
+    clf.fit(X, y)
+
+【相关测试 5】
+测试文件：sklearn/model_selection/tests/test_search.py
+测试名称：test_no_refit
+测试代码：
+def test_no_refit():
+    # Test that GSCV can be used for model selection alone without refitting
+    clf = MockClassifier()
+    for scoring in [None, ['accuracy', 'precision']]:
+        grid_search = GridSearchCV(clf, {'foo_param': [1, 2, 3]}, refit=False)
+        grid_search.fit(X, y)
+        assert_true(not hasattr(grid_search, "best_estimator_") and
+                    hasattr(grid_search, "best_index_") and
+                    hasattr(grid_search, "best_params_"))
+
+        # Make sure the functions predict/transform etc raise meaningful
+        # error messages
+        for fn_name in ('predict', 'predict_proba', 'predict_log_proba',
+                        'transform', 'inverse_transform'):
+            assert_raise_message(NotFittedError,
+                                 ('refit=False. %s is available only after '
+                                  'refitting on the best parameters'
+                                  % fn_name), getattr(grid_search, fn_name), X)
+
+    # Test that an invalid refit param raises appropriate error messages
+    for refit in ["", 5, True, 'recall', 'accuracy']:
+        assert_raise_message(ValueError, "For multi-metric scoring, the "
+                             "parameter refit must be set to a scorer key",
+                             GridSearchCV(clf, {}, refit=refit,
+                                          scoring={'acc': 'accuracy',
+                                                   'prec': 'precision'}).fit,
+                             X, y)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

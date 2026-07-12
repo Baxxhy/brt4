@@ -1,0 +1,516 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+`PolyElement.as_expr()` not accepting symbols
+The method `PolyElement.as_expr()`
+
+https://github.com/sympy/sympy/blob/193e3825645d93c73e31cdceb6d742cc6919624d/sympy/polys/rings.py#L618-L624
+
+is supposed to let you set the symbols you want to use, but, as it stands, either you pass the wrong number of symbols, and get an error message, or you pass the right number of symbols, and it ignores them, using `self.ring.symbols` instead:
+
+```python
+>>> from sympy import ring, ZZ, symbols
+>>> R, x, y, z = ring("x,y,z", ZZ)
+>>> f = 3*x**2*y - x*y*z + 7*z**3 + 1
+>>> U, V, W = symbols("u,v,w")
+>>> f.as_expr(U, V, W)
+3*x**2*y - x*y*z + 7*z**3 + 1
+```
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/polys/rings.py
+对象名称：PolyElement
+节点类型：class
+父节点：rings
+行号范围：556-2467
+代码：
+class PolyElement(DomainElement, DefaultPrinting, CantSympify, dict):
+    """Element of multivariate distributed polynomial ring. """
+    def new(self, init):
+    def parent(self):
+    def __getnewargs__(self):
+    _hash = None
+    def __hash__(self):
+    def copy(self):
+    def set_ring(self, new_ring):
+    def as_expr(self, *symbols):
+    def as_expr_dict(self):
+    def clear_denoms(self):
+    def strip_zero(self):
+    def __eq__(p1, p2):
+    def __ne__(p1, p2):
+    def almosteq(p1, p2, tolerance=None):
+    def sort_key(self):
+    def _cmp(p1, p2, op):
+    def __lt__(p1, p2):
+    def __le__(p1, p2):
+    def __gt__(p1, p2):
+    def __ge__(p1, p2):
+    def _drop(self, gen):
+    def drop(self, gen):
+    def _drop_to_ground(self, gen):
+    def drop_to_ground(self, gen):
+    def to_dense(self):
+    def to_dict(self):
+    def str(self, printer, precedence, exp_pattern, mul_symbol):
+    @property
+    def is_generator(self):
+    @property
+    def is_ground(self):
+    @property
+    def is_monomial(self):
+    @property
+    def is_term(self):
+    @property
+    def is_negative(self):
+    @property
+    def is_positive(self):
+    @property
+    def is_nonnegative(self):
+    @property
+    def is_nonpositive(self):
+    @property
+    def is_zero(f):
+    @property
+    def is_one(f):
+    @property
+    def is_monic(f):
+    @property
+    def is_primitive(f):
+    @property
+    def is_linear(f):
+    @property
+    def is_quadratic(f):
+    @property
+    def is_squarefree(f):
+    @property
+    def is_irreducible(f):
+    @property
+    def is_cyclotomic(f):
+    def __neg__(self):
+    def __pos__(self):
+    def __add__(p1, p2):
+    def __radd__(p1, n):
+    def __sub__(p1, p2):
+    def __rsub__(p1, n):
+    def __mul__(p1, p2):
+    def __rmul__(p1, p2):
+    def __pow__(self, n):
+    def _pow_generic(self, n):
+    def _pow_multinomial(self, n):
+    def square(self):
+    def __divmod__(p1, p2):
+    def __rdivmod__(p1, p2):
+    def __mod__(p1, p2):
+    def __rmod__(p1, p2):
+    def __truediv__(p1, p2):
+    def __rtruediv__(p1, p2):
+    __floordiv__ = __truediv__
+    __rfloordiv__ = __rtruediv__
+    def _term_div(self):
+    def div(self, fv):
+    def rem(self, G):
+    def quo(f, G):
+    def exquo(f, G):
+    def _iadd_monom(self, mc):
+    def _iadd_poly_monom(self, p2, mc):
+    def degree(f, x=None):
+    def degrees(f):
+    def tail_degree(f, x=None):
+    def tail_degrees(f):
+    def leading_expv(self):
+    def _get_coeff(self, expv):
+    def coeff(self, element):
+    def const(self):
+    @property
+    def LC(self):
+    @property
+    def LM(self):
+    def leading_monom(self):
+    @property
+    def LT(self):
+    def leading_term(self):
+    def _sorted(self, seq, order):
+    def coeffs(self, order=None):
+    def monoms(self, order=None):
+    def terms(self, order=None):
+    def itercoeffs(self):
+    def itermonoms(self):
+    def iterterms(self):
+    def listcoeffs(self):
+    def listmonoms(self):
+    def listterms(self):
+    def imul_num(p, c):
+    def content(f):
+    def primitive(f):
+    def monic(f):
+    def mul_ground(f, x):
+    def mul_monom(f, monom):
+    def mul_term(f, term):
+    def quo_ground(f, x):
+    def quo_term(f, term):
+    def trunc_ground(f, p):
+    rem_ground = trunc_ground
+    def extract_ground(self, g):
+    def _norm(f, norm_func):
+    def max_norm(f):
+    def l1_norm(f):
+    def deflate(f, *G):
+    def inflate(f, J):
+    def lcm(self, g):
+    def gcd(f, g):
+    def cofactors(f, g):
+    def _gcd_zero(f, g):
+    def _gcd_monom(f, g):
+    def _gcd(f, g):
+    def _gcd_ZZ(f, g):
+    def _gcd_QQ(self, g):
+    def cancel(self, g):
+    def canonical_unit(f):
+    def diff(f, x):
+    def __call__(f, *values):
+    def evaluate(self, x, a=None):
+    def subs(self, x, a=None):
+    def compose(f, x, a=None):
+    def pdiv(f, g):
+    def prem(f, g):
+    def pquo(f, g):
+    def pexquo(f, g):
+    def half_gcdex(f, g):
+    def gcdex(f, g):
+    def subresultants(f, g):
+    def resultant(f, g):
+    def discriminant(f):
+    def decompose(f):
+    def shift(f, a):
+    def sturm(f):
+    def gff_list(f):
+    def sqf_norm(f):
+    def sqf_part(f):
+    def sqf_list(f, all=False):
+    def factor_list(f):
+
+
+【源码片段 2】
+文件路径：sympy/polys/rings.py
+对象名称：as_expr
+节点类型：class_function
+父节点：PolyElement
+行号范围：618-624
+代码：
+    def as_expr(self, *symbols):
+        if symbols and len(symbols) != self.ring.ngens:
+            raise ValueError("not enough symbols, expected %s got %s" % (self.ring.ngens, len(symbols)))
+        else:
+            symbols = self.ring.symbols
+
+        return expr_from_dict(self.as_expr_dict(), *symbols)
+
+
+【源码片段 3】
+文件路径：sympy/polys/rings.py
+对象名称：ring
+节点类型：top-level function
+父节点：rings
+行号范围：36-64
+代码：
+def ring(symbols, domain, order=lex):
+    """Construct a polynomial ring returning ``(ring, x_1, ..., x_n)``.
+
+    Parameters
+    ==========
+
+    symbols : str
+        Symbol/Expr or sequence of str, Symbol/Expr (non-empty)
+    domain : :class:`~.Domain` or coercible
+    order : :class:`~.MonomialOrder` or coercible, optional, defaults to ``lex``
+
+    Examples
+    ========
+
+    >>> from sympy.polys.rings import ring
+    >>> from sympy.polys.domains import ZZ
+    >>> from sympy.polys.orderings import lex
+
+    >>> R, x, y, z = ring("x,y,z", ZZ, lex)
+    >>> R
+    Polynomial ring in x, y, z over ZZ with lex order
+    >>> x + y + z
+    x + y + z
+    >>> type(_)
+    <class 'sympy.polys.rings.PolyElement'>
+
+    """
+    _ring = PolyRing(symbols, domain, order)
+    return (_ring,) + _ring.gens
+
+
+【源码片段 4】
+文件路径：sympy/polys/domains/integerring.py
+对象名称：ZZ
+节点类型：global_var
+父节点：integerring
+行号范围：231-231
+代码：
+ZZ = IntegerRing()
+
+
+【源码片段 5】
+文件路径：sympy/stats/rv.py
+对象名称：symbols
+节点类型：class_function
+父节点：RandomDomain
+行号范围：79-80
+代码：
+    def symbols(self):
+        return self.args[0]
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/polys/tests/test_rings.py
+测试名称：test_PolyElement_as_expr
+测试代码：
+def test_PolyElement_as_expr():
+    R, x, y, z = ring("x,y,z", ZZ)
+    f = 3*x**2*y - x*y*z + 7*z**3 + 1
+
+    X, Y, Z = R.symbols
+    g = 3*X**2*Y - X*Y*Z + 7*Z**3 + 1
+
+    assert f != g
+    assert f.as_expr() == g
+
+    X, Y, Z = symbols("x,y,z")
+    g = 3*X**2*Y - X*Y*Z + 7*Z**3 + 1
+
+    assert f != g
+    assert f.as_expr(X, Y, Z) == g
+
+    raises(ValueError, lambda: f.as_expr(X))
+
+    R, = ring("", ZZ)
+    assert R(3).as_expr() == 3
+
+【相关测试 2】
+测试文件：sympy/polys/tests/test_fields.py
+测试名称：test_FracElement_as_expr
+测试代码：
+def test_FracElement_as_expr():
+    F, x, y, z = field("x,y,z", ZZ)
+    f = (3*x**2*y - x*y*z)/(7*z**3 + 1)
+
+    X, Y, Z = F.symbols
+    g = (3*X**2*Y - X*Y*Z)/(7*Z**3 + 1)
+
+    assert f != g
+    assert f.as_expr() == g
+
+    X, Y, Z = symbols("x,y,z")
+    g = (3*X**2*Y - X*Y*Z)/(7*Z**3 + 1)
+
+    assert f != g
+    assert f.as_expr(X, Y, Z) == g
+
+    raises(ValueError, lambda: f.as_expr(X))
+
+【相关测试 3】
+测试文件：sympy/core/tests/test_expr.py
+测试名称：test_as_poly_as_expr
+测试代码：
+def test_as_poly_as_expr():
+    f = x**2 + 2*x*y
+
+    assert f.as_poly().as_expr() == f
+    assert f.as_poly(x, y).as_expr() == f
+
+    assert (f + sin(x)).as_poly(x, y) is None
+
+    p = Poly(f, x, y)
+
+    assert p.as_poly() == p
+
+    # https://github.com/sympy/sympy/issues/20610
+    assert S(2).as_poly() is None
+    assert sqrt(2).as_poly(extension=True) is None
+
+    raises(AttributeError, lambda: Tuple(x, x).as_poly(x))
+    raises(AttributeError, lambda: Tuple(x ** 2, x, y).as_poly(x))
+
+【相关测试 4】
+测试文件：sympy/polys/tests/test_polytools.py
+测试名称：test_Poly_as_expr
+测试代码：
+def test_Poly_as_expr():
+    assert Poly(0, x).as_expr() == 0
+    assert Poly(0, x, y, z).as_expr() == 0
+
+    assert Poly(1, x).as_expr() == 1
+    assert Poly(1, x, y, z).as_expr() == 1
+
+    assert Poly(x**2 + 3, x).as_expr() == x**2 + 3
+    assert Poly(x**2 + 3, x, y, z).as_expr() == x**2 + 3
+
+    assert Poly(
+        3*x**2*y*z**3 + 4*x*y + 5*x*z).as_expr() == 3*x**2*y*z**3 + 4*x*y + 5*x*z
+
+    f = Poly(x**2 + 2*x*y**2 - y, x, y)
+
+    assert f.as_expr() == -y + x**2 + 2*x*y**2
+
+    assert f.as_expr({x: 5}) == 25 - y + 10*y**2
+    assert f.as_expr({y: 6}) == -6 + 72*x + x**2
+
+    assert f.as_expr({x: 5, y: 6}) == 379
+    assert f.as_expr(5, 6) == 379
+
+    raises(GeneratorsError, lambda: f.as_expr({z: 7}))
+
+【相关测试 5】
+测试文件：sympy/printing/tests/test_str.py
+测试名称：test_PolyElement
+测试代码：
+def test_PolyElement():
+    Ruv, u,v = ring("u,v", ZZ)
+    Rxyz, x,y,z = ring("x,y,z", Ruv)
+    Rx_zzi, xz = ring("x", ZZ_I)
+
+    assert str(x - x) == "0"
+    assert str(x - 1) == "x - 1"
+    assert str(x + 1) == "x + 1"
+    assert str(x**2) == "x**2"
+    assert str(x**(-2)) == "x**(-2)"
+    assert str(x**QQ(1, 2)) == "x**(1/2)"
+
+    assert str((u**2 + 3*u*v + 1)*x**2*y + u + 1) == "(u**2 + 3*u*v + 1)*x**2*y + u + 1"
+    assert str((u**2 + 3*u*v + 1)*x**2*y + (u + 1)*x) == "(u**2 + 3*u*v + 1)*x**2*y + (u + 1)*x"
+    assert str((u**2 + 3*u*v + 1)*x**2*y + (u + 1)*x + 1) == "(u**2 + 3*u*v + 1)*x**2*y + (u + 1)*x + 1"
+    assert str((-u**2 + 3*u*v - 1)*x**2*y - (u + 1)*x - 1) == "-(u**2 - 3*u*v + 1)*x**2*y - (u + 1)*x - 1"
+
+    assert str(-(v**2 + v + 1)*x + 3*u*v + 1) == "-(v**2 + v + 1)*x + 3*u*v + 1"
+    assert str(-(v**2 + v + 1)*x - 3*u*v + 1) == "-(v**2 + v + 1)*x - 3*u*v + 1"
+
+    assert str((1+I)*xz + 2) == "(1 + 1*I)*x + (2 + 0*I)"
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

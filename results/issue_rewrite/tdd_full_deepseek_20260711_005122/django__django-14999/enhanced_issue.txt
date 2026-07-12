@@ -1,0 +1,132 @@
+instance_id: django__django-14999
+
+issue_summary: 当模型已定义 db_table 时，RenameModel 操作在 PostgreSQL 中会不必要地删除并重建外键约束，在 SQLite 中会重建表。
+
+trigger_condition:
+{
+  "text": "对一个已定义 db_table 选项的模型执行 RenameModel 操作。",
+  "evidence": [
+    "Issue 描述：'A RenameModel operation that already has db_table defined must be a noop.'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "在 PostgreSQL 中，外键约束被删除并重建；在 SQLite 中，表被重建（这符合表重命名预期，但对于已定义 db_table 的情况是多余的）。",
+  "symptom_type": "wrong_sql",
+  "evidence": [
+    "Issue 描述：'In Postgres, it drops and recreates foreign key constraints. In sqlite it recreates the table (as expected for a table renaming).'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "对于已定义 db_table 的模型，RenameModel 操作应该是一个无操作（noop），即不改变数据库结构。",
+  "evidence": [
+    "Issue 描述：'A RenameModel operation that already has db_table defined must be a noop.'"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "RenameModel",
+    "kind": "class",
+    "source_path": "django/db/migrations/operations/models.py",
+    "reason": "Issue 直接关于 RenameModel 操作的行为。"
+  },
+  {
+    "name": "RenameModel.database_forwards",
+    "kind": "method",
+    "source_path": "django/db/migrations/operations/models.py",
+    "reason": "该方法负责执行数据库前向迁移，是可能产生不必要 SQL 的地方。"
+  },
+  {
+    "name": "RenameModel.database_backwards",
+    "kind": "method",
+    "source_path": "django/db/migrations/operations/models.py",
+    "reason": "该方法负责执行数据库回滚迁移，可能也存在类似问题。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "相似测试 test_rename_model 中创建的模型没有显式设置 db_table 选项。",
+    "target_pattern": "在创建模型时，通过 options 参数设置 db_table 为一个自定义表名（例如 'custom_pony_table'）。",
+    "reason": "Issue 明确指出问题发生在模型已定义 db_table 的情况下。为模型设置 db_table 是触发缺陷路径的关键。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "相似测试通常使用默认数据库后端。",
+    "target_pattern": "需要针对 PostgreSQL 和 SQLite 后端分别测试，因为 Issue 描述了在不同后端下的不同表现。",
+    "reason": "Issue 分别描述了在 PostgreSQL 和 SQLite 中的错误现象，表明缺陷行为可能依赖于数据库后端。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "sql",
+    "expression_hint": "在执行 RenameModel.database_forwards 期间，通过 schema_editor 执行的 SQL 语句列表。",
+    "reason": "Issue 的核心是产生了不必要的外键约束删除/重建或表重建 SQL。观察生成的 SQL 可以判断操作是否是无操作。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "执行 RenameModel.state_forwards 前后的项目状态（ProjectState），特别是模型的 db_table 选项和关联关系。",
+    "reason": "需要确认状态迁移是否正确处理了模型重命名，同时保持 db_table 不变。"
+  },
+  {
+    "kind": "warning",
+    "expression_hint": "迁移过程中产生的任何警告信息。",
+    "reason": "某些数据库后端在执行不必要操作时可能会产生警告。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证当模型已定义 db_table 时，执行 RenameModel.database_forwards 不会产生任何 SQL 查询（即无操作）。",
+    "preferred_assertion_style": "before_after_relation",
+    "avoid": "断言完整的 SQL 字符串，因为不同数据库后端或版本的 SQL 可能略有不同。",
+    "reason": "Issue 期望的行为是无操作。使用 assertNumQueries(0) 或比较执行前后数据库结构（如表、外键）无变化是稳定且直接的验证方式。"
+  },
+  {
+    "assertion_goal": "验证模型的状态迁移正确更新了模型名称，但保持了 db_table 选项不变。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言整个 ProjectState 对象的完整 repr。",
+    "reason": "需要确保 RenameModel 操作在逻辑层面（状态）正确，但物理层面（数据库）无变化。应聚焦于关键属性如模型名和 db_table。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 OperationTestBase 或其类似测试基类，它提供了设置测试模型、应用操作和断言数据库状态的方法。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要配置不同的数据库连接（PostgreSQL, SQLite）来复现后端特定的行为。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "创建模型时，需要在 CreateModel 操作中通过 options 参数指定 db_table。",
+    "source": "inference",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "RenameModel 操作内部具体如何判断是否应该跳过数据库操作的确切逻辑位置。",
+  "除了 PostgreSQL 和 SQLite，其他数据库后端（如 MySQL）是否也存在类似问题。",
+  "当模型有 db_table 且涉及继承（MTI）或复杂外键关系时，RenameModel 的行为细节。"
+]

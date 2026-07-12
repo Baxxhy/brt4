@@ -1,0 +1,277 @@
+{
+  "instance_id": "sympy__sympy-23534",
+  "issue_summary": "当使用带括号的元组作为 symbols 函数的 names 参数并指定 cls=Function 时，生成的符号对象类型错误地变成了 Symbol 而不是 UndefinedFunction。",
+  "trigger_condition": {
+    "text": "调用 symbols(('q:2', 'u:2'), cls=smp.Function) 并解包赋值给 q, u，然后访问 q[0] 的类型。",
+    "evidence": [
+      "Issue 中的代码示例：q, u = smp.symbols(('q:2', 'u:2'), cls=smp.Function); print(type(q[0]))",
+      "源码片段1中 symbols 函数的文档说明：'Despite its name, :func:`symbols` can create symbol-like objects like instances of Function or Wild classes. To achieve this, set ``cls`` keyword argument to the desired type:'"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "生成的 q[0] 的类型是 sympy.core.symbol.Symbol，而不是预期的 sympy.core.function.UndefinedFunction。",
+    "symptom_type": "wrong_type",
+    "evidence": [
+      "Issue 中的 Actual result: <class 'sympy.core.symbol.Symbol'>",
+      "Issue 中的 Expected result: <class 'sympy.core.function.UndefinedFunction'>"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当使用 cls=Function 参数调用 symbols 函数时，无论 names 参数是字符串还是带括号的元组，生成的符号对象都应该是 UndefinedFunction 类型。",
+    "evidence": [
+      "Issue 中的 Expected result: <class 'sympy.core.function.UndefinedFunction'>",
+      "源码片段1中 symbols 函数的文档示例：symbols('f,g,h', cls=Function) 返回 (f, g, h)，且 type(_[0]) 是 UndefinedFunction。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "symbols",
+      "kind": "function",
+      "source_path": "sympy/core/symbol.py",
+      "reason": "Issue 直接报告了 symbols 函数在特定输入下行为异常。"
+    },
+    {
+      "name": "Function",
+      "kind": "class",
+      "source_path": "sympy/core/function.py",
+      "reason": "Issue 涉及使用 cls=Function 参数来创建函数对象。"
+    },
+    {
+      "name": "UndefinedFunction",
+      "kind": "class",
+      "source_path": "sympy/core/function.py",
+      "reason": "Issue 期望的输出类型是 UndefinedFunction。"
+    },
+    {
+      "name": "Symbol",
+      "kind": "class",
+      "source_path": "sympy/core/symbol.py",
+      "reason": "Issue 观察到的错误输出类型是 Symbol。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/core/symbol.py",
+      "object": "symbols",
+      "lines": "586-796",
+      "reason": "Issue 的核心是 symbols 函数在处理 names 为元组且 cls=Function 时的逻辑可能存在问题。源码片段1显示该函数对字符串和可迭代容器（如元组）有不同的处理分支。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_symbols",
+      "test_file": "sympy/core/tests/test_symbol.py",
+      "why_relevant": "该测试广泛测试了 symbols 函数的各种输入和边界情况，包括元组输入和范围语法，可以作为构造新测试的基础。",
+      "reusable_parts": [
+        "imports (如 from sympy import symbols, Symbol)",
+        "assert 风格 (如 assert symbols(...) == ...)",
+        "对 symbols 函数各种调用方式的构造"
+      ],
+      "possible_gap": "该测试没有专门测试当 names 是元组且 cls=Function 的情况，也没有检查生成对象的类型。"
+    },
+    {
+      "test_name": "test_var_cls",
+      "test_file": "sympy/core/tests/test_var.py",
+      "why_relevant": "该测试直接涉及使用 cls=Function 参数来创建函数对象，并检查生成对象的类型。",
+      "reusable_parts": [
+        "使用 cls=Function 参数的调用模式",
+        "类型检查 (isinstance(ns['f'], FunctionClass))"
+      ],
+      "possible_gap": "该测试使用 var 函数而非 symbols 函数，且输入是简单字符串，不是 Issue 中带括号的元组和范围语法。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试中 symbols 的 names 参数通常是字符串（如 'x,y,z'）或简单字符串元组（如 ('x', 'y', 'z')），且 cls 参数通常为默认值或用于设置假设（如 real=True）。",
+      "target_pattern": "names 参数应为带括号的元组，且包含范围语法（如 ('q:2', 'u:2')），同时显式指定 cls=Function。",
+      "reason": "Issue 明确指出当 names 是带括号的元组（用于解构）且指定 cls=Function 时，类型生成错误。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "相关测试中调用 symbols 后，通常直接断言返回的符号对象等于预期的 Symbol 实例。",
+      "target_pattern": "调用 symbols 后，需要检查返回对象的类型（type(q[0])），而不是仅检查其值或相等性。",
+      "reason": "Issue 的核心错误是类型错误，而非值错误。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "type",
+      "expression_hint": "type(result[0]) 或 type(q[0])，其中 result 是 symbols(...) 的返回值，q 是解包后的元组元素。",
+      "reason": "Issue 直接比较了实际类型和期望类型，这是判断缺陷是否触发的关键。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "symbols(('q:2', 'u:2'), cls=Function) 的返回值结构，例如其长度、元素是否为元组等。",
+      "reason": "需要确认 symbols 函数在处理元组输入时是否正确解析了范围语法并生成了预期数量的对象。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 symbols(('q:2', 'u:2'), cls=Function) 返回的对象的第一个元素的类型是 UndefinedFunction（或其元类 FunctionClass）。",
+      "preferred_assertion_style": "isinstance",
+      "avoid": "避免断言完整的 repr 字符串或精确的 Symbol 相等，因为类型是核心问题。",
+      "reason": "使用 isinstance 可以稳定地检查对象是否属于预期的类层次，而不依赖于具体的字符串表示或实例标识。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 sympy（或 sympy as smp）、symbols 函数以及 Function 和 UndefinedFunction 类。",
+      "source": "issue|retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可以放在现有的 test_symbol.py 文件中，遵循其现有的测试函数风格。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "symbols 函数内部对 names 为元组的处理逻辑具体在哪里导致了 cls 参数被忽略或错误应用。",
+    "除了 ('q:2', 'u:2') 这种形式，是否还有其他带括号的元组输入组合会触发相同问题。",
+    "当 names 是单个字符串（如 'q:2,u:2'）且指定 cls=Function 时，行为是否正确。"
+  ],
+  "raw": {
+    "issue_summary": "当使用带括号的元组作为 symbols 函数的 names 参数并指定 cls=Function 时，生成的符号对象类型错误地变成了 Symbol 而不是 UndefinedFunction。",
+    "trigger_condition": {
+      "text": "调用 symbols(('q:2', 'u:2'), cls=smp.Function) 并解包赋值给 q, u，然后访问 q[0] 的类型。",
+      "evidence": [
+        "Issue 中的代码示例：q, u = smp.symbols(('q:2', 'u:2'), cls=smp.Function); print(type(q[0]))",
+        "源码片段1中 symbols 函数的文档说明：'Despite its name, :func:`symbols` can create symbol-like objects like instances of Function or Wild classes. To achieve this, set ``cls`` keyword argument to the desired type:'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 q[0] 的类型是 sympy.core.symbol.Symbol，而不是预期的 sympy.core.function.UndefinedFunction。",
+      "symptom_type": "wrong_type",
+      "evidence": [
+        "Issue 中的 Actual result: <class 'sympy.core.symbol.Symbol'>",
+        "Issue 中的 Expected result: <class 'sympy.core.function.UndefinedFunction'>"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当使用 cls=Function 参数调用 symbols 函数时，无论 names 参数是字符串还是带括号的元组，生成的符号对象都应该是 UndefinedFunction 类型。",
+      "evidence": [
+        "Issue 中的 Expected result: <class 'sympy.core.function.UndefinedFunction'>",
+        "源码片段1中 symbols 函数的文档示例：symbols('f,g,h', cls=Function) 返回 (f, g, h)，且 type(_[0]) 是 UndefinedFunction。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "symbols",
+        "kind": "function",
+        "source_path": "sympy/core/symbol.py",
+        "reason": "Issue 直接报告了 symbols 函数在特定输入下行为异常。"
+      },
+      {
+        "name": "Function",
+        "kind": "class",
+        "source_path": "sympy/core/function.py",
+        "reason": "Issue 涉及使用 cls=Function 参数来创建函数对象。"
+      },
+      {
+        "name": "UndefinedFunction",
+        "kind": "class",
+        "source_path": "sympy/core/function.py",
+        "reason": "Issue 期望的输出类型是 UndefinedFunction。"
+      },
+      {
+        "name": "Symbol",
+        "kind": "class",
+        "source_path": "sympy/core/symbol.py",
+        "reason": "Issue 观察到的错误输出类型是 Symbol。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/core/symbol.py",
+        "object": "symbols",
+        "lines": "586-796",
+        "reason": "Issue 的核心是 symbols 函数在处理 names 为元组且 cls=Function 时的逻辑可能存在问题。源码片段1显示该函数对字符串和可迭代容器（如元组）有不同的处理分支。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_symbols",
+        "test_file": "sympy/core/tests/test_symbol.py",
+        "why_relevant": "该测试广泛测试了 symbols 函数的各种输入和边界情况，包括元组输入和范围语法，可以作为构造新测试的基础。",
+        "reusable_parts": [
+          "imports (如 from sympy import symbols, Symbol)",
+          "assert 风格 (如 assert symbols(...) == ...)",
+          "对 symbols 函数各种调用方式的构造"
+        ],
+        "possible_gap": "该测试没有专门测试当 names 是元组且 cls=Function 的情况，也没有检查生成对象的类型。"
+      },
+      {
+        "test_name": "test_var_cls",
+        "test_file": "sympy/core/tests/test_var.py",
+        "why_relevant": "该测试直接涉及使用 cls=Function 参数来创建函数对象，并检查生成对象的类型。",
+        "reusable_parts": [
+          "使用 cls=Function 参数的调用模式",
+          "类型检查 (isinstance(ns['f'], FunctionClass))"
+        ],
+        "possible_gap": "该测试使用 var 函数而非 symbols 函数，且输入是简单字符串，不是 Issue 中带括号的元组和范围语法。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中 symbols 的 names 参数通常是字符串（如 'x,y,z'）或简单字符串元组（如 ('x', 'y', 'z')），且 cls 参数通常为默认值或用于设置假设（如 real=True）。",
+        "target_pattern": "names 参数应为带括号的元组，且包含范围语法（如 ('q:2', 'u:2')），同时显式指定 cls=Function。",
+        "reason": "Issue 明确指出当 names 是带括号的元组（用于解构）且指定 cls=Function 时，类型生成错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试中调用 symbols 后，通常直接断言返回的符号对象等于预期的 Symbol 实例。",
+        "target_pattern": "调用 symbols 后，需要检查返回对象的类型（type(q[0])），而不是仅检查其值或相等性。",
+        "reason": "Issue 的核心错误是类型错误，而非值错误。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "type(result[0]) 或 type(q[0])，其中 result 是 symbols(...) 的返回值，q 是解包后的元组元素。",
+        "reason": "Issue 直接比较了实际类型和期望类型，这是判断缺陷是否触发的关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "symbols(('q:2', 'u:2'), cls=Function) 的返回值结构，例如其长度、元素是否为元组等。",
+        "reason": "需要确认 symbols 函数在处理元组输入时是否正确解析了范围语法并生成了预期数量的对象。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 symbols(('q:2', 'u:2'), cls=Function) 返回的对象的第一个元素的类型是 UndefinedFunction（或其元类 FunctionClass）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言完整的 repr 字符串或精确的 Symbol 相等，因为类型是核心问题。",
+        "reason": "使用 isinstance 可以稳定地检查对象是否属于预期的类层次，而不依赖于具体的字符串表示或实例标识。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy（或 sympy as smp）、symbols 函数以及 Function 和 UndefinedFunction 类。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可以放在现有的 test_symbol.py 文件中，遵循其现有的测试函数风格。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "symbols 函数内部对 names 为元组的处理逻辑具体在哪里导致了 cls 参数被忽略或错误应用。",
+      "除了 ('q:2', 'u:2') 这种形式，是否还有其他带括号的元组输入组合会触发相同问题。",
+      "当 names 是单个字符串（如 'q:2,u:2'）且指定 cls=Function 时，行为是否正确。"
+    ]
+  }
+}

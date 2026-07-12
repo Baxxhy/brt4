@@ -1,0 +1,496 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Incorrect result with Quaterniont.to_rotation_matrix()
+https://github.com/sympy/sympy/blob/ab14b02dba5a7e3e4fb1e807fc8a954f1047a1a1/sympy/algebras/quaternion.py#L489
+
+There appears to be an error in the `Quaternion.to_rotation_matrix()` output.  The simplest example I created to illustrate the problem is as follows:
+
+```
+>>import sympy
+>>print('Sympy version: ', sympy.__version__)
+Sympy version: 1.2
+
+>> from sympy import *
+>> x = symbols('x')
+>> q = Quaternion(cos(x/2), sin(x/2), 0, 0)
+>> trigsimp(q.to_rotation_matrix())
+Matrix([
+[1,      0,      0],
+[0, cos(x), sin(x)],
+[0, sin(x), cos(x)]])
+```
+One of the `sin(x)` functions should be negative.  What was the reference of the original equations?  
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/algebras/quaternion.py
+对象名称：Quaternion
+节点类型：class
+父节点：quaternion
+行号范围：20-551
+代码：
+class Quaternion(Expr):
+    """Provides basic quaternion operations.
+    Quaternion objects can be instantiated as Quaternion(a, b, c, d)
+    as in (a + b*i + c*j + d*k).
+
+    Example
+    ========
+
+    >>> from sympy.algebras.quaternion import Quaternion
+    >>> q = Quaternion(1, 2, 3, 4)
+    >>> q
+    1 + 2*i + 3*j + 4*k
+
+    Quaternions over complex fields can be defined as :
+    ========
+    >>> from sympy.algebras.quaternion import Quaternion
+    >>> from sympy import symbols, I
+    >>> x = symbols('x')
+    >>> q1 = Quaternion(x, x**3, x, x**2, real_field = False)
+    >>> q2 = Quaternion(3 + 4*I, 2 + 5*I, 0, 7 + 8*I, real_field = False)
+    >>> q1
+    x + x**3*i + x*j + x**2*k
+    >>> q2
+    (3 + 4*I) + (2 + 5*I)*i + 0*j + (7 + 8*I)*k
+    """
+    _op_priority = 11.0
+    is_commutative = False
+    def __new__(cls, a=0, b=0, c=0, d=0, real_field=True):
+    @property
+    def a(self):
+    @property
+    def b(self):
+    @property
+    def c(self):
+    @property
+    def d(self):
+    @property
+    def real_field(self):
+    @classmethod
+    def from_axis_angle(cls, vector, angle):
+    @classmethod
+    def from_rotation_matrix(cls, M):
+    @staticmethod
+    def __copysign(x, y):
+
+
+    def __add__(self, other):
+    def __radd__(self, other):
+    def __sub__(self, other):
+    def __mul__(self, other):
+    def __rmul__(self, other):
+    def __pow__(self, p):
+    def __neg__(self):
+    def _eval_Integral(self, *args):
+    def _eval_diff(self, *symbols, **kwargs):
+    def add(self, other):
+    def mul(self, other):
+    @staticmethod
+    def _generic_mul(q1, q2):
+
+    def _eval_conjugate(self):
+    def norm(self):
+    def normalize(self):
+    def inverse(self):
+    def pow(self, p):
+    def exp(self):
+    def _ln(self):
+    def pow_cos_sin(self, p):
+    def diff(self, *args):
+    def integrate(self, *args):
+    @staticmethod
+    def rotate_point(pin, r):
+    def to_axis_angle(self):
+    def to_rotation_matrix(self, v=None):
+
+
+【源码片段 2】
+文件路径：sympy/algebras/quaternion.py
+对象名称：to_rotation_matrix
+节点类型：class_function
+父节点：Quaternion
+行号范围：489-551
+代码：
+    def to_rotation_matrix(self, v=None):
+        """Returns the equivalent rotation transformation matrix of the quaternion
+        which represents rotation about the origin if v is not passed.
+
+        Example
+        ========
+
+        >>> from sympy.algebras.quaternion import Quaternion
+        >>> from sympy import symbols, trigsimp, cos, sin
+        >>> x = symbols('x')
+        >>> q = Quaternion(cos(x/2), 0, 0, sin(x/2))
+        >>> trigsimp(q.to_rotation_matrix())
+        Matrix([
+        [cos(x), -sin(x), 0],
+        [sin(x),  cos(x), 0],
+        [     0,       0, 1]])
+
+        Generates a 4x4 transformation matrix (used for rotation about a point
+        other than the origin) if the point(v) is passed as an argument.
+
+        Example
+        ========
+
+        >>> from sympy.algebras.quaternion import Quaternion
+        >>> from sympy import symbols, trigsimp, cos, sin
+        >>> x = symbols('x')
+        >>> q = Quaternion(cos(x/2), 0, 0, sin(x/2))
+        >>> trigsimp(q.to_rotation_matrix((1, 1, 1)))
+         Matrix([
+        [cos(x), -sin(x), 0,  sin(x) - cos(x) + 1],
+        [sin(x),  cos(x), 0, -sin(x) - cos(x) + 1],
+        [     0,       0, 1,                    0],
+        [     0,       0, 0,                    1]])
+        """
+
+        q = self
+        s = q.norm()**-2
+        m00 = 1 - 2*s*(q.c**2 + q.d**2)
+        m01 = 2*s*(q.b*q.c - q.d*q.a)
+        m02 = 2*s*(q.b*q.d + q.c*q.a)
+
+        m10 = 2*s*(q.b*q.c + q.d*q.a)
+        m11 = 1 - 2*s*(q.b**2 + q.d**2)
+        m12 = 2*s*(q.c*q.d + q.b*q.a)
+
+        m20 = 2*s*(q.b*q.d - q.c*q.a)
+        m21 = 2*s*(q.c*q.d + q.b*q.a)
+        m22 = 1 - 2*s*(q.b**2 + q.c**2)
+
+        if not v:
+            return Matrix([[m00, m01, m02], [m10, m11, m12], [m20, m21, m22]])
+
+        else:
+            (x, y, z) = v
+
+            m03 = x - x*m00 - y*m01 - z*m02
+            m13 = y - x*m10 - y*m11 - z*m12
+            m23 = z - x*m20 - y*m21 - z*m22
+            m30 = m31 = m32 = 0
+            m33 = 1
+
+            return Matrix([[m00, m01, m02, m03], [m10, m11, m12, m13],
+                          [m20, m21, m22, m23], [m30, m31, m32, m33]])
+
+
+【源码片段 3】
+文件路径：sympy/algebras/quaternion.py
+对象名称：quaternion
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 4】
+文件路径：sympy/simplify/trigsimp.py
+对象名称：trigsimp
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/algebras/tests/test_quaternion.py
+测试名称：test_quaternion_conversions
+测试代码：
+def test_quaternion_conversions():
+    q1 = Quaternion(1, 2, 3, 4)
+
+    assert q1.to_axis_angle() == ((2 * sqrt(29)/29,
+                                   3 * sqrt(29)/29,
+                                   4 * sqrt(29)/29),
+                                   2 * acos(sqrt(30)/30))
+
+    assert q1.to_rotation_matrix() == Matrix([[-S(2)/3, S(2)/15, S(11)/15],
+                                     [S(2)/3, -S(1)/3, S(14)/15],
+                                     [S(1)/3, S(14)/15, S(2)/15]])
+
+    assert q1.to_rotation_matrix((1, 1, 1)) == Matrix([[-S(2)/3, S(2)/15, S(11)/15, S(4)/5],
+                                                  [S(2)/3, -S(1)/3, S(14)/15, -S(4)/15],
+                                                  [S(1)/3, S(14)/15, S(2)/15, -S(2)/5],
+                                                  [S(0), S(0), S(0), S(1)]])
+
+    theta = symbols("theta", real=True)
+    q2 = Quaternion(cos(theta/2), 0, 0, sin(theta/2))
+
+    assert trigsimp(q2.to_rotation_matrix()) == Matrix([
+                                               [cos(theta), -sin(theta), 0],
+                                               [sin(theta),  cos(theta), 0],
+                                               [0,           0,          1]])
+
+    assert q2.to_axis_angle() == ((0, 0, sin(theta/2)/Abs(sin(theta/2))),
+                                   2*acos(cos(theta/2)))
+
+    assert trigsimp(q2.to_rotation_matrix((1, 1, 1))) == Matrix([
+               [cos(theta), -sin(theta), 0, sin(theta) - cos(theta) + 1],
+               [sin(theta),  cos(theta), 0, -sin(theta) - cos(theta) + 1],
+               [0,           0,          1,  0],
+               [0,           0,          0,  1]])
+
+【相关测试 2】
+测试文件：sympy/algebras/tests/test_quaternion.py
+测试名称：test_quaternion_functions
+测试代码：
+def test_quaternion_functions():
+    q = Quaternion(x, y, z, w)
+    q1 = Quaternion(1, 2, 3, 4)
+    q0 = Quaternion(0, 0, 0, 0)
+
+    assert conjugate(q) == Quaternion(x, -y, -z, -w)
+    assert q.norm() == sqrt(w**2 + x**2 + y**2 + z**2)
+    assert q.normalize() == Quaternion(x, y, z, w) / sqrt(w**2 + x**2 + y**2 + z**2)
+    assert q.inverse() == Quaternion(x, -y, -z, -w) / (w**2 + x**2 + y**2 + z**2)
+    raises(ValueError, lambda: q0.inverse())
+    assert q.pow(2) == Quaternion(-w**2 + x**2 - y**2 - z**2, 2*x*y, 2*x*z, 2*w*x)
+    assert q1.pow(-2) == Quaternion(-S(7)/225, -S(1)/225, -S(1)/150, -S(2)/225)
+    assert q1.pow(-0.5) == NotImplemented
+
+    assert q1.exp() == \
+    Quaternion(E * cos(sqrt(29)),
+               2 * sqrt(29) * E * sin(sqrt(29)) / 29,
+               3 * sqrt(29) * E * sin(sqrt(29)) / 29,
+               4 * sqrt(29) * E * sin(sqrt(29)) / 29)
+    assert q1._ln() == \
+    Quaternion(log(sqrt(30)),
+               2 * sqrt(29) * acos(sqrt(30)/30) / 29,
+               3 * sqrt(29) * acos(sqrt(30)/30) / 29,
+               4 * sqrt(29) * acos(sqrt(30)/30) / 29)
+
+    assert q1.pow_cos_sin(2) == \
+    Quaternion(30 * cos(2 * acos(sqrt(30)/30)),
+               60 * sqrt(29) * sin(2 * acos(sqrt(30)/30)) / 29,
+               90 * sqrt(29) * sin(2 * acos(sqrt(30)/30)) / 29,
+               120 * sqrt(29) * sin(2 * acos(sqrt(30)/30)) / 29)
+
+    assert diff(Quaternion(x, x, x, x), x) == Quaternion(1, 1, 1, 1)
+
+    assert integrate(Quaternion(x, x, x, x), x) == \
+    Quaternion(x**2 / 2, x**2 / 2, x**2 / 2, x**2 / 2)
+
+    assert Quaternion.rotate_point((1, 1, 1), q1) == (1 / 5, 1, 7 / 5)
+
+【相关测试 3】
+测试文件：sympy/matrices/tests/test_matrices.py
+测试名称：test_rotation_matrices
+测试代码：
+def test_rotation_matrices():
+    # This tests the rotation matrices by rotating about an axis and back.
+    theta = pi/3
+    r3_plus = rot_axis3(theta)
+    r3_minus = rot_axis3(-theta)
+    r2_plus = rot_axis2(theta)
+    r2_minus = rot_axis2(-theta)
+    r1_plus = rot_axis1(theta)
+    r1_minus = rot_axis1(-theta)
+    assert r3_minus*r3_plus*eye(3) == eye(3)
+    assert r2_minus*r2_plus*eye(3) == eye(3)
+    assert r1_minus*r1_plus*eye(3) == eye(3)
+
+    # Check the correctness of the trace of the rotation matrix
+    assert r1_plus.trace() == 1 + 2*cos(theta)
+    assert r2_plus.trace() == 1 + 2*cos(theta)
+    assert r3_plus.trace() == 1 + 2*cos(theta)
+
+    # Check that a rotation with zero angle doesn't change anything.
+    assert rot_axis1(0) == eye(3)
+    assert rot_axis2(0) == eye(3)
+    assert rot_axis3(0) == eye(3)
+
+【相关测试 4】
+测试文件：sympy/vector/tests/test_coordsysrect.py
+测试名称：test_rotation_matrix
+测试代码：
+def test_rotation_matrix():
+    N = CoordSys3D('N')
+    A = N.orient_new_axis('A', q1, N.k)
+    B = A.orient_new_axis('B', q2, A.i)
+    C = B.orient_new_axis('C', q3, B.j)
+    D = N.orient_new_axis('D', q4, N.j)
+    E = N.orient_new_space('E', q1, q2, q3, '123')
+    F = N.orient_new_quaternion('F', q1, q2, q3, q4)
+    G = N.orient_new_body('G', q1, q2, q3, '123')
+    assert N.rotation_matrix(C) == Matrix([
+        [- sin(q1) * sin(q2) * sin(q3) + cos(q1) * cos(q3), - sin(q1) *
+        cos(q2), sin(q1) * sin(q2) * cos(q3) + sin(q3) * cos(q1)], \
+        [sin(q1) * cos(q3) + sin(q2) * sin(q3) * cos(q1), \
+         cos(q1) * cos(q2), sin(q1) * sin(q3) - sin(q2) * cos(q1) * \
+         cos(q3)], [- sin(q3) * cos(q2), sin(q2), cos(q2) * cos(q3)]])
+    test_mat = D.rotation_matrix(C) - Matrix(
+        [[cos(q1) * cos(q3) * cos(q4) - sin(q3) * (- sin(q4) * cos(q2) +
+        sin(q1) * sin(q2) * cos(q4)), - sin(q2) * sin(q4) - sin(q1) *
+            cos(q2) * cos(q4), sin(q3) * cos(q1) * cos(q4) + cos(q3) * \
+          (- sin(q4) * cos(q2) + sin(q1) * sin(q2) * cos(q4))], \
+         [sin(q1) * cos(q3) + sin(q2) * sin(q3) * cos(q1), cos(q1) * \
+          cos(q2), sin(q1) * sin(q3) - sin(q2) * cos(q1) * cos(q3)], \
+         [sin(q4) * cos(q1) * cos(q3) - sin(q3) * (cos(q2) * cos(q4) + \
+                                                   sin(q1) * sin(q2) * \
+                                                   sin(q4)), sin(q2) *
+                cos(q4) - sin(q1) * sin(q4) * cos(q2), sin(q3) * \
+          sin(q4) * cos(q1) + cos(q3) * (cos(q2) * cos(q4) + \
+                                         sin(q1) * sin(q2) * sin(q4))]])
+    assert test_mat.expand() == zeros(3, 3)
+    assert E.rotation_matrix(N) == Matrix(
+        [[cos(q2)*cos(q3), sin(q3)*cos(q2), -sin(q2)],
+        [sin(q1)*sin(q2)*cos(q3) - sin(q3)*cos(q1), \
+         sin(q1)*sin(q2)*sin(q3) + cos(q1)*cos(q3), sin(q1)*cos(q2)], \
+         [sin(q1)*sin(q3) + sin(q2)*cos(q1)*cos(q3), - \
+          sin(q1)*cos(q3) + sin(q2)*sin(q3)*cos(q1), cos(q1)*cos(q2)]])
+    assert F.rotation_matrix(N) == Matrix([[
+        q1**2 + q2**2 - q3**2 - q4**2,
+        2*q1*q4 + 2*q2*q3, -2*q1*q3 + 2*q2*q4],[ -2*q1*q4 + 2*q2*q3,
+            q1**2 - q2**2 + q3**2 - q4**2, 2*q1*q2 + 2*q3*q4],
+                                           [2*q1*q3 + 2*q2*q4,
+                                            -2*q1*q2 + 2*q3*q4,
+                                q1**2 - q2**2 - q3**2 + q4**2]])
+    assert G.rotation_matrix(N) == Matrix([[
+        cos(q2)*cos(q3),  sin(q1)*sin(q2)*cos(q3) + sin(q3)*cos(q1),
+        sin(q1)*sin(q3) - sin(q2)*cos(q1)*cos(q3)], [
+            -sin(q3)*cos(q2), -sin(q1)*sin(q2)*sin(q3) + cos(q1)*cos(q3),
+            sin(q1)*cos(q3) + sin(q2)*sin(q3)*cos(q1)],[
+                sin(q2), -sin(q1)*cos(q2), cos(q1)*cos(q2)]])
+
+【相关测试 5】
+测试文件：sympy/algebras/tests/test_quaternion.py
+测试名称：test_quaternion_construction
+测试代码：
+def test_quaternion_construction():
+    q = Quaternion(x, y, z, w)
+    assert q + q == Quaternion(2*x, 2*y, 2*z, 2*w)
+
+    q2 = Quaternion.from_axis_angle((sqrt(3)/3, sqrt(3)/3, sqrt(3)/3), 2*pi/3)
+    assert q2 == Quaternion(Rational(1/2), Rational(1/2),
+                            Rational(1/2), Rational(1,2))
+
+    M = Matrix([[cos(x), -sin(x), 0], [sin(x), cos(x), 0], [0, 0, 1]])
+    q3 = trigsimp(Quaternion.from_rotation_matrix(M))
+    assert q3 == Quaternion(sqrt(2)*sqrt(cos(x) + 1)/2, 0, 0, sqrt(-2*cos(x) + 2)/2)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

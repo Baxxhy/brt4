@@ -1,0 +1,93 @@
+instance_id: sympy__sympy-24562
+
+issue_summary: Rational 构造函数在传入字符串参数 '0.5' 和 '100' 时，计算结果错误，而传入数值参数 0.5 和 100 时结果正确。
+
+trigger_condition:
+{
+  "text": "调用 Rational('0.5', '100')，即使用两个字符串参数构造 Rational 对象。",
+  "evidence": [
+    "Issue 中明确提到：\"when calc Rational('0.5', '100'), the value is 1/100100; but Rational(0.5, 100) the value is 1/200\"。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "Rational('0.5', '100') 返回了错误的值 1/100100，而不是预期的 1/200。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 中明确说明：\"the value is 1/100100\"。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "Rational('0.5', '100') 应该返回与 Rational(0.5, 100) 相同的值，即 1/200。",
+  "evidence": [
+    "Issue 中说明 Rational(0.5, 100) 的值是 1/200，并且 \"this value is the true value\"。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "Rational",
+    "kind": "class",
+    "source_path": "sympy/core/numbers.py",
+    "reason": "Issue 直接报告了 Rational 构造函数在处理特定字符串参数时的行为错误。"
+  },
+  {
+    "name": "Rational.__new__",
+    "kind": "method",
+    "source_path": "sympy/core/numbers.py",
+    "reason": "构造函数的具体实现在 __new__ 方法中，是处理输入参数的关键位置。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "Rational('3/4') 或 Rational('1e2/1e-2')，即单个字符串参数。",
+    "target_pattern": "Rational('0.5', '100')，即两个独立的字符串参数。",
+    "reason": "Issue 表明缺陷仅在两个字符串参数时触发，而现有测试多使用单个字符串参数或数值参数。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "Rational('0.5', '100') 的返回值，特别是其 .p 和 .q 属性。",
+    "reason": "直接观察构造结果是否等于 1/200，或错误地等于 1/100100。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "Rational('0.5', '100') 应该等于 Rational(0.5, 100)。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的 repr 字符串，因为内部表示可能变化；避免断言无关的属性。",
+    "reason": "Issue 的核心是两种调用方式应产生相同结果，直接比较两个 Rational 对象最稳定。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 Rational 类。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "Rational('0.5', '100') 的错误结果 1/100100 是如何计算出来的？是解析逻辑错误还是字符串拼接错误？",
+  "Rational 的 __new__ 方法中处理两个字符串参数的具体代码路径是什么？",
+  "除了 '0.5' 和 '100'，其他字符串参数组合是否也存在类似问题？"
+]

@@ -1,0 +1,112 @@
+instance_id: pylint-dev__pylint-4604
+
+issue_summary: pylint 的 unused-import 检查器错误地将类型注释中使用的模块标记为未使用。
+
+trigger_condition:
+{
+  "text": "导入一个模块（例如 `import abc`），并且该模块的名称在类型注释中被引用（例如 `# type: abc.ABC`）。",
+  "evidence": [
+    "Issue 中的 Steps to reproduce 代码片段展示了导入 `abc` 并在类型注释 `# type: abc.ABC` 中使用它。",
+    "Issue 中的 Current behavior 显示 `unused-import` 警告被触发。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "pylint 错误地发出了 `unused-import` 警告，指出导入的模块 `abc` 未被使用。",
+  "symptom_type": "warning",
+  "evidence": [
+    "Issue 中的 Current behavior 部分显示了警告输出：`W0611: Unused import abc (unused-import)`。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当导入的模块在类型注释中被使用时，pylint 不应发出 `unused-import` 警告。",
+  "evidence": [
+    "Issue 中的 Expected behavior 部分明确指出：`unused-import should not be emitted.`。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "pylint.lint.Run",
+    "kind": "function",
+    "source_path": "",
+    "reason": "相关源码片段 1 显示它是 pylint 的主入口点，用于启动检查。"
+  },
+  {
+    "name": "CheckerTestCase",
+    "kind": "class",
+    "source_path": "tests/checkers/unittest_imports.py",
+    "reason": "所有相关测试都继承自此类，它是测试检查器的基础。"
+  },
+  {
+    "name": "visit_import",
+    "kind": "method",
+    "source_path": "",
+    "reason": "相关测试中多次调用此方法来检查 import 语句，与 unused-import 检查相关。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中的 import 语句通常用于直接引用（如 `import astroid` 或 `from external_module import anything`）。",
+    "target_pattern": "import 语句后，其模块名仅在类型注释中被引用（如 `# type: abc.ABC`）。",
+    "reason": "Issue 表明，当导入仅用于类型注释时，unused-import 检查器错误地将其标记为未使用。这种输入模式可能触发缺陷路径。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "相似测试中可能使用默认配置或特定配置（如 `ignored_modules`）。",
+    "target_pattern": "确保 `unused-import` 检查是启用的（这是 pylint 默认行为）。",
+    "reason": "Issue 发生在默认配置下，unused-import 警告被触发。测试需要确保该检查器处于活动状态。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "warning",
+    "expression_hint": "self.checker.visit_import(node) 调用后产生的消息列表，特别是 `unused-import` (W0611) 警告。",
+    "reason": "Issue 的核心错误是错误地发出了 `unused-import` 警告。观测检查器输出的消息可以判断缺陷是否被触发。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当导入的模块在类型注释中被使用时，检查器不应发出 `unused-import` 警告。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "避免断言完整的警告消息字符串，因为格式可能变化。避免断言不相关的警告类型。",
+    "reason": "Issue 的期望行为是警告缺失。断言消息列表中不包含 `unused-import` 或 `W0611` 片段是稳定且与目标对齐的。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 `CheckerTestCase` 作为测试基类，并可能配置 `pylint.testutils.CheckerTestCase` 的检查器。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要使用 `astroid.extract_node` 从源代码字符串构造 AST 节点。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "unused-import 检查器处理类型注释的具体逻辑和代码位置未知。",
+  "是否还有其他边界情况（例如嵌套类型、泛型）也会触发此缺陷。",
+  "修复后，检查器是否还需要考虑 `from abc import ABC` 并在 `# type: ABC` 中使用的情况（Issue 中也提到了）。"
+]

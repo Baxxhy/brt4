@@ -1,0 +1,133 @@
+instance_id: django__django-13512
+
+issue_summary: Django admin 在编辑包含中文字符的 JSONField 时，会显示 ASCII 转义序列而非原始字符。
+
+trigger_condition:
+{
+  "text": "在 Django admin 中编辑一个包含非 ASCII 字符（例如中文字符）的 JSONField。",
+  "evidence": [
+    "Issue 描述中提到：'when we edit a JsonField which contains Chinese character in Django admin'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "JSONField 中的中文字符在 Django admin 界面显示为 ASCII 转义序列（如 \\u4e2d\\u56fd），而非可读的字符。",
+  "symptom_type": "serialization_error",
+  "evidence": [
+    "Issue 描述中展示了 json.dumps('中国') 默认输出 ASCII 转义序列，并指出在 admin 中会出现同样问题。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "Django admin 应正确显示 JSONField 中的非 ASCII 字符（如中文字符），而不是其 ASCII 转义序列。",
+  "evidence": [
+    "Issue 描述中提及尝试修复并 'it works prefectly'，暗示修复后应正常显示字符。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "json.dumps",
+    "kind": "function",
+    "source_path": "",
+    "reason": "Issue 直接引用 json.dumps 并指出其默认 ASCII 编码行为是问题的根源。"
+  },
+  {
+    "name": "JSONSerializer.dumps",
+    "kind": "method",
+    "source_path": "django/core/signing.py",
+    "reason": "检索到的源码片段 1 显示了一个使用 json.dumps 的序列化方法，可能与 JSON 序列化过程相关。"
+  },
+  {
+    "name": "models.JSONField",
+    "kind": "class",
+    "source_path": "",
+    "reason": "Issue 和多个相关测试都围绕 JSONField 展开。"
+  },
+  {
+    "name": "DjangoJSONEncoder",
+    "kind": "class",
+    "source_path": "",
+    "reason": "多个相关测试使用了 DjangoJSONEncoder，可能与自定义 JSON 编码有关。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相关测试中使用的值多为 UUID、Decimal 或简单字典。",
+    "target_pattern": "使用包含非 ASCII 字符（如中文字符）的字符串作为 JSONField 的值。",
+    "reason": "Issue 明确指出中文字符会触发问题，而现有测试未使用此类输入。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "测试可能使用默认的 json.dumps 配置或 DjangoJSONEncoder。",
+    "target_pattern": "可能需要配置或模拟 Django admin 中 JSONField 的序列化环境，确保使用默认的 ASCII 编码行为。",
+    "reason": "Issue 表明问题源于 json.dumps 的默认 ASCII 编码，在 admin 上下文中被使用。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "serialization",
+    "expression_hint": "serializers.serialize('json', [instance]) 的输出字符串，或 admin 界面模拟渲染后的文本内容。",
+    "reason": "Issue 的核心是序列化后的输出包含 ASCII 转义序列，观察此输出可判断问题是否出现。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "json.dumps(obj) 或相关序列化方法调用后的返回值。",
+    "reason": "直接检查序列化函数是否对中文字符产生了转义序列。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "序列化后的 JSON 字符串应包含原始中文字符，而非其 Unicode 转义序列（如 \\u4e2d\\u56fd）。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "避免对整个 JSON 字符串进行完全相等断言，因为格式（如空格）可能变化。",
+    "reason": "Issue 描述的错误是出现了转义序列，因此断言输出中不应包含此类片段。"
+  },
+  {
+    "assertion_goal": "序列化后的 JSON 字符串应可被正确解码回包含中文字符的原始对象。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言与特定编码（如 UTF-8）的字节串相等。",
+    "reason": "这验证了序列化/反序列化的往返正确性，是更稳定的功能断言。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "可能需要创建一个包含 JSONField 的 Django 模型实例，并将其值设置为包含中文字符的字典或字符串。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要继承自 TestCase 以使用数据库，因为 JSONField 通常与数据库交互。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  },
+  {
+    "hint": "可能需要配置或导入 Django 的序列化器（serializers）模块。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "触发缺陷的确切代码路径和调用链（例如，是 admin 的哪个具体函数调用了有问题的序列化代码）尚不明确。",
+  "修复方案是否涉及修改 JSONSerializer.dumps、DjangoJSONEncoder 或其他地方的编码参数（如 ensure_ascii）不确定。",
+  "现有测试环境（如数据库后端）是否会影响非 ASCII 字符在 JSONField 中的处理行为不确定。"
+]

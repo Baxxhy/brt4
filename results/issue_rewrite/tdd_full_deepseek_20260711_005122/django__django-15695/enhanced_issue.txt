@@ -1,0 +1,158 @@
+instance_id: django__django-15695
+
+issue_summary: RenameIndex() 在未命名索引（unique_together）向后移动再向前移动时崩溃，因为未正确恢复旧的自生成名称。
+
+trigger_condition:
+{
+  "text": "对一个通过 old_fields 指定的未命名索引执行 RenameIndex 操作，先调用 database_backwards（向后移动），再调用 database_forwards（向前移动）重新应用重命名。",
+  "evidence": [
+    "Issue 描述：'RenameIndex() should restore the old auto-generated name when an unnamed index for unique_together is moving backward. Now re-applying RenameIndex() crashes.'",
+    "Issue 中的测试代码片段展示了 database_backwards 后紧接着 database_forwards 的调用序列。",
+    "相关测试 2 (test_rename_index_unnamed_index) 展示了使用 old_fields 参数构造 RenameIndex 并调用 database_backwards 和 database_forwards 的模式。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "在 PostgreSQL 上，重新应用 database_forwards 时抛出 django.db.utils.ProgrammingError: relation \"new_pony_test_idx\" already exists。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中明确给出错误信息：'django.db.utils.ProgrammingError: relation \"new_pony_test_idx\" already exists'。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当对未命名索引执行 RenameIndex 的向后移动操作时，应恢复旧的自动生成名称，使得后续重新应用向前移动操作时不会因索引名冲突而崩溃。",
+  "evidence": [
+    "Issue 描述的第一句：'RenameIndex() should restore the old auto-generated name when an unnamed index for unique_together is moving backward.'",
+    "相关测试 2 (test_rename_index_unnamed_index) 的注释表明 'Reverse is a no-op.'，暗示向后移动不应导致后续向前移动失败。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "RenameIndex",
+    "kind": "class",
+    "source_path": "django/db/migrations/operations/models.py",
+    "reason": "Issue 直接关于 RenameIndex 类的行为。"
+  },
+  {
+    "name": "RenameIndex.database_backwards",
+    "kind": "method",
+    "source_path": "django/db/migrations/operations/models.py",
+    "reason": "Issue 涉及向后移动操作，该方法在未命名索引场景下被调用。"
+  },
+  {
+    "name": "RenameIndex.database_forwards",
+    "kind": "method",
+    "source_path": "django/db/migrations/operations/models.py",
+    "reason": "Issue 涉及重新应用向前移动操作，该方法在重命名索引时被调用。"
+  },
+  {
+    "name": "BaseDatabaseWrapper.schema_editor",
+    "kind": "method",
+    "source_path": "django/db/backends/base/base.py",
+    "reason": "Issue 和测试中都需要通过 connection.schema_editor() 获取 SchemaEditor 来执行数据库操作。"
+  },
+  {
+    "name": "TransactionTestCase.assertNumQueries",
+    "kind": "method",
+    "source_path": "django/test/testcases.py",
+    "reason": "Issue 中的测试代码片段和现有测试都使用了这个断言来监控查询数量。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "call_chain",
+    "current_pattern": "在 test_rename_index_unnamed_index 中，调用顺序是：database_forwards -> database_backwards（验证为 no-op）-> 结束。",
+    "target_pattern": "根据 Issue，调用顺序应为：database_forwards -> database_backwards -> database_forwards（重新应用）。",
+    "reason": "在未命名索引场景下，第二次调用 database_forwards 试图再次创建同名索引，可能触发冲突。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "在 test_rename_index_unnamed_index 中，database_backwards 被调用时，self.old_fields 存在，因此方法直接返回（no-op）。",
+    "target_pattern": "Issue 暗示 database_backwards 应该“恢复旧的自动生成名称”，但当前实现可能没有做到，导致对象内部状态（如 self.old_name）未正确设置，影响后续操作。",
+    "reason": "如果 database_backwards 是 no-op，那么 self.old_name 可能保持为 None 或错误的值，使得后续 database_forwards 无法正确查找旧的索引名。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "在第二次调用 operation.database_forwards 时捕获的异常（如 django.db.utils.ProgrammingError）。",
+    "reason": "Issue 明确报告了重新应用重命名时抛出异常，这是缺陷的直接表现。"
+  },
+  {
+    "kind": "sql",
+    "expression_hint": "schema_editor 执行的 SQL 语句，特别是创建或重命名索引的语句。",
+    "reason": "错误信息表明索引已存在，观察 SQL 可以确认是否尝试创建重复名称的索引。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "RenameIndex 实例在 database_backwards 调用前后的内部状态，如 self.old_name, self.new_name, self.old_fields 的值。",
+    "reason": "理解状态如何变化有助于判断为什么后续 database_forwards 会失败。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "schema_editor._constraint_names 在 database_forwards 中查找旧索引名时的返回值。",
+    "reason": "对于未命名索引，该方法用于查找数据库中的实际名称。如果返回的名称不正确或为空，会导致后续问题。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证在未命名索引上执行 database_backwards 再 database_forwards 的序列不会抛出 ProgrammingError（特别是“relation already exists”）。",
+    "preferred_assertion_style": "raises",
+    "avoid": "避免断言具体的完整 SQL 错误消息字符串，因为不同数据库后端可能略有不同。",
+    "reason": "Issue 的核心是操作序列导致异常，修复后应不再抛出该异常。使用 raises 配合适当的异常类型（或 not raises）可以稳定地捕获此行为变化。"
+  },
+  {
+    "assertion_goal": "验证在操作序列后，目标索引名称在数据库中存在且正确。",
+    "preferred_assertion_style": "before_after_relation",
+    "avoid": "避免硬编码索引的具体名称，除非名称是测试设置的一部分。",
+    "reason": "测试应确保索引重命名操作最终达到了预期状态，即新名称的索引存在。这比断言内部状态更稳定。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用支持重命名索引的数据库后端（如 PostgreSQL）进行测试，因为 Issue 是在 PostgreSQL 上发现的。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要继承自 OperationTestBase 测试基类，以使用 self.set_up_test_model, self.assertIndexNameExists 等辅助方法。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试模型需要设置 unique_together 或 index_together 以生成未命名索引，如相关测试中使用 index_together=True。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要使用 connection.schema_editor() 上下文管理器来执行数据库操作。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "database_backwards 方法中 'Backward operation with unnamed index is a no-op.' 这一设计意图是否就是导致问题的根本原因？还是说 no-op 本身没问题，但需要在 no-op 中做一些额外的状态恢复？",
+  "旧的“自动生成名称”具体是如何生成和存储的？在 database_backwards 中应该如何正确地恢复它？",
+  "除了 PostgreSQL，其他数据库后端（如 SQLite, MySQL）是否也会出现同样的问题？",
+  "Issue 中提到的 'unique_together' 与测试中使用的 'index_together' 在生成未命名索引方面是否完全等效？"
+]

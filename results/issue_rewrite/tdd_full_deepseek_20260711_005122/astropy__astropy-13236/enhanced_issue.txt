@@ -1,0 +1,133 @@
+instance_id: astropy__astropy-13236
+
+issue_summary: 向 Table 添加结构化 ndarray 时，会被自动转换为 NdarrayMixin，但 Issue 认为这不再必要且应改为 Column。
+
+trigger_condition:
+{
+  "text": "将一个结构化 numpy ndarray（dtype 包含多个字段）作为数据添加到 astropy.table.Table 中，例如通过 Table 初始化或 add_column 方法。",
+  "evidence": [
+    "Issue 描述中提到：'Currently if you add a structured `np.array` to a Table, it gets turned into an `NdarrayMixin`'",
+    "Issue 中的代码片段显示了对 `isinstance(data, np.ndarray) and len(data.dtype) > 1` 的检查。",
+    "相关测试 1 展示了将结构化数组 a, b, c 添加到 Table 中。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "当前行为（Issue 认为是有问题的）是结构化 ndarray 被自动转换为 NdarrayMixin 类型的列，而不是保持为 Column 类型。Issue 未报告运行时异常或错误输出，而是认为这是一个设计上的问题，需要改变行为。",
+  "symptom_type": "wrong_type",
+  "evidence": [
+    "Issue 描述：'it gets turned into an `NdarrayMixin`'",
+    "相关测试 1 中的断言 `assert isinstance(t['a'], NdarrayMixin)` 证实了当前行为。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "在未来的版本中，向 Table 添加结构化 ndarray 时，它应该被添加为 Column 类型，而不是被自动转换为 NdarrayMixin。",
+  "evidence": [
+    "Issue 提案：'in the future (5.2) the structured array will be added as a `Column`.'",
+    "Issue 提到原始使用 NdarrayMixin 的原因（如序列化问题）可能因 #12644 而已解决。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "astropy.table.Table.__init__",
+    "kind": "method",
+    "source_path": "astropy/table/table.py",
+    "reason": "这是创建 Table 并添加数据的主要入口，Issue 中提到的转换逻辑很可能在此方法或其调用的内部方法中。"
+  },
+  {
+    "name": "astropy.table.Table.add_column",
+    "kind": "method",
+    "source_path": "astropy/table/table.py",
+    "reason": "向现有 Table 添加列的方法，同样可能触发结构化数组的转换逻辑。"
+  },
+  {
+    "name": "astropy.table.NdarrayMixin",
+    "kind": "class",
+    "source_path": "astropy/table/ndarray_mixin.py",
+    "reason": "Issue 的核心是关于是否将结构化数组转换为此类。"
+  },
+  {
+    "name": "astropy.table.Column",
+    "kind": "class",
+    "source_path": "astropy/table/column.py",
+    "reason": "Issue 期望结构化数组最终应作为此类的实例存在于 Table 中。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相关测试 1 中，将结构化数组 a, b, c 添加到 Table，并断言 `isinstance(t['a'], NdarrayMixin)` 为 True。",
+    "target_pattern": "变异测试，使其断言添加的结构化数组列 `isinstance(t['a'], Column)` 为 True（或 `isinstance(t['a'], NdarrayMixin)` 为 False）。",
+    "reason": "Issue 期望未来行为是结构化数组成为 Column 而非 NdarrayMixin。变异断言目标可以捕捉行为是否已改变。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "测试中，结构化数组在添加前是普通的 `np.ndarray`。",
+    "target_pattern": "确保添加的数据是结构化 `np.ndarray`（`len(data.dtype) > 1`）且不是 `Column` 或 `NdarrayMixin` 的实例。",
+    "reason": "Issue 中的代码片段显示转换条件要求 `not isinstance(data, Column) and not data_is_mixin and isinstance(data, np.ndarray) and len(data.dtype) > 1`。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "type",
+    "expression_hint": "type(t['column_name']) 或 isinstance(t['column_name'], (NdarrayMixin, Column))",
+    "reason": "Issue 的核心是列的类型问题。观察添加结构化数组后列的实际类型是判断行为是否符合预期的直接方式。"
+  },
+  {
+    "kind": "warning",
+    "expression_hint": "warnings.catch_warnings 记录 FutureWarning",
+    "reason": "Issue 提案中提到在过渡期添加 FutureWarning。观察是否有警告发出可以指示代码是否处于过渡状态。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证向 Table 添加的结构化 ndarray 列是 Column 类型（或至少不是 NdarrayMixin 类型）。",
+    "preferred_assertion_style": "isinstance",
+    "avoid": "断言完整的 repr 字符串或过于具体的内部属性，这些可能在重构或警告信息变化时失效。",
+    "reason": "Issue 的核心是类型变化。使用 isinstance 检查 Column 或否定 NdarrayMixin 是稳定且语义对齐的断言。"
+  },
+  {
+    "assertion_goal": "验证数据内容在添加后保持不变。",
+    "preferred_assertion_style": "equals",
+    "avoid": "忽略数据内容，只关注类型。",
+    "reason": "确保类型改变不会破坏数据完整性。可以复用相关测试 1 中对数据值的断言模式。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 astropy.table.Table, astropy.table.NdarrayMixin, astropy.table.Column, numpy as np。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能不需要特殊 fixture，可以直接在函数内构造数据。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "Issue 中提到的转换逻辑的确切位置（文件路径和行号）在提供的源码片段中未直接找到。",
+  "在未来的版本中，是否所有结构化 ndarray 都会变成 Column，还是只有某些特定情况？Issue 描述似乎指向所有情况。",
+  "过渡期 FutureWarning 的确切文本内容未知。",
+  "除了类型变化，行为改变（如序列化）是否还有其他可观测的影响？"
+]

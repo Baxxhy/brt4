@@ -1,0 +1,152 @@
+instance_id: django__django-11138
+
+issue_summary: 当在 MySQL、SQLite 和 Oracle 数据库上使用日期查找（如 __date）时，DATABASES 设置中的 TIME_ZONE 值未被使用，导致错误的时区转换。
+
+trigger_condition:
+{
+  "text": "在 USE_TZ=True 的设置下，为特定数据库配置了 TIME_ZONE（例如 'Europe/Paris'），并使用带 __date 查找的查询（如 MyModel.objects.filter(my_datetime_field__date=dt.date())）。",
+  "evidence": [
+    "Issue 描述中提供了 settings.py 配置示例，包含 USE_TZ=True, TIME_ZONE='Europe/Paris' 和 DATABASES 中 'legacy' 数据库的 TIME_ZONE 设置。",
+    "Issue 中展示了查询 MyModel.objects.filter(my_datetime_field__date=dt.date()).exists() 导致错误结果。",
+    "相关测试 1 (test_lookup_date_with_use_tz) 展示了在 USE_TZ=True 下使用 __date 查找。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "使用 __date 查找时，生成的 SQL 查询错误地将 CONVERT_TZ 的源时区硬编码为 'UTC'，而不是使用数据库配置的 TIME_ZONE，导致查询结果错误（例如返回 False 而非 True）。",
+  "symptom_type": "wrong_sql",
+  "evidence": [
+    "Issue 中展示了错误的 SQL 查询：WHERE DATE(CONVERT_TZ(`my_model`.`my_datetime_field`, 'UTC', 'Europe/Paris')) = '2017-07-06'。",
+    "Issue 指出问题在于 'UTC' 被强制使用，忽略了数据库设置。",
+    "Issue 链接了源码中 'UTC' 被硬编码的行（django/db/backends/mysql/operations.py 第 49 行）。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当 USE_TZ=True 且数据库配置了 TIME_ZONE 时，使用 __date 查找生成的 SQL 查询应使用数据库的 TIME_ZONE 作为 CONVERT_TZ 的源时区，或者当应用时区与数据库时区相同时，应避免不必要的 CONVERT_TZ 调用。",
+  "evidence": [
+    "Issue 中说明：'First, conversion should be from Paris to Paris, instead of UTC to Paris. The conversion should go from the database timezone tz2 to the django app one tz1.'",
+    "Issue 中说明：'Secondly, when tz1 == tz2, there should be no need to use CONVERT_TZ and the query will work without timezone tables in MySQL.'",
+    "相关测试 1 (test_lookup_date_with_use_tz) 展示了在不同 TIME_ZONE 设置下 __date 查找的预期行为差异。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "make_aware",
+    "kind": "function",
+    "source_path": "django/utils/timezone.py",
+    "reason": "Issue 中用于创建感知时区的 datetime 对象，是触发条件的一部分。"
+  },
+  {
+    "name": "QuerySet.filter",
+    "kind": "method",
+    "source_path": "",
+    "reason": "Issue 的核心是使用带 __date 查找的 filter 方法进行查询。"
+  },
+  {
+    "name": "datetime.datetime",
+    "kind": "class",
+    "source_path": "",
+    "reason": "用于构造测试数据中的日期时间对象。"
+  },
+  {
+    "name": "timezone.get_current_timezone",
+    "kind": "function",
+    "source_path": "",
+    "reason": "相关测试中用于获取当前时区，用于构造感知时区的 datetime。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "相似测试通常只覆盖全局 TIME_ZONE 设置（通过 @override_settings）。",
+    "target_pattern": "需要为测试数据库配置 DATABASES['...']['TIME_ZONE'] 设置，可能使其与全局 TIME_ZONE 相同或不同。",
+    "reason": "Issue 的核心是 DATABASES 设置中的 TIME_ZONE 未被使用。必须配置此设置才能触发缺陷路径。",
+    "confidence": "high"
+  },
+  {
+    "slot": "input",
+    "current_pattern": "相似测试使用感知时区的 datetime 作为查询值或创建模型实例。",
+    "target_pattern": "查询时使用从感知时区 datetime 提取的 .date() 作为 __date 查找的值（如 dt.date()）。",
+    "reason": "Issue 明确指出问题发生在使用 __date 查找时（例如 my_datetime_field__date=dt.date()）。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "相似测试可能使用支持时区的数据库后端（如 PostgreSQL）或需要 has_zoneinfo_database。",
+    "target_pattern": "使用不支持时区的数据库后端（如 MySQL、SQLite、Oracle），并且 USE_TZ=True。",
+    "reason": "Issue 标题和描述明确指出问题发生在 MySQL、SQLite 和 Oracle 上，这些数据库在 Django 中通常被视为“不支持时区”。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "sql",
+    "expression_hint": "生成的 SQL 查询字符串，特别是 CONVERT_TZ 函数的参数。",
+    "reason": "Issue 的核心错误是 SQL 中 CONVERT_TZ 的源时区错误。观察生成的 SQL 可以确认是否使用了 'UTC' 而不是数据库的 TIME_ZONE。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "QuerySet.exists() 或 QuerySet.count() 的结果。",
+    "reason": "Issue 展示了错误的行为是 exists() 返回 False 而预期为 True。观察查询结果可以判断缺陷是否被触发。"
+  },
+  {
+    "kind": "config",
+    "expression_hint": "当前活跃的数据库连接的配置，特别是其 TIME_ZONE 设置。",
+    "reason": "需要确认测试运行时数据库连接确实使用了配置的 DATABASES[...]['TIME_ZONE'] 值。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当数据库 TIME_ZONE 与全局 TIME_ZONE 相同时，使用 __date 查找的查询应返回正确的结果（例如 exists() 为 True）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的、字面的 SQL 字符串，因为 SQL 生成可能因数据库后端而异。",
+    "reason": "Issue 指出当 tz1 == tz2 时，查询应该工作。这是一个稳定的功能语义断言。"
+  },
+  {
+    "assertion_goal": "生成的 SQL 查询不应包含从 'UTC' 到应用时区的 CONVERT_TZ 转换，当数据库配置了不同的 TIME_ZONE 时。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言 SQL 的精确格式或表/列名。",
+    "reason": "Issue 的核心是错误地使用了 'UTC' 作为源时区。检查 SQL 中是否包含 \"'UTC'\" 片段是一个稳定的、与问题直接相关的断言。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 @override_settings 来设置 USE_TZ=True 和全局 TIME_ZONE，并可能覆盖 DATABASES 配置以包含每个数据库的 TIME_ZONE。",
+    "source": "issue|retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要一个使用不支持时区的数据库后端（如 MySQL）的测试数据库，并可能涉及创建具有日期时间字段的模型。",
+    "source": "issue|inference",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要使用 TransactionTestCase 或确保测试在事务中运行，以避免数据库配置污染。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "确切的修复代码位置和需要修改的具体函数/方法名称（除了 Issue 中提到的行之外）。",
+  "对于 SQLite 和 Oracle 后端，是否在完全相同的代码位置存在类似的硬编码 'UTC' 问题。",
+  "当数据库 TIME_ZONE 未设置（为 None 或空字符串）时，预期的行为是什么（应回退到 UTC？）。",
+  "是否所有日期时间部分查找（__year, __month 等）都受此问题影响，还是仅 __date 查找。"
+]

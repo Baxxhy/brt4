@@ -1,0 +1,601 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+[Bug]: wspace and hspace in subfigures not working
+### Bug summary
+
+`wspace` and `hspace` in `Figure.subfigures` do nothing.
+
+### Code for reproduction
+
+```python
+import matplotlib.pyplot as plt
+
+figs = plt.figure().subfigures(2, 2, wspace=0, hspace=0)
+for fig in figs.flat:
+    fig.subplots().plot([1, 2])
+plt.show()
+```
+
+
+### Actual outcome
+
+Same figure independently of the values of hspace and wspace.
+
+### Expected outcome
+
+https://github.com/matplotlib/matplotlib/blob/b3bd929cf07ea35479fded8f739126ccc39edd6d/lib/matplotlib/figure.py#L1550-L1554
+
+### Additional information
+
+_No response_
+
+### Operating system
+
+OS/X
+
+### Matplotlib Version
+
+3.7.1
+
+### Matplotlib Backend
+
+MacOSX
+
+### Python version
+
+Python 3.10.9
+
+### Jupyter version
+
+_No response_
+
+### Installation
+
+conda
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：lib/matplotlib/figure.py
+对象名称：subfigures
+节点类型：class_function
+父节点：FigureBase
+行号范围：1545-1600
+代码：
+    def subfigures(self, nrows=1, ncols=1, squeeze=True,
+                   wspace=None, hspace=None,
+                   width_ratios=None, height_ratios=None,
+                   **kwargs):
+        """
+        Add a set of subfigures to this figure or subfigure.
+
+        A subfigure has the same artist methods as a figure, and is logically
+        the same as a figure, but cannot print itself.
+        See :doc:`/gallery/subplots_axes_and_figures/subfigures`.
+
+        .. note::
+            The *subfigure* concept is new in v3.4, and the API is still provisional.
+
+        Parameters
+        ----------
+        nrows, ncols : int, default: 1
+            Number of rows/columns of the subfigure grid.
+
+        squeeze : bool, default: True
+            If True, extra dimensions are squeezed out from the returned
+            array of subfigures.
+
+        wspace, hspace : float, default: None
+            The amount of width/height reserved for space between subfigures,
+            expressed as a fraction of the average subfigure width/height.
+            If not given, the values will be inferred from a figure or
+            rcParams when necessary.
+
+        width_ratios : array-like of length *ncols*, optional
+            Defines the relative widths of the columns. Each column gets a
+            relative width of ``width_ratios[i] / sum(width_ratios)``.
+            If not given, all columns will have the same width.
+
+        height_ratios : array-like of length *nrows*, optional
+            Defines the relative heights of the rows. Each row gets a
+            relative height of ``height_ratios[i] / sum(height_ratios)``.
+            If not given, all rows will have the same height.
+        """
+        gs = GridSpec(nrows=nrows, ncols=ncols, figure=self,
+                      wspace=wspace, hspace=hspace,
+                      width_ratios=width_ratios,
+                      height_ratios=height_ratios)
+
+        sfarr = np.empty((nrows, ncols), dtype=object)
+        for i in range(ncols):
+            for j in range(nrows):
+                sfarr[j, i] = self.add_subfigure(gs[j, i], **kwargs)
+
+        if squeeze:
+            # Discarding unneeded dimensions that equal 1.  If we only have one
+            # subfigure, just return it instead of a 1-element array.
+            return sfarr.item() if sfarr.size == 1 else sfarr.squeeze()
+        else:
+            # Returned axis array will be always 2-d, even if nrows=ncols=1.
+            return sfarr
+
+
+【源码片段 2】
+文件路径：lib/matplotlib/figure.py
+对象名称：subplots
+节点类型：class_function
+父节点：FigureBase
+行号范围：798-932
+代码：
+    def subplots(self, nrows=1, ncols=1, *, sharex=False, sharey=False,
+                 squeeze=True, width_ratios=None, height_ratios=None,
+                 subplot_kw=None, gridspec_kw=None):
+        """
+        Add a set of subplots to this figure.
+
+        This utility wrapper makes it convenient to create common layouts of
+        subplots in a single call.
+
+        Parameters
+        ----------
+        nrows, ncols : int, default: 1
+            Number of rows/columns of the subplot grid.
+
+        sharex, sharey : bool or {'none', 'all', 'row', 'col'}, default: False
+            Controls sharing of x-axis (*sharex*) or y-axis (*sharey*):
+
+            - True or 'all': x- or y-axis will be shared among all subplots.
+            - False or 'none': each subplot x- or y-axis will be independent.
+            - 'row': each subplot row will share an x- or y-axis.
+            - 'col': each subplot column will share an x- or y-axis.
+
+            When subplots have a shared x-axis along a column, only the x tick
+            labels of the bottom subplot are created. Similarly, when subplots
+            have a shared y-axis along a row, only the y tick labels of the
+            first column subplot are created. To later turn other subplots'
+            ticklabels on, use `~matplotlib.axes.Axes.tick_params`.
+
+            When subplots have a shared axis that has units, calling
+            `.Axis.set_units` will update each axis with the new units.
+
+        squeeze : bool, default: True
+            - If True, extra dimensions are squeezed out from the returned
+              array of Axes:
+
+              - if only one subplot is constructed (nrows=ncols=1), the
+                resulting single Axes object is returned as a scalar.
+              - for Nx1 or 1xM subplots, the returned object is a 1D numpy
+                object array of Axes objects.
+              - for NxM, subplots with N>1 and M>1 are returned as a 2D array.
+
+            - If False, no squeezing at all is done: the returned Axes object
+              is always a 2D array containing Axes instances, even if it ends
+              up being 1x1.
+
+        width_ratios : array-like of length *ncols*, optional
+            Defines the relative widths of the columns. Each column gets a
+            relative width of ``width_ratios[i] / sum(width_ratios)``.
+            If not given, all columns will have the same width.  Equivalent
+            to ``gridspec_kw={'width_ratios': [...]}``.
+
+        height_ratios : array-like of length *nrows*, optional
+            Defines the relative heights of the rows. Each row gets a
+            relative height of ``height_ratios[i] / sum(height_ratios)``.
+            If not given, all rows will have the same height. Equivalent
+            to ``gridspec_kw={'height_ratios': [...]}``.
+
+        subplot_kw : dict, optional
+            Dict with keywords passed to the `.Figure.add_subplot` call used to
+            create each subplot.
+
+        gridspec_kw : dict, optional
+            Dict with keywords passed to the
+            `~matplotlib.gridspec.GridSpec` constructor used to create
+            the grid the subplots are placed on.
+
+        Returns
+        -------
+        `~.axes.Axes` or array of Axes
+            Either a single `~matplotlib.axes.Axes` object or an array of Axes
+            objects if more than one subplot was created. The dimensions of the
+            resulting array can be controlled with the *squeeze* keyword, see
+            above.
+
+        See Also
+        --------
+        .pyplot.subplots
+        .Figure.add_subplot
+        .pyplot.subplot
+
+        Examples
+        --------
+        ::
+
+            # First create some toy data:
+            x = np.linspace(0, 2*np.pi, 400)
+            y = np.sin(x**2)
+
+            # Create a figure
+            fig = plt.figure()
+
+            # Create a subplot
+            ax = fig.subplots()
+            ax.plot(x, y)
+            ax.set_title('Simple plot')
+
+            # Create two subplots and unpack the output array immediately
+            ax1, ax2 = fig.subplots(1, 2, sharey=True)
+            ax1.plot(x, y)
+            ax1.set_title('Sharing Y axis')
+            ax2.scatter(x, y)
+
+            # Create four polar Axes and access them through the returned array
+            axes = fig.subplots(2, 2, subplot_kw=dict(projection='polar'))
+            axes[0, 0].plot(x, y)
+            axes[1, 1].scatter(x, y)
+
+            # Share an X-axis with each column of subplots
+            fig.subplots(2, 2, sharex='col')
+
+            # Share a Y-axis with each row of subplots
+            fig.subplots(2, 2, sharey='row')
+
+            # Share both X- and Y-axes with all subplots
+            fig.subplots(2, 2, sharex='all', sharey='all')
+
+            # Note that this is the same as
+            fig.subplots(2, 2, sharex=True, sharey=True)
+        """
+        gridspec_kw = dict(gridspec_kw or {})
+        if height_ratios is not None:
+            if 'height_ratios' in gridspec_kw:
+                raise ValueError("'height_ratios' must not be defined both as "
+                                 "parameter and as key in 'gridspec_kw'")
+            gridspec_kw['height_ratios'] = height_ratios
+        if width_ratios is not None:
+            if 'width_ratios' in gridspec_kw:
+                raise ValueError("'width_ratios' must not be defined both as "
+                                 "parameter and as key in 'gridspec_kw'")
+            gridspec_kw['width_ratios'] = width_ratios
+
+        gs = self.add_gridspec(nrows, ncols, figure=self, **gridspec_kw)
+        axs = gs.subplots(sharex=sharex, sharey=sharey, squeeze=squeeze,
+                          subplot_kw=subplot_kw)
+        return axs
+
+
+【源码片段 3】
+文件路径：lib/matplotlib/figure.py
+对象名称：figure
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 4】
+文件路径：lib/matplotlib/figure.py
+对象名称：show
+节点类型：class_function
+父节点：Figure
+行号范围：2674-2716
+代码：
+    def show(self, warn=True):
+        """
+        If using a GUI backend with pyplot, display the figure window.
+
+        If the figure was not created using `~.pyplot.figure`, it will lack
+        a `~.backend_bases.FigureManagerBase`, and this method will raise an
+        AttributeError.
+
+        .. warning::
+
+            This does not manage an GUI event loop. Consequently, the figure
+            may only be shown briefly or not shown at all if you or your
+            environment are not managing an event loop.
+
+            Use cases for `.Figure.show` include running this from a GUI
+            application (where there is persistently an event loop running) or
+            from a shell, like IPython, that install an input hook to allow the
+            interactive shell to accept input while the figure is also being
+            shown and interactive.  Some, but not all, GUI toolkits will
+            register an input hook on import.  See :ref:`cp_integration` for
+            more details.
+
+            If you're in a shell without input hook integration or executing a
+            python script, you should use `matplotlib.pyplot.show` with
+            ``block=True`` instead, which takes care of starting and running
+            the event loop for you.
+
+        Parameters
+        ----------
+        warn : bool, default: True
+            If ``True`` and we are not running headless (i.e. on Linux with an
+            unset DISPLAY), issue warning when called on a non-GUI backend.
+
+        """
+        if self.canvas.manager is None:
+            raise AttributeError(
+                "Figure.show works only for figures managed by pyplot, "
+                "normally created by pyplot.figure()")
+        try:
+            self.canvas.manager.show()
+        except NonGuiException as exc:
+            if warn:
+                _api.warn_external(str(exc))
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：lib/matplotlib/tests/test_figure.py
+测试名称：test_subfigure_double
+测试代码：
+@image_comparison(['test_subfigure_double.png'], style='mpl20',
+                  savefig_kwarg={'facecolor': 'teal'})
+def test_subfigure_double():
+    # test assigning the subfigure via subplotspec
+    np.random.seed(19680801)
+
+    fig = plt.figure(layout='constrained', figsize=(10, 8))
+
+    fig.suptitle('fig')
+
+    subfigs = fig.subfigures(1, 2, wspace=0.07)
+
+    subfigs[0].set_facecolor('coral')
+    subfigs[0].suptitle('subfigs[0]')
+
+    subfigs[1].set_facecolor('coral')
+    subfigs[1].suptitle('subfigs[1]')
+
+    subfigsnest = subfigs[0].subfigures(2, 1, height_ratios=[1, 1.4])
+    subfigsnest[0].suptitle('subfigsnest[0]')
+    subfigsnest[0].set_facecolor('r')
+    axsnest0 = subfigsnest[0].subplots(1, 2, sharey=True)
+    for ax in axsnest0:
+        fontsize = 12
+        pc = ax.pcolormesh(np.random.randn(30, 30), vmin=-2.5, vmax=2.5)
+        ax.set_xlabel('x-label', fontsize=fontsize)
+        ax.set_ylabel('y-label', fontsize=fontsize)
+        ax.set_title('Title', fontsize=fontsize)
+
+    subfigsnest[0].colorbar(pc, ax=axsnest0)
+
+    subfigsnest[1].suptitle('subfigsnest[1]')
+    subfigsnest[1].set_facecolor('g')
+    axsnest1 = subfigsnest[1].subplots(3, 1, sharex=True)
+    for nn, ax in enumerate(axsnest1):
+        ax.set_ylabel(f'ylabel{nn}')
+    subfigsnest[1].supxlabel('supxlabel')
+    subfigsnest[1].supylabel('supylabel')
+
+    axsRight = subfigs[1].subplots(2, 2)
+
+【相关测试 2】
+测试文件：lib/matplotlib/tests/test_figure.py
+测试名称：test_subfigure
+测试代码：
+@image_comparison(['test_subfigure.png'], style='mpl20',
+                  savefig_kwarg={'facecolor': 'teal'})
+def test_subfigure():
+    np.random.seed(19680801)
+    fig = plt.figure(layout='constrained')
+    sub = fig.subfigures(1, 2)
+
+    axs = sub[0].subplots(2, 2)
+    for ax in axs.flat:
+        pc = ax.pcolormesh(np.random.randn(30, 30), vmin=-2, vmax=2)
+    sub[0].colorbar(pc, ax=axs)
+    sub[0].suptitle('Left Side')
+    sub[0].set_facecolor('white')
+
+    axs = sub[1].subplots(1, 3)
+    for ax in axs.flat:
+        pc = ax.pcolormesh(np.random.randn(30, 30), vmin=-2, vmax=2)
+    sub[1].colorbar(pc, ax=axs, location='bottom')
+    sub[1].suptitle('Right Side')
+    sub[1].set_facecolor('white')
+
+    fig.suptitle('Figure suptitle', fontsize='xx-large')
+
+【相关测试 3】
+测试文件：lib/matplotlib/tests/test_figure.py
+测试名称：test_subfigure_ticks
+测试代码：
+@mpl.style.context('mpl20')
+def test_subfigure_ticks():
+    # This tests a tick-spacing error that only seems applicable
+    # when the subfigures are saved to file.  It is very hard to replicate
+    fig = plt.figure(constrained_layout=True, figsize=(10, 3))
+    # create left/right subfigs nested in bottom subfig
+    (subfig_bl, subfig_br) = fig.subfigures(1, 2, wspace=0.01,
+                                            width_ratios=[7, 2])
+
+    # put ax1-ax3 in gridspec of bottom-left subfig
+    gs = subfig_bl.add_gridspec(nrows=1, ncols=14)
+
+    ax1 = subfig_bl.add_subplot(gs[0, :1])
+    ax1.scatter(x=[-56.46881504821776, 24.179891162109396], y=[1500, 3600])
+
+    ax2 = subfig_bl.add_subplot(gs[0, 1:3], sharey=ax1)
+    ax2.scatter(x=[-126.5357270050049, 94.68456736755368], y=[1500, 3600])
+    ax3 = subfig_bl.add_subplot(gs[0, 3:14], sharey=ax1)
+
+    fig.dpi = 120
+    fig.draw_without_rendering()
+    ticks120 = ax2.get_xticks()
+    fig.dpi = 300
+    fig.draw_without_rendering()
+    ticks300 = ax2.get_xticks()
+    np.testing.assert_allclose(ticks120, ticks300)
+
+【相关测试 4】
+测试文件：lib/matplotlib/tests/test_figure.py
+测试名称：test_subfigure_spanning
+测试代码：
+def test_subfigure_spanning():
+    # test that subfigures get laid out properly...
+    fig = plt.figure(constrained_layout=True)
+    gs = fig.add_gridspec(3, 3)
+    sub_figs = [
+        fig.add_subfigure(gs[0, 0]),
+        fig.add_subfigure(gs[0:2, 1]),
+        fig.add_subfigure(gs[2, 1:3]),
+        fig.add_subfigure(gs[0:, 1:])
+    ]
+
+    w = 640
+    h = 480
+    np.testing.assert_allclose(sub_figs[0].bbox.min, [0., h * 2/3])
+    np.testing.assert_allclose(sub_figs[0].bbox.max, [w / 3, h])
+
+    np.testing.assert_allclose(sub_figs[1].bbox.min, [w / 3, h / 3])
+    np.testing.assert_allclose(sub_figs[1].bbox.max, [w * 2/3, h])
+
+    np.testing.assert_allclose(sub_figs[2].bbox.min, [w / 3, 0])
+    np.testing.assert_allclose(sub_figs[2].bbox.max, [w, h / 3])
+
+    # check here that slicing actually works.  Last sub_fig
+    # with open slices failed, but only on draw...
+    for i in range(4):
+        sub_figs[i].add_subplot()
+    fig.draw_without_rendering()
+
+【相关测试 5】
+测试文件：lib/matplotlib/tests/test_figure.py
+测试名称：test_suptitle_subfigures
+测试代码：
+def test_suptitle_subfigures():
+    fig = plt.figure(figsize=(4, 3))
+    sf1, sf2 = fig.subfigures(1, 2)
+    sf2.set_facecolor('white')
+    sf1.subplots()
+    sf2.subplots()
+    fig.suptitle("This is a visible suptitle.")
+
+    # verify the first subfigure facecolor is the default transparent
+    assert sf1.get_facecolor() == (0.0, 0.0, 0.0, 0.0)
+    # verify the second subfigure facecolor is white
+    assert sf2.get_facecolor() == (1.0, 1.0, 1.0, 1.0)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

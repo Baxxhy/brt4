@@ -1,0 +1,327 @@
+{
+  "instance_id": "django__django-11265",
+  "issue_summary": "在使用了 FilteredRelation 注解的 QuerySet 上调用 exclude 方法会抛出 FieldError 异常。",
+  "trigger_condition": {
+    "text": "对一个通过 annotate 添加了 FilteredRelation 的 QuerySet 调用 exclude 方法，并在 exclude 条件中引用该 FilteredRelation 的别名。",
+    "evidence": [
+      "Issue 中描述了将 filter 改为 exclude 后出现错误，并给出了修改后的代码示例。",
+      "Issue 中提供的错误信息显示 'Cannot resolve keyword 'book_alice' into field'。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "抛出 django.core.exceptions.FieldError: Cannot resolve keyword 'book_alice' into field.",
+    "symptom_type": "exception",
+    "evidence": [
+      "Issue 中提供了完整的错误堆栈跟踪，最终异常为 FieldError。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "在使用了 FilteredRelation 注解的 QuerySet 上调用 exclude 方法时，应能正确解析 FilteredRelation 的别名，并生成相应的 SQL 查询，返回预期的结果集。",
+    "evidence": [
+      "Issue 中修改后的测试期望返回空列表 []，表明 exclude 应能正常工作。",
+      "相关测试代码表明 filter 方法可以正常工作，因此 exclude 也应能正常工作。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "QuerySet.annotate",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 中触发缺陷的代码使用了 annotate 方法添加 FilteredRelation。"
+    },
+    {
+      "name": "QuerySet.exclude",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 中触发缺陷的代码使用了 exclude 方法。"
+    },
+    {
+      "name": "FilteredRelation",
+      "kind": "class",
+      "source_path": "django/db/models/query_utils.py",
+      "reason": "Issue 的核心是关于 FilteredRelation 与 exclude 的交互问题。"
+    },
+    {
+      "name": "Query._filter_or_exclude",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "exclude 方法内部调用了 _filter_or_exclude。"
+    },
+    {
+      "name": "Query.split_exclude",
+      "kind": "method",
+      "source_path": "django/db/models/sql/query.py",
+      "reason": "Issue 描述中怀疑 split_exclude 函数是问题所在。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/sql/query.py",
+      "object": "split_exclude",
+      "lines": "",
+      "reason": "Issue 描述中明确指出 'the function split_exclude(self, filter_expr, can_reuse, names_with_path) seams to be the faulty one'。"
+    },
+    {
+      "path": "django/db/models/query.py",
+      "object": "QuerySet.annotate",
+      "lines": "1011-1055",
+      "reason": "该方法负责处理 FilteredRelation 注解，可能影响后续查询的元数据。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "FilteredRelationTests.test_with_join",
+      "test_file": "tests/filtered_relation/tests.py",
+      "why_relevant": "该测试与 Issue 中修改前的原始测试几乎相同，使用了相同的 annotate 和 filter 操作，只是没有使用 exclude。",
+      "reusable_parts": [
+        "Author.objects.annotate(...) 的构造方式",
+        "FilteredRelation 的创建",
+        "assertSequenceEqual 断言风格",
+        "测试类的上下文 (TestCase)"
+      ],
+      "possible_gap": "该测试使用的是 filter 方法，而 Issue 触发需要 exclude 方法。"
+    },
+    {
+      "test_name": "FilteredRelationTests.test_exclude_relation_with_join",
+      "test_file": "tests/filtered_relation/tests.py",
+      "why_relevant": "该测试名称包含 'exclude'，并且使用了 FilteredRelation，与 Issue 主题高度相关。",
+      "reusable_parts": [
+        "Author.objects.annotate(...) 的构造方式",
+        "FilteredRelation 的创建",
+        "distinct() 的调用",
+        "assertSequenceEqual 断言风格"
+      ],
+      "possible_gap": "该测试在 filter 条件中使用了 FilteredRelation 的别名，而不是在 exclude 条件中。其 exclude 逻辑是通过 FilteredRelation 的 condition 参数 (~Q) 实现的，而非 QuerySet 的 exclude 方法。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "call_chain",
+      "current_pattern": "Author.objects.annotate(book_alice=FilteredRelation(...)).filter(book_alice__isnull=False)",
+      "target_pattern": "Author.objects.annotate(book_alice=FilteredRelation(...)).exclude(book_alice__isnull=False)",
+      "reason": "Issue 表明将 filter 替换为 exclude 会触发缺陷。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "filter(book_alice__isnull=False)",
+      "target_pattern": "exclude(book_alice__isnull=False)",
+      "reason": "在 exclude 的参数中引用 FilteredRelation 别名是触发条件。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "是否捕获到 django.core.exceptions.FieldError",
+      "reason": "Issue 的核心错误现象是抛出 FieldError 异常。"
+    },
+    {
+      "kind": "sql",
+      "expression_hint": "生成的 SQL 查询字符串",
+      "reason": "观察 exclude 操作是否成功生成了包含正确 JOIN 和 WHERE 子句的 SQL。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "Query 对象的 annotations 或 filtered_relations 属性在 exclude 调用前后的状态",
+      "reason": "Issue 怀疑 split_exclude 创建的新查询丢失了原始查询的额外数据。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 exclude 操作不会抛出 FieldError 异常。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言完整的 SQL 字符串或精确的 repr 输出。",
+      "reason": "当前缺陷表现为异常，因此首先需要断言异常是否被抛出。修复后，应不再抛出异常。"
+    },
+    {
+      "assertion_goal": "验证 exclude 操作返回了预期的结果集（例如空列表）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言结果集中对象的完整 repr 或无关属性。",
+      "reason": "Issue 中修改后的测试期望返回空列表，这是修复后应满足的功能性目标。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 TestCase 类，并设置 Author 和 Book 模型的数据。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要导入 FilteredRelation 和 Q 对象。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "split_exclude 方法内部具体是如何丢失 FilteredRelation 信息的。",
+    "除了 exclude 方法，其他涉及查询克隆或条件取反的操作（如 filter(~Q(...))）是否也会触发相同缺陷。",
+    "修复后，exclude 生成的 SQL 查询的确切形式。"
+  ],
+  "raw": {
+    "issue_summary": "在使用了 FilteredRelation 注解的 QuerySet 上调用 exclude 方法会抛出 FieldError 异常。",
+    "trigger_condition": {
+      "text": "对一个通过 annotate 添加了 FilteredRelation 的 QuerySet 调用 exclude 方法，并在 exclude 条件中引用该 FilteredRelation 的别名。",
+      "evidence": [
+        "Issue 中描述了将 filter 改为 exclude 后出现错误，并给出了修改后的代码示例。",
+        "Issue 中提供的错误信息显示 'Cannot resolve keyword 'book_alice' into field'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 django.core.exceptions.FieldError: Cannot resolve keyword 'book_alice' into field.",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中提供了完整的错误堆栈跟踪，最终异常为 FieldError。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在使用了 FilteredRelation 注解的 QuerySet 上调用 exclude 方法时，应能正确解析 FilteredRelation 的别名，并生成相应的 SQL 查询，返回预期的结果集。",
+      "evidence": [
+        "Issue 中修改后的测试期望返回空列表 []，表明 exclude 应能正常工作。",
+        "相关测试代码表明 filter 方法可以正常工作，因此 exclude 也应能正常工作。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发缺陷的代码使用了 annotate 方法添加 FilteredRelation。"
+      },
+      {
+        "name": "QuerySet.exclude",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发缺陷的代码使用了 exclude 方法。"
+      },
+      {
+        "name": "FilteredRelation",
+        "kind": "class",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 的核心是关于 FilteredRelation 与 exclude 的交互问题。"
+      },
+      {
+        "name": "Query._filter_or_exclude",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "exclude 方法内部调用了 _filter_or_exclude。"
+      },
+      {
+        "name": "Query.split_exclude",
+        "kind": "method",
+        "source_path": "django/db/models/sql/query.py",
+        "reason": "Issue 描述中怀疑 split_exclude 函数是问题所在。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "split_exclude",
+        "lines": "",
+        "reason": "Issue 描述中明确指出 'the function split_exclude(self, filter_expr, can_reuse, names_with_path) seams to be the faulty one'。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.annotate",
+        "lines": "1011-1055",
+        "reason": "该方法负责处理 FilteredRelation 注解，可能影响后续查询的元数据。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FilteredRelationTests.test_with_join",
+        "test_file": "tests/filtered_relation/tests.py",
+        "why_relevant": "该测试与 Issue 中修改前的原始测试几乎相同，使用了相同的 annotate 和 filter 操作，只是没有使用 exclude。",
+        "reusable_parts": [
+          "Author.objects.annotate(...) 的构造方式",
+          "FilteredRelation 的创建",
+          "assertSequenceEqual 断言风格",
+          "测试类的上下文 (TestCase)"
+        ],
+        "possible_gap": "该测试使用的是 filter 方法，而 Issue 触发需要 exclude 方法。"
+      },
+      {
+        "test_name": "FilteredRelationTests.test_exclude_relation_with_join",
+        "test_file": "tests/filtered_relation/tests.py",
+        "why_relevant": "该测试名称包含 'exclude'，并且使用了 FilteredRelation，与 Issue 主题高度相关。",
+        "reusable_parts": [
+          "Author.objects.annotate(...) 的构造方式",
+          "FilteredRelation 的创建",
+          "distinct() 的调用",
+          "assertSequenceEqual 断言风格"
+        ],
+        "possible_gap": "该测试在 filter 条件中使用了 FilteredRelation 的别名，而不是在 exclude 条件中。其 exclude 逻辑是通过 FilteredRelation 的 condition 参数 (~Q) 实现的，而非 QuerySet 的 exclude 方法。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "Author.objects.annotate(book_alice=FilteredRelation(...)).filter(book_alice__isnull=False)",
+        "target_pattern": "Author.objects.annotate(book_alice=FilteredRelation(...)).exclude(book_alice__isnull=False)",
+        "reason": "Issue 表明将 filter 替换为 exclude 会触发缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "filter(book_alice__isnull=False)",
+        "target_pattern": "exclude(book_alice__isnull=False)",
+        "reason": "在 exclude 的参数中引用 FilteredRelation 别名是触发条件。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "是否捕获到 django.core.exceptions.FieldError",
+        "reason": "Issue 的核心错误现象是抛出 FieldError 异常。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串",
+        "reason": "观察 exclude 操作是否成功生成了包含正确 JOIN 和 WHERE 子句的 SQL。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "Query 对象的 annotations 或 filtered_relations 属性在 exclude 调用前后的状态",
+        "reason": "Issue 怀疑 split_exclude 创建的新查询丢失了原始查询的额外数据。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 exclude 操作不会抛出 FieldError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 SQL 字符串或精确的 repr 输出。",
+        "reason": "当前缺陷表现为异常，因此首先需要断言异常是否被抛出。修复后，应不再抛出异常。"
+      },
+      {
+        "assertion_goal": "验证 exclude 操作返回了预期的结果集（例如空列表）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言结果集中对象的完整 repr 或无关属性。",
+        "reason": "Issue 中修改后的测试期望返回空列表，这是修复后应满足的功能性目标。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 TestCase 类，并设置 Author 和 Book 模型的数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 FilteredRelation 和 Q 对象。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "split_exclude 方法内部具体是如何丢失 FilteredRelation 信息的。",
+      "除了 exclude 方法，其他涉及查询克隆或条件取反的操作（如 filter(~Q(...))）是否也会触发相同缺陷。",
+      "修复后，exclude 生成的 SQL 查询的确切形式。"
+    ]
+  }
+}

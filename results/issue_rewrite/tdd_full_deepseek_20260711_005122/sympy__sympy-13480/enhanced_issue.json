@@ -1,0 +1,293 @@
+{
+  "instance_id": "sympy__sympy-13480",
+  "issue_summary": "对表达式 coth(log(tan(x))) 在 x 为某些整数值（如 2, 3, 5）时进行 .subs 替换会引发 NameError 异常。",
+  "trigger_condition": {
+    "text": "构造表达式 coth(log(tan(x)))，其中 x 是一个 Symbol，然后调用 e.subs(x, n)，其中 n 是特定的整数（如 2, 3, 5, 6, 8, 9, 11, 12, 13, 15, 18）。",
+    "evidence": [
+      "Issue 中的代码示例：`e = coth(log(tan(x)))` 和 `print(e.subs(x, 2))`",
+      "Issue 描述：\"Fails for 2, 3, 5, 6, 8, 9, 11, 12, 13, 15, 18, ... etc.\""
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "执行 e.subs(x, n) 时，在 coth.eval 方法中抛出 NameError: name 'cotm' is not defined。",
+    "symptom_type": "exception",
+    "evidence": [
+      "Issue 中的错误堆栈：\"File \\\"...hyperbolic.py\\\", line 590, in eval if cotm is S.ComplexInfinity: NameError: name 'cotm' is not defined\""
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "对表达式 coth(log(tan(x))) 在 x 为任意整数（包括 Issue 中列出的值）进行 .subs 替换时，应正常计算并返回一个值（可能是数值、符号表达式或 zoo/complex infinity），而不应抛出 NameError。",
+    "evidence": [
+      "Issue 报告的是错误，隐含期望是正常执行。相关测试 test_coth 展示了 coth 函数对各种输入（包括特殊值如 0, oo, pi*I）的正常求值行为。",
+      "相关测试 test_tan_subs 展示了 tan(x).subs(x, S.Pi/2) 能正常返回 zoo，说明 subs 操作应能处理可能导致无穷大的情况。"
+    ],
+    "confidence": "medium"
+  },
+  "target_apis": [
+    {
+      "name": "coth",
+      "kind": "class",
+      "source_path": "sympy/functions/elementary/hyperbolic.py",
+      "reason": "Issue 的核心是 coth 函数在特定输入下的求值错误。"
+    },
+    {
+      "name": "coth.eval",
+      "kind": "method",
+      "source_path": "sympy/functions/elementary/hyperbolic.py",
+      "reason": "错误堆栈指向 coth 类的 eval 方法，其中存在未定义变量 'cotm'。"
+    },
+    {
+      "name": "subs",
+      "kind": "method",
+      "source_path": "",
+      "reason": "触发 bug 的操作是调用表达式的 .subs 方法。"
+    },
+    {
+      "name": "tan",
+      "kind": "function",
+      "source_path": "",
+      "reason": "表达式包含 tan(x)。"
+    },
+    {
+      "name": "log",
+      "kind": "function",
+      "source_path": "",
+      "reason": "表达式包含 log(tan(x))。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/functions/elementary/hyperbolic.py",
+      "object": "coth.eval",
+      "lines": "557-607",
+      "reason": "错误堆栈直接指向此方法，且源码片段 6 显示第 590 行附近使用了未定义的变量 'cotm'（应为 'cothm'？）。该段代码处理 arg.is_Add 的情况，可能与 log(tan(x)) 在特定 x 值下的化简形式有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_coth",
+      "test_file": "sympy/functions/elementary/tests/test_hyperbolic.py",
+      "why_relevant": "这是针对 coth 函数的主要测试，包含了各种输入（数值、符号、特殊值、复数）的求值断言，是构造 coth 相关测试的模板。",
+      "reusable_parts": [
+        "imports (from sympy import ...)",
+        "符号定义 (x, y = symbols('x,y'))",
+        "coth 函数调用模式",
+        "对特殊值（如 nan, zoo, oo）的断言风格",
+        "使用 assert coth(...) == ..."
+      ],
+      "possible_gap": "现有测试没有覆盖 coth(log(tan(x))) 这种嵌套函数组合，也没有测试在特定整数值下通过 .subs 触发 eval 方法中 arg.is_Add 分支的路径。"
+    },
+    {
+      "test_name": "test_tan_subs",
+      "test_file": "sympy/functions/elementary/tests/test_trigonometric.py",
+      "why_relevant": "它直接测试了 tan(x).subs(x, value) 的操作，展示了 subs 方法的使用和对于可能导致 zoo 的值的处理。",
+      "reusable_parts": [
+        "subs 方法的调用模式：`tan(x).subs(x, value)`",
+        "对替换后返回 zoo 的断言"
+      ],
+      "possible_gap": "它只测试了 tan 函数，没有涉及 coth 和 log 的嵌套，也没有触发 coth.eval 中的错误分支。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "test_coth 中直接对 coth 传入常数或简单符号表达式进行求值，如 coth(2), coth(pi*I)。",
+      "target_pattern": "构造一个嵌套表达式：coth(log(tan(x)))，然后对其调用 .subs(x, specific_integer)，其中 specific_integer 来自 Issue 列表（如 2）。",
+      "reason": "Issue 表明，只有当输入是这种特定组合，并且 subs 的值为特定整数时，才会触发 coth.eval 中访问未定义变量 'cotm' 的代码路径。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "test_coth 中测试了 coth(pi*I/2) == 0 等涉及 pi 倍数的情况。",
+      "target_pattern": "让 subs 的值为一个普通整数（如 2），使得 log(tan(2)) 在 sympy 内部化简后，可能以某种 Add 形式（如 a + b*I*pi）进入 coth.eval 的 arg.is_Add 分支。",
+      "reason": "源码片段 6 显示，在 arg.is_Add 分支中使用了变量 'cotm'，而 'cotm' 未定义。触发此分支需要 arg 被识别为 Add 类型。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "在调用 e.subs(x, n) 时捕获 NameError 异常，并检查其消息是否包含 \"name 'cotm' is not defined\"。",
+      "reason": "这是 Issue 中直接观察到的错误现象，是判断缺陷是否被触发的明确信号。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "在修复后，观察 e.subs(x, n) 的返回值类型和值（可能是浮点数、符号表达式、zoo 等）。",
+      "reason": "用于验证修复后行为是否符合预期（正常返回而非崩溃）。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "在 coth.eval 方法内部，观察 arg 在特定整数 n 替换后的具体形式（sympify 后的结构），特别是它是否成为 Add 类型以及其系数。",
+      "reason": "有助于理解触发 bug 的精确条件，并确认修复是否正确处理了该条件。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "对表达式 coth(log(tan(x))) 在 x 替换为特定整数 n 后，求值过程不应抛出 NameError 异常。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言返回值的精确数值或符号形式，因为 Issue 未指定正确结果，只报告了崩溃。",
+      "reason": "Issue 的核心是异常崩溃。初始的复现测试应聚焦于触发该异常。修复后的测试可改为断言不抛出异常或返回合理值。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要从 sympy 导入 Symbol, coth, log, tan。使用标准的 SymPy 测试环境即可。",
+      "source": "issue|retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "log(tan(n)) 对于 n=2,3,5... 这些整数值，在 SymPy 内部化简后的精确数学形式是什么？为什么它会使得 coth.eval 中的 arg 成为 Add 类型？",
+    "变量 'cotm' 的预期定义是什么？它应该是 'cothm' 的笔误，还是另一个应从上下文中推导出的变量？",
+    "修复后，coth(log(tan(2))) 的预期正确值应该是什么？是一个复数、实数、还是 zoo？Issue 没有提供。",
+    "除了列出的整数，是否还有其他值（如有理数、浮点数）会触发同样的错误？"
+  ],
+  "raw": {
+    "issue_summary": "对表达式 coth(log(tan(x))) 在 x 为某些整数值（如 2, 3, 5）时进行 .subs 替换会引发 NameError 异常。",
+    "trigger_condition": {
+      "text": "构造表达式 coth(log(tan(x)))，其中 x 是一个 Symbol，然后调用 e.subs(x, n)，其中 n 是特定的整数（如 2, 3, 5, 6, 8, 9, 11, 12, 13, 15, 18）。",
+      "evidence": [
+        "Issue 中的代码示例：`e = coth(log(tan(x)))` 和 `print(e.subs(x, 2))`",
+        "Issue 描述：\"Fails for 2, 3, 5, 6, 8, 9, 11, 12, 13, 15, 18, ... etc.\""
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行 e.subs(x, n) 时，在 coth.eval 方法中抛出 NameError: name 'cotm' is not defined。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈：\"File \\\"...hyperbolic.py\\\", line 590, in eval if cotm is S.ComplexInfinity: NameError: name 'cotm' is not defined\""
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对表达式 coth(log(tan(x))) 在 x 为任意整数（包括 Issue 中列出的值）进行 .subs 替换时，应正常计算并返回一个值（可能是数值、符号表达式或 zoo/complex infinity），而不应抛出 NameError。",
+      "evidence": [
+        "Issue 报告的是错误，隐含期望是正常执行。相关测试 test_coth 展示了 coth 函数对各种输入（包括特殊值如 0, oo, pi*I）的正常求值行为。",
+        "相关测试 test_tan_subs 展示了 tan(x).subs(x, S.Pi/2) 能正常返回 zoo，说明 subs 操作应能处理可能导致无穷大的情况。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "coth",
+        "kind": "class",
+        "source_path": "sympy/functions/elementary/hyperbolic.py",
+        "reason": "Issue 的核心是 coth 函数在特定输入下的求值错误。"
+      },
+      {
+        "name": "coth.eval",
+        "kind": "method",
+        "source_path": "sympy/functions/elementary/hyperbolic.py",
+        "reason": "错误堆栈指向 coth 类的 eval 方法，其中存在未定义变量 'cotm'。"
+      },
+      {
+        "name": "subs",
+        "kind": "method",
+        "source_path": "",
+        "reason": "触发 bug 的操作是调用表达式的 .subs 方法。"
+      },
+      {
+        "name": "tan",
+        "kind": "function",
+        "source_path": "",
+        "reason": "表达式包含 tan(x)。"
+      },
+      {
+        "name": "log",
+        "kind": "function",
+        "source_path": "",
+        "reason": "表达式包含 log(tan(x))。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/functions/elementary/hyperbolic.py",
+        "object": "coth.eval",
+        "lines": "557-607",
+        "reason": "错误堆栈直接指向此方法，且源码片段 6 显示第 590 行附近使用了未定义的变量 'cotm'（应为 'cothm'？）。该段代码处理 arg.is_Add 的情况，可能与 log(tan(x)) 在特定 x 值下的化简形式有关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_coth",
+        "test_file": "sympy/functions/elementary/tests/test_hyperbolic.py",
+        "why_relevant": "这是针对 coth 函数的主要测试，包含了各种输入（数值、符号、特殊值、复数）的求值断言，是构造 coth 相关测试的模板。",
+        "reusable_parts": [
+          "imports (from sympy import ...)",
+          "符号定义 (x, y = symbols('x,y'))",
+          "coth 函数调用模式",
+          "对特殊值（如 nan, zoo, oo）的断言风格",
+          "使用 assert coth(...) == ..."
+        ],
+        "possible_gap": "现有测试没有覆盖 coth(log(tan(x))) 这种嵌套函数组合，也没有测试在特定整数值下通过 .subs 触发 eval 方法中 arg.is_Add 分支的路径。"
+      },
+      {
+        "test_name": "test_tan_subs",
+        "test_file": "sympy/functions/elementary/tests/test_trigonometric.py",
+        "why_relevant": "它直接测试了 tan(x).subs(x, value) 的操作，展示了 subs 方法的使用和对于可能导致 zoo 的值的处理。",
+        "reusable_parts": [
+          "subs 方法的调用模式：`tan(x).subs(x, value)`",
+          "对替换后返回 zoo 的断言"
+        ],
+        "possible_gap": "它只测试了 tan 函数，没有涉及 coth 和 log 的嵌套，也没有触发 coth.eval 中的错误分支。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_coth 中直接对 coth 传入常数或简单符号表达式进行求值，如 coth(2), coth(pi*I)。",
+        "target_pattern": "构造一个嵌套表达式：coth(log(tan(x)))，然后对其调用 .subs(x, specific_integer)，其中 specific_integer 来自 Issue 列表（如 2）。",
+        "reason": "Issue 表明，只有当输入是这种特定组合，并且 subs 的值为特定整数时，才会触发 coth.eval 中访问未定义变量 'cotm' 的代码路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "test_coth 中测试了 coth(pi*I/2) == 0 等涉及 pi 倍数的情况。",
+        "target_pattern": "让 subs 的值为一个普通整数（如 2），使得 log(tan(2)) 在 sympy 内部化简后，可能以某种 Add 形式（如 a + b*I*pi）进入 coth.eval 的 arg.is_Add 分支。",
+        "reason": "源码片段 6 显示，在 arg.is_Add 分支中使用了变量 'cotm'，而 'cotm' 未定义。触发此分支需要 arg 被识别为 Add 类型。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 e.subs(x, n) 时捕获 NameError 异常，并检查其消息是否包含 \"name 'cotm' is not defined\"。",
+        "reason": "这是 Issue 中直接观察到的错误现象，是判断缺陷是否被触发的明确信号。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "在修复后，观察 e.subs(x, n) 的返回值类型和值（可能是浮点数、符号表达式、zoo 等）。",
+        "reason": "用于验证修复后行为是否符合预期（正常返回而非崩溃）。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 coth.eval 方法内部，观察 arg 在特定整数 n 替换后的具体形式（sympify 后的结构），特别是它是否成为 Add 类型以及其系数。",
+        "reason": "有助于理解触发 bug 的精确条件，并确认修复是否正确处理了该条件。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对表达式 coth(log(tan(x))) 在 x 替换为特定整数 n 后，求值过程不应抛出 NameError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言返回值的精确数值或符号形式，因为 Issue 未指定正确结果，只报告了崩溃。",
+        "reason": "Issue 的核心是异常崩溃。初始的复现测试应聚焦于触发该异常。修复后的测试可改为断言不抛出异常或返回合理值。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要从 sympy 导入 Symbol, coth, log, tan。使用标准的 SymPy 测试环境即可。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "log(tan(n)) 对于 n=2,3,5... 这些整数值，在 SymPy 内部化简后的精确数学形式是什么？为什么它会使得 coth.eval 中的 arg 成为 Add 类型？",
+      "变量 'cotm' 的预期定义是什么？它应该是 'cothm' 的笔误，还是另一个应从上下文中推导出的变量？",
+      "修复后，coth(log(tan(2))) 的预期正确值应该是什么？是一个复数、实数、还是 zoo？Issue 没有提供。",
+      "除了列出的整数，是否还有其他值（如有理数、浮点数）会触发同样的错误？"
+    ]
+  }
+}

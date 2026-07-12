@@ -1,0 +1,122 @@
+{
+  "issue_summary": "ManagementUtility 在实例化 CommandParser 时未传递已计算的 prog 参数，导致 usage 中的 %(prog)s 错误地引用了 sys.argv[0] 而非 self.prog_name。",
+  "trigger_condition": {
+    "text": "调用 execute_from_command_line 并传入自定义 argv，其中 argv[0] 与 sys.argv[0] 不同（例如 sys.argv[0] 为 None 或错误值）。",
+    "evidence": ["Issue 描述：'If passing my own argv to execute_from_command_line avoided all the ensuing exceptions, I wouldn't have to modify sys.argv[0] globally'", "源码片段 4 显示 execute_from_command_line 接收 argv 参数并传递给 ManagementUtility"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "当 sys.argv[0] 不正确（例如为 None）时，CommandParser 的 usage 字符串可能引发异常或显示错误的程序名。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 描述：'sys.argv[0] is incorrectly None'，并提到 'ensuing exceptions'"],
+    "confidence": "medium"
+  },
+  "expected_behavior": {
+    "text": "CommandParser 的 usage 字符串中的 %(prog)s 应正确显示 ManagementUtility 根据传入 argv 计算出的 self.prog_name，而非 sys.argv[0]。",
+    "evidence": ["Issue 描述：'Instead, it should refer to self.prog_name'，并给出了修复建议：在实例化 CommandParser 时传递 prog=self.prog_name"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "ManagementUtility",
+      "kind": "class",
+      "source_path": "django/core/management/__init__.py",
+      "reason": "Issue 的核心对象，负责解析 argv 并创建 CommandParser。"
+    },
+    {
+      "name": "CommandParser",
+      "kind": "class",
+      "source_path": "django/core/management/base.py",
+      "reason": "Issue 指出其实例化时未正确设置 prog 参数。"
+    },
+    {
+      "name": "execute_from_command_line",
+      "kind": "function",
+      "source_path": "django/core/management/__init__.py",
+      "reason": "Issue 中提到的入口点，用于触发缺陷路径。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/core/management/__init__.py",
+      "object": "ManagementUtility.execute",
+      "lines": "",
+      "reason": "Issue 指出在 execute 方法中实例化 CommandParser 时未传递 prog=self.prog_name。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "MainModule.test_program_name_in_help",
+      "test_file": "tests/admin_scripts/tests.py",
+      "why_relevant": "该测试检查帮助输出中的程序名，与 Issue 关注的 usage 字符串中程序名显示相关。",
+      "reusable_parts": ["AdminScriptTestCase", "self.run_test", "assertOutput"],
+      "possible_gap": "该测试可能使用默认的 sys.argv[0] 或标准调用方式，未测试传入自定义 argv 且 sys.argv[0] 异常的场景。"
+    },
+    {
+      "test_name": "CommandTypes.test_help",
+      "test_file": "tests/admin_scripts/tests.py",
+      "why_relevant": "该测试检查 'help' 命令的输出，其中包含程序名（manage.py），与 usage 字符串相关。",
+      "reusable_parts": ["AdminScriptTestCase", "self.run_manage", "assertOutput"],
+      "possible_gap": "该测试可能依赖于默认的 sys.argv[0]（即 'manage.py'），未测试当 sys.argv[0] 与 self.prog_name 不一致时的行为。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试中调用管理命令时通常使用默认的 sys.argv（或未显式设置 argv）。",
+      "target_pattern": "调用 execute_from_command_line 或 ManagementUtility 时传入自定义 argv，其中 argv[0] 与 sys.argv[0] 不同（例如 sys.argv[0] 为 None 或空字符串）。",
+      "reason": "Issue 明确指出在 sys.argv[0] 不正确但传入自定义 argv 时触发问题。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "测试环境通常具有正常的 sys.argv[0]。",
+      "target_pattern": "在测试中模拟 sys.argv[0] 为 None 或错误值，同时传入自定义 argv。",
+      "reason": "Issue 描述的场景是 sys.argv[0] 在嵌入式环境中被错误地设置为 None。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "CommandParser 生成的帮助文本或 usage 字符串，特别是其中的程序名部分。",
+      "reason": "Issue 的核心是 usage 字符串中的 %(prog)s 应显示正确的程序名。"
+    },
+    {
+      "kind": "exception",
+      "expression_hint": "调用 ManagementUtility.execute 或相关命令解析时是否抛出异常。",
+      "reason": "Issue 提到 'ensuing exceptions'，当 sys.argv[0] 为 None 时可能引发异常。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "帮助输出或 usage 字符串中的程序名应与传入的自定义 argv[0] 计算出的 self.prog_name 一致，而非 sys.argv[0]。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的、硬编码的帮助字符串相等。",
+      "reason": "Issue 关注程序名的正确性，而非整个输出字符串的精确匹配。"
+    },
+    {
+      "assertion_goal": "当传入自定义 argv 且 sys.argv[0] 异常时，命令解析不应引发异常。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言特定异常消息的完整字符串。",
+      "reason": "Issue 表明当前行为会引发异常，而修复后应避免。注意：此断言极性为当前 buggy 行为（应引发异常），修复后应正常（不引发异常）。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 AdminScriptTestCase 或其类似测试基类来运行管理命令。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要模拟 sys.argv[0] 的值。",
+      "source": "issue",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "当 sys.argv[0] 为 None 时，具体会抛出哪种异常？",
+    "除了 help 命令，其他命令的 usage 字符串是否也会受此影响？",
+    "修复后，当 prog 参数正确传递时，CommandParser 内部是否完全不再依赖 sys.argv[0]？"
+  ]
+}

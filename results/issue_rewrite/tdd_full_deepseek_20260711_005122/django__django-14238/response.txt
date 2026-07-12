@@ -1,0 +1,162 @@
+{
+  "issue_summary": "DEFAULT_AUTO_FIELD 设置为 BigAutoField 或 SmallAutoField 的子类时，Django 在模型准备阶段会错误地抛出 ValueError，声称该字段必须继承自 AutoField。",
+  "trigger_condition": {
+    "text": "在 Django 设置中将 DEFAULT_AUTO_FIELD 配置为自定义的 BigAutoField 或 SmallAutoField 子类，然后定义一个没有显式主键的模型。",
+    "evidence": ["Issue 描述中设置了 DEFAULT_AUTO_FIELD = \"example.core.models.MyBigAutoField\"，其中 MyBigAutoField 继承自 models.BigAutoField。", "Issue 中的堆栈跟踪显示在定义 MyModel 类时触发了错误。", "相关测试 1 和 2 展示了通过 @override_settings 设置 DEFAULT_AUTO_FIELD 来触发类似错误。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "在模型类定义过程中抛出 ValueError，消息为 \"Primary key '...' referred by DEFAULT_AUTO_FIELD must subclass AutoField.\"",
+    "symptom_type": "exception",
+    "evidence": ["Issue 中提供了完整的 ValueError 异常堆栈跟踪和错误信息。", "相关测试 1 和 2 也使用了 assertRaisesMessage(ValueError, msg) 来捕获相同的错误模式。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "DEFAULT_AUTO_FIELD 可以设置为 AutoField、BigAutoField 或 SmallAutoField 的任意子类，并且模型能够正常创建，其主键字段是相应子类的实例。",
+    "evidence": ["Issue 描述末尾的建议指出，可以通过修改 AutoFieldMeta.__subclasscheck__ 来允许这些子类。", "相关测试 3 和 5 展示了当 DEFAULT_AUTO_FIELD 设置为标准 AutoField 子类（如 SmallAutoField）时，模型可以正常创建，并且主键是正确类型的实例。", "相关测试 4 确认了 BigAutoField 和 SmallAutoField 在 issubclass 检查中被视为 AutoField 的子类。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "django.db.models.Model",
+      "kind": "class",
+      "source_path": "django/db/models/base.py",
+      "reason": "Issue 中定义 MyModel 时触发了错误，这是缺陷发生的入口点。"
+    },
+    {
+      "name": "django.db.models.options.Options._get_default_pk_class",
+      "kind": "method",
+      "source_path": "django/db/models/options.py",
+      "reason": "堆栈跟踪显示错误是从这个方法中抛出的，它是检查 DEFAULT_AUTO_FIELD 有效性的关键方法。"
+    },
+    {
+      "name": "django.db.models.fields.AutoFieldMeta.__subclasscheck__",
+      "kind": "method",
+      "source_path": "django/db/models/fields/__init__.py",
+      "reason": "Issue 明确指出修复可以在 AutoFieldMeta.__subclasscheck__ 中进行，它负责子类检查逻辑。"
+    },
+    {
+      "name": "django.db.models.fields.AutoFieldMeta._subclasses",
+      "kind": "method",
+      "source_path": "django/db/models/fields/__init__.py",
+      "reason": "源码片段 5 显示 _subclasses 方法返回 (BigAutoField, SmallAutoField)，这影响了 __subclasscheck__ 的行为。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/fields/__init__.py",
+      "object": "AutoFieldMeta.__subclasscheck__",
+      "lines": "2526-2527",
+      "reason": "Issue 明确建议在此处修复。该方法检查子类是否在 self._subclasses 中，而 _subclasses 只包含 BigAutoField 和 SmallAutoField，不包含它们的子类。"
+    },
+    {
+      "path": "django/db/models/fields/__init__.py",
+      "object": "AutoFieldMeta._subclasses",
+      "lines": "2520-2521",
+      "reason": "该方法返回的元组可能不完整，或者其逻辑未能递归地包含 BigAutoField 和 SmallAutoField 的子类。"
+    },
+    {
+      "path": "django/db/models/options.py",
+      "object": "Options._get_default_pk_class",
+      "lines": "",
+      "reason": "堆栈跟踪显示错误从这里抛出，它可能依赖于有缺陷的 issubclass 检查。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "TestDefaultPK.test_default_auto_field_setting_non_auto",
+      "test_file": "tests/model_options/test_default_pk.py",
+      "why_relevant": "它测试了 DEFAULT_AUTO_FIELD 设置为非 AutoField 子类（TextField）时抛出 ValueError 的场景，与当前 Issue 的错误触发模式（设置、定义模型、捕获异常）高度相似。",
+      "reusable_parts": ["@isolate_apps 装饰器", "@override_settings 装饰器", "在测试方法内定义匿名 Model 类", "使用 assertRaisesMessage 捕获 ValueError 并验证错误信息片段"],
+      "possible_gap": "它测试的是完全无效的字段（TextField），而当前 Issue 是关于有效的 AutoField 子类（BigAutoField 的子类）被错误拒绝。"
+    },
+    {
+      "test_name": "TestDefaultPK.test_default_auto_field_setting",
+      "test_file": "tests/model_options/test_default_pk.py",
+      "why_relevant": "它测试了 DEFAULT_AUTO_FIELD 设置为标准子类（SmallAutoField）时的成功路径，展示了正确的配置和模型创建后对主键类型的断言。",
+      "reusable_parts": ["@isolate_apps 装饰器", "@override_settings 装饰器", "定义匿名 Model 类", "使用 assertIsInstance 检查主键字段类型"],
+      "possible_gap": "它没有测试自定义子类，因此不会触发缺陷。"
+    },
+    {
+      "test_name": "AutoFieldInheritanceTests.test_issubclass_of_autofield",
+      "test_file": "tests/model_fields/test_autofield.py",
+      "why_relevant": "它直接测试了 BigAutoField 和 SmallAutoField 是否是 AutoField 的子类，这触及了缺陷的核心——子类检查逻辑。",
+      "reusable_parts": ["使用 issubclass 进行检查", "使用 subTest 进行参数化测试"],
+      "possible_gap": "它测试的是类层次关系本身，而不是在 DEFAULT_AUTO_FIELD 配置和模型创建流程中的动态检查。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "相似测试 test_default_auto_field_setting 中，@override_settings(DEFAULT_AUTO_FIELD='django.db.models.SmallAutoField') 使用了标准子类。",
+      "target_pattern": "将配置值改为一个自定义的 BigAutoField 或 SmallAutoField 子类，例如 'myapp.models.MyBigAutoField'。",
+      "reason": "Issue 表明，当 DEFAULT_AUTO_FIELD 指向自定义子类时，当前的子类检查逻辑会失败。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试 test_issubclass_of_autofield 中，直接对类对象（models.BigAutoField）使用 issubclass。",
+      "target_pattern": "需要测试在模型准备阶段，对自定义子类（如 MyBigAutoField）的动态 issubclass 检查。这涉及到 Django 内部通过 AutoFieldMeta 进行的检查。",
+      "reason": "缺陷可能在于 AutoFieldMeta.__subclasscheck__ 没有正确处理自定义子类的实例。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "在定义模型类（如 class MyModel(models.Model): pass）的上下文中，捕获并检查是否抛出 ValueError 及其消息。",
+      "reason": "Issue 的核心错误现象就是抛出特定的 ValueError。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "成功创建模型后，检查 Model._meta.pk 的类型，例如 type(Model._meta.pk) 或 isinstance(Model._meta.pk, MyBigAutoField)。",
+      "reason": "修复后，主键字段应该是自定义子类的实例，这与相关测试 3 和 5 的断言目标一致。"
+    },
+    {
+      "kind": "config",
+      "expression_hint": "在测试开始时，确认 settings.DEFAULT_AUTO_FIELD 的值是否正确设置为自定义类的路径。",
+      "reason": "确保触发条件已正确设置。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "当 DEFAULT_AUTO_FIELD 设置为自定义的 BigAutoField/SmallAutoField 子类时，定义模型不应抛出 ValueError，且其主键应为该子类的实例。",
+      "preferred_assertion_style": "isinstance",
+      "avoid": "避免断言完整的错误信息字符串，因为 Issue 中给出的信息可能不完整或未来会变化。避免断言与缺陷无关的模型属性。",
+      "reason": "修复的核心是允许自定义子类通过子类检查并成功创建主键。使用 isinstance 检查主键类型是稳定且与预期行为直接相关的断言。"
+    },
+    {
+      "assertion_goal": "自定义的 BigAutoField/SmallAutoField 子类应通过 issubclass(MyBigAutoField, models.AutoField) 检查。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免直接断言 AutoFieldMeta._subclasses 的内部实现细节。",
+      "reason": "这验证了类层次关系的正确性，是缺陷的根本原因之一。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 @isolate_apps 装饰器来隔离应用注册，防止模型冲突。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要使用 @override_settings 装饰器来动态设置 DEFAULT_AUTO_FIELD。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要在测试模块中定义自定义的 BigAutoField 或 SmallAutoField 子类。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试类应继承自 SimpleTestCase，因为它不涉及数据库操作。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "AutoFieldMeta._subclasses 方法的完整逻辑和设计意图，以及它是否应该递归地包含子类。",
+    "除了 __subclasscheck__ 之外，是否还有其他地方（如 _get_default_pk_class 中的直接类型检查）需要修改。",
+    "修复后，对于多层继承（例如，继承自 MyBigAutoField 的类）是否也应该被正确处理。"
+  ]
+}

@@ -1,0 +1,128 @@
+{
+  "issue_summary": "OrderedSet 目前不支持 reversed() 调用，需要添加 __reversed__ 方法。",
+  "trigger_condition": {
+    "text": "对 OrderedSet 实例调用 Python 内置的 reversed() 函数。",
+    "evidence": ["Issue 描述：'Currently, OrderedSet isn't reversible (i.e. allowed to be passed as an argument to Python's reversed()).'"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "尝试对 OrderedSet 调用 reversed() 时，可能会引发 TypeError，因为缺少 __reversed__ 方法。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 描述暗示当前不支持，且相关源码片段显示 OrderedSet 类定义中未列出 __reversed__ 方法。"],
+    "confidence": "medium"
+  },
+  "expected_behavior": {
+    "text": "OrderedSet 实例应支持 reversed() 调用，并返回一个反向迭代器。",
+    "evidence": ["Issue 描述：'This would be natural to support given that OrderedSet is ordered. This should be straightforward to add by adding a __reversed__() method to OrderedSet.'"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "OrderedSet",
+      "kind": "class",
+      "source_path": "django/utils/datastructures.py",
+      "reason": "Issue 的核心是关于为 OrderedSet 类添加 __reversed__ 方法。"
+    },
+    {
+      "name": "__reversed__",
+      "kind": "method",
+      "source_path": "django/utils/datastructures.py",
+      "reason": "Issue 明确指出需要添加此方法以实现 reversed() 支持。"
+    },
+    {
+      "name": "reversed",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 涉及 Python 内置的 reversed() 函数调用。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/utils/datastructures.py",
+      "object": "OrderedSet",
+      "lines": "5-35",
+      "reason": "源码片段显示 OrderedSet 类定义中缺少 __reversed__ 方法。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "OrderedSetTests.test_len",
+      "test_file": "tests/utils_tests/test_datastructures.py",
+      "why_relevant": "它测试 OrderedSet 的基本功能，提供了创建 OrderedSet 实例和调用方法的模式。",
+      "reusable_parts": ["imports", "class OrderedSetTests", "setup of OrderedSet instance", "assertEqual usage"],
+      "possible_gap": "它没有测试迭代或 reversed() 功能。"
+    },
+    {
+      "test_name": "OrderedSetTests.test_init_with_iterable",
+      "test_file": "tests/utils_tests/test_datastructures.py",
+      "why_relevant": "它展示了用可迭代对象初始化 OrderedSet 并检查顺序，与 ordered 属性相关。",
+      "reusable_parts": ["imports", "class OrderedSetTests", "initialization with iterable", "checking order via list(s.dict.keys())"],
+      "possible_gap": "它没有测试反向迭代。"
+    },
+    {
+      "test_name": "test_reversed_ordering",
+      "test_file": "tests/ordering/tests.py",
+      "why_relevant": "它测试了 Django 中另一个 ordered 对象（QuerySet）的 reverse() 方法，概念上相关。",
+      "reusable_parts": ["concept of testing reversed order", "assertQuerysetEqual for ordering"],
+      "possible_gap": "它测试的是 QuerySet，不是 OrderedSet，且使用 reverse() 方法而非 __reversed__。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "call_chain",
+      "current_pattern": "相似测试中调用 add(), remove(), len(), in 等现有方法。",
+      "target_pattern": "在测试中调用 reversed(ordered_set_instance)。",
+      "reason": "Issue 的核心触发条件是调用 reversed()，这是当前测试中缺失的操作。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试中 OrderedSet 包含少量元素（如 1, 2）。",
+      "target_pattern": "确保 OrderedSet 包含多个元素以验证反向迭代顺序。",
+      "reason": "为了有意义地测试 reversed()，需要验证元素顺序被正确反转。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "调用 reversed(ordered_set) 时是否引发 TypeError。",
+      "reason": "当前缺陷的典型表现是引发异常。修复后应不再引发。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "list(reversed(ordered_set)) 的结果。",
+      "reason": "修复后，应能获得反向的元素列表，可用于验证顺序。"
+    },
+    {
+      "kind": "order",
+      "expression_hint": "比较 list(ordered_set) 和 list(reversed(ordered_set)) 的顺序关系。",
+      "reason": "核心是验证反向迭代的顺序是正向迭代的逆序。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "对 OrderedSet 调用 reversed() 应成功并返回一个迭代器，其产生的元素顺序是原始顺序的逆序。",
+      "preferred_assertion_style": "order_equals",
+      "avoid": "避免断言完整的 repr 字符串或依赖内部 dict.keys() 表示，除非稳定。",
+      "reason": "Issue 关注的是功能支持（可逆）和顺序正确性，而非特定内部实现。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 SimpleTestCase 作为基类，如现有 OrderedSetTests 所示。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要导入 OrderedSet 类。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "当前 OrderedSet 的 __iter__ 方法具体实现和内部数据结构（例如，是否使用 dict）未在提供的源码片段中完全展示，可能影响 __reversed__ 的实现方式。",
+    "如果当前调用 reversed() 的确切异常类型和消息未在 Issue 中明确说明，需要通过实际运行来确认。",
+    "修复后 __reversed__ 方法返回的迭代器类型（如 list_reverseiterator）未指定。"
+  ]
+}

@@ -1,0 +1,277 @@
+{
+  "instance_id": "django__django-11400",
+  "issue_summary": "RelatedFieldListFilter 和 RelatedOnlyFieldListFilter 在相关模型排序上存在缺陷，未正确回退到 Model._meta.ordering 或 ModelAdmin.ordering。",
+  "trigger_condition": {
+    "text": "使用 RelatedFieldListFilter 或 RelatedOnlyFieldListFilter 作为 list_filter，且相关模型的 ModelAdmin 未定义 ordering 属性（对于 RelatedFieldListFilter），或即使定义了 ordering（对于 RelatedOnlyFieldListFilter）。",
+    "evidence": [
+      "Issue 描述：'RelatedFieldListFilter doesn't fall back to the ordering defined in Model._meta.ordering'，'RelatedOnlyFieldListFilter doesn't order the related model at all, even if ordering is defined on the related model's ModelAdmin class'。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "过滤器下拉列表中的选项（lookup_choices）未按预期顺序（如 Model._meta.ordering 或 ModelAdmin.ordering）排序，可能表现为无序或默认数据库顺序。",
+    "symptom_type": "wrong_order",
+    "evidence": [
+      "Issue 描述：'Ordering gets set to an empty tuple'，'doesn't order the related model at all'。相关测试 1 和 2 验证了 ordering 对 lookup_choices 顺序的影响。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "RelatedFieldListFilter 应优先使用相关模型 ModelAdmin 的 ordering，若无则回退到相关模型的 Model._meta.ordering。RelatedOnlyFieldListFilter 应同样尊重相关模型 ModelAdmin 的 ordering。",
+    "evidence": [
+      "Issue 描述：'IMHO it should fall back to the ordering defined in the related model's Meta.ordering field'，暗示了期望行为。相关测试 1 和 2 展示了 ModelAdmin.ordering 应影响排序。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "RelatedFieldListFilter",
+      "kind": "class",
+      "source_path": "django/contrib/admin/filters.py",
+      "reason": "Issue 直接报告了该类在排序上的问题。"
+    },
+    {
+      "name": "RelatedOnlyFieldListFilter",
+      "kind": "class",
+      "source_path": "django/contrib/admin/filters.py",
+      "reason": "Issue 直接报告了该类在排序上的问题。"
+    },
+    {
+      "name": "field_choices",
+      "kind": "method",
+      "source_path": "django/contrib/admin/filters.py",
+      "reason": "Issue 指出 RelatedOnlyFieldListFilter 的 field_choices 方法省略了 ordering 参数。"
+    },
+    {
+      "name": "get_queryset",
+      "kind": "method",
+      "source_path": "",
+      "reason": "相关测试 3 中 ModelAdmin 的 get_queryset 可能影响过滤器的数据源。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/contrib/admin/filters.py",
+      "object": "RelatedFieldListFilter.field_choices",
+      "lines": "162-220",
+      "reason": "Issue 提到 ordering 在行 196 附近被设置为空元组，且未回退到 Model._meta.ordering。"
+    },
+    {
+      "path": "django/contrib/admin/filters.py",
+      "object": "RelatedOnlyFieldListFilter.field_choices",
+      "lines": "419-422",
+      "reason": "Issue 指出该方法调用 field.get_choices 时完全省略了 ordering 参数。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_relatedfieldlistfilter_foreignkey_ordering",
+      "test_file": "tests/admin_filters/tests.py",
+      "why_relevant": "它测试了 RelatedFieldListFilter 在相关模型的 ModelAdmin 定义了 ordering 时的行为，直接涉及排序问题。",
+      "reusable_parts": [
+        "TestCase 框架、ModelAdmin 子类定义、site.register 模式、request 和 changelist 构造、filterspec 获取、对 filterspec.lookup_choices 的顺序断言。"
+      ],
+      "possible_gap": "它只测试了 ModelAdmin.ordering 存在的情况，没有测试当 ModelAdmin.ordering 缺失时是否回退到 Model._meta.ordering（Issue 的核心问题之一）。"
+    },
+    {
+      "test_name": "test_relatedonlyfieldlistfilter_foreignkey",
+      "test_file": "tests/admin_filters/tests.py",
+      "why_relevant": "它测试了 RelatedOnlyFieldListFilter 的基本功能，但未测试排序。可作为变异起点来添加排序验证。",
+      "reusable_parts": [
+        "测试类结构、modeladmin 构造、request 和 changelist 设置、filterspec 提取。"
+      ],
+      "possible_gap": "它没有验证 lookup_choices 的顺序，且使用了 sorted() 进行比较，掩盖了顺序问题。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "相关测试 1 中，为相关模型（Employee）的 ModelAdmin 显式定义了 ordering = ('name',)。",
+      "target_pattern": "不定义相关模型 ModelAdmin 的 ordering 属性，或将其设置为空，以测试回退到 Model._meta.ordering 的行为。",
+      "reason": "Issue 指出当 ModelAdmin.ordering 未定义时，排序会错误地保持为空元组，而非回退。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "相关测试 1 和 2 通过 BookAdmin 的 list_filter 触发 RelatedFieldListFilter。",
+      "target_pattern": "使用 RelatedOnlyFieldListFilter 并为其相关模型的 ModelAdmin 定义 ordering，以测试 ordering 参数是否被传递。",
+      "reason": "Issue 指出 RelatedOnlyFieldListFilter 的 field_choices 完全省略了 ordering 参数。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "order",
+      "expression_hint": "filterspec.lookup_choices 中选项的顺序（例如 [(pk, name), ...]）。",
+      "reason": "Issue 的核心是排序错误，直接观察 lookup_choices 的顺序可以判断是否触发了缺陷。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "传递给 field.get_choices 的 ordering 参数值（可能通过 mock 或插桩观测）。",
+      "reason": "Issue 指出 ordering 参数被设置为空元组或完全省略，观测其值可以定位缺陷。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 filterspec.lookup_choices 的顺序与预期顺序（如 Model._meta.ordering 或 ModelAdmin.ordering 定义）一致。",
+      "preferred_assertion_style": "order_equals",
+      "avoid": "使用 sorted() 进行比较，因为它会掩盖顺序问题；避免断言完整的 SQL 字符串。",
+      "reason": "Issue 是关于顺序错误，直接比较顺序列表能稳定地捕获缺陷。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要 Django TestCase、测试数据库、自定义 Model 和 ModelAdmin、site 注册与清理。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要为相关模型定义 Meta.ordering。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "Model._meta.ordering 的确切格式和它在过滤器代码中如何被访问。",
+    "当 ModelAdmin.ordering 和 Model._meta.ordering 都存在时，预期的优先级顺序是什么。",
+    "RelatedOnlyFieldListFilter 的 field_choices 方法内部是否还有其他影响排序的逻辑。"
+  ],
+  "raw": {
+    "issue_summary": "RelatedFieldListFilter 和 RelatedOnlyFieldListFilter 在相关模型排序上存在缺陷，未正确回退到 Model._meta.ordering 或 ModelAdmin.ordering。",
+    "trigger_condition": {
+      "text": "使用 RelatedFieldListFilter 或 RelatedOnlyFieldListFilter 作为 list_filter，且相关模型的 ModelAdmin 未定义 ordering 属性（对于 RelatedFieldListFilter），或即使定义了 ordering（对于 RelatedOnlyFieldListFilter）。",
+      "evidence": [
+        "Issue 描述：'RelatedFieldListFilter doesn't fall back to the ordering defined in Model._meta.ordering'，'RelatedOnlyFieldListFilter doesn't order the related model at all, even if ordering is defined on the related model's ModelAdmin class'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "过滤器下拉列表中的选项（lookup_choices）未按预期顺序（如 Model._meta.ordering 或 ModelAdmin.ordering）排序，可能表现为无序或默认数据库顺序。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 描述：'Ordering gets set to an empty tuple'，'doesn't order the related model at all'。相关测试 1 和 2 验证了 ordering 对 lookup_choices 顺序的影响。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "RelatedFieldListFilter 应优先使用相关模型 ModelAdmin 的 ordering，若无则回退到相关模型的 Model._meta.ordering。RelatedOnlyFieldListFilter 应同样尊重相关模型 ModelAdmin 的 ordering。",
+      "evidence": [
+        "Issue 描述：'IMHO it should fall back to the ordering defined in the related model's Meta.ordering field'，暗示了期望行为。相关测试 1 和 2 展示了 ModelAdmin.ordering 应影响排序。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "RelatedFieldListFilter",
+        "kind": "class",
+        "source_path": "django/contrib/admin/filters.py",
+        "reason": "Issue 直接报告了该类在排序上的问题。"
+      },
+      {
+        "name": "RelatedOnlyFieldListFilter",
+        "kind": "class",
+        "source_path": "django/contrib/admin/filters.py",
+        "reason": "Issue 直接报告了该类在排序上的问题。"
+      },
+      {
+        "name": "field_choices",
+        "kind": "method",
+        "source_path": "django/contrib/admin/filters.py",
+        "reason": "Issue 指出 RelatedOnlyFieldListFilter 的 field_choices 方法省略了 ordering 参数。"
+      },
+      {
+        "name": "get_queryset",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 3 中 ModelAdmin 的 get_queryset 可能影响过滤器的数据源。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/filters.py",
+        "object": "RelatedFieldListFilter.field_choices",
+        "lines": "162-220",
+        "reason": "Issue 提到 ordering 在行 196 附近被设置为空元组，且未回退到 Model._meta.ordering。"
+      },
+      {
+        "path": "django/contrib/admin/filters.py",
+        "object": "RelatedOnlyFieldListFilter.field_choices",
+        "lines": "419-422",
+        "reason": "Issue 指出该方法调用 field.get_choices 时完全省略了 ordering 参数。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_relatedfieldlistfilter_foreignkey_ordering",
+        "test_file": "tests/admin_filters/tests.py",
+        "why_relevant": "它测试了 RelatedFieldListFilter 在相关模型的 ModelAdmin 定义了 ordering 时的行为，直接涉及排序问题。",
+        "reusable_parts": [
+          "TestCase 框架、ModelAdmin 子类定义、site.register 模式、request 和 changelist 构造、filterspec 获取、对 filterspec.lookup_choices 的顺序断言。"
+        ],
+        "possible_gap": "它只测试了 ModelAdmin.ordering 存在的情况，没有测试当 ModelAdmin.ordering 缺失时是否回退到 Model._meta.ordering（Issue 的核心问题之一）。"
+      },
+      {
+        "test_name": "test_relatedonlyfieldlistfilter_foreignkey",
+        "test_file": "tests/admin_filters/tests.py",
+        "why_relevant": "它测试了 RelatedOnlyFieldListFilter 的基本功能，但未测试排序。可作为变异起点来添加排序验证。",
+        "reusable_parts": [
+          "测试类结构、modeladmin 构造、request 和 changelist 设置、filterspec 提取。"
+        ],
+        "possible_gap": "它没有验证 lookup_choices 的顺序，且使用了 sorted() 进行比较，掩盖了顺序问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 中，为相关模型（Employee）的 ModelAdmin 显式定义了 ordering = ('name',)。",
+        "target_pattern": "不定义相关模型 ModelAdmin 的 ordering 属性，或将其设置为空，以测试回退到 Model._meta.ordering 的行为。",
+        "reason": "Issue 指出当 ModelAdmin.ordering 未定义时，排序会错误地保持为空元组，而非回退。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 和 2 通过 BookAdmin 的 list_filter 触发 RelatedFieldListFilter。",
+        "target_pattern": "使用 RelatedOnlyFieldListFilter 并为其相关模型的 ModelAdmin 定义 ordering，以测试 ordering 参数是否被传递。",
+        "reason": "Issue 指出 RelatedOnlyFieldListFilter 的 field_choices 完全省略了 ordering 参数。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "order",
+        "expression_hint": "filterspec.lookup_choices 中选项的顺序（例如 [(pk, name), ...]）。",
+        "reason": "Issue 的核心是排序错误，直接观察 lookup_choices 的顺序可以判断是否触发了缺陷。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "传递给 field.get_choices 的 ordering 参数值（可能通过 mock 或插桩观测）。",
+        "reason": "Issue 指出 ordering 参数被设置为空元组或完全省略，观测其值可以定位缺陷。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 filterspec.lookup_choices 的顺序与预期顺序（如 Model._meta.ordering 或 ModelAdmin.ordering 定义）一致。",
+        "preferred_assertion_style": "order_equals",
+        "avoid": "使用 sorted() 进行比较，因为它会掩盖顺序问题；避免断言完整的 SQL 字符串。",
+        "reason": "Issue 是关于顺序错误，直接比较顺序列表能稳定地捕获缺陷。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要 Django TestCase、测试数据库、自定义 Model 和 ModelAdmin、site 注册与清理。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要为相关模型定义 Meta.ordering。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "Model._meta.ordering 的确切格式和它在过滤器代码中如何被访问。",
+      "当 ModelAdmin.ordering 和 Model._meta.ordering 都存在时，预期的优先级顺序是什么。",
+      "RelatedOnlyFieldListFilter 的 field_choices 方法内部是否还有其他影响排序的逻辑。"
+    ]
+  }
+}

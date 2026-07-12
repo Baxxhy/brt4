@@ -1,0 +1,134 @@
+instance_id: django__django-15973
+
+issue_summary: 当在多对多字段的through参数中引用另一个应用的模型时，迁移过程中会抛出AttributeError: 'str' object has no attribute '_meta'异常。
+
+trigger_condition:
+{
+  "text": "在多对多字段的through参数中指定一个位于不同应用（app）的模型，然后运行迁移（migrate）。",
+  "evidence": [
+    "Issue描述：'The many-to-many field uses fonte_variavel model as the \"through\" argument.'，且模型定义在'core/fonte_variavel/models.py'，而ManyToManyField定义在'core/fonte/models.py'。",
+    "Issue描述：'If I put \"fonte_variavel\" model inside \"fonte\"'s models.py, it works, but if I do the same for \"variavel\" and continue having FonteVariavelModel in a different app, it continues not working, so the problem must be with exclusively with the ManyToMany intermediary model.'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "运行迁移时，在schema_editor.create_model(model)过程中抛出AttributeError: 'str' object has no attribute '_meta'。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue中的traceback：'File \"/home/elysium/.local/share/virtualenvs/django-bugfix-O9qARFZW/lib/python3.9/site-packages/django/db/backends/base/schema.py\", line 453, in create_model if field.remote_field.through._meta.auto_created: AttributeError: 'str' object has no attribute '_meta''。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "迁移应能成功执行，即使多对多字段的through模型定义在另一个应用中。",
+  "evidence": [
+    "Issue描述：'Putting everything in the same models.py file also works.'，这表明当模型在同一应用内时，迁移是成功的。",
+    "相关测试1和2展示了在测试环境中，通过模型在同一应用内（app_label=\"schema\"）时，create_model操作可以成功执行。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "django.db.models.fields.related.ManyToManyField",
+    "kind": "class",
+    "source_path": "django/db/models/fields/related.py",
+    "reason": "Issue的核心是ManyToManyField的through参数处理问题。"
+  },
+  {
+    "name": "django.db.backends.base.schema.BaseDatabaseSchemaEditor.create_model",
+    "kind": "method",
+    "source_path": "django/db/backends/base/schema.py",
+    "reason": "错误发生在create_model方法中处理多对多字段时。"
+  },
+  {
+    "name": "django.db.migrations.operations.models.CreateModel.database_forwards",
+    "kind": "method",
+    "source_path": "django/db/migrations/operations/models.py",
+    "reason": "迁移操作会调用database_forwards，进而调用create_model。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "相似测试中，所有相关模型（包括through模型）都定义在同一个app_label（例如\"schema\"）下。",
+    "target_pattern": "将through模型定义在与源模型（定义ManyToManyField的模型）不同的app_label下。",
+    "reason": "Issue表明，当through模型位于不同应用时，迁移过程中through引用可能未被正确解析为模型对象，而保持为字符串，导致后续访问._meta失败。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "在测试中，模型是直接定义的本地类，并通过new_apps或类似机制注册，然后立即调用create_model。",
+    "target_pattern": "模拟迁移过程：模型定义在分离的文件/模块中，通过迁移操作（如CreateModel）的database_forwards来触发create_model。",
+    "reason": "Issue中的错误发生在执行迁移时，此时模型是通过迁移状态（state.apps）获取的，可能与测试中直接操作模型类的环境不同。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "在调用schema_editor.create_model(model)时捕获AttributeError，并检查异常消息是否包含'str' object has no attribute '_meta'。",
+    "reason": "这是Issue中直接观察到的错误现象，是判断缺陷是否触发的直接标志。"
+  },
+  {
+    "kind": "type",
+    "expression_hint": "在create_model方法中，在处理多对多字段循环时，检查field.remote_field.through的类型。在正常（同一应用）情况下应为模型类，在缺陷（跨应用）情况下可能为字符串。",
+    "reason": "错误根源在于through被当作字符串而非模型对象访问其_meta属性。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "迁移状态（state.apps）中模型引用的解析情况，特别是跨应用引用的解析。",
+    "reason": "迁移时模型引用需要正确解析为实际模型类，跨应用引用可能在此处出现问题。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "迁移操作（或直接调用create_model）应成功完成，不抛出AttributeError。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言具体的SQL输出或完整的模型_meta内容。",
+    "reason": "Issue的核心是迁移失败并抛出特定异常。一个稳定的断言是验证在跨应用through配置下，迁移操作不会引发该异常。注意：修复后应正常，所以测试中应使用assert not raises或验证操作成功。但作为复现测试，初始目标是触发异常。"
+  },
+  {
+    "assertion_goal": "field.remote_field.through应是一个模型类（具有_meta属性），而不是字符串。",
+    "preferred_assertion_style": "isinstance",
+    "avoid": "断言through等于特定的模型类名字符串。",
+    "reason": "直接检查through属性的类型可以定位问题根源，且不依赖于具体的模型名称。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用TransactionTestCase或TestCase，并可能涉及数据库schema操作。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要设置多个Django应用（app），并将模型定义在不同的应用中。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要模拟迁移状态（state）和apps注册器，或者直接使用schema_editor在测试中创建模型。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "错误发生的精确条件：是否仅当through模型所在的应用的迁移顺序（dependencies）在源模型之后时才会触发？Issue中显示fonte的迁移依赖('variavel', '__first__')，但没有fonte_variavel。",
+  "在迁移状态（state.apps）中，字符串形式的模型引用（如'fonte_variavel.FonteVariavelModel'）是在哪个环节、由哪个函数负责解析为模型类的？",
+  "修复后的预期行为下，through模型跨应用引用时，迁移生成的SQL或表结构是否与同应用时完全一致？"
+]

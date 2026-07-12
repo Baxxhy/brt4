@@ -1,0 +1,466 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+simplify(cos(x)**I): Invalid comparison of complex I (fu.py)
+```
+>>> from sympy import *
+>>> x = Symbol('x')
+>>> print(simplify(cos(x)**I))
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/home/e/se/sympy/simplify/simplify.py", line 587, in simplify
+    expr = trigsimp(expr, deep=True)
+  File "/home/e/se/sympy/simplify/trigsimp.py", line 508, in trigsimp
+    return trigsimpfunc(expr)
+  File "/home/e/se/sympy/simplify/trigsimp.py", line 501, in <lambda>
+    'matching': (lambda x: futrig(x)),
+  File "/home/e/se/sympy/simplify/trigsimp.py", line 1101, in futrig
+    e = bottom_up(e, lambda x: _futrig(x, **kwargs))
+  File "/home/e/se/sympy/simplify/simplify.py", line 1081, in bottom_up
+    rv = F(rv)
+  File "/home/e/se/sympy/simplify/trigsimp.py", line 1101, in <lambda>
+    e = bottom_up(e, lambda x: _futrig(x, **kwargs))
+  File "/home/e/se/sympy/simplify/trigsimp.py", line 1169, in _futrig
+    e = greedy(tree, objective=Lops)(e)
+  File "/home/e/se/sympy/strategies/core.py", line 115, in minrule
+    return min([rule(expr) for rule in rules], key=objective)
+  File "/home/e/se/sympy/strategies/core.py", line 115, in <listcomp>
+    return min([rule(expr) for rule in rules], key=objective)
+  File "/home/e/se/sympy/strategies/core.py", line 44, in chain_rl
+    expr = rule(expr)
+  File "/home/e/se/sympy/simplify/fu.py", line 566, in TR6
+    return _TR56(rv, cos, sin, lambda x: 1 - x, max=max, pow=pow)
+  File "/home/e/se/sympy/simplify/fu.py", line 524, in _TR56
+    return bottom_up(rv, _f)
+  File "/home/e/se/sympy/simplify/simplify.py", line 1081, in bottom_up
+    rv = F(rv)
+  File "/home/e/se/sympy/simplify/fu.py", line 504, in _f
+    if (rv.exp < 0) == True:
+  File "/home/e/se/sympy/core/expr.py", line 406, in __lt__
+    raise TypeError("Invalid comparison of complex %s" % me)
+TypeError: Invalid comparison of complex I
+```
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/simplify/simplify.py
+对象名称：simplify
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 2】
+文件路径：sympy/simplify/trigsimp.py
+对象名称：trigsimp
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 3】
+文件路径：sympy/simplify/trigsimp.py
+对象名称：futrig
+节点类型：top-level function
+父节点：trigsimp
+行号范围：1069-1110
+代码：
+def futrig(e, **kwargs):
+    """Return simplified ``e`` using Fu-like transformations.
+    This is not the "Fu" algorithm. This is called by default
+    from ``trigsimp``. By default, hyperbolics subexpressions
+    will be simplified, but this can be disabled by setting
+    ``hyper=False``.
+
+    Examples
+    ========
+
+    >>> from sympy import trigsimp, tan, sinh, tanh
+    >>> from sympy.simplify.trigsimp import futrig
+    >>> from sympy.abc import x
+    >>> trigsimp(1/tan(x)**2)
+    tan(x)**(-2)
+
+    >>> futrig(sinh(x)/tanh(x))
+    cosh(x)
+
+    """
+    from sympy.simplify.fu import hyper_as_trig
+    from sympy.simplify.simplify import bottom_up
+
+    e = sympify(e)
+
+    if not isinstance(e, Basic):
+        return e
+
+    if not e.args:
+        return e
+
+    old = e
+    e = bottom_up(e, lambda x: _futrig(x, **kwargs))
+
+    if kwargs.pop('hyper', True) and e.has(HyperbolicFunction):
+        e, f = hyper_as_trig(e)
+        e = f(_futrig(e))
+
+    if e != old and e.is_Mul and e.args[0].is_Rational:
+        # redistribute leading coeff on 2-arg Add
+        e = Mul(*e.as_coeff_Mul())
+    return e
+
+
+【源码片段 4】
+文件路径：sympy/simplify/simplify.py
+对象名称：bottom_up
+节点类型：top-level function
+父节点：simplify
+行号范围：1070-1091
+代码：
+def bottom_up(rv, F, atoms=False, nonbasic=False):
+    """Apply ``F`` to all expressions in an expression tree from the
+    bottom up. If ``atoms`` is True, apply ``F`` even if there are no args;
+    if ``nonbasic`` is True, try to apply ``F`` to non-Basic objects.
+    """
+    args = getattr(rv, 'args', None)
+    if args is not None:
+        if args:
+            args = tuple([bottom_up(a, F, atoms, nonbasic) for a in args])
+            if args != rv.args:
+                rv = rv.func(*args)
+            rv = F(rv)
+        elif atoms:
+            rv = F(rv)
+    else:
+        if nonbasic:
+            try:
+                rv = F(rv)
+            except TypeError:
+                pass
+
+    return rv
+
+
+【源码片段 5】
+文件路径：sympy/simplify/trigsimp.py
+对象名称：_futrig
+节点类型：top-level function
+父节点：trigsimp
+行号范围：1113-1170
+代码：
+def _futrig(e, **kwargs):
+    """Helper for futrig."""
+    from sympy.simplify.fu import (
+        TR1, TR2, TR3, TR2i, TR10, L, TR10i,
+        TR8, TR6, TR15, TR16, TR111, TR5, TRmorrie, TR11, TR14, TR22,
+        TR12)
+    from sympy.core.compatibility import _nodes
+
+    if not e.has(TrigonometricFunction):
+        return e
+
+    if e.is_Mul:
+        coeff, e = e.as_independent(TrigonometricFunction)
+    else:
+        coeff = S.One
+
+    Lops = lambda x: (L(x), x.count_ops(), _nodes(x), len(x.args), x.is_Add)
+    trigs = lambda x: x.has(TrigonometricFunction)
+
+    tree = [identity,
+        (
+        TR3,  # canonical angles
+        TR1,  # sec-csc -> cos-sin
+        TR12,  # expand tan of sum
+        lambda x: _eapply(factor, x, trigs),
+        TR2,  # tan-cot -> sin-cos
+        [identity, lambda x: _eapply(_mexpand, x, trigs)],
+        TR2i,  # sin-cos ratio -> tan
+        lambda x: _eapply(lambda i: factor(i.normal()), x, trigs),
+        TR14,  # factored identities
+        TR5,  # sin-pow -> cos_pow
+        TR10,  # sin-cos of sums -> sin-cos prod
+        TR11, TR6, # reduce double angles and rewrite cos pows
+        lambda x: _eapply(factor, x, trigs),
+        TR14,  # factored powers of identities
+        [identity, lambda x: _eapply(_mexpand, x, trigs)],
+        TR10i,  # sin-cos products > sin-cos of sums
+        TRmorrie,
+        [identity, TR8],  # sin-cos products -> sin-cos of sums
+        [identity, lambda x: TR2i(TR2(x))],  # tan -> sin-cos -> tan
+        [
+            lambda x: _eapply(expand_mul, TR5(x), trigs),
+            lambda x: _eapply(
+                expand_mul, TR15(x), trigs)], # pos/neg powers of sin
+        [
+            lambda x:  _eapply(expand_mul, TR6(x), trigs),
+            lambda x:  _eapply(
+                expand_mul, TR16(x), trigs)], # pos/neg powers of cos
+        TR111,  # tan, sin, cos to neg power -> cot, csc, sec
+        [identity, TR2i],  # sin-cos ratio to tan
+        [identity, lambda x: _eapply(
+            expand_mul, TR22(x), trigs)],  # tan-cot to sec-csc
+        TR1, TR2, TR2i,
+        [identity, lambda x: _eapply(
+            factor_terms, TR12(x), trigs)],  # expand tan of sum
+        )]
+    e = greedy(tree, objective=Lops)(e)
+    return coeff*e
+
+
+【源码片段 6】
+文件路径：sympy/simplify/fu.py
+对象名称：TR6
+节点类型：top-level function
+父节点：fu
+行号范围：548-566
+代码：
+def TR6(rv, max=4, pow=False):
+    """Replacement of cos**2 with 1 - sin(x)**2.
+
+    See _TR56 docstring for advanced use of ``max`` and ``pow``.
+
+    Examples
+    ========
+
+    >>> from sympy.simplify.fu import TR6
+    >>> from sympy.abc import x
+    >>> from sympy import cos
+    >>> TR6(cos(x)**2)
+    1 - sin(x)**2
+    >>> TR6(cos(x)**-2)  #unchanged
+    cos(x)**(-2)
+    >>> TR6(cos(x)**4)
+    (1 - sin(x)**2)**2
+    """
+    return _TR56(rv, cos, sin, lambda x: 1 - x, max=max, pow=pow)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/simplify/tests/test_fu.py
+测试名称：test__TR56
+测试代码：
+def test__TR56():
+    h = lambda x: 1 - x
+    assert T(sin(x)**3, sin, cos, h, 4, False) == sin(x)**3
+    assert T(sin(x)**10, sin, cos, h, 4, False) == sin(x)**10
+    assert T(sin(x)**6, sin, cos, h, 6, False) == (-cos(x)**2 + 1)**3
+    assert T(sin(x)**6, sin, cos, h, 6, True) == sin(x)**6
+    assert T(sin(x)**8, sin, cos, h, 10, True) == (-cos(x)**2 + 1)**4
+
+【相关测试 2】
+测试文件：sympy/simplify/tests/test_fu.py
+测试名称：test_TR6
+测试代码：
+def test_TR6():
+    assert TR6(cos(x)**2) == -sin(x)**2 + 1
+    assert TR6(cos(x)**-2) == cos(x)**(-2)
+    assert TR6(cos(x)**4) == (-sin(x)**2 + 1)**2
+
+【相关测试 3】
+测试文件：sympy/simplify/tests/test_trigsimp.py
+测试名称：test_issue_2827_trigsimp_methods
+测试代码：
+def test_issue_2827_trigsimp_methods():
+    measure1 = lambda expr: len(str(expr))
+    measure2 = lambda expr: -count_ops(expr)
+                                       # Return the most complicated result
+    expr = (x + 1)/(x + sin(x)**2 + cos(x)**2)
+    ans = Matrix([1])
+    M = Matrix([expr])
+    assert trigsimp(M, method='fu', measure=measure1) == ans
+    assert trigsimp(M, method='fu', measure=measure2) != ans
+    # all methods should work with Basic expressions even if they
+    # aren't Expr
+    M = Matrix.eye(1)
+    assert all(trigsimp(M, method=m) == M for m in
+        'fu matching groebner old'.split())
+    # watch for E in exptrigsimp, not only exp()
+    eq = 1/sqrt(E) + E
+    assert exptrigsimp(eq) == eq
+
+【相关测试 4】
+测试文件：sympy/simplify/tests/test_trigsimp.py
+测试名称：test_trigsimp_issues
+测试代码：
+def test_trigsimp_issues():
+    a, x, y = symbols('a x y')
+
+    # issue 4625 - factor_terms works, too
+    assert trigsimp(sin(x)**3 + cos(x)**2*sin(x)) == sin(x)
+
+    # issue 5948
+    assert trigsimp(diff(integrate(cos(x)/sin(x)**3, x), x)) == \
+        cos(x)/sin(x)**3
+    assert trigsimp(diff(integrate(sin(x)/cos(x)**3, x), x)) == \
+        sin(x)/cos(x)**3
+
+    # check integer exponents
+    e = sin(x)**y/cos(x)**y
+    assert trigsimp(e) == e
+    assert trigsimp(e.subs(y, 2)) == tan(x)**2
+    assert trigsimp(e.subs(x, 1)) == tan(1)**y
+
+    # check for multiple patterns
+    assert (cos(x)**2/sin(x)**2*cos(y)**2/sin(y)**2).trigsimp() == \
+        1/tan(x)**2/tan(y)**2
+    assert trigsimp(cos(x)/sin(x)*cos(x+y)/sin(x+y)) == \
+        1/(tan(x)*tan(x + y))
+
+    eq = cos(2)*(cos(3) + 1)**2/(cos(3) - 1)**2
+    assert trigsimp(eq) == eq.factor()  # factor makes denom (-1 + cos(3))**2
+    assert trigsimp(cos(2)*(cos(3) + 1)**2*(cos(3) - 1)**2) == \
+        cos(2)*sin(3)**4
+
+    # issue 6789; this generates an expression that formerly caused
+    # trigsimp to hang
+    assert cot(x).equals(tan(x)) is False
+
+    # nan or the unchanged expression is ok, but not sin(1)
+    z = cos(x)**2 + sin(x)**2 - 1
+    z1 = tan(x)**2 - 1/cot(x)**2
+    n = (1 + z1/z)
+    assert trigsimp(sin(n)) != sin(1)
+    eq = x*(n - 1) - x*n
+    assert trigsimp(eq) is S.NaN
+    assert trigsimp(eq, recursive=True) is S.NaN
+    assert trigsimp(1).is_Integer
+
+    assert trigsimp(-sin(x)**4 - 2*sin(x)**2*cos(x)**2 - cos(x)**4) == -1
+
+【相关测试 5】
+测试文件：sympy/simplify/tests/test_simplify.py
+测试名称：test_simplify_complex
+测试代码：
+def test_simplify_complex():
+    cosAsExp = cos(x)._eval_rewrite_as_exp(x)
+    tanAsExp = tan(x)._eval_rewrite_as_exp(x)
+    assert simplify(cosAsExp*tanAsExp) == sin(x) # issue 4341
+
+    # issue 10124
+    assert simplify(exp(Matrix([[0, -1], [1, 0]]))) == Matrix([[cos(1),
+        -sin(1)], [sin(1), cos(1)]])
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

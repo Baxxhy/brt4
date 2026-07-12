@@ -1,0 +1,377 @@
+{
+  "instance_id": "django__django-14792",
+  "issue_summary": "使用 Etc/GMT-10 等时区时，Trunc/Extract 数据库函数生成的 SQL 查询中时区符号被错误反转。",
+  "trigger_condition": {
+    "text": "当 USE_TZ=True 时，对 Trunc 或 Extract 函数使用 tzinfo 参数指定为 Etc/GMT-10 或类似时区对象（如 pytz.timezone('Etc/GMT-10') 或 zoneinfo.ZoneInfo('Etc/GMT-10')）。",
+    "evidence": [
+      "Issue 描述：'When using a time zone of \"Etc/GMT-10\" (or similar) for a Trunc class tzinfo...'",
+      "源码片段 2 显示 get_tzname 方法会调用 timezone._get_timezone_name(self.tzinfo)。",
+      "相关测试 1 和 2 展示了为 Extract 和 Trunc 函数提供 tzinfo 参数的用法。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "生成的 SQL 查询中，AT TIME ZONE 子句的时区字符串符号错误反转（例如应为 '-10' 却得到 'Etc/GMT+10'），导致时区转换方向与预期相反。",
+    "symptom_type": "wrong_sql",
+    "evidence": [
+      "Issue 中对比了 Django 3.1 和 3.2 生成的 SQL 片段：'AT TIME ZONE \\'-10\\'' vs 'AT TIME ZONE \\'Etc/GMT+10\\''。",
+      "Issue 指出：'This later, incorrectly, becomes \"Etc/GMT+10\" in the resulting query...'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "对于 Etc/GMT-10 时区，生成的 SQL 查询应正确表示东十区（即相对于 UTC 加 10 小时），例如 AT TIME ZONE '-10' 或等效表示。",
+    "evidence": [
+      "Issue 描述了 Django 3.1 的行为：'On Django 3.1 the TimezoneMixin method get_tzname() returns \"+10\"... This later becomes \"-10\" in the resulting query...'，并暗示这是正确的方向。",
+      "Issue 标题和描述表明当前行为是 'Reverse time zone conversion'，即反转了，因此修复后不应反转。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "Trunc",
+      "kind": "class",
+      "source_path": "django/db/models/functions/datetime.py",
+      "reason": "Issue 标题和描述明确指出 Trunc() 函数受影响。"
+    },
+    {
+      "name": "Extract",
+      "kind": "class",
+      "source_path": "django/db/models/functions/datetime.py",
+      "reason": "Issue 标题和描述明确指出 Extract() 函数受影响。"
+    },
+    {
+      "name": "TimezoneMixin.get_tzname",
+      "kind": "method",
+      "source_path": "django/db/models/functions/datetime.py",
+      "reason": "Issue 提到 TimezoneMixin.get_tzname() 的返回值变化是问题的起点。"
+    },
+    {
+      "name": "timezone._get_timezone_name",
+      "kind": "function",
+      "source_path": "django/utils/timezone.py",
+      "reason": "Issue 指出 Django 3.2 中此函数返回值的改变导致了后续问题。"
+    },
+    {
+      "name": "DatabaseOperations._prepare_tzname_delta",
+      "kind": "method",
+      "source_path": "django/db/backends/postgresql/operations.py",
+      "reason": "Issue 指出此方法对时区名字符串进行了符号反转处理，是导致最终 SQL 错误的关键环节。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/utils/timezone.py",
+      "object": "_get_timezone_name",
+      "lines": "74-76",
+      "reason": "Issue 显示此函数在 Django 3.2 中返回了完整的时区名称（如 'Etc/GMT-10'），而在 3.1 中返回了偏移字符串（如 '+10'）。这改变了后续处理的输入。"
+    },
+    {
+      "path": "django/db/backends/postgresql/operations.py",
+      "object": "_prepare_tzname_delta",
+      "lines": "46-51",
+      "reason": "此方法对包含 '+' 或 '-' 的字符串进行符号反转。当输入为 'Etc/GMT-10' 时，会错误地输出 'Etc/GMT+10'，导致时区方向反转。"
+    },
+    {
+      "path": "django/db/models/functions/datetime.py",
+      "object": "TimezoneMixin.get_tzname",
+      "lines": "17-28",
+      "reason": "此方法调用 _get_timezone_name，其返回值的变化会直接影响后续查询生成。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "DateFunctionWithTimeZoneTests.test_extract_func_with_timezone",
+      "test_file": "tests/db_functions/datetime/test_extract_trunc.py",
+      "why_relevant": "该测试展示了为 Extract 函数提供不同 tzinfo 参数（包括基于 timedelta 的时区）的用法，并验证了正确的时间提取结果。",
+      "reusable_parts": [
+        "测试类装饰器 @override_settings(USE_TZ=True, TIME_ZONE='UTC')",
+        "使用 timezone.make_aware 创建感知时间对象",
+        "使用 DTModel.objects.annotate 和 Extract 进行查询",
+        "使用 assertEqual 验证提取结果"
+      ],
+      "possible_gap": "该测试使用了 'Australia/Melbourne' 和基于 timedelta 的时区，但没有使用 'Etc/GMT-10' 这类特殊的 POSIX 时区，因此可能无法触发 _prepare_tzname_delta 中的符号反转逻辑。"
+    },
+    {
+      "test_name": "DateFunctionWithTimeZoneTests.test_trunc_func_with_timezone",
+      "test_file": "tests/db_functions/datetime/test_extract_trunc.py",
+      "why_relevant": "该测试展示了为 Trunc 函数提供 tzinfo 参数的用法，并验证了截断结果。",
+      "reusable_parts": [
+        "测试类装饰器 @override_settings(USE_TZ=True, TIME_ZONE='UTC')",
+        "使用 timezone.make_aware 创建感知时间对象",
+        "使用 DTModel.objects.annotate 和 Trunc 进行查询",
+        "使用 assertQuerysetEqual 验证截断结果",
+        "辅助函数 truncate_to"
+      ],
+      "possible_gap": "该测试同样使用了 'Australia/Melbourne'，没有测试 'Etc/GMT-10' 时区，且其断言依赖于高阶的 assertQuerysetEqual 和辅助函数，可能不便于直接观察生成的原始 SQL。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中使用常规时区名称（如 'Australia/Melbourne'）或基于 timedelta 的时区对象作为 tzinfo 参数。",
+      "target_pattern": "将 tzinfo 参数改为使用 'Etc/GMT-10' 或 'Etc/GMT+5' 等 POSIX 时区对象（通过 pytz.timezone 或 zoneinfo.ZoneInfo 创建）。",
+      "reason": "Issue 明确指出问题发生在使用 'Etc/GMT-10' 这类时区时。常规时区名称可能不会触发 _prepare_tzname_delta 中的符号反转逻辑，或者反转逻辑对它们无害。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "测试设置 USE_TZ=True。",
+      "target_pattern": "保持 USE_TZ=True。",
+      "reason": "Issue 和源码显示，只有在 USE_TZ=True 时，get_tzname 方法才会尝试获取时区名称。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "sql",
+      "expression_hint": "生成的 SQL 查询字符串，特别是 AT TIME ZONE 子句后的部分。",
+      "reason": "Issue 的核心错误现象是生成的 SQL 中时区字符串符号错误。观察原始 SQL 可以直接判断问题是否出现。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "timezone._get_timezone_name(tzinfo) 的返回值。",
+      "reason": "Issue 显示此函数返回值在 Django 3.1 和 3.2 之间发生了变化，是问题链的起点。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "TimezoneMixin.get_tzname() 的返回值。",
+      "reason": "此方法返回的时区名称会传递给数据库后端进行进一步处理。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "DatabaseOperations._prepare_tzname_delta(tzname) 的返回值（如果能够观测到）。",
+      "reason": "Issue 明确指出此方法对时区名字符串进行了符号反转，是导致最终错误的关键步骤。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "生成的 SQL 查询中，AT TIME ZONE 子句后的时区表示应正确对应东十区（即相对于 UTC 加 10 小时），例如包含 '-10' 片段，而不应包含符号反转的 '+10' 片段。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的、具体的 SQL 字符串相等，因为 SQL 格式可能因数据库后端或 Django 版本而变化。",
+      "reason": "Issue 的核心是时区符号方向错误。断言 SQL 中包含正确的符号片段（如 '-10'）或排除错误的符号片段（如 '+10'）更稳定，且直接对应问题语义。"
+    },
+    {
+      "assertion_goal": "对于 Etc/GMT-10 时区，查询返回的日期时间部分（如小时、天）应与将该时区视为东十区（UTC+10）计算的结果一致。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言与数据库存储的原始 UTC 时间直接比较。",
+      "reason": "修复后，Trunc/Extract 函数应基于正确的时区偏移进行计算。这可以通过将输入时间转换为目标时区后手动计算预期值来验证。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用一个包含 DateTimeField 的测试模型（如 DTModel），并插入一些感知日期时间数据。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试类需要继承自正确的 TestCase（可能是 django.test.TestCase），并使用 @override_settings(USE_TZ=True, TIME_ZONE='UTC') 装饰器。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要导入 pytz 和/或 zoneinfo 模块来创建 'Etc/GMT-10' 时区对象。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要配置 PostgreSQL 数据库后端，因为 Issue 中提到的 _prepare_tzname_delta 方法位于 postgresql 后端中。",
+      "source": "retrieved_source",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "问题是否也影响其他数据库后端（如 MySQL、SQLite），还是仅限于 PostgreSQL？",
+    "除了 'Etc/GMT-10'，还有哪些具体的时区名称会触发此问题？Issue 提到 'or similar'。",
+    "Django 3.2 中 timezone._get_timezone_name 返回完整时区名称是否是预期行为？如果是，那么修复点可能主要在 _prepare_tzname_delta 或其他地方。",
+    "在修复版本中，对于 'Etc/GMT-10'，_prepare_tzname_delta 的预期输出是什么？是 '-10' 还是保持 'Etc/GMT-10' 但后续处理不同？"
+  ],
+  "raw": {
+    "issue_summary": "使用 Etc/GMT-10 等时区时，Trunc/Extract 数据库函数生成的 SQL 查询中时区符号被错误反转。",
+    "trigger_condition": {
+      "text": "当 USE_TZ=True 时，对 Trunc 或 Extract 函数使用 tzinfo 参数指定为 Etc/GMT-10 或类似时区对象（如 pytz.timezone('Etc/GMT-10') 或 zoneinfo.ZoneInfo('Etc/GMT-10')）。",
+      "evidence": [
+        "Issue 描述：'When using a time zone of \"Etc/GMT-10\" (or similar) for a Trunc class tzinfo...'",
+        "源码片段 2 显示 get_tzname 方法会调用 timezone._get_timezone_name(self.tzinfo)。",
+        "相关测试 1 和 2 展示了为 Extract 和 Trunc 函数提供 tzinfo 参数的用法。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 查询中，AT TIME ZONE 子句的时区字符串符号错误反转（例如应为 '-10' 却得到 'Etc/GMT+10'），导致时区转换方向与预期相反。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中对比了 Django 3.1 和 3.2 生成的 SQL 片段：'AT TIME ZONE \\'-10\\'' vs 'AT TIME ZONE \\'Etc/GMT+10\\''。",
+        "Issue 指出：'This later, incorrectly, becomes \"Etc/GMT+10\" in the resulting query...'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对于 Etc/GMT-10 时区，生成的 SQL 查询应正确表示东十区（即相对于 UTC 加 10 小时），例如 AT TIME ZONE '-10' 或等效表示。",
+      "evidence": [
+        "Issue 描述了 Django 3.1 的行为：'On Django 3.1 the TimezoneMixin method get_tzname() returns \"+10\"... This later becomes \"-10\" in the resulting query...'，并暗示这是正确的方向。",
+        "Issue 标题和描述表明当前行为是 'Reverse time zone conversion'，即反转了，因此修复后不应反转。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Trunc",
+        "kind": "class",
+        "source_path": "django/db/models/functions/datetime.py",
+        "reason": "Issue 标题和描述明确指出 Trunc() 函数受影响。"
+      },
+      {
+        "name": "Extract",
+        "kind": "class",
+        "source_path": "django/db/models/functions/datetime.py",
+        "reason": "Issue 标题和描述明确指出 Extract() 函数受影响。"
+      },
+      {
+        "name": "TimezoneMixin.get_tzname",
+        "kind": "method",
+        "source_path": "django/db/models/functions/datetime.py",
+        "reason": "Issue 提到 TimezoneMixin.get_tzname() 的返回值变化是问题的起点。"
+      },
+      {
+        "name": "timezone._get_timezone_name",
+        "kind": "function",
+        "source_path": "django/utils/timezone.py",
+        "reason": "Issue 指出 Django 3.2 中此函数返回值的改变导致了后续问题。"
+      },
+      {
+        "name": "DatabaseOperations._prepare_tzname_delta",
+        "kind": "method",
+        "source_path": "django/db/backends/postgresql/operations.py",
+        "reason": "Issue 指出此方法对时区名字符串进行了符号反转处理，是导致最终 SQL 错误的关键环节。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/timezone.py",
+        "object": "_get_timezone_name",
+        "lines": "74-76",
+        "reason": "Issue 显示此函数在 Django 3.2 中返回了完整的时区名称（如 'Etc/GMT-10'），而在 3.1 中返回了偏移字符串（如 '+10'）。这改变了后续处理的输入。"
+      },
+      {
+        "path": "django/db/backends/postgresql/operations.py",
+        "object": "_prepare_tzname_delta",
+        "lines": "46-51",
+        "reason": "此方法对包含 '+' 或 '-' 的字符串进行符号反转。当输入为 'Etc/GMT-10' 时，会错误地输出 'Etc/GMT+10'，导致时区方向反转。"
+      },
+      {
+        "path": "django/db/models/functions/datetime.py",
+        "object": "TimezoneMixin.get_tzname",
+        "lines": "17-28",
+        "reason": "此方法调用 _get_timezone_name，其返回值的变化会直接影响后续查询生成。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "DateFunctionWithTimeZoneTests.test_extract_func_with_timezone",
+        "test_file": "tests/db_functions/datetime/test_extract_trunc.py",
+        "why_relevant": "该测试展示了为 Extract 函数提供不同 tzinfo 参数（包括基于 timedelta 的时区）的用法，并验证了正确的时间提取结果。",
+        "reusable_parts": [
+          "测试类装饰器 @override_settings(USE_TZ=True, TIME_ZONE='UTC')",
+          "使用 timezone.make_aware 创建感知时间对象",
+          "使用 DTModel.objects.annotate 和 Extract 进行查询",
+          "使用 assertEqual 验证提取结果"
+        ],
+        "possible_gap": "该测试使用了 'Australia/Melbourne' 和基于 timedelta 的时区，但没有使用 'Etc/GMT-10' 这类特殊的 POSIX 时区，因此可能无法触发 _prepare_tzname_delta 中的符号反转逻辑。"
+      },
+      {
+        "test_name": "DateFunctionWithTimeZoneTests.test_trunc_func_with_timezone",
+        "test_file": "tests/db_functions/datetime/test_extract_trunc.py",
+        "why_relevant": "该测试展示了为 Trunc 函数提供 tzinfo 参数的用法，并验证了截断结果。",
+        "reusable_parts": [
+          "测试类装饰器 @override_settings(USE_TZ=True, TIME_ZONE='UTC')",
+          "使用 timezone.make_aware 创建感知时间对象",
+          "使用 DTModel.objects.annotate 和 Trunc 进行查询",
+          "使用 assertQuerysetEqual 验证截断结果",
+          "辅助函数 truncate_to"
+        ],
+        "possible_gap": "该测试同样使用了 'Australia/Melbourne'，没有测试 'Etc/GMT-10' 时区，且其断言依赖于高阶的 assertQuerysetEqual 和辅助函数，可能不便于直接观察生成的原始 SQL。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用常规时区名称（如 'Australia/Melbourne'）或基于 timedelta 的时区对象作为 tzinfo 参数。",
+        "target_pattern": "将 tzinfo 参数改为使用 'Etc/GMT-10' 或 'Etc/GMT+5' 等 POSIX 时区对象（通过 pytz.timezone 或 zoneinfo.ZoneInfo 创建）。",
+        "reason": "Issue 明确指出问题发生在使用 'Etc/GMT-10' 这类时区时。常规时区名称可能不会触发 _prepare_tzname_delta 中的符号反转逻辑，或者反转逻辑对它们无害。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试设置 USE_TZ=True。",
+        "target_pattern": "保持 USE_TZ=True。",
+        "reason": "Issue 和源码显示，只有在 USE_TZ=True 时，get_tzname 方法才会尝试获取时区名称。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，特别是 AT TIME ZONE 子句后的部分。",
+        "reason": "Issue 的核心错误现象是生成的 SQL 中时区字符串符号错误。观察原始 SQL 可以直接判断问题是否出现。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "timezone._get_timezone_name(tzinfo) 的返回值。",
+        "reason": "Issue 显示此函数返回值在 Django 3.1 和 3.2 之间发生了变化，是问题链的起点。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "TimezoneMixin.get_tzname() 的返回值。",
+        "reason": "此方法返回的时区名称会传递给数据库后端进行进一步处理。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "DatabaseOperations._prepare_tzname_delta(tzname) 的返回值（如果能够观测到）。",
+        "reason": "Issue 明确指出此方法对时区名字符串进行了符号反转，是导致最终错误的关键步骤。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的 SQL 查询中，AT TIME ZONE 子句后的时区表示应正确对应东十区（即相对于 UTC 加 10 小时），例如包含 '-10' 片段，而不应包含符号反转的 '+10' 片段。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、具体的 SQL 字符串相等，因为 SQL 格式可能因数据库后端或 Django 版本而变化。",
+        "reason": "Issue 的核心是时区符号方向错误。断言 SQL 中包含正确的符号片段（如 '-10'）或排除错误的符号片段（如 '+10'）更稳定，且直接对应问题语义。"
+      },
+      {
+        "assertion_goal": "对于 Etc/GMT-10 时区，查询返回的日期时间部分（如小时、天）应与将该时区视为东十区（UTC+10）计算的结果一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言与数据库存储的原始 UTC 时间直接比较。",
+        "reason": "修复后，Trunc/Extract 函数应基于正确的时区偏移进行计算。这可以通过将输入时间转换为目标时区后手动计算预期值来验证。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用一个包含 DateTimeField 的测试模型（如 DTModel），并插入一些感知日期时间数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类需要继承自正确的 TestCase（可能是 django.test.TestCase），并使用 @override_settings(USE_TZ=True, TIME_ZONE='UTC') 装饰器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 pytz 和/或 zoneinfo 模块来创建 'Etc/GMT-10' 时区对象。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置 PostgreSQL 数据库后端，因为 Issue 中提到的 _prepare_tzname_delta 方法位于 postgresql 后端中。",
+        "source": "retrieved_source",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "问题是否也影响其他数据库后端（如 MySQL、SQLite），还是仅限于 PostgreSQL？",
+      "除了 'Etc/GMT-10'，还有哪些具体的时区名称会触发此问题？Issue 提到 'or similar'。",
+      "Django 3.2 中 timezone._get_timezone_name 返回完整时区名称是否是预期行为？如果是，那么修复点可能主要在 _prepare_tzname_delta 或其他地方。",
+      "在修复版本中，对于 'Etc/GMT-10'，_prepare_tzname_delta 的预期输出是什么？是 '-10' 还是保持 'Etc/GMT-10' 但后续处理不同？"
+    ]
+  }
+}

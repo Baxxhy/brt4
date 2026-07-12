@@ -1,0 +1,367 @@
+{
+  "instance_id": "django__django-11292",
+  "issue_summary": "管理命令缺少一个公开的 --skip-checks 命令行选项来跳过系统检查。",
+  "trigger_condition": {
+    "text": "从命令行运行一个管理命令，但没有一个公开的选项来跳过系统检查。",
+    "evidence": [
+      "Issue 描述：'Management commands already have skip_checks stealth option. I propose exposing this option on the command line.'",
+      "源码片段 4 中 BaseCommand 的 stealth_options 包含 'skip_checks'。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "用户无法通过命令行选项跳过系统检查，导致在开发环境中可能被不必要的检查打断。",
+    "symptom_type": "unknown",
+    "evidence": [
+      "Issue 描述：'Sometimes in a development environment, it is nice to move ahead with a task at hand rather than getting side tracked fixing a system check.'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "管理命令应该支持一个公开的 --skip-checks 命令行选项，当指定时，可以跳过系统检查。",
+    "evidence": [
+      "Issue 描述：'I propose exposing this option on the command line. This would allow users to skip checks when running a command from the command line.'"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "BaseCommand",
+      "kind": "class",
+      "source_path": "django/core/management/base.py",
+      "reason": "所有管理命令的基类，包含 requires_system_checks 属性和 execute 方法，是添加命令行选项和实现跳过检查逻辑的关键位置。"
+    },
+    {
+      "name": "BaseCommand.execute",
+      "kind": "method",
+      "source_path": "django/core/management/base.py",
+      "reason": "该方法负责执行命令，并包含检查系统检查的逻辑（if self.requires_system_checks and not options.get('skip_checks'):）。"
+    },
+    {
+      "name": "BaseCommand.add_arguments",
+      "kind": "method",
+      "source_path": "django/core/management/base.py",
+      "reason": "子类可以重写此方法来添加自定义命令行参数，是添加 --skip-checks 选项的入口点。"
+    },
+    {
+      "name": "management.call_command",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试中用于调用管理命令的 API，可用于测试 skip_checks 选项的行为。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/core/management/base.py",
+      "object": "BaseCommand",
+      "lines": "148-478",
+      "reason": "作为管理命令的基类，它定义了 stealth_options 包含 'skip_checks'，但可能没有在 add_arguments 或 create_parser 中将其公开为命令行参数。"
+    },
+    {
+      "path": "django/core/management/base.py",
+      "object": "BaseCommand.execute",
+      "lines": "342-374",
+      "reason": "该方法已经处理了 skip_checks 选项（options.get('skip_checks')），但该选项可能不是通过标准命令行解析器添加的，而是作为 stealth option 传递。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "CommandTests.test_call_command_no_checks",
+      "test_file": "tests/user_commands/tests.py",
+      "why_relevant": "该测试直接验证了通过 call_command 调用命令时 skip_checks 参数的行为（跳过检查或不跳过）。",
+      "reusable_parts": [
+        "使用 management.call_command",
+        "使用 BaseCommand.check 的 monkeypatch 来计数",
+        "assertEqual 断言风格",
+        "override_settings 设置"
+      ],
+      "possible_gap": "该测试通过 Python API (call_command) 测试 skip_checks，而不是通过命令行参数（如 --skip-checks）测试。"
+    },
+    {
+      "test_name": "CommandTests.test_call_command_unrecognized_option",
+      "test_file": "tests/user_commands/tests.py",
+      "why_relevant": "该测试验证了调用命令时传递无效选项会引发错误，展示了选项验证机制。",
+      "reusable_parts": [
+        "使用 management.call_command",
+        "assertRaisesMessage 断言风格",
+        "override_settings 设置"
+      ],
+      "possible_gap": "该测试关注无效选项，而 Issue 是关于添加一个有效的新选项。"
+    },
+    {
+      "test_name": "CommandTypes.test_base_command_with_wrong_option",
+      "test_file": "tests/admin_scripts/tests.py",
+      "why_relevant": "该测试通过运行 manage.py 脚本来测试命令行参数解析，包括无效选项的处理。",
+      "reusable_parts": [
+        "使用 AdminScriptTestCase 和 run_manage",
+        "assertOutput 和 assertNoOutput 断言风格",
+        "测试命令行参数解析"
+      ],
+      "possible_gap": "该测试使用一个特定的测试命令（base_command），可能不直接测试 skip_checks 选项。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "在 test_call_command_no_checks 中，skip_checks 是作为关键字参数传递给 call_command 的。",
+      "target_pattern": "需要变异为通过命令行参数（例如 --skip-checks）来传递 skip_checks 选项。",
+      "reason": "Issue 的核心是暴露 skip_checks 为命令行选项，而不是仅作为 Python API 参数。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "测试中使用的命令（如 'dance'）可能没有显式定义 requires_system_checks 或处理 skip_checks 选项。",
+      "target_pattern": "需要创建一个自定义管理命令，其 requires_system_checks 为 True，并确保 --skip-checks 选项被正确解析和处理。",
+      "reason": "为了测试跳过检查的功能，需要一个默认会执行检查的命令。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "warning",
+      "expression_hint": "系统检查是否被执行（例如，通过 monkeypatch BaseCommand.check 来计数，或检查标准错误输出中是否有检查相关的警告）。",
+      "reason": "Issue 是关于跳过系统检查，因此观察检查是否被触发是关键。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "命令执行的输出（stdout）和错误（stderr）。",
+      "reason": "检查相关的消息通常会输出到 stderr，而命令的正常输出在 stdout。观察这些输出可以判断检查是否被跳过。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "options 字典中 'skip_checks' 键的值在命令执行过程中的状态。",
+      "reason": "需要确认 --skip-checks 命令行选项被正确解析并传递给 execute 方法。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "当指定 --skip-checks 选项时，系统检查（BaseCommand.check）不被调用。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的错误消息字符串，因为消息可能因 Django 版本或配置而变化。",
+      "reason": "这是 Issue 期望的核心行为：能够跳过检查。"
+    },
+    {
+      "assertion_goal": "当不指定 --skip-checks 选项时，系统检查被调用（对于 requires_system_checks=True 的命令）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言检查输出的完整内容。",
+      "reason": "确保默认行为（执行检查）仍然正确，以验证新选项是可选功能。"
+    },
+    {
+      "assertion_goal": "--skip-checks 选项被识别为有效选项，不会引发 'unrecognized arguments' 错误。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "断言完整的帮助文本。",
+      "reason": "验证该选项已成功添加到命令的解析器中。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要创建一个自定义的管理命令类，用于测试。可以继承 BaseCommand 并设置 requires_system_checks = True。",
+      "source": "inference",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 override_settings 来确保测试命令所在的应用程序在 INSTALLED_APPS 中。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可以使用 monkeypatch 来临时替换 BaseCommand.check 方法，以便计数或观察其是否被调用。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "对于测试命令行调用，可以使用 AdminScriptTestCase 和 run_manage 方法（如相关测试 3 和 4）。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "--skip-checks 选项应该接受什么值（布尔标志，还是可能需要一个参数）？Issue 没有明确说明。",
+    "该选项是否应该添加到所有管理命令的基类 BaseCommand 的 add_arguments 中，还是由各个命令决定是否添加？",
+    "skip_checks 选项当前作为 stealth option 是如何工作的？需要更详细地理解其现有机制。",
+    "修复后，通过 call_command API 传递 skip_checks 和通过命令行传递 --skip-checks 的行为是否应该完全一致？"
+  ],
+  "raw": {
+    "issue_summary": "管理命令缺少一个公开的 --skip-checks 命令行选项来跳过系统检查。",
+    "trigger_condition": {
+      "text": "从命令行运行一个管理命令，但没有一个公开的选项来跳过系统检查。",
+      "evidence": [
+        "Issue 描述：'Management commands already have skip_checks stealth option. I propose exposing this option on the command line.'",
+        "源码片段 4 中 BaseCommand 的 stealth_options 包含 'skip_checks'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "用户无法通过命令行选项跳过系统检查，导致在开发环境中可能被不必要的检查打断。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述：'Sometimes in a development environment, it is nice to move ahead with a task at hand rather than getting side tracked fixing a system check.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "管理命令应该支持一个公开的 --skip-checks 命令行选项，当指定时，可以跳过系统检查。",
+      "evidence": [
+        "Issue 描述：'I propose exposing this option on the command line. This would allow users to skip checks when running a command from the command line.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "BaseCommand",
+        "kind": "class",
+        "source_path": "django/core/management/base.py",
+        "reason": "所有管理命令的基类，包含 requires_system_checks 属性和 execute 方法，是添加命令行选项和实现跳过检查逻辑的关键位置。"
+      },
+      {
+        "name": "BaseCommand.execute",
+        "kind": "method",
+        "source_path": "django/core/management/base.py",
+        "reason": "该方法负责执行命令，并包含检查系统检查的逻辑（if self.requires_system_checks and not options.get('skip_checks'):）。"
+      },
+      {
+        "name": "BaseCommand.add_arguments",
+        "kind": "method",
+        "source_path": "django/core/management/base.py",
+        "reason": "子类可以重写此方法来添加自定义命令行参数，是添加 --skip-checks 选项的入口点。"
+      },
+      {
+        "name": "management.call_command",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试中用于调用管理命令的 API，可用于测试 skip_checks 选项的行为。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/base.py",
+        "object": "BaseCommand",
+        "lines": "148-478",
+        "reason": "作为管理命令的基类，它定义了 stealth_options 包含 'skip_checks'，但可能没有在 add_arguments 或 create_parser 中将其公开为命令行参数。"
+      },
+      {
+        "path": "django/core/management/base.py",
+        "object": "BaseCommand.execute",
+        "lines": "342-374",
+        "reason": "该方法已经处理了 skip_checks 选项（options.get('skip_checks')），但该选项可能不是通过标准命令行解析器添加的，而是作为 stealth option 传递。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "CommandTests.test_call_command_no_checks",
+        "test_file": "tests/user_commands/tests.py",
+        "why_relevant": "该测试直接验证了通过 call_command 调用命令时 skip_checks 参数的行为（跳过检查或不跳过）。",
+        "reusable_parts": [
+          "使用 management.call_command",
+          "使用 BaseCommand.check 的 monkeypatch 来计数",
+          "assertEqual 断言风格",
+          "override_settings 设置"
+        ],
+        "possible_gap": "该测试通过 Python API (call_command) 测试 skip_checks，而不是通过命令行参数（如 --skip-checks）测试。"
+      },
+      {
+        "test_name": "CommandTests.test_call_command_unrecognized_option",
+        "test_file": "tests/user_commands/tests.py",
+        "why_relevant": "该测试验证了调用命令时传递无效选项会引发错误，展示了选项验证机制。",
+        "reusable_parts": [
+          "使用 management.call_command",
+          "assertRaisesMessage 断言风格",
+          "override_settings 设置"
+        ],
+        "possible_gap": "该测试关注无效选项，而 Issue 是关于添加一个有效的新选项。"
+      },
+      {
+        "test_name": "CommandTypes.test_base_command_with_wrong_option",
+        "test_file": "tests/admin_scripts/tests.py",
+        "why_relevant": "该测试通过运行 manage.py 脚本来测试命令行参数解析，包括无效选项的处理。",
+        "reusable_parts": [
+          "使用 AdminScriptTestCase 和 run_manage",
+          "assertOutput 和 assertNoOutput 断言风格",
+          "测试命令行参数解析"
+        ],
+        "possible_gap": "该测试使用一个特定的测试命令（base_command），可能不直接测试 skip_checks 选项。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "在 test_call_command_no_checks 中，skip_checks 是作为关键字参数传递给 call_command 的。",
+        "target_pattern": "需要变异为通过命令行参数（例如 --skip-checks）来传递 skip_checks 选项。",
+        "reason": "Issue 的核心是暴露 skip_checks 为命令行选项，而不是仅作为 Python API 参数。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试中使用的命令（如 'dance'）可能没有显式定义 requires_system_checks 或处理 skip_checks 选项。",
+        "target_pattern": "需要创建一个自定义管理命令，其 requires_system_checks 为 True，并确保 --skip-checks 选项被正确解析和处理。",
+        "reason": "为了测试跳过检查的功能，需要一个默认会执行检查的命令。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "系统检查是否被执行（例如，通过 monkeypatch BaseCommand.check 来计数，或检查标准错误输出中是否有检查相关的警告）。",
+        "reason": "Issue 是关于跳过系统检查，因此观察检查是否被触发是关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "命令执行的输出（stdout）和错误（stderr）。",
+        "reason": "检查相关的消息通常会输出到 stderr，而命令的正常输出在 stdout。观察这些输出可以判断检查是否被跳过。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "options 字典中 'skip_checks' 键的值在命令执行过程中的状态。",
+        "reason": "需要确认 --skip-checks 命令行选项被正确解析并传递给 execute 方法。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当指定 --skip-checks 选项时，系统检查（BaseCommand.check）不被调用。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的错误消息字符串，因为消息可能因 Django 版本或配置而变化。",
+        "reason": "这是 Issue 期望的核心行为：能够跳过检查。"
+      },
+      {
+        "assertion_goal": "当不指定 --skip-checks 选项时，系统检查被调用（对于 requires_system_checks=True 的命令）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言检查输出的完整内容。",
+        "reason": "确保默认行为（执行检查）仍然正确，以验证新选项是可选功能。"
+      },
+      {
+        "assertion_goal": "--skip-checks 选项被识别为有效选项，不会引发 'unrecognized arguments' 错误。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的帮助文本。",
+        "reason": "验证该选项已成功添加到命令的解析器中。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要创建一个自定义的管理命令类，用于测试。可以继承 BaseCommand 并设置 requires_system_checks = True。",
+        "source": "inference",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 override_settings 来确保测试命令所在的应用程序在 INSTALLED_APPS 中。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用 monkeypatch 来临时替换 BaseCommand.check 方法，以便计数或观察其是否被调用。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "对于测试命令行调用，可以使用 AdminScriptTestCase 和 run_manage 方法（如相关测试 3 和 4）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "--skip-checks 选项应该接受什么值（布尔标志，还是可能需要一个参数）？Issue 没有明确说明。",
+      "该选项是否应该添加到所有管理命令的基类 BaseCommand 的 add_arguments 中，还是由各个命令决定是否添加？",
+      "skip_checks 选项当前作为 stealth option 是如何工作的？需要更详细地理解其现有机制。",
+      "修复后，通过 call_command API 传递 skip_checks 和通过命令行传递 --skip-checks 的行为是否应该完全一致？"
+    ]
+  }
+}

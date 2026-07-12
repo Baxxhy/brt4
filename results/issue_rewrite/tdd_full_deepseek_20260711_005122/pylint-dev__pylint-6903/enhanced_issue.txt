@@ -1,0 +1,135 @@
+instance_id: pylint-dev__pylint-6903
+
+issue_summary: 在 Kubernetes Pod 中运行 pylint 时，当 --jobs=0 且 _query_cpu() 返回 0 时，会导致 multiprocessing.Pool 因进程数至少为 1 而崩溃。
+
+trigger_condition:
+{
+  "text": "在特定容器环境（如 Kubernetes Pod）中运行 pylint，使用 --jobs=0 参数，并且系统文件 /sys/fs/cgroup/cpu/cpu.cfs_quota_us 为 -1，/sys/fs/cgroup/cpu/cpu.shares 为 2，导致 _query_cpu() 函数返回 0。",
+  "evidence": [
+    "Issue 描述：'I run pylint in multiple parallel stages with Jenkins at a Kubernets agent with `--jobs=0`.'",
+    "Issue 描述：'cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us > -1' 和 'cat /sys/fs/cgroup/cpu/cpu.shares > 2'",
+    "源码片段 1 显示 _query_cpu 函数读取这些文件并计算 avail_cpu = int(cpu_shares / 1024)。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "multiprocessing.Pool 初始化时抛出 ValueError: \"Number of processes must be at least 1\"。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 的 Pylint output 部分显示了完整的堆栈跟踪，最终错误为 'raise ValueError(\"Number of processes must be at least 1\")'。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "即使 _query_cpu() 函数计算出的可用 CPU 数为 0，pylint 也不应崩溃，应能正常执行（例如，使用至少 1 个进程）。",
+  "evidence": [
+    "Issue 的 Expected behavior 部分：'I expect pylint to not crash if the number of available cpu is misscalculated in this special case. The calculated number should never be 0.'"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "_query_cpu",
+    "kind": "function",
+    "source_path": "pylint/lint/run.py",
+    "reason": "该函数负责在容器环境中确定可用 CPU 数量，其返回值（0）直接导致了后续的崩溃。"
+  },
+  {
+    "name": "check_parallel",
+    "kind": "function",
+    "source_path": "pylint/lint/parallel.py",
+    "reason": "该函数使用 multiprocessing.Pool 进行并行检查，并接收 jobs 参数。当 jobs 为 0 时，会触发崩溃。"
+  },
+  {
+    "name": "PyLinter.check",
+    "kind": "method",
+    "source_path": "pylint/lint/pylinter.py",
+    "reason": "这是 pylint 检查的主入口，它根据 self.config.jobs 的值决定调用 check_parallel 还是 _check_files。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "在测试中设置 linter.config.jobs = 1 或 2。",
+    "target_pattern": "设置 linter.config.jobs = 0。",
+    "reason": "Issue 明确指出使用 --jobs=0 触发了崩溃。将 jobs 设置为 0 是触发缺陷的直接条件。",
+    "confidence": "high"
+  },
+  {
+    "slot": "mock",
+    "current_pattern": "现有测试没有模拟 _query_cpu 函数的返回值。",
+    "target_pattern": "模拟 _query_cpu 函数，使其返回 0。",
+    "reason": "Issue 表明在特定容器环境下 _query_cpu 返回 0。模拟此返回值可以复现导致 multiprocessing.Pool 崩溃的条件。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "测试在普通主机环境下运行，_query_cpu 可能返回非零值。",
+    "target_pattern": "通过模拟文件系统或环境变量，使 _query_cpu 内部读取的容器 cgroup 文件返回导致计算为 0 的值（如 cpu_shares=2）。",
+    "reason": "需要复现导致 _query_cpu 返回 0 的底层环境状态，而不仅仅是最终结果。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "_query_cpu() 的返回值。",
+    "reason": "观察此返回值是否为 0，这是触发后续崩溃的关键。"
+  },
+  {
+    "kind": "exception",
+    "expression_hint": "调用 check_parallel 或 linter.check 时是否抛出 ValueError。",
+    "reason": "Issue 的核心错误现象是 ValueError: \"Number of processes must be at least 1\"。"
+  },
+  {
+    "kind": "config",
+    "expression_hint": "linter.config.jobs 的值。",
+    "reason": "确认配置是否正确设置为 0，这是触发缺陷的输入。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当 jobs=0 且 _query_cpu 返回 0 时，pylint 不应抛出 ValueError 异常，应能正常完成检查或使用默认的最小进程数。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言完整的异常消息字符串，因为修复后消息可能改变。避免断言与特定文件数量或消息内容相关的无关细节。",
+    "reason": "Issue 的核心是异常是否被抛出。使用 raises 断言可以明确验证缺陷是否被触发（在修复前）或是否被修复（在修复后）。注意：修复后，此断言应改为验证不抛出异常。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 mock 或 monkeypatch 来模拟 _query_cpu 函数或 /sys/fs/cgroup/cpu/ 下的文件内容，以控制其返回值为 0。",
+    "source": "inference",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要创建 PyLinter 对象并设置其 config.jobs = 0。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要提供一些文件供 pylint 检查，可以使用类似 _gen_file_datas 的工具或现有测试文件。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "当 jobs=0 且 _query_cpu 返回 0 时，修复后的预期行为具体是什么？是回退到单进程（jobs=1），还是使用其他默认值？Issue 中建议的修复是 'append a ` or 1`'，但这只是推测。",
+  "_query_cpu 函数中基于 cpu.cfs_quota_us 的计算路径（第 55 行）是否也可能在某种情况下返回 0？Issue 作者表示不确定。",
+  "除了模拟 _query_cpu 返回 0，是否还需要模拟其他环境条件（如特定的 cgroup 文件存在性）才能完全复现原始场景？"
+]

@@ -1,0 +1,110 @@
+instance_id: matplotlib__matplotlib-25287
+
+issue_summary: 当通过样式或rcParams设置ytick.labelcolor/xtick.labelcolor时，指数标签（offsetText）的颜色未随之改变，而是错误地使用了tick.color的颜色。
+
+trigger_condition:
+{
+  "text": "通过plt.rcParams.update设置ytick.labelcolor或xtick.labelcolor为特定颜色（例如'red'），然后创建一个包含大数值（例如1.01e9）的绘图。",
+  "evidence": [
+    "Issue中的代码示例：plt.rcParams.update({'ytick.labelcolor': 'red'}) 和 ax.plot([1.01e9,1.02e9,1.03e9])",
+    "相关测试1：test_offset_label_color 中使用了 ax.plot([1.01e9, 1.02e9, 1.03e9]) 和 labelcolor='red'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "指数标签（offsetText）的颜色与预期的labelcolor（例如红色）不符，而是使用了tick.color的颜色（例如默认黑色）。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue描述：'it does not change the color of the exponent label as well. It will be colored based on xtick.color / ytick.color.'",
+    "Issue中的实际结果图片展示了错误的颜色",
+    "相关测试1直接断言 offset text 的颜色应为红色，暗示这是正确行为"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当通过rcParams设置ytick.labelcolor或xtick.labelcolor时，对应的指数标签（offsetText）的颜色也应随之改变，与设置的labelcolor一致。",
+  "evidence": [
+    "Issue中的预期结果图片展示了正确的颜色",
+    "相关测试1的断言：assert ax.yaxis.get_offset_text().get_color() == 'red'",
+    "Issue中提供的补丁旨在将offsetText的颜色从使用tick.color改为使用tick.labelcolor（除非其为'inherit'）"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "plt.rcParams.update",
+    "kind": "function",
+    "source_path": "",
+    "reason": "Issue中用于设置全局配置（ytick.labelcolor）以触发缺陷。"
+  },
+  {
+    "name": "ax.yaxis.get_offset_text",
+    "kind": "method",
+    "source_path": "",
+    "reason": "用于获取指数标签对象以检查其颜色，在相关测试中被使用。"
+  },
+  {
+    "name": "ax.yaxis.get_offset_text().get_color",
+    "kind": "method",
+    "source_path": "",
+    "reason": "用于获取指数标签的颜色，是断言检查的目标。"
+  },
+  {
+    "name": "mtransforms.blended_transform_factory",
+    "kind": "function",
+    "source_path": "lib/matplotlib/transforms.py",
+    "reason": "在Issue补丁涉及的代码行中被使用，用于创建offsetText的变换。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "相关测试1（test_offset_label_color）使用 ax.yaxis.set_tick_params(labelcolor='red') 在坐标轴对象级别设置标签颜色。",
+    "target_pattern": "改为使用 plt.rcParams.update({'ytick.labelcolor': 'red'}) 在全局rcParams级别设置标签颜色，如Issue所示。",
+    "reason": "Issue明确指出bug发生在通过styles/rcParams设置时。改变配置的层级可能触发不同的代码路径，导致offsetText颜色未被正确应用。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "ax.yaxis.get_offset_text().get_color()",
+    "reason": "这是直接检查指数标签颜色的表达式，与Issue描述的错误现象（颜色错误）和预期行为（颜色正确）直接对应。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证通过rcParams设置的ytick.labelcolor（例如'red'）已正确应用于y轴的指数标签（offsetText）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言完整的图形输出或与颜色无关的其他属性。",
+    "reason": "Issue的核心是颜色值是否正确，直接比较颜色字符串是稳定且直接的验证方式。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 matplotlib.pyplot 和 rcParams 进行全局配置。可能需要在测试开始前设置rcParams，并在测试后恢复，以避免影响其他测试。",
+    "source": "issue|retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "Issue补丁中检查 rcParams['xtick.labelcolor']=='inherit' 的条件逻辑的确切含义和必要性。",
+  "除了y轴，x轴的offsetText是否也存在相同问题（Issue提到了xtick.labelcolor）。",
+  "当labelcolor设置为'inherit'（默认值？）时，offsetText的颜色行为应该是怎样的。"
+]

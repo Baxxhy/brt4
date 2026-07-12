@@ -1,0 +1,353 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+autodoc_typehints_description_target not working with Napoleon
+### Describe the bug
+
+I was trying to use the config option `autodoc_typehints_description_target = "documented"` combined with the Napoleon plugin (using Google style).
+
+The return types were missing from the resulting documentation.
+
+
+
+### How to Reproduce
+
+Just generate the documentation using Napoleon and the config options:
+```python
+autodoc_typehints = "description"
+autodoc_typehints_description_target = "documented"
+
+napoleon_numpy_docstring = False
+```
+
+Generate the documentation of a function with the following docstring:
+
+```
+"""
+Description.
+
+Parameters:
+    param1: First parameter.
+    param2: Second parameter.
+
+Returns:
+    The returned value.
+
+"""
+```
+
+### Expected behavior
+
+As the return is specified, the return type should be present in the documentation, either as a rtype section or as part of the return description.
+
+### Your project
+
+https://github.com/Tuxemon/Tuxemon
+
+### Screenshots
+
+![bildo](https://user-images.githubusercontent.com/2364173/133911607-f45de9af-c9e9-4d67-815f-4c571e70ec49.png)
+
+
+### OS
+
+Win
+
+### Python version
+
+3.8
+
+### Sphinx version
+
+4.2.0
+
+### Sphinx extensions
+
+    'sphinx.ext.autodoc',     'sphinx.ext.todo',     'sphinx.ext.viewcode',     'sphinx.ext.githubpages',     'sphinx.ext.napoleon',
+
+### Extra tools
+
+_No response_
+
+### Additional context
+
+_No response_
+
+
+====================
+【iCoRe 检索出的相关源代码】
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/test_ext_autodoc_configs.py
+测试名称：test_autodoc_typehints_description_no_undoc
+测试代码：
+@pytest.mark.sphinx('text', testroot='ext-autodoc',
+                    confoverrides={'autodoc_typehints': "description",
+                                   'autodoc_typehints_description_target': 'documented'})
+def test_autodoc_typehints_description_no_undoc(app):
+    # No :type: or :rtype: will be injected for `incr`, which does not have
+    # a description for its parameters or its return. `tuple_args` does
+    # describe them, so :type: and :rtype: will be added.
+    (app.srcdir / 'index.rst').write_text(
+        '.. autofunction:: target.typehints.incr\n'
+        '\n'
+        '.. autofunction:: target.typehints.tuple_args\n'
+        '\n'
+        '   :param x: arg\n'
+        '   :return: another tuple\n'
+    )
+    app.build()
+    context = (app.outdir / 'index.txt').read_text()
+    assert ('target.typehints.incr(a, b=1)\n'
+            '\n'
+            'target.typehints.tuple_args(x)\n'
+            '\n'
+            '   Parameters:\n'
+            '      **x** (*Tuple**[**int**, **Union**[**int**, **str**]**]*) -- arg\n'
+            '\n'
+            '   Returns:\n'
+            '      another tuple\n'
+            '\n'
+            '   Return type:\n'
+            '      Tuple[int, int]\n'
+            in context)
+
+【相关测试 2】
+测试文件：tests/test_ext_autodoc_configs.py
+测试名称：test_autodoc_typehints_description_with_documented_init_no_undoc
+测试代码：
+@pytest.mark.sphinx('text', testroot='ext-autodoc',
+                    confoverrides={'autodoc_typehints': "description",
+                                   'autodoc_typehints_description_target': 'documented'})
+def test_autodoc_typehints_description_with_documented_init_no_undoc(app):
+    (app.srcdir / 'index.rst').write_text(
+        '.. autoclass:: target.typehints._ClassWithDocumentedInit\n'
+        '   :special-members: __init__\n'
+    )
+    app.build()
+    context = (app.outdir / 'index.txt').read_text()
+    assert ('class target.typehints._ClassWithDocumentedInit(x)\n'
+            '\n'
+            '   Class docstring.\n'
+            '\n'
+            '   __init__(x)\n'
+            '\n'
+            '      Init docstring.\n'
+            '\n'
+            '      Parameters:\n'
+            '         **x** (*int*) -- Some integer\n' == context)
+
+【相关测试 3】
+测试文件：tests/test_ext_autodoc_configs.py
+测试名称：test_autodoc_typehints_description
+测试代码：
+@pytest.mark.sphinx('text', testroot='ext-autodoc',
+                    confoverrides={'autodoc_typehints': "description"})
+def test_autodoc_typehints_description(app):
+    app.build()
+    context = (app.outdir / 'index.txt').read_text()
+    assert ('target.typehints.incr(a, b=1)\n'
+            '\n'
+            '   Parameters:\n'
+            '      * **a** (*int*) --\n'
+            '\n'
+            '      * **b** (*int*) --\n'
+            '\n'
+            '   Return type:\n'
+            '      int\n'
+            in context)
+    assert ('target.typehints.tuple_args(x)\n'
+            '\n'
+            '   Parameters:\n'
+            '      **x** (*Tuple**[**int**, **Union**[**int**, **str**]**]*) --\n'
+            '\n'
+            '   Return type:\n'
+            '      Tuple[int, int]\n'
+            in context)
+
+    # Overloads still get displayed in the signature
+    assert ('target.overload.sum(x: int, y: int = 0) -> int\n'
+            'target.overload.sum(x: float, y: float = 0.0) -> float\n'
+            'target.overload.sum(x: str, y: str = None) -> str\n'
+            '\n'
+            '   docstring\n'
+            in context)
+
+【相关测试 4】
+测试文件：tests/test_ext_autodoc_configs.py
+测试名称：test_autodoc_typehints_description_with_documented_init
+测试代码：
+@pytest.mark.sphinx('text', testroot='ext-autodoc',
+                    confoverrides={'autodoc_typehints': "description"})
+def test_autodoc_typehints_description_with_documented_init(app):
+    (app.srcdir / 'index.rst').write_text(
+        '.. autoclass:: target.typehints._ClassWithDocumentedInit\n'
+        '   :special-members: __init__\n'
+    )
+    app.build()
+    context = (app.outdir / 'index.txt').read_text()
+    assert ('class target.typehints._ClassWithDocumentedInit(x)\n'
+            '\n'
+            '   Class docstring.\n'
+            '\n'
+            '   Parameters:\n'
+            '      **x** (*int*) --\n'
+            '\n'
+            '   Return type:\n'
+            '      None\n'
+            '\n'
+            '   __init__(x)\n'
+            '\n'
+            '      Init docstring.\n'
+            '\n'
+            '      Parameters:\n'
+            '         **x** (*int*) -- Some integer\n'
+            '\n'
+            '      Return type:\n'
+            '         None\n' == context)
+
+【相关测试 5】
+测试文件：tests/test_ext_autodoc_configs.py
+测试名称：test_autodoc_typehints_description_and_type_aliases
+测试代码：
+@pytest.mark.skipif(sys.version_info < (3, 7), reason='python 3.7+ is required.')
+@pytest.mark.sphinx('text', testroot='ext-autodoc',
+                    srcdir='autodoc_typehints_description_and_type_aliases',
+                    confoverrides={'autodoc_typehints': "description",
+                                   'autodoc_type_aliases': {'myint': 'myint'}})
+def test_autodoc_typehints_description_and_type_aliases(app):
+    (app.srcdir / 'autodoc_type_aliases.rst').write_text('.. autofunction:: target.autodoc_type_aliases.sum')
+    app.build()
+    context = (app.outdir / 'autodoc_type_aliases.txt').read_text()
+    assert ('target.autodoc_type_aliases.sum(x, y)\n'
+            '\n'
+            '   docstring\n'
+            '\n'
+            '   Parameters:\n'
+            '      * **x** (*myint*) --\n'
+            '\n'
+            '      * **y** (*myint*) --\n'
+            '\n'
+            '   Return type:\n'
+            '      myint\n' == context)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

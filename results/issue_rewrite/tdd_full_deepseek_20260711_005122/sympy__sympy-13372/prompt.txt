@@ -1,0 +1,503 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+UnboundLocalError in evalf
+```
+>>> Mul(x, Max(0, y), evaluate=False).evalf()
+x*Max(0, y)
+>>> Mul(Max(0, y), x, evaluate=False).evalf()
+Traceback (most recent call last):
+  File "./sympy/core/evalf.py", line 1285, in evalf
+    rf = evalf_table[x.func]
+KeyError: Max
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "./sympy/core/evalf.py", line 1394, in evalf
+    result = evalf(self, prec + 4, options)
+  File "./sympy/core/evalf.py", line 1286, in evalf
+    r = rf(x, prec, options)
+  File "./sympy/core/evalf.py", line 538, in evalf_mul
+    arg = evalf(arg, prec, options)
+  File "./sympy/core/evalf.py", line 1308, in evalf
+    r = re, im, reprec, imprec
+UnboundLocalError: local variable 'reprec' referenced before assignment
+```
+
+I found this after changing the order of Mul args in https://github.com/sympy/sympy/pull/13059.
+
+Based on the code, I think the elif clauses that define reprec and imprec should have an `else: raise NotImplementedError`. That appears to fix it, although I didn't try to debug to see why the arg order is mattering here. 
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/assumptions/handlers/sets.py
+对象名称：Mul
+节点类型：class_function
+父节点：AskIntegerHandler
+行号范围：46-71
+代码：
+    def Mul(expr, assumptions):
+        """
+        Integer*Integer      -> Integer
+        Integer*Irrational   -> !Integer
+        Odd/Even             -> !Integer
+        Integer*Rational     -> ?
+        """
+        if expr.is_number:
+            return AskIntegerHandler._number(expr, assumptions)
+        _output = True
+        for arg in expr.args:
+            if not ask(Q.integer(arg), assumptions):
+                if arg.is_Rational:
+                    if arg.q == 2:
+                        return ask(Q.even(2*expr), assumptions)
+                    if ~(arg.q & 1):
+                        return None
+                elif ask(Q.irrational(arg), assumptions):
+                    if _output:
+                        _output = False
+                    else:
+                        return
+                else:
+                    return
+        else:
+            return _output
+
+
+【源码片段 2】
+文件路径：sympy/core/evalf.py
+对象名称：evalf
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 3】
+文件路径：sympy/functions/elementary/miscellaneous.py
+对象名称：Max
+节点类型：class
+父节点：miscellaneous
+行号范围：524-639
+代码：
+class Max(MinMaxBase, Application):
+    """
+    Return, if possible, the maximum value of the list.
+
+    When number of arguments is equal one, then
+    return this argument.
+
+    When number of arguments is equal two, then
+    return, if possible, the value from (a, b) that is >= the other.
+
+    In common case, when the length of list greater than 2, the task
+    is more complicated. Return only the arguments, which are greater
+    than others, if it is possible to determine directional relation.
+
+    If is not possible to determine such a relation, return a partially
+    evaluated result.
+
+    Assumptions are used to make the decision too.
+
+    Also, only comparable arguments are permitted.
+
+    It is named ``Max`` and not ``max`` to avoid conflicts
+    with the built-in function ``max``.
+
+
+    Examples
+    ========
+
+    >>> from sympy import Max, Symbol, oo
+    >>> from sympy.abc import x, y
+    >>> p = Symbol('p', positive=True)
+    >>> n = Symbol('n', negative=True)
+
+    >>> Max(x, -2)                  #doctest: +SKIP
+    Max(x, -2)
+    >>> Max(x, -2).subs(x, 3)
+    3
+    >>> Max(p, -2)
+    p
+    >>> Max(x, y)
+    Max(x, y)
+    >>> Max(x, y) == Max(y, x)
+    True
+    >>> Max(x, Max(y, z))           #doctest: +SKIP
+    Max(x, y, z)
+    >>> Max(n, 8, p, 7, -oo)        #doctest: +SKIP
+    Max(8, p)
+    >>> Max (1, x, oo)
+    oo
+
+    * Algorithm
+
+    The task can be considered as searching of supremums in the
+    directed complete partial orders [1]_.
+
+    The source values are sequentially allocated by the isolated subsets
+    in which supremums are searched and result as Max arguments.
+
+    If the resulted supremum is single, then it is returned.
+
+    The isolated subsets are the sets of values which are only the comparable
+    with each other in the current set. E.g. natural numbers are comparable with
+    each other, but not comparable with the `x` symbol. Another example: the
+    symbol `x` with negative assumption is comparable with a natural number.
+
+    Also there are "least" elements, which are comparable with all others,
+    and have a zero property (maximum or minimum for all elements). E.g. `oo`.
+    In case of it the allocation operation is terminated and only this value is
+    returned.
+
+    Assumption:
+       - if A > B > C then A > C
+       - if A == B then B can be removed
+
+    References
+    ==========
+
+    .. [1] http://en.wikipedia.org/wiki/Directed_complete_partial_order
+    .. [2] http://en.wikipedia.org/wiki/Lattice_%28order%29
+
+    See Also
+    ========
+
+    Min : find minimum values
+    """
+    zero = S.Infinity
+    identity = S.NegativeInfinity
+    def fdiff( self, argindex ):
+    def _eval_rewrite_as_Heaviside(self, *args):
+    def _eval_rewrite_as_Piecewise(self, *args):
+    def _eval_is_positive(self):
+    def _eval_is_nonnegative(self):
+    def _eval_is_negative(self):
+
+
+【源码片段 4】
+文件路径：sympy/core/evalf.py
+对象名称：evalf_table
+节点类型：global_var
+父节点：evalf
+行号范围：1222-1222
+代码：
+evalf_table = None
+
+
+【源码片段 5】
+文件路径：sympy/core/evalf.py
+对象名称：evalf_mul
+节点类型：top-level function
+父节点：evalf
+行号范围：527-638
+代码：
+def evalf_mul(v, prec, options):
+    res = pure_complex(v)
+    if res:
+        # the only pure complex that is a mul is h*I
+        _, h = res
+        im, _, im_acc, _ = evalf(h, prec, options)
+        return None, im, None, im_acc
+    args = list(v.args)
+
+    # see if any argument is NaN or oo and thus warrants a special return
+    special = []
+    from sympy.core.numbers import Float
+    for arg in args:
+        arg = evalf(arg, prec, options)
+        if arg[0] is None:
+            continue
+        arg = Float._new(arg[0], 1)
+        if arg is S.NaN or arg.is_infinite:
+            special.append(arg)
+    if special:
+        from sympy.core.mul import Mul
+        special = Mul(*special)
+        return evalf(special, prec + 4, {})
+
+    # With guard digits, multiplication in the real case does not destroy
+    # accuracy. This is also true in the complex case when considering the
+    # total accuracy; however accuracy for the real or imaginary parts
+    # separately may be lower.
+    acc = prec
+
+    # XXX: big overestimate
+    working_prec = prec + len(args) + 5
+
+    # Empty product is 1
+    start = man, exp, bc = MPZ(1), 0, 1
+
+    # First, we multiply all pure real or pure imaginary numbers.
+    # direction tells us that the result should be multiplied by
+    # I**direction; all other numbers get put into complex_factors
+    # to be multiplied out after the first phase.
+    last = len(args)
+    direction = 0
+    args.append(S.One)
+    complex_factors = []
+
+    for i, arg in enumerate(args):
+        if i != last and pure_complex(arg):
+            args[-1] = (args[-1]*arg).expand()
+            continue
+        elif i == last and arg is S.One:
+            continue
+        re, im, re_acc, im_acc = evalf(arg, working_prec, options)
+        if re and im:
+            complex_factors.append((re, im, re_acc, im_acc))
+            continue
+        elif re:
+            (s, m, e, b), w_acc = re, re_acc
+        elif im:
+            (s, m, e, b), w_acc = im, im_acc
+            direction += 1
+        else:
+            return None, None, None, None
+        direction += 2*s
+        man *= m
+        exp += e
+        bc += b
+        if bc > 3*working_prec:
+            man >>= working_prec
+            exp += working_prec
+        acc = min(acc, w_acc)
+    sign = (direction & 2) >> 1
+    if not complex_factors:
+        v = normalize(sign, man, exp, bitcount(man), prec, rnd)
+        # multiply by i
+        if direction & 1:
+            return None, v, None, acc
+        else:
+            return v, None, acc, None
+    else:
+        # initialize with the first term
+        if (man, exp, bc) != start:
+            # there was a real part; give it an imaginary part
+            re, im = (sign, man, exp, bitcount(man)), (0, MPZ(0), 0, 0)
+            i0 = 0
+        else:
+            # there is no real part to start (other than the starting 1)
+            wre, wim, wre_acc, wim_acc = complex_factors[0]
+            acc = min(acc,
+                      complex_accuracy((wre, wim, wre_acc, wim_acc)))
+            re = wre
+            im = wim
+            i0 = 1
+
+        for wre, wim, wre_acc, wim_acc in complex_factors[i0:]:
+            # acc is the overall accuracy of the product; we aren't
+            # computing exact accuracies of the product.
+            acc = min(acc,
+                      complex_accuracy((wre, wim, wre_acc, wim_acc)))
+
+            use_prec = working_prec
+            A = mpf_mul(re, wre, use_prec)
+            B = mpf_mul(mpf_neg(im), wim, use_prec)
+            C = mpf_mul(re, wim, use_prec)
+            D = mpf_mul(im, wre, use_prec)
+            re = mpf_add(A, B, use_prec)
+            im = mpf_add(C, D, use_prec)
+        if options.get('verbose'):
+            print("MUL: wanted", prec, "accurate bits, got", acc)
+        # multiply by I
+        if direction & 1:
+            re, im = mpf_neg(im), re
+        return re, im, acc, acc
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/core/tests/test_evalf.py
+测试名称：test_issue_10395
+测试代码：
+def test_issue_10395():
+    eq = x*Max(0, y)
+    assert nfloat(eq) == eq
+    eq = x*Max(y, -1.1)
+    assert nfloat(eq) == eq
+    assert Max(y, 4).n() == Max(4.0, y)
+
+【相关测试 2】
+测试文件：sympy/core/tests/test_evalf.py
+测试名称：test_evalf_mul
+测试代码：
+def test_evalf_mul():
+    # sympy should not try to expand this; it should be handled term-wise
+    # in evalf through mpmath
+    assert NS(product(1 + sqrt(n)*I, (n, 1, 500)), 1) == '5.e+567 + 2.e+568*I'
+
+【相关测试 3】
+测试文件：sympy/core/tests/test_evalf.py
+测试名称：test_evaluate_false
+测试代码：
+def test_evaluate_false():
+    for no in [0, False]:
+        assert Add(3, 2, evaluate=no).is_Add
+        assert Mul(3, 2, evaluate=no).is_Mul
+        assert Pow(3, 2, evaluate=no).is_Pow
+    assert Pow(y, 2, evaluate=True) - Pow(y, 2, evaluate=True) == 0
+
+【相关测试 4】
+测试文件：sympy/core/tests/test_evalf.py
+测试名称：test_evalf_integer_parts
+测试代码：
+def test_evalf_integer_parts():
+    a = floor(log(8)/log(2) - exp(-1000), evaluate=False)
+    b = floor(log(8)/log(2), evaluate=False)
+    assert a.evalf() == 3
+    assert b.evalf() == 3
+    # equals, as a fallback, can still fail but it might succeed as here
+    assert ceiling(10*(sin(1)**2 + cos(1)**2)) == 10
+
+    assert int(floor(factorial(50)/E, evaluate=False).evalf(70)) == \
+        long(11188719610782480504630258070757734324011354208865721592720336800)
+    assert int(ceiling(factorial(50)/E, evaluate=False).evalf(70)) == \
+        long(11188719610782480504630258070757734324011354208865721592720336801)
+    assert int(floor((GoldenRatio**999 / sqrt(5) + Rational(1, 2)))
+               .evalf(1000)) == fibonacci(999)
+    assert int(floor((GoldenRatio**1000 / sqrt(5) + Rational(1, 2)))
+               .evalf(1000)) == fibonacci(1000)
+
+    assert ceiling(x).evalf(subs={x: 3}) == 3
+    assert ceiling(x).evalf(subs={x: 3*I}) == 3*I
+    assert ceiling(x).evalf(subs={x: 2 + 3*I}) == 2 + 3*I
+    assert ceiling(x).evalf(subs={x: 3.}) == 3
+    assert ceiling(x).evalf(subs={x: 3.*I}) == 3*I
+    assert ceiling(x).evalf(subs={x: 2. + 3*I}) == 2 + 3*I
+
+【相关测试 5】
+测试文件：sympy/core/tests/test_evalf.py
+测试名称：test_evalf_trig_zero_detection
+测试代码：
+def test_evalf_trig_zero_detection():
+    a = sin(160*pi, evaluate=False)
+    t = a.evalf(maxn=100)
+    assert abs(t) < 1e-100
+    assert t._prec < 2
+    assert a.evalf(chop=True) == 0
+    raises(PrecisionExhausted, lambda: a.evalf(strict=True))
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

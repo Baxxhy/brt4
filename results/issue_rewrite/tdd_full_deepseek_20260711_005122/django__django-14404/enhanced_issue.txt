@@ -1,0 +1,123 @@
+instance_id: django__django-14404
+
+issue_summary: catch_all_view 在 APPEND_SLASH=True 且 FORCE_SCRIPT_NAME 设置时，重定向路径错误地使用了 request.path_info 而非 request.path，导致脚本名被错误地截断。
+
+trigger_condition:
+{
+  "text": "当 settings.APPEND_SLASH=True 且 FORCE_SCRIPT_NAME 被设置（非 None）时，访问一个缺少尾部斜杠的未知管理后台 URL。",
+  "evidence": [
+    "Issue 描述指出 catch_all_view 不支持 FORCE_SCRIPT_NAME，并提到它使用 request.path_info 而非 request.path。",
+    "源码片段 1 显示 catch_all_view 在 APPEND_SLASH=True 且 URL 不以 '/' 结尾时，使用 request.path_info 构建重定向路径。",
+    "源码片段 2 显示 FORCE_SCRIPT_NAME 是一个可配置的全局设置。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "重定向路径中缺少 FORCE_SCRIPT_NAME 前缀，导致重定向到一个错误的 URL（脚本名被截断）。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 描述明确指出 catch_all_view 返回的 redirect 路径中脚本名被截断，因为它使用了 request.path_info 而不是 request.path。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当 FORCE_SCRIPT_NAME 被设置时，catch_all_view 在 APPEND_SLASH=True 下对未知 URL 的重定向应包含完整的脚本名前缀，即使用 request.path 或等效方式构建路径。",
+  "evidence": [
+    "Issue 描述指出期望的行为是使用 '%s/' % request.path（包含脚本名）而不是 '%s/' % request.path_info（脚本名被截断）。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "AdminSite.catch_all_view",
+    "kind": "method",
+    "source_path": "django/contrib/admin/sites.py",
+    "reason": "这是 Issue 直接报告的存在缺陷的函数。"
+  },
+  {
+    "name": "django.conf.settings.FORCE_SCRIPT_NAME",
+    "kind": "module",
+    "source_path": "django/conf/global_settings.py",
+    "reason": "Issue 明确指出缺陷与 FORCE_SCRIPT_NAME 设置相关。"
+  },
+  {
+    "name": "django.test.Client.get",
+    "kind": "method",
+    "source_path": "",
+    "reason": "相关测试中使用 Client 发起请求以触发 catch_all_view。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "相似测试中只设置了 APPEND_SLASH=True，未设置 FORCE_SCRIPT_NAME。",
+    "target_pattern": "在测试中添加 FORCE_SCRIPT_NAME 设置，例如 FORCE_SCRIPT_NAME='/script'。",
+    "reason": "Issue 明确指出缺陷在 FORCE_SCRIPT_NAME 设置时触发，添加此配置可能使重定向路径构建出错。",
+    "confidence": "high"
+  },
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中访问的 URL 如 '/test_admin/admin/unknown/'（无脚本名前缀）。",
+    "target_pattern": "访问的 URL 应包含 FORCE_SCRIPT_NAME 前缀，例如 '/script/test_admin/admin/unknown'（缺少尾部斜杠）。",
+    "reason": "为了测试 catch_all_view 在包含脚本名的路径下的行为，并触发其内部的重定向逻辑。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "response.status_code 和 response.url（如果重定向发生）",
+    "reason": "缺陷表现为重定向路径错误，观察响应状态码和重定向目标 URL 可以判断是否触发了错误的重定向。"
+  },
+  {
+    "kind": "config",
+    "expression_hint": "settings.FORCE_SCRIPT_NAME 和 settings.APPEND_SLASH 的值",
+    "reason": "缺陷触发依赖于这两个配置，确认它们在测试运行时的实际值至关重要。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当 FORCE_SCRIPT_NAME 设置时，访问缺少尾部斜杠的未知管理 URL 应返回 404 或正确的重定向（包含脚本名前缀）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言完整的硬编码重定向 URL 字符串，因为脚本名可能变化。",
+    "reason": "Issue 期望重定向路径包含脚本名，但当前实现可能返回 404 或错误路径。断言应关注行为是否符合预期语义，而非具体字符串。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 override_settings 设置 APPEND_SLASH=True 和 FORCE_SCRIPT_NAME（例如 '/myscript'）。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要创建超级用户并登录，因为管理后台视图通常需要认证。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要设置 ROOT_URLCONF 指向包含 admin 站点的 URL 配置。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "在 FORCE_SCRIPT_NAME 设置下，catch_all_view 对未知 URL 的预期确切行为是什么？是应该返回 404，还是应该重定向到包含脚本名的正确路径？",
+  "request.path 和 request.path_info 在 FORCE_SCRIPT_NAME 设置下的具体区别和值是什么？",
+  "除了重定向路径错误，是否还有其他副作用或错误？"
+]

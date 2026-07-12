@@ -1,0 +1,124 @@
+instance_id: django__django-14376
+
+issue_summary: MySQL后端使用了mysqlclient已弃用的'db'和'passwd'参数，应改用'database'和'password'。
+
+trigger_condition:
+{
+  "text": "使用MySQL后端（django.db.backends.mysql）建立数据库连接时，会传递包含'db'和'passwd'的连接参数。",
+  "evidence": [
+    "Issue描述指出'db'和'passwd'使用位于django/db/backends/mysql/base.py第202-205行",
+    "Issue提到mysqlclient在1.3.8版本后支持'database'和'password'参数"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "使用已弃用的参数'db'和'passwd'，可能导致DeprecationWarning或未来版本不兼容。",
+  "symptom_type": "warning",
+  "evidence": [
+    "Issue标题和描述明确指出'db'和'passwd'已被mysqlclient标记为弃用"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "MySQL后端应使用mysqlclient推荐的'database'和'password'参数，避免使用已弃用的'db'和'passwd'。",
+  "evidence": [
+    "Issue提到mysqlclient在1.3.8版本添加了对'database'和'password'的支持",
+    "Issue指出Django 2.2、3.1、3.2要求的最低mysqlclient版本都高于1.3.8"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "django.db.backends.mysql.base.DatabaseWrapper.get_connection_params",
+    "kind": "method",
+    "source_path": "django/db/backends/mysql/base.py",
+    "reason": "Issue引用的代码行位于此文件，该方法负责构建MySQL连接参数"
+  },
+  {
+    "name": "django.db.backends.mysql.base.DatabaseWrapper",
+    "kind": "class",
+    "source_path": "django/db/backends/mysql/base.py",
+    "reason": "MySQL后端的主要包装类，包含连接管理逻辑"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "测试中使用标准DATABASES配置（NAME, USER, PASSWORD等）",
+    "target_pattern": "配置MySQL后端连接，触发get_connection_params调用",
+    "reason": "需要触发MySQL后端连接建立过程，才能测试连接参数传递",
+    "confidence": "medium"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "测试直接调用特定方法或命令",
+    "target_pattern": "建立实际的数据库连接，触发完整的连接参数构建流程",
+    "reason": "Issue涉及的是连接建立时的参数传递，需要完整调用链",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "warning",
+    "expression_hint": "连接建立过程中产生的DeprecationWarning",
+    "reason": "Issue的核心是使用已弃用参数，应观察是否产生弃用警告"
+  },
+  {
+    "kind": "config",
+    "expression_hint": "传递给mysqlclient.connect()的实际参数字典",
+    "reason": "需要验证是否使用了'db'/'passwd'而不是'database'/'password'"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "连接参数中应使用'database'和'password'，不应使用'db'和'passwd'",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "完整的参数字典字符串比较",
+    "reason": "只需验证弃用参数不存在，不依赖具体参数顺序或完整字典结构"
+  },
+  {
+    "assertion_goal": "连接建立不应产生DeprecationWarning",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "捕获特定异常消息的完整匹配",
+    "reason": "只需验证没有弃用警告，不依赖警告的精确文本"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要配置MySQL数据库连接设置，可能使用测试数据库或内存数据库",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  },
+  {
+    "hint": "可能需要mock mysqlclient.connect来观察传递的参数",
+    "source": "inference",
+    "confidence": "medium"
+  },
+  {
+    "hint": "使用unittest.skipUnless确保只在MySQL后端运行",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "当前检索到的源码片段都是sqlite3相关，没有实际的mysql/base.py代码",
+  "不确定弃用警告是否默认被抑制或需要特定配置才会显示",
+  "不确定是否所有MySQL连接场景都会触发此问题，还是特定配置下才会",
+  "需要确认修复后是否完全移除'db'/'passwd'，还是两者都支持"
+]

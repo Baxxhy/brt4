@@ -1,0 +1,129 @@
+{
+  "issue_summary": "当函数返回类型注解为 Tuple[()]（空元组）时，Sphinx 在解析注解时抛出 IndexError: pop from empty list 异常。",
+  "trigger_condition": {
+    "text": "使用 Sphinx 构建包含函数返回类型注解为 Tuple[()] 的 Python 模块文档。",
+    "evidence": ["Issue 描述中给出了示例代码：`def foo() -> Tuple[()]: return ()`", "Issue 报告了在构建文档时触发错误。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "在 sphinx/domains/python.py 的 unparse 函数中，执行 result.pop() 时抛出 IndexError: pop from empty list 异常。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 中的错误堆栈跟踪：`File \"\\path\\to\\site-packages\\sphinx\\domains\\python.py\", line 112, in unparse result.pop() IndexError: pop from empty list`"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "Sphinx 应能成功解析并构建包含 Tuple[()] 类型注解的文档，不抛出异常。",
+    "evidence": ["Issue 的 Expected behavior 部分：\"Docs are built and there is `foo` with valid type annotations.\"", "相关测试代码表明 Sphinx 能够处理其他复杂的类型注解，如 Tuple[int, int] 和 Callable[[int, int], int]。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "sphinx.domains.python.unparse",
+      "kind": "function",
+      "source_path": "sphinx/pycode/ast.py",
+      "reason": "Issue 的堆栈跟踪指向此函数，它是解析 AST 节点为字符串的关键函数，可能负责处理 Tuple[()] 注解。"
+    },
+    {
+      "name": "sphinx.domains.python._parse_annotation",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试 test_parse_annotation 调用了此函数，它负责解析类型注解字符串，可能与触发 bug 的流程相关。"
+    },
+    {
+      "name": "sphinx.util.inspect.signature_from_str",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试 test_signature_from_str_complex_annotations 使用了此函数处理包含 Tuple 和 Callable 的注解字符串。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sphinx/pycode/ast.py",
+      "object": "unparse",
+      "lines": "61-122",
+      "reason": "Issue 的堆栈跟踪直接指向此函数的第 112 行，且源码片段显示该函数处理 ast.Tuple 节点，可能未正确处理空元组元素列表。"
+    },
+    {
+      "path": "sphinx/domains/python.py",
+      "object": "unparse",
+      "lines": "",
+      "reason": "Issue 的堆栈跟踪文件路径指向此文件，但检索到的源码片段来自 sphinx/pycode/ast.py，表明可能存在调用关系或代码位置变更。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_parse_annotation",
+      "test_file": "tests/test_domain_py.py",
+      "why_relevant": "该测试直接测试 _parse_annotation 函数，验证了多种类型注解（包括 Tuple[int, int]）的解析，与 Issue 中类型注解解析的场景高度相关。",
+      "reusable_parts": ["测试函数结构", "assert_node 断言风格", "对 _parse_annotation 的调用方式"],
+      "possible_gap": "该测试没有覆盖 Tuple[()] 这种空元组类型注解的情况，因此不会触发 IndexError。"
+    },
+    {
+      "test_name": "test_signature_annotations",
+      "test_file": "tests/test_util_inspect.py",
+      "why_relevant": "该测试验证了从真实函数（包括使用 typing 模块的函数）提取签名和注解，涵盖了多种 Tuple 类型（如 Tuple[int, str], Tuple[int, ...]），与 Issue 中涉及 typing.Tuple 的场景相关。",
+      "reusable_parts": ["从 typing_test_data 导入测试函数", "使用 inspect.signature", "stringify_signature 辅助函数", "对复杂注解的断言模式"],
+      "possible_gap": "测试数据 f10 和 f12 只测试了非空元组和可变长元组，没有测试空元组 Tuple[()]。"
+    },
+    {
+      "test_name": "test_signature_from_str_complex_annotations",
+      "test_file": "tests/test_util_inspect.py",
+      "why_relevant": "该测试直接使用字符串形式的类型注解（如 '() -> Tuple[str, int, ...]'）来测试签名解析，与 Issue 中注解可能以字符串形式被处理的场景相关。",
+      "reusable_parts": ["signature_from_str 的调用方式", "对 return_annotation 的简单相等断言"],
+      "possible_gap": "测试用例没有包含 Tuple[()] 的字符串形式。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "测试中使用非空元组类型注解，如 Tuple[int, int] 或 Tuple[str, int, ...]。",
+      "target_pattern": "将类型注解改为空元组 Tuple[()]。",
+      "reason": "Issue 明确指出 Tuple[()] 会触发 bug，而现有测试用例未覆盖此边界情况。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "向 _parse_annotation 传入 \"Tuple[int, int]\" 这样的字符串。",
+      "target_pattern": "向 _parse_annotation 传入 \"Tuple[()]\" 字符串。",
+      "reason": "这可能会使解析路径走到处理空元素列表的代码分支，从而触发 IndexError。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "在调用 unparse 或相关解析函数时，捕获 IndexError 异常。",
+      "reason": "Issue 的核心错误症状就是 IndexError，观测此异常可直接确认 bug 是否被触发。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "观察 unparse 函数在处理 ast.Tuple 节点（其 elts 为空列表）时的返回值或中间状态。",
+      "reason": "异常发生在 result.pop()，观测 result 列表在处理空元组时的状态有助于理解缺陷。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证当输入类型注解为 Tuple[()] 时，解析过程不会抛出 IndexError 异常。",
+      "preferred_assertion_style": "raises",
+      "avoid": "避免断言完整的输出字符串，因为修复后的具体输出格式可能不确定。",
+      "reason": "Issue 的核心是异常，因此断言不抛出特定异常是直接且稳定的验证方式。修复后应不再抛出异常。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "可能需要创建一个包含目标函数的临时模块文件，并使用 Sphinx 的 autodoc 扩展来触发文档构建流程。",
+      "source": "issue",
+      "confidence": "medium"
+    },
+    {
+      "hint": "可以参考相关测试中使用的 app fixture 和 restructuredtext.parse 来构建测试环境。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "sphinx/domains/python.py 中的 unparse 函数与检索到的 sphinx/pycode/ast.py 中的 unparse 函数的确切关系和调用链不明确。",
+    "触发 bug 的完整调用路径（从读取源码到调用 unparse）的具体细节未在 Issue 中完全说明。",
+    "修复后对于 Tuple[()] 注解的预期输出字符串格式是什么（例如是 \"Tuple[()]\" 还是其他形式）不确定。"
+  ]
+}

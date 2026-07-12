@@ -1,0 +1,133 @@
+{
+  "issue_summary": "Autodoc 扩展的 mock 模块在处理泛型类时，因尝试将字符串与 TypeVar 拼接而抛出 TypeError。",
+  "trigger_condition": {
+    "text": "使用 sphinx.ext.autodoc 构建包含泛型类型（例如使用 TypeVar 的类）的文档。",
+    "evidence": ["Issue 描述：'When building the docs for a generically-typed class, a TypeError is thrown...'", "Issue 重现步骤涉及构建包含泛型类型的项目文档。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "构建文档时抛出 TypeError，错误涉及尝试将字符串与 TypeVar 对象拼接。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 描述：'a TypeError is thrown as Autodoc's `mock._make_subclass` attempts to concatenate a `str` to a `TypeVar`.'"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "即使涉及泛型类型，文档构建也应正常完成，不抛出 TypeError。",
+    "evidence": ["Issue 描述：'Docs can still be built when generics are involved.'"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "_make_subclass",
+      "kind": "function",
+      "source_path": "sphinx/ext/autodoc/mock.py",
+      "reason": "Issue 明确指出此函数尝试拼接字符串和 TypeVar 导致 TypeError。"
+    },
+    {
+      "name": "stringify",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试显示其用于处理 TypeVar 的字符串表示，可能与泛型类型的处理相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sphinx/ext/autodoc/mock.py",
+      "object": "_make_subclass",
+      "lines": "71-76",
+      "reason": "Issue 直接提及此函数，其代码行 `attrs = {'__module__': module, '__display_name__': module + '.' + name}` 可能涉及与非常规类型（如 TypeVar）的拼接操作。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_mock",
+      "test_file": "tests/test_ext_autodoc_mock.py",
+      "why_relevant": "测试了 mock 模块的基本功能，包括模块导入和模拟对象创建，是理解 mock 上下文的起点。",
+      "reusable_parts": ["import_module 的使用", "mock 上下文管理器", "sys.modules 检查"],
+      "possible_gap": "未涉及泛型类型或 TypeVar 的模拟，也未测试 _make_subclass 函数。"
+    },
+    {
+      "test_name": "test_MockObject",
+      "test_file": "tests/test_ext_autodoc_mock.py",
+      "why_relevant": "测试了 _MockObject 的行为，包括属性访问和子类化，与模拟对象的创建和交互相关。",
+      "reusable_parts": ["_MockObject 实例化", "模拟对象的属性/方法访问模式", "基于模拟对象的子类创建"],
+      "possible_gap": "未涉及泛型类或 TypeVar，也未直接调用 _make_subclass。"
+    },
+    {
+      "test_name": "test_stringify_type_hints_typevars",
+      "test_file": "tests/test_util_typing.py",
+      "why_relevant": "直接测试了 TypeVar 的字符串化，与 Issue 中涉及的泛型类型处理高度相关。",
+      "reusable_parts": ["TypeVar 的创建", "stringify 函数的调用", "对 TypeVar 和泛型容器的断言"],
+      "possible_gap": "测试的是独立的工具函数，未集成到 autodoc/mock 的文档构建流程中。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "test_MockObject 中使用普通类作为基类创建子类。",
+      "target_pattern": "使用包含 TypeVar 的泛型类作为基类来创建子类或模拟对象。",
+      "reason": "Issue 表明当基类是泛型类时，_make_subclass 内部拼接操作会失败。",
+      "confidence": "medium"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "模拟对象的属性是普通字符串或 _MockObject 实例。",
+      "target_pattern": "模拟对象的属性或 __display_name__ 等元数据涉及 TypeVar 对象。",
+      "reason": "_make_subclass 中 `module + '.' + name` 拼接可能期望字符串，但传入的 module 或 name 可能关联 TypeVar。",
+      "confidence": "low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "调用 _make_subclass 或相关文档构建流程时是否抛出 TypeError。",
+      "reason": "Issue 的核心错误现象是 TypeError。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "_make_subclass 函数中 `module` 和 `name` 参数的实际类型，以及 `module + '.' + name` 操作数的类型。",
+      "reason": "错误是字符串与 TypeVar 的拼接，需要确认操作数的类型。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "模拟创建后对象的 __display_name__ 属性值或字符串表示。",
+      "reason": "拼接结果用于 __display_name__，其值可能异常。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "文档构建过程（或 _make_subclass 调用）不应抛出 TypeError。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言具体的完整错误消息字符串，因为可能随 Python 版本变化。",
+      "reason": "Issue 的核心是异常被触发，修复后应不再触发。"
+    },
+    {
+      "assertion_goal": "创建的模拟对象或其 __display_name__ 属性应能正确处理泛型类型信息。",
+      "preferred_assertion_style": "isinstance",
+      "avoid": "断言 __display_name__ 等于某个特定字符串，因为具体表示可能未在 Issue 中指定。",
+      "reason": "修复后，涉及泛型类型的模拟对象应能成功创建并具有合理的属性。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要模拟一个包含泛型类型（如使用 TypeVar）的模块或类。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 mock 上下文管理器来隔离导入。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要导入 typing 模块以创建 TypeVar。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "TypeVar 对象是如何传递到 _make_subclass 的 `module` 或 `name` 参数中的具体路径。",
+    "除了 _make_subclass，autodoc 流程中是否还有其他函数对泛型类型处理不当。",
+    "修复后，泛型类的 __display_name__ 或文档字符串的具体期望格式是什么。"
+  ]
+}

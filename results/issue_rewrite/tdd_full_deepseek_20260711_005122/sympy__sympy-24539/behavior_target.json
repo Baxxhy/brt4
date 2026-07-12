@@ -1,0 +1,261 @@
+{
+  "instance_id": "sympy__sympy-24539",
+  "issue_summary": "PolyElement.as_expr() 方法忽略传入的 symbols 参数，总是使用 self.ring.symbols。",
+  "trigger_condition": {
+    "text": "调用 PolyElement.as_expr() 方法时传入与 self.ring.ngens 数量相等的 symbols 参数。",
+    "evidence": [
+      "Issue 描述：'either you pass the wrong number of symbols, and get an error message, or you pass the right number of symbols, and it ignores them, using self.ring.symbols instead'",
+      "Issue 中的示例代码：f.as_expr(U, V, W)",
+      "源码片段 2 中 as_expr 方法定义：def as_expr(self, *symbols):"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "方法返回的表达式使用了原始的环符号（如 x, y, z），而不是传入的新符号（如 u, v, w）。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 中的示例输出：'3*x**2*y - x*y*z + 7*z**3 + 1'，其中使用了 x, y, z 而非 u, v, w。",
+      "Issue 描述：'it ignores them, using self.ring.symbols instead'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当传入正确数量的 symbols 参数时，as_expr() 方法应使用传入的 symbols 来构建表达式。",
+    "evidence": [
+      "Issue 标题和描述暗示该方法应接受 symbols 参数。",
+      "相关测试 1 中：assert f.as_expr(X, Y, Z) == g，其中 X, Y, Z 是外部 symbols。",
+      "源码片段 2 中方法签名和参数检查逻辑暗示 symbols 参数是设计来使用的。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "PolyElement.as_expr",
+      "kind": "method",
+      "source_path": "sympy/polys/rings.py",
+      "reason": "这是 Issue 直接报告的有缺陷的方法。"
+    },
+    {
+      "name": "ring",
+      "kind": "function",
+      "source_path": "sympy/polys/rings.py",
+      "reason": "用于创建 PolyElement 对象及其环环境。"
+    },
+    {
+      "name": "symbols",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 中用于创建新符号，测试中也用于构造预期表达式。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/polys/rings.py",
+      "object": "PolyElement.as_expr",
+      "lines": "618-624",
+      "reason": "Issue 直接指向此方法，其逻辑在 symbols 参数数量正确时，仍将 symbols 重新赋值为 self.ring.symbols。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_PolyElement_as_expr",
+      "test_file": "sympy/polys/tests/test_rings.py",
+      "why_relevant": "这是直接测试 PolyElement.as_expr 方法的测试，包含使用外部 symbols 参数的用例。",
+      "reusable_parts": [
+        "imports (ring, ZZ)",
+        "对象构造 (R, x, y, z = ring(...); f = ...)",
+        "API 调用 (f.as_expr(...))",
+        "assert 风格 (assert f.as_expr(X, Y, Z) == g)"
+      ],
+      "possible_gap": "该测试使用了与环符号同名的外部 symbols (X, Y, Z = symbols(\"x,y,z\"))，因此即使 bug 存在，断言也可能碰巧通过。它没有测试使用不同名称的 symbols。"
+    },
+    {
+      "test_name": "test_FracElement_as_expr",
+      "test_file": "sympy/polys/tests/test_fields.py",
+      "why_relevant": "测试了类似结构（FracElement）的 as_expr 方法，模式相似。",
+      "reusable_parts": [
+        "imports (field, ZZ, symbols)",
+        "对象构造模式",
+        "API 调用模式",
+        "assert 风格"
+      ],
+      "possible_gap": "测试的是 FracElement 而非 PolyElement，且同样使用了同名的外部 symbols。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "相似测试中使用与环符号同名的外部 symbols 作为参数：X, Y, Z = symbols(\"x,y,z\")；f.as_expr(X, Y, Z)。",
+      "target_pattern": "使用与环符号不同名称的 symbols 作为参数：U, V, W = symbols(\"u,v,w\")；f.as_expr(U, V, W)。",
+      "reason": "Issue 的核心是传入的 symbols 被忽略，使用同名 symbols 可能掩盖问题。使用不同名称能明确暴露返回值是否使用了传入的 symbols。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "f.as_expr(U, V, W) 的返回值，观察其字符串表示中是否包含 'u', 'v', 'w' 或原始的 'x', 'y', 'z'。",
+      "reason": "Issue 的错误现象是返回值使用了错误的符号。直接观察返回的表达式字符串可以判断 bug 是否触发。"
+    },
+    {
+      "kind": "repr",
+      "expression_hint": "f.as_expr(U, V, W) 返回的表达式对象的 repr 或 str。",
+      "reason": "表达式的 repr/str 会显示其使用的符号，是判断是否使用了正确符号的直接依据。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "使用新符号调用 as_expr 返回的表达式，其符号应与传入的新符号对应。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的表达式字符串完全相等，因为符号名称不同。避免断言与使用原始环符号的表达式相等。",
+      "reason": "Issue 是关于符号映射，核心是表达式中使用了哪个符号集。断言返回的表达式字符串包含新符号名称（如 'u'）是稳定且直接相关的。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 ring, ZZ, symbols 来构造 PolyElement 对象和外部 symbols。",
+      "source": "issue|retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试环境可能需要 sympy 的常规测试设置。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "as_expr 方法内部调用的 expr_from_dict 函数的确切行为及其对 symbols 参数的使用方式。",
+    "除了符号名称错误外，表达式的结构（系数、指数）是否在所有情况下都正确。",
+    "当传入 symbols 数量错误时，抛出的 ValueError 信息是否准确且是预期行为的一部分。"
+  ],
+  "raw": {
+    "issue_summary": "PolyElement.as_expr() 方法忽略传入的 symbols 参数，总是使用 self.ring.symbols。",
+    "trigger_condition": {
+      "text": "调用 PolyElement.as_expr() 方法时传入与 self.ring.ngens 数量相等的 symbols 参数。",
+      "evidence": [
+        "Issue 描述：'either you pass the wrong number of symbols, and get an error message, or you pass the right number of symbols, and it ignores them, using self.ring.symbols instead'",
+        "Issue 中的示例代码：f.as_expr(U, V, W)",
+        "源码片段 2 中 as_expr 方法定义：def as_expr(self, *symbols):"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "方法返回的表达式使用了原始的环符号（如 x, y, z），而不是传入的新符号（如 u, v, w）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的示例输出：'3*x**2*y - x*y*z + 7*z**3 + 1'，其中使用了 x, y, z 而非 u, v, w。",
+        "Issue 描述：'it ignores them, using self.ring.symbols instead'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当传入正确数量的 symbols 参数时，as_expr() 方法应使用传入的 symbols 来构建表达式。",
+      "evidence": [
+        "Issue 标题和描述暗示该方法应接受 symbols 参数。",
+        "相关测试 1 中：assert f.as_expr(X, Y, Z) == g，其中 X, Y, Z 是外部 symbols。",
+        "源码片段 2 中方法签名和参数检查逻辑暗示 symbols 参数是设计来使用的。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "PolyElement.as_expr",
+        "kind": "method",
+        "source_path": "sympy/polys/rings.py",
+        "reason": "这是 Issue 直接报告的有缺陷的方法。"
+      },
+      {
+        "name": "ring",
+        "kind": "function",
+        "source_path": "sympy/polys/rings.py",
+        "reason": "用于创建 PolyElement 对象及其环环境。"
+      },
+      {
+        "name": "symbols",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中用于创建新符号，测试中也用于构造预期表达式。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/polys/rings.py",
+        "object": "PolyElement.as_expr",
+        "lines": "618-624",
+        "reason": "Issue 直接指向此方法，其逻辑在 symbols 参数数量正确时，仍将 symbols 重新赋值为 self.ring.symbols。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_PolyElement_as_expr",
+        "test_file": "sympy/polys/tests/test_rings.py",
+        "why_relevant": "这是直接测试 PolyElement.as_expr 方法的测试，包含使用外部 symbols 参数的用例。",
+        "reusable_parts": [
+          "imports (ring, ZZ)",
+          "对象构造 (R, x, y, z = ring(...); f = ...)",
+          "API 调用 (f.as_expr(...))",
+          "assert 风格 (assert f.as_expr(X, Y, Z) == g)"
+        ],
+        "possible_gap": "该测试使用了与环符号同名的外部 symbols (X, Y, Z = symbols(\"x,y,z\"))，因此即使 bug 存在，断言也可能碰巧通过。它没有测试使用不同名称的 symbols。"
+      },
+      {
+        "test_name": "test_FracElement_as_expr",
+        "test_file": "sympy/polys/tests/test_fields.py",
+        "why_relevant": "测试了类似结构（FracElement）的 as_expr 方法，模式相似。",
+        "reusable_parts": [
+          "imports (field, ZZ, symbols)",
+          "对象构造模式",
+          "API 调用模式",
+          "assert 风格"
+        ],
+        "possible_gap": "测试的是 FracElement 而非 PolyElement，且同样使用了同名的外部 symbols。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中使用与环符号同名的外部 symbols 作为参数：X, Y, Z = symbols(\"x,y,z\")；f.as_expr(X, Y, Z)。",
+        "target_pattern": "使用与环符号不同名称的 symbols 作为参数：U, V, W = symbols(\"u,v,w\")；f.as_expr(U, V, W)。",
+        "reason": "Issue 的核心是传入的 symbols 被忽略，使用同名 symbols 可能掩盖问题。使用不同名称能明确暴露返回值是否使用了传入的 symbols。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "f.as_expr(U, V, W) 的返回值，观察其字符串表示中是否包含 'u', 'v', 'w' 或原始的 'x', 'y', 'z'。",
+        "reason": "Issue 的错误现象是返回值使用了错误的符号。直接观察返回的表达式字符串可以判断 bug 是否触发。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "f.as_expr(U, V, W) 返回的表达式对象的 repr 或 str。",
+        "reason": "表达式的 repr/str 会显示其使用的符号，是判断是否使用了正确符号的直接依据。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用新符号调用 as_expr 返回的表达式，其符号应与传入的新符号对应。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的表达式字符串完全相等，因为符号名称不同。避免断言与使用原始环符号的表达式相等。",
+        "reason": "Issue 是关于符号映射，核心是表达式中使用了哪个符号集。断言返回的表达式字符串包含新符号名称（如 'u'）是稳定且直接相关的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 ring, ZZ, symbols 来构造 PolyElement 对象和外部 symbols。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试环境可能需要 sympy 的常规测试设置。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "as_expr 方法内部调用的 expr_from_dict 函数的确切行为及其对 symbols 参数的使用方式。",
+      "除了符号名称错误外，表达式的结构（系数、指数）是否在所有情况下都正确。",
+      "当传入 symbols 数量错误时，抛出的 ValueError 信息是否准确且是预期行为的一部分。"
+    ]
+  }
+}

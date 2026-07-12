@@ -1,0 +1,140 @@
+{
+  "issue_summary": "在模拟 ON DELETE CASCADE 时，Collector 的快速删除路径未能合并针对同一表的多个删除查询，导致不必要的数据库往返次数。",
+  "trigger_condition": {
+    "text": "当使用 on_delete=models.CASCADE 的模型实例被删除，且满足快速删除路径的条件时，如果该模型有多个指向同一表的外键或多对多关系，就会触发此问题。",
+    "evidence": ["Issue 描述中提到：'When emulating ON DELETE CASCADE via on_delete=models.CASCADE the deletion.Collector will try to perform fast queries...'", "Issue 给出了 Person、User、Entry 模型示例，其中 Entry 有两个指向 User 的外键，Person 有一个自引用的多对多关系。", "相关测试代码中使用了带有外键和多对多关系的模型进行删除操作。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "针对同一张表，生成了多个独立的 DELETE 查询，而不是合并成一个使用 OR 条件的查询。这导致数据库往返次数增加，影响性能。",
+    "symptom_type": "performance",
+    "evidence": ["Issue 中明确列出了未合并的查询示例：'DELETE FROM person_friends WHERE from_id = :id' 和 'DELETE FROM person_friends WHERE to_id = :id' 是分开的。", "Issue 指出 'both queries (or N queries depending on the number of foreign relationships) can be combined into a single one by using OR'。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "在快速删除路径中，针对同一张表的多个删除条件应该被合并到单个 DELETE 查询中，使用 OR 连接条件，以减少数据库往返次数。",
+    "evidence": ["Issue 中给出了合并后的查询示例：'DELETE FROM person_friends WHERE from_id = :id OR to_id = :id' 和 'DELETE FROM entry WHERE created_by_id = :id OR updated_by = :id'。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "django.db.models.deletion.Collector.delete",
+      "kind": "method",
+      "source_path": "django/db/models/deletion.py",
+      "reason": "Collector 类负责收集和删除对象，其 delete 方法可能执行快速删除逻辑。"
+    },
+    {
+      "name": "django.db.models.deletion.Collector.can_fast_delete",
+      "kind": "method",
+      "source_path": "django/db/models/deletion.py",
+      "reason": "该方法判断是否可以进行快速删除，是触发快速删除路径的条件之一。"
+    },
+    {
+      "name": "django.db.models.deletion.CASCADE",
+      "kind": "function",
+      "source_path": "django/db/models/deletion.py",
+      "reason": "Issue 明确提到 'on_delete=models.CASCADE'，这是触发级联删除和 Collector 收集逻辑的入口。"
+    },
+    {
+      "name": "django.db.models.Model.delete",
+      "kind": "method",
+      "source_path": "",
+      "reason": "用户调用模型实例的 delete() 方法是触发整个删除流程的常见方式。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/deletion.py",
+      "object": "Collector",
+      "lines": "64-349",
+      "reason": "Collector 类负责处理级联删除逻辑，包括快速删除路径。Issue 的核心是关于 Collector 在快速删除时未能合并查询。"
+    },
+    {
+      "path": "django/db/models/deletion.py",
+      "object": "Collector.delete",
+      "lines": "",
+      "reason": "delete 方法最终执行删除查询，可能是生成和发送 SQL 的地方，也是合并查询逻辑应该发生的地方。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_fast_delete_fk",
+      "test_file": "tests/delete/tests.py",
+      "why_relevant": "该测试直接测试了快速删除功能，使用了带有外键的模型，并检查了查询数量。",
+      "reusable_parts": ["FastDeleteTests 测试类结构", "使用 User 和 Avatar 模型建立外键关系", "self.assertNumQueries 断言风格", "delete() 方法的调用方式"],
+      "possible_gap": "该测试只涉及单个外键关系，没有测试一个模型有多个指向同一表的外键（如 Issue 中的 Entry 模型）的情况，因此无法触发查询合并问题。"
+    },
+    {
+      "test_name": "test_fast_delete_m2m",
+      "test_file": "tests/delete/tests.py",
+      "why_relevant": "该测试测试了多对多关系的快速删除，Issue 中提到了自引用多对多关系（Person.friends）。",
+      "reusable_parts": ["M2MFrom 和 M2MTo 模型的多对多关系设置", "self.assertNumQueries 断言风格"],
+      "possible_gap": "该测试可能只涉及一个方向的多对多关系删除，而 Issue 中 Person 的自引用多对多关系会生成两个方向的删除查询（from_id 和 to_id），需要合并。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "object_state",
+      "current_pattern": "测试模型（如 User）只有一个指向目标表的外键。",
+      "target_pattern": "创建一个模型（如 Entry），它有两个指向同一目标表（如 User）的外键。",
+      "reason": "Issue 明确指出，当模型有多个指向同一表的外键时，快速删除应该合并查询。创建这样的模型状态是触发缺陷的关键。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "多对多关系可能只在一个方向上被测试。",
+      "target_pattern": "创建一个自引用的多对多关系模型（如 Person），并建立双向关系。",
+      "reason": "自引用的多对多关系在删除时会生成两个针对中间表的删除查询（from_id 和 to_id），Issue 指出这些查询应该被合并。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "sql",
+      "expression_hint": "在执行 delete() 过程中捕获并检查生成的 SQL 查询字符串。",
+      "reason": "Issue 的核心症状是 SQL 查询未被合并。观察生成的 SQL 可以确认是否针对同一表生成了多个 DELETE 查询，而不是一个使用 OR 的查询。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "在 delete() 调用前后，检查数据库连接执行的查询数量（例如，通过 django.db.connection.queries）。",
+      "reason": "Issue 关注性能问题，即查询数量过多。观测查询数量可以直接反映问题是否被触发（数量多）或修复（数量少）。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证针对同一张表的删除条件被合并到单个 SQL DELETE 查询中。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的、具体的 SQL 字符串，因为数据库后端或 Django 版本可能导致 SQL 格式差异。",
+      "reason": "Issue 的关键是查询合并，因此断言生成的 SQL 中包含 'OR' 连接的条件比断言精确的查询数量或完整 SQL 更稳定、更贴近问题本质。"
+    },
+    {
+      "assertion_goal": "验证删除操作的总查询次数少于未合并时的预期次数。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "断言一个固定的、可能随实现变化的查询次数。",
+      "reason": "合并查询的直接效果是减少数据库往返次数。断言查询次数减少比断言一个具体数字更稳健，因为基础查询数量可能因 Django 版本或数据库特性而变化。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要定义 Issue 中描述的模型：Person（自引用 ManyToManyField）、User、Entry（两个 ForeignKey 指向 User）。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试应该继承自 django.test.TestCase 以确保数据库事务和查询捕获功能。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 assertNumQueries 来检查查询数量。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "Collector 内部具体哪个方法负责生成和组合快速删除的 WHERE 子句条件。",
+    "快速删除路径（can_fast_delete）的确切条件集合，以及这些条件是否总是为 Issue 中描述的模型配置所满足。",
+    "合并查询的逻辑是否也适用于非快速删除路径（即常规的逐条删除）。",
+    "当有多个不同的外键指向不同的表时，Collector 是否已经正确处理了按表分组，只是缺少对同一表内多个条件的合并。"
+  ]
+}

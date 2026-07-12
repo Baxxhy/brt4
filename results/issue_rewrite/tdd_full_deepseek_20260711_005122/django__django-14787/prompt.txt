@@ -1,0 +1,386 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+method_decorator() should preserve wrapper assignments
+Description
+	
+the function that is passed to the decorator is a partial object and does not have any of the attributes expected from a function i.e. __name__, __module__ etc...
+consider the following case
+def logger(func):
+	@wraps(func)
+	def inner(*args, **kwargs):
+		try:
+			result = func(*args, **kwargs)
+		except Exception as e:
+			result = str(e)
+		finally:
+			logger.debug(f"{func.__name__} called with args: {args} and kwargs: {kwargs} resulting: {result}")
+	return inner
+class Test:
+	@method_decorator(logger)
+	def hello_world(self):
+		return "hello"
+Test().test_method()
+This results in the following exception
+AttributeError: 'functools.partial' object has no attribute '__name__'
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/utils/decorators.py
+对象名称：method_decorator
+节点类型：top-level function
+父节点：decorators
+行号范围：53-86
+代码：
+def method_decorator(decorator, name=''):
+    """
+    Convert a function decorator into a method decorator
+    """
+    # 'obj' can be a class or a function. If 'obj' is a function at the time it
+    # is passed to _dec,  it will eventually be a method of the class it is
+    # defined on. If 'obj' is a class, the 'name' is required to be the name
+    # of the method that will be decorated.
+    def _dec(obj):
+        if not isinstance(obj, type):
+            return _multi_decorate(decorator, obj)
+        if not (name and hasattr(obj, name)):
+            raise ValueError(
+                "The keyword argument `name` must be the name of a method "
+                "of the decorated class: %s. Got '%s' instead." % (obj, name)
+            )
+        method = getattr(obj, name)
+        if not callable(method):
+            raise TypeError(
+                "Cannot decorate '%s' as it isn't a callable attribute of "
+                "%s (%s)." % (name, obj, method)
+            )
+        _wrapper = _multi_decorate(decorator, method)
+        setattr(obj, name, _wrapper)
+        return obj
+
+    # Don't worry about making _dec look similar to a list/tuple as it's rather
+    # meaningless.
+    if not hasattr(decorator, '__iter__'):
+        update_wrapper(_dec, decorator)
+    # Change the name to aid debugging.
+    obj = decorator if hasattr(decorator, '__name__') else decorator.__class__
+    _dec.__name__ = 'method_decorator(%s)' % obj.__name__
+    return _dec
+
+
+【源码片段 2】
+文件路径：django/views/generic/base.py
+对象名称：logger
+节点类型：global_var
+父节点：base
+行号范围：12-12
+代码：
+logger = logging.getLogger('django.request')
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/decorators/tests.py
+测试名称：MethodDecoratorTests.test_preserve_attributes
+测试代码：
+class MethodDecoratorTests(SimpleTestCase):
+    def test_preserve_attributes(self):
+        # Sanity check myattr_dec and myattr2_dec
+        @myattr_dec
+        def func():
+            pass
+        self.assertIs(getattr(func, 'myattr', False), True)
+
+        @myattr2_dec
+        def func():
+            pass
+        self.assertIs(getattr(func, 'myattr2', False), True)
+
+        @myattr_dec
+        @myattr2_dec
+        def func():
+            pass
+
+        self.assertIs(getattr(func, 'myattr', False), True)
+        self.assertIs(getattr(func, 'myattr2', False), False)
+
+        # Decorate using method_decorator() on the method.
+        class TestPlain:
+            @myattr_dec_m
+            @myattr2_dec_m
+            def method(self):
+                "A method"
+                pass
+
+        # Decorate using method_decorator() on both the class and the method.
+        # The decorators applied to the methods are applied before the ones
+        # applied to the class.
+        @method_decorator(myattr_dec_m, "method")
+        class TestMethodAndClass:
+            @method_decorator(myattr2_dec_m)
+            def method(self):
+                "A method"
+                pass
+
+        # Decorate using an iterable of function decorators.
+        @method_decorator((myattr_dec, myattr2_dec), 'method')
+        class TestFunctionIterable:
+            def method(self):
+                "A method"
+                pass
+
+        # Decorate using an iterable of method decorators.
+        decorators = (myattr_dec_m, myattr2_dec_m)
+
+        @method_decorator(decorators, "method")
+        class TestMethodIterable:
+            def method(self):
+                "A method"
+                pass
+
+        tests = (TestPlain, TestMethodAndClass, TestFunctionIterable, TestMethodIterable)
+        for Test in tests:
+            with self.subTest(Test=Test):
+                self.assertIs(getattr(Test().method, 'myattr', False), True)
+                self.assertIs(getattr(Test().method, 'myattr2', False), True)
+                self.assertIs(getattr(Test.method, 'myattr', False), True)
+                self.assertIs(getattr(Test.method, 'myattr2', False), True)
+                self.assertEqual(Test.method.__doc__, 'A method')
+                self.assertEqual(Test.method.__name__, 'method')
+
+【相关测试 2】
+测试文件：tests/decorators/tests.py
+测试名称：MethodDecoratorTests.test_new_attribute
+测试代码：
+class MethodDecoratorTests(SimpleTestCase):
+    def test_new_attribute(self):
+        """A decorator that sets a new attribute on the method."""
+        def decorate(func):
+            func.x = 1
+            return func
+
+        class MyClass:
+            @method_decorator(decorate)
+            def method(self):
+                return True
+
+        obj = MyClass()
+        self.assertEqual(obj.method.x, 1)
+        self.assertIs(obj.method(), True)
+
+【相关测试 3】
+测试文件：tests/decorators/tests.py
+测试名称：MethodDecoratorTests.test_descriptors
+测试代码：
+class MethodDecoratorTests(SimpleTestCase):
+    def test_descriptors(self):
+
+        def original_dec(wrapped):
+            def _wrapped(arg):
+                return wrapped(arg)
+
+            return _wrapped
+
+        method_dec = method_decorator(original_dec)
+
+        class bound_wrapper:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+                self.__name__ = wrapped.__name__
+
+            def __call__(self, arg):
+                return self.wrapped(arg)
+
+            def __get__(self, instance, cls=None):
+                return self
+
+        class descriptor_wrapper:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+                self.__name__ = wrapped.__name__
+
+            def __get__(self, instance, cls=None):
+                return bound_wrapper(self.wrapped.__get__(instance, cls))
+
+        class Test:
+            @method_dec
+            @descriptor_wrapper
+            def method(self, arg):
+                return arg
+
+        self.assertEqual(Test().method(1), 1)
+
+【相关测试 4】
+测试文件：tests/decorators/tests.py
+测试名称：MethodDecoratorTests.test_preserve_signature
+测试代码：
+class MethodDecoratorTests(SimpleTestCase):
+    def test_preserve_signature(self):
+        class Test:
+            @simple_dec_m
+            def say(self, arg):
+                return arg
+
+        self.assertEqual("test:hello", Test().say("hello"))
+
+【相关测试 5】
+测试文件：tests/decorators/tests.py
+测试名称：MethodDecoratorTests.test_tuple_of_decorators
+测试代码：
+class MethodDecoratorTests(SimpleTestCase):
+    def test_tuple_of_decorators(self):
+        """
+        @method_decorator can accept a tuple of decorators.
+        """
+        def add_question_mark(func):
+            def _wrapper(*args, **kwargs):
+                return func(*args, **kwargs) + "?"
+            return _wrapper
+
+        def add_exclamation_mark(func):
+            def _wrapper(*args, **kwargs):
+                return func(*args, **kwargs) + "!"
+            return _wrapper
+
+        # The order should be consistent with the usual order in which
+        # decorators are applied, e.g.
+        #    @add_exclamation_mark
+        #    @add_question_mark
+        #    def func():
+        #        ...
+        decorators = (add_exclamation_mark, add_question_mark)
+
+        @method_decorator(decorators, name="method")
+        class TestFirst:
+            def method(self):
+                return "hello world"
+
+        class TestSecond:
+            @method_decorator(decorators)
+            def method(self):
+                return "hello world"
+
+        self.assertEqual(TestFirst().method(), "hello world?!")
+        self.assertEqual(TestSecond().method(), "hello world?!")
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

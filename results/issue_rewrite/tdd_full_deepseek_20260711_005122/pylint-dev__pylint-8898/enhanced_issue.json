@@ -1,0 +1,287 @@
+{
+  "instance_id": "pylint-dev__pylint-8898",
+  "issue_summary": "pylint 的 bad-name-rgxs 选项在处理包含逗号的正则表达式时，会错误地按逗号分割，导致正则表达式被破坏并引发异常。",
+  "trigger_condition": {
+    "text": "在配置文件（如 pyproject.toml 或 .pylintrc）的 [tool.pylint.basic] 部分设置 bad-name-rgxs 选项，其值为一个包含逗号（例如量词中的逗号）的正则表达式字符串，例如 \"(foo{1,3})\"。",
+    "evidence": [
+      "Issue 中的配置示例：bad-name-rgxs = \"(foo{1,3})\"",
+      "Issue 描述：'Since pylint splits on commas in this option, instead of taking a list of strings, if there are any commas in the regular expression, the result is mangled before being parsed.'"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "运行 pylint 时抛出 re.error 异常，提示正则表达式语法错误，例如 'missing ), unterminated subpattern'。",
+    "symptom_type": "exception",
+    "evidence": [
+      "Issue 中的堆栈跟踪显示 re.error: missing ), unterminated subpattern at position 0",
+      "相关测试 test_csv_regex_error 也检查了类似的错误输出。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "bad-name-rgxs 选项应能正确接受包含逗号的有效正则表达式，或者提供转义逗号的方法，使得正则表达式不会被错误分割。",
+    "evidence": [
+      "Issue 中的预期行为：'I would expect any valid regular expression to be expressible in this option. If not directly, adding some way to escape commas so that this issue can be worked around.'"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "_regexp_csv_transfomer",
+      "kind": "function",
+      "source_path": "pylint/config/argument.py",
+      "reason": "该函数负责将逗号分隔的正则表达式字符串转换为正则表达式模式列表，是处理 bad-name-rgxs 等选项值的核心转换器。"
+    },
+    {
+      "name": "_parse_configuration_file",
+      "kind": "method",
+      "source_path": "pylint/config/arguments_manager.py",
+      "reason": "该方法负责解析配置文件中的参数，会调用参数解析器，最终可能触发 _regexp_csv_transfomer。"
+    },
+    {
+      "name": "Run",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试中用于启动 pylint 运行测试，是触发缺陷的入口点。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "pylint/config/argument.py",
+      "object": "_regexp_csv_transfomer",
+      "lines": "114-119",
+      "reason": "该函数使用 _csv_transformer 对输入值按逗号分割，如果正则表达式本身包含逗号（如量词 {1,3}），会被错误分割，导致后续编译失败。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_csv_regex_error",
+      "test_file": "tests/config/test_config.py",
+      "why_relevant": "该测试直接针对 --bad-names-rgx 命令行选项，检查当提供的逗号分隔的正则表达式值无效时，pylint 是否正确报错。",
+      "reusable_parts": [
+        "使用 Run 函数启动 pylint",
+        "使用 pytest.raises(SystemExit) 捕获退出",
+        "使用 capsys 捕获输出",
+        "断言错误信息包含特定片段"
+      ],
+      "possible_gap": "当前测试通过命令行参数传递正则表达式，而 Issue 是通过配置文件触发。此外，当前测试使用的正则表达式 `(foo{1,3})` 被设计为无效（缺少闭合括号），目的是触发错误；而 Issue 的核心问题是有效的正则表达式 `(foo{1,3})` 被错误分割，导致编译失败。"
+    },
+    {
+      "test_name": "test_regex_error",
+      "test_file": "tests/config/test_config.py",
+      "why_relevant": "该测试检查单个无效正则表达式（不涉及逗号分割）的错误处理，展示了 pylint 对正则表达式错误的通用处理模式。",
+      "reusable_parts": [
+        "测试结构和错误捕获方式",
+        "输出断言模式"
+      ],
+      "possible_gap": "不涉及逗号分割逻辑，因此不直接测试 bad-name-rgxs 选项的 CSV 处理缺陷。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "测试 test_csv_regex_error 通过命令行参数 `--bad-names-rgx=(foo{1,3})` 传递一个无效的正则表达式（缺少闭合括号）。",
+      "target_pattern": "通过配置文件设置 `bad-name-rgxs = \"(foo{1,3})\"`，这是一个有效的正则表达式，但包含逗号。",
+      "reason": "Issue 表明缺陷发生在配置文件解析时，选项值被按逗号分割。将输入方式从命令行改为配置文件，并使用有效的、包含逗号的正则表达式，可以触发分割逻辑，从而走向缺陷路径。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "测试中可能没有显式使用配置文件。",
+      "target_pattern": "创建一个配置文件（如 .pylintrc 或 pyproject.toml），在其中设置 bad-name-rgxs 选项。",
+      "reason": "Issue 的触发条件依赖于配置文件解析路径，这与直接命令行参数解析可能不同。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "运行 pylint 命令后捕获的异常（如 re.error）及其错误信息。",
+      "reason": "Issue 的核心症状是 re.error 异常，观测此异常可以确认缺陷是否被触发。"
+    },
+    {
+      "kind": "config",
+      "expression_hint": "_regexp_csv_transfomer 函数接收到的原始 value 字符串，以及 _csv_transformer 分割后的结果列表。",
+      "reason": "可以观察输入的正则表达式字符串是否在逗号处被错误分割，这是缺陷的直接原因。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证当 bad-name-rgxs 配置为包含逗号的有效正则表达式时，pylint 不会因正则表达式语法错误而崩溃（即，不应抛出 re.error 异常）。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言完整的异常信息字符串完全相等，因为错误信息可能因 Python 版本或环境略有不同。",
+      "reason": "Issue 的预期行为是支持包含逗号的正则表达式。在修复后，应不再抛出 re.error 异常。因此，在缺陷状态下，断言会抛出异常；在修复后，断言应改为不抛出异常或正常执行。当前提示基于缺陷状态。"
+    },
+    {
+      "assertion_goal": "验证错误信息中是否包含指示正则表达式被错误分割或编译失败的片段。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的、可能不稳定的堆栈跟踪文本。",
+      "reason": "在缺陷状态下，错误信息应能反映出问题（如 'missing ), unterminated subpattern'），这与正则表达式被分割后片段无效有关。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 pytest 的 capsys fixture 来捕获标准错误输出。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要创建一个临时的配置文件（如 .pylintrc）或使用 pyproject.toml 来设置选项。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "使用 Run 函数（可能来自 pylint.testutils）来执行 pylint，并设置 exit=False 以在测试中控制退出。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "缺陷是否只存在于配置文件解析路径，还是命令行参数传递同样存在？Issue 使用了配置文件，但相关测试使用了命令行。",
+    "_csv_transformer 函数的确切行为和它是否可以被配置或绕过？",
+    "除了 bad-name-rgxs，其他使用 _regexp_csv_transfomer 的选项是否也有同样问题？"
+  ],
+  "raw": {
+    "issue_summary": "pylint 的 bad-name-rgxs 选项在处理包含逗号的正则表达式时，会错误地按逗号分割，导致正则表达式被破坏并引发异常。",
+    "trigger_condition": {
+      "text": "在配置文件（如 pyproject.toml 或 .pylintrc）的 [tool.pylint.basic] 部分设置 bad-name-rgxs 选项，其值为一个包含逗号（例如量词中的逗号）的正则表达式字符串，例如 \"(foo{1,3})\"。",
+      "evidence": [
+        "Issue 中的配置示例：bad-name-rgxs = \"(foo{1,3})\"",
+        "Issue 描述：'Since pylint splits on commas in this option, instead of taking a list of strings, if there are any commas in the regular expression, the result is mangled before being parsed.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行 pylint 时抛出 re.error 异常，提示正则表达式语法错误，例如 'missing ), unterminated subpattern'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的堆栈跟踪显示 re.error: missing ), unterminated subpattern at position 0",
+        "相关测试 test_csv_regex_error 也检查了类似的错误输出。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "bad-name-rgxs 选项应能正确接受包含逗号的有效正则表达式，或者提供转义逗号的方法，使得正则表达式不会被错误分割。",
+      "evidence": [
+        "Issue 中的预期行为：'I would expect any valid regular expression to be expressible in this option. If not directly, adding some way to escape commas so that this issue can be worked around.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "_regexp_csv_transfomer",
+        "kind": "function",
+        "source_path": "pylint/config/argument.py",
+        "reason": "该函数负责将逗号分隔的正则表达式字符串转换为正则表达式模式列表，是处理 bad-name-rgxs 等选项值的核心转换器。"
+      },
+      {
+        "name": "_parse_configuration_file",
+        "kind": "method",
+        "source_path": "pylint/config/arguments_manager.py",
+        "reason": "该方法负责解析配置文件中的参数，会调用参数解析器，最终可能触发 _regexp_csv_transfomer。"
+      },
+      {
+        "name": "Run",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试中用于启动 pylint 运行测试，是触发缺陷的入口点。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "pylint/config/argument.py",
+        "object": "_regexp_csv_transfomer",
+        "lines": "114-119",
+        "reason": "该函数使用 _csv_transformer 对输入值按逗号分割，如果正则表达式本身包含逗号（如量词 {1,3}），会被错误分割，导致后续编译失败。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_csv_regex_error",
+        "test_file": "tests/config/test_config.py",
+        "why_relevant": "该测试直接针对 --bad-names-rgx 命令行选项，检查当提供的逗号分隔的正则表达式值无效时，pylint 是否正确报错。",
+        "reusable_parts": [
+          "使用 Run 函数启动 pylint",
+          "使用 pytest.raises(SystemExit) 捕获退出",
+          "使用 capsys 捕获输出",
+          "断言错误信息包含特定片段"
+        ],
+        "possible_gap": "当前测试通过命令行参数传递正则表达式，而 Issue 是通过配置文件触发。此外，当前测试使用的正则表达式 `(foo{1,3})` 被设计为无效（缺少闭合括号），目的是触发错误；而 Issue 的核心问题是有效的正则表达式 `(foo{1,3})` 被错误分割，导致编译失败。"
+      },
+      {
+        "test_name": "test_regex_error",
+        "test_file": "tests/config/test_config.py",
+        "why_relevant": "该测试检查单个无效正则表达式（不涉及逗号分割）的错误处理，展示了 pylint 对正则表达式错误的通用处理模式。",
+        "reusable_parts": [
+          "测试结构和错误捕获方式",
+          "输出断言模式"
+        ],
+        "possible_gap": "不涉及逗号分割逻辑，因此不直接测试 bad-name-rgxs 选项的 CSV 处理缺陷。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试 test_csv_regex_error 通过命令行参数 `--bad-names-rgx=(foo{1,3})` 传递一个无效的正则表达式（缺少闭合括号）。",
+        "target_pattern": "通过配置文件设置 `bad-name-rgxs = \"(foo{1,3})\"`，这是一个有效的正则表达式，但包含逗号。",
+        "reason": "Issue 表明缺陷发生在配置文件解析时，选项值被按逗号分割。将输入方式从命令行改为配置文件，并使用有效的、包含逗号的正则表达式，可以触发分割逻辑，从而走向缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试中可能没有显式使用配置文件。",
+        "target_pattern": "创建一个配置文件（如 .pylintrc 或 pyproject.toml），在其中设置 bad-name-rgxs 选项。",
+        "reason": "Issue 的触发条件依赖于配置文件解析路径，这与直接命令行参数解析可能不同。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "运行 pylint 命令后捕获的异常（如 re.error）及其错误信息。",
+        "reason": "Issue 的核心症状是 re.error 异常，观测此异常可以确认缺陷是否被触发。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "_regexp_csv_transfomer 函数接收到的原始 value 字符串，以及 _csv_transformer 分割后的结果列表。",
+        "reason": "可以观察输入的正则表达式字符串是否在逗号处被错误分割，这是缺陷的直接原因。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当 bad-name-rgxs 配置为包含逗号的有效正则表达式时，pylint 不会因正则表达式语法错误而崩溃（即，不应抛出 re.error 异常）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常信息字符串完全相等，因为错误信息可能因 Python 版本或环境略有不同。",
+        "reason": "Issue 的预期行为是支持包含逗号的正则表达式。在修复后，应不再抛出 re.error 异常。因此，在缺陷状态下，断言会抛出异常；在修复后，断言应改为不抛出异常或正常执行。当前提示基于缺陷状态。"
+      },
+      {
+        "assertion_goal": "验证错误信息中是否包含指示正则表达式被错误分割或编译失败的片段。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、可能不稳定的堆栈跟踪文本。",
+        "reason": "在缺陷状态下，错误信息应能反映出问题（如 'missing ), unterminated subpattern'），这与正则表达式被分割后片段无效有关。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 pytest 的 capsys fixture 来捕获标准错误输出。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建一个临时的配置文件（如 .pylintrc）或使用 pyproject.toml 来设置选项。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 Run 函数（可能来自 pylint.testutils）来执行 pylint，并设置 exit=False 以在测试中控制退出。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否只存在于配置文件解析路径，还是命令行参数传递同样存在？Issue 使用了配置文件，但相关测试使用了命令行。",
+      "_csv_transformer 函数的确切行为和它是否可以被配置或绕过？",
+      "除了 bad-name-rgxs，其他使用 _regexp_csv_transfomer 的选项是否也有同样问题？"
+    ]
+  }
+}

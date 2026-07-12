@@ -1,0 +1,261 @@
+{
+  "instance_id": "django__django-15268",
+  "issue_summary": "迁移优化器未能将多个 AlterFooTogether 操作合并为一个，导致不必要的冗余操作。",
+  "trigger_condition": {
+    "text": "在迁移操作列表中，连续出现对同一模型的 AlterUniqueTogether 和/或 AlterIndexTogether 操作，其中包含将约束设置为空集再设置为新值的序列。",
+    "evidence": [
+      "Issue 中给出的示例：operations = [migrations.AlterUniqueTogether(name='mymodel', unique_together=set()), migrations.AlterIndexTogether(name='mymodel', index_together=set()), migrations.AlterUniqueTogether(name='mymodel', unique_together={(\"col\",)}), migrations.AlterIndexTogether(name='mymodel', index_together={(\"col\",)})]"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "迁移优化后，操作列表仍然包含冗余的 AlterFooTogether 操作（例如先移除再添加），而不是直接优化为最终的目标操作。",
+    "symptom_type": "wrong_order",
+    "evidence": [
+      "Issue 描述：\"should be optimized to\" 展示了优化后的理想结果，暗示当前优化器未能实现此优化。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "迁移优化器应将连续的、针对同一模型的 AlterUniqueTogether 和 AlterIndexTogether 操作序列优化为仅包含最终目标约束的单个操作。",
+    "evidence": [
+      "Issue 中给出的优化后示例：operations = [migrations.AlterUniqueTogether(name='mymodel', unique_together={(\"col\",)}), migrations.AlterIndexTogether(name='mymodel', index_together={(\"col\",)})]"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "migrations.AlterUniqueTogether",
+      "kind": "class",
+      "source_path": "django/db/migrations/operations/models.py",
+      "reason": "Issue 直接涉及此类操作，需要检查其优化逻辑。"
+    },
+    {
+      "name": "migrations.AlterIndexTogether",
+      "kind": "class",
+      "source_path": "django/db/migrations/operations/models.py",
+      "reason": "Issue 直接涉及此类操作，需要检查其优化逻辑。"
+    },
+    {
+      "name": "OptimizerTests.assertOptimizesTo",
+      "kind": "method",
+      "source_path": "tests/migrations/test_optimizer.py",
+      "reason": "相关测试中用于验证优化结果的方法，是测试此类问题的典型模式。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/migrations/operations/models.py",
+      "object": "AlterTogetherOptionOperation 或其子类（AlterUniqueTogether, AlterIndexTogether）的优化逻辑",
+      "lines": "",
+      "reason": "Issue 核心是迁移操作的优化问题，优化逻辑很可能位于这些操作类或其父类中。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "_test_alter_alter_model",
+      "test_file": "tests/migrations/test_optimizer.py",
+      "why_relevant": "该测试方法专门测试两个 AlterFooTogether 操作应合并为第二个操作，与 Issue 描述的优化场景高度相似。",
+      "reusable_parts": [
+        "测试类 OptimizerTests",
+        "assertOptimizesTo 断言方法",
+        "AlterUniqueTogether 和 AlterIndexTogether 对象的构造方式"
+      ],
+      "possible_gap": "当前测试只测试了两个操作直接合并的场景，而 Issue 示例涉及四个操作（两个约束类型，每个都先清空再设置），可能涉及跨类型或更复杂序列的优化逻辑。"
+    },
+    {
+      "test_name": "test_partly_alter_foo_together",
+      "test_file": "tests/migrations/test_autodetector.py",
+      "why_relevant": "测试了从一种约束状态到另一种状态的变化，涉及 AlterUniqueTogether 和 AlterIndexTogether 操作，展示了迁移检测器如何生成这些操作。",
+      "reusable_parts": [
+        "ModelState 的构造",
+        "assertOperationTypes 和 assertOperationAttributes 断言风格",
+        "get_changes 方法的使用"
+      ],
+      "possible_gap": "该测试关注的是自动检测器（autodetector）生成的操作，而非优化器（optimizer）对已生成操作列表的优化。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试 _test_alter_alter_model 中输入两个 AlterFooTogether 操作（例如从 [(\"a\", \"b\")] 变为 [(\"a\", \"c\")]）。",
+      "target_pattern": "输入四个操作：两个 AlterUniqueTogether 和两个 AlterIndexTogether，每个类型都包含一个设置为空集的操作和一个设置为非空集的操作，且针对同一模型。",
+      "reason": "Issue 示例表明，这种特定序列（清空 -> 设置）未能被优化，变异为此模式可能触发缺陷路径。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试中操作的 unique_together/index_together 参数是简单的元组列表。",
+      "target_pattern": "使用 set() 作为清空约束的参数值。",
+      "reason": "Issue 示例中明确使用了 set() 来表示空约束，这可能是一个关键触发条件。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "order",
+      "expression_hint": "优化前后操作列表的长度和类型序列。",
+      "reason": "Issue 的核心是操作数量未按预期减少，观测优化结果的操作列表能直接判断优化是否成功。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "每个 AlterFooTogether 操作中的 unique_together/index_together 参数值。",
+      "reason": "需要确认优化后的操作是否包含了正确的最终约束值，而不是中间的空集状态。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "优化后的操作列表应只包含最终目标约束的 AlterUniqueTogether 和 AlterIndexTogether 操作，且数量少于优化前。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的、硬编码的操作列表字符串表示，因为具体实现可能影响 repr。",
+      "reason": "应关注操作列表的语义等价性（例如，通过比较操作类型和关键属性），而非精确的字符串匹配，以提高稳定性。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 SimpleTestCase 或 TestCase 的子类，并可能涉及 migrations 模块的导入。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能不需要真实的数据库，因为优化器在内存中操作迁移对象。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "优化器处理 AlterUniqueTogether 和 AlterIndexTogether 交叉序列的具体规则是什么？",
+    "除了 set() 之外，使用空列表 [] 或其他表示空约束的方式是否也会触发此问题？",
+    "缺陷是否只存在于特定数据库后端（如 SQLite）？相关源码片段 3 检索了 SQLite 后端文件，但内容未提供。"
+  ],
+  "raw": {
+    "issue_summary": "迁移优化器未能将多个 AlterFooTogether 操作合并为一个，导致不必要的冗余操作。",
+    "trigger_condition": {
+      "text": "在迁移操作列表中，连续出现对同一模型的 AlterUniqueTogether 和/或 AlterIndexTogether 操作，其中包含将约束设置为空集再设置为新值的序列。",
+      "evidence": [
+        "Issue 中给出的示例：operations = [migrations.AlterUniqueTogether(name='mymodel', unique_together=set()), migrations.AlterIndexTogether(name='mymodel', index_together=set()), migrations.AlterUniqueTogether(name='mymodel', unique_together={(\"col\",)}), migrations.AlterIndexTogether(name='mymodel', index_together={(\"col\",)})]"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "迁移优化后，操作列表仍然包含冗余的 AlterFooTogether 操作（例如先移除再添加），而不是直接优化为最终的目标操作。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 描述：\"should be optimized to\" 展示了优化后的理想结果，暗示当前优化器未能实现此优化。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "迁移优化器应将连续的、针对同一模型的 AlterUniqueTogether 和 AlterIndexTogether 操作序列优化为仅包含最终目标约束的单个操作。",
+      "evidence": [
+        "Issue 中给出的优化后示例：operations = [migrations.AlterUniqueTogether(name='mymodel', unique_together={(\"col\",)}), migrations.AlterIndexTogether(name='mymodel', index_together={(\"col\",)})]"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "migrations.AlterUniqueTogether",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/models.py",
+        "reason": "Issue 直接涉及此类操作，需要检查其优化逻辑。"
+      },
+      {
+        "name": "migrations.AlterIndexTogether",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/models.py",
+        "reason": "Issue 直接涉及此类操作，需要检查其优化逻辑。"
+      },
+      {
+        "name": "OptimizerTests.assertOptimizesTo",
+        "kind": "method",
+        "source_path": "tests/migrations/test_optimizer.py",
+        "reason": "相关测试中用于验证优化结果的方法，是测试此类问题的典型模式。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/operations/models.py",
+        "object": "AlterTogetherOptionOperation 或其子类（AlterUniqueTogether, AlterIndexTogether）的优化逻辑",
+        "lines": "",
+        "reason": "Issue 核心是迁移操作的优化问题，优化逻辑很可能位于这些操作类或其父类中。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "_test_alter_alter_model",
+        "test_file": "tests/migrations/test_optimizer.py",
+        "why_relevant": "该测试方法专门测试两个 AlterFooTogether 操作应合并为第二个操作，与 Issue 描述的优化场景高度相似。",
+        "reusable_parts": [
+          "测试类 OptimizerTests",
+          "assertOptimizesTo 断言方法",
+          "AlterUniqueTogether 和 AlterIndexTogether 对象的构造方式"
+        ],
+        "possible_gap": "当前测试只测试了两个操作直接合并的场景，而 Issue 示例涉及四个操作（两个约束类型，每个都先清空再设置），可能涉及跨类型或更复杂序列的优化逻辑。"
+      },
+      {
+        "test_name": "test_partly_alter_foo_together",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "测试了从一种约束状态到另一种状态的变化，涉及 AlterUniqueTogether 和 AlterIndexTogether 操作，展示了迁移检测器如何生成这些操作。",
+        "reusable_parts": [
+          "ModelState 的构造",
+          "assertOperationTypes 和 assertOperationAttributes 断言风格",
+          "get_changes 方法的使用"
+        ],
+        "possible_gap": "该测试关注的是自动检测器（autodetector）生成的操作，而非优化器（optimizer）对已生成操作列表的优化。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 _test_alter_alter_model 中输入两个 AlterFooTogether 操作（例如从 [(\"a\", \"b\")] 变为 [(\"a\", \"c\")]）。",
+        "target_pattern": "输入四个操作：两个 AlterUniqueTogether 和两个 AlterIndexTogether，每个类型都包含一个设置为空集的操作和一个设置为非空集的操作，且针对同一模型。",
+        "reason": "Issue 示例表明，这种特定序列（清空 -> 设置）未能被优化，变异为此模式可能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中操作的 unique_together/index_together 参数是简单的元组列表。",
+        "target_pattern": "使用 set() 作为清空约束的参数值。",
+        "reason": "Issue 示例中明确使用了 set() 来表示空约束，这可能是一个关键触发条件。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "order",
+        "expression_hint": "优化前后操作列表的长度和类型序列。",
+        "reason": "Issue 的核心是操作数量未按预期减少，观测优化结果的操作列表能直接判断优化是否成功。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "每个 AlterFooTogether 操作中的 unique_together/index_together 参数值。",
+        "reason": "需要确认优化后的操作是否包含了正确的最终约束值，而不是中间的空集状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "优化后的操作列表应只包含最终目标约束的 AlterUniqueTogether 和 AlterIndexTogether 操作，且数量少于优化前。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的、硬编码的操作列表字符串表示，因为具体实现可能影响 repr。",
+        "reason": "应关注操作列表的语义等价性（例如，通过比较操作类型和关键属性），而非精确的字符串匹配，以提高稳定性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或 TestCase 的子类，并可能涉及 migrations 模块的导入。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能不需要真实的数据库，因为优化器在内存中操作迁移对象。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "优化器处理 AlterUniqueTogether 和 AlterIndexTogether 交叉序列的具体规则是什么？",
+      "除了 set() 之外，使用空列表 [] 或其他表示空约束的方式是否也会触发此问题？",
+      "缺陷是否只存在于特定数据库后端（如 SQLite）？相关源码片段 3 检索了 SQLite 后端文件，但内容未提供。"
+    ]
+  }
+}

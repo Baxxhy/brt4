@@ -1,0 +1,146 @@
+{
+  "issue_summary": "QuerySet.bulk_create() 在 unique_fields/update_fields 中使用混合大小写列名时，生成的 ON CONFLICT 子句使用了字段名而非数据库列名，导致 PostgreSQL 语法错误。",
+  "trigger_condition": {
+    "text": "调用 bulk_create 方法，参数 update_conflicts=True，且 update_fields 和 unique_fields 中包含的字段在模型定义中使用了 db_column 参数指定了与字段名不同的数据库列名（例如字段名为小写，db_column 为大写）。",
+    "evidence": ["Issue 描述中提供了模型定义示例，其中 blacklistid 字段的 db_column=\"BlacklistID\"，sectorid 字段的 db_column=\"SectorID\"。", "Issue 描述中展示了调用：qs.bulk_create(instances, update_conflicts=True, update_fields=[\"sectorid\", ...], unique_fields=[\"blacklistid\"])。", "Issue 指出生成的 ON CONFLICT 子句使用了字段名（\"blacklistid\"）而非数据库列名（\"BlacklistID\"）。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "PostgreSQL 返回语法错误：ERROR: column \"blacklistid\" does not exist。",
+    "symptom_type": "wrong_sql",
+    "evidence": ["Issue 中明确给出了错误信息：'PostgreSQL returns ERROR: column \"blacklistid\" does not exist at character 1508'。", "Issue 展示了错误的 SQL 片段：'ON CONFLICT(\"blacklistid\") DO UPDATE SET \"sectorid\" = EXCLUDED.\"sectorid\", ...'。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "bulk_create 方法在生成 ON CONFLICT 子句时，对于 unique_fields 和 update_fields 中指定的字段，应使用其对应的数据库列名（db_column），而非字段名，以确保 SQL 语法正确。",
+    "evidence": ["Issue 中给出了预期的 SQL 片段：'ON CONFLICT(\"BlacklistID\") DO UPDATE SET \"SectorID\" = EXCLUDED.\"SectorID\", ...'。", "Issue 指出 INSERT 部分正确使用了数据库列名（\"BlacklistID\"），而 ON CONFLICT 部分错误。", "相关测试 test_custom_db_columns 表明 bulk_update 方法能正确处理自定义数据库列名，暗示 bulk_create 也应具备类似能力。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "QuerySet.bulk_create",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 直接报告了 bulk_create 方法在特定参数下的缺陷。"
+    },
+    {
+      "name": "Model",
+      "kind": "class",
+      "source_path": "django/db/models/base.py",
+      "reason": "模型定义中的 db_column 字段属性是触发条件的关键。"
+    },
+    {
+      "name": "QuerySet.bulk_update",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "相关测试表明 bulk_update 能处理自定义列名，可作为对比参考。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/query.py",
+      "object": "QuerySet.bulk_create",
+      "lines": "746-841",
+      "reason": "Issue 的核心功能在此方法中实现，特别是处理 update_conflicts、unique_fields 和 update_fields 参数的逻辑。"
+    },
+    {
+      "path": "django/db/models/query.py",
+      "object": "QuerySet._batched_insert",
+      "lines": "",
+      "reason": "bulk_create 内部调用了 _batched_insert 来执行 SQL 生成，可能是生成 ON CONFLICT 子句的具体位置。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "BulkCreateTests.test_update_conflicts_unique_fields",
+      "test_file": "tests/bulk_create/tests.py",
+      "why_relevant": "它测试了 bulk_create 在 update_conflicts=True 和 unique_fields 参数下的行为，是 Issue 的核心场景。",
+      "reusable_parts": ["测试类结构（BulkCreateTests）、skipUnlessDBFeature 装饰器、bulk_create 调用模式、update_conflicts 和 unique_fields 参数的使用、使用 assertCountEqual 验证结果。"],
+      "possible_gap": "它使用的模型字段没有定义 db_column，因此不会触发混合大小写列名的问题。"
+    },
+    {
+      "test_name": "BulkUpdateTests.test_custom_db_columns",
+      "test_file": "tests/queries/test_bulk_update.py",
+      "why_relevant": "它测试了 bulk_update 方法对自定义数据库列名（db_column）的处理，与 Issue 中涉及的 db_column 问题直接相关。",
+      "reusable_parts": ["使用带有 db_column 字段的模型（CustomDbColumn）、bulk_update 的调用、refresh_from_db 和 assertEqual 验证。"],
+      "possible_gap": "它测试的是 bulk_update 而非 bulk_create，且没有涉及 update_conflicts 和 ON CONFLICT 子句生成。"
+    },
+    {
+      "test_name": "BulkCreateTests._test_update_conflicts",
+      "test_file": "tests/bulk_create/tests.py",
+      "why_relevant": "它是 test_update_conflicts_unique_fields 调用的内部方法，展示了 bulk_create 在冲突更新场景下的通用测试模式。",
+      "reusable_parts": ["创建初始对象、创建冲突对象、调用 bulk_create 并指定 update_conflicts、update_fields、unique_fields、使用 assertCountEqual 验证最终数据库状态。"],
+      "possible_gap": "同样，使用的模型字段没有定义 db_column。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中使用普通字段名（如 \"number\", \"name\"）作为 unique_fields 和 update_fields 的参数。",
+      "target_pattern": "使用定义了 db_column 的字段名作为参数，且 db_column 与字段名大小写不同（例如字段名为小写 \"sectorid\"，db_column 为大写 \"SectorID\"）。",
+      "reason": "Issue 表明当字段名与 db_column 不同时，bulk_create 在生成 ON CONFLICT 子句时错误地使用了字段名。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试中使用的模型类（如 TwoFields, UpsertConflict）的字段没有显式设置 db_column。",
+      "target_pattern": "创建一个新模型类，其字段使用 db_column 参数指定与字段名不同的数据库列名。",
+      "reason": "这是触发缺陷的必要条件，需要模拟 Issue 中描述的模型定义。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "sql",
+      "expression_hint": "在执行 bulk_create 前后捕获生成的 SQL 语句，特别是 ON CONFLICT 子句部分。",
+      "reason": "Issue 的核心是生成的 SQL 错误，直接观察 SQL 可以确认是否使用了正确的数据库列名。"
+    },
+    {
+      "kind": "exception",
+      "expression_hint": "捕获 bulk_create 调用时可能抛出的数据库异常（如 django.db.utils.ProgrammingError）。",
+      "reason": "Issue 中观察到的错误现象是 PostgreSQL 语法错误导致的异常。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "bulk_create 调用后，数据库中对应记录的值。",
+      "reason": "如果 ON CONFLICT 子句因列名错误而失效，可能导致插入失败或更新未执行，从而影响最终数据状态。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 bulk_create 调用成功完成，没有抛出数据库异常。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言完整的、具体的 SQL 字符串，因为 SQL 生成可能因数据库后端或 Django 版本而异。",
+      "reason": "Issue 中当前行为会抛出异常，修复后应正常执行。因此，断言不抛出特定异常（如 ProgrammingError）是稳定的目标。"
+    },
+    {
+      "assertion_goal": "验证数据库中的记录已按预期更新或插入。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "仅断言对象数量，因为数量可能正确但数据内容错误。",
+      "reason": "即使 SQL 错误，插入可能部分成功。断言具体字段值能更准确地验证 ON CONFLICT UPDATE 是否按预期工作。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用支持 ON CONFLICT 子句的数据库后端（如 PostgreSQL）。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要创建一个继承自 django.test.TestCase 的测试类。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要定义一个新的模型，其字段使用 db_column 参数，并为其创建数据库表（例如通过 migrations）。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "缺陷是否也影响其他数据库后端（如 SQLite、MySQL），还是仅限于 PostgreSQL。",
+    "bulk_create 方法内部具体哪个函数或哪行代码负责将字段名映射到数据库列名用于 ON CONFLICT 子句。",
+    "当 unique_fields 包含多个字段或 update_fields 列表为空时，行为是否一致。",
+    "模型主键字段（pk）在 unique_fields 中且定义了 db_column 时，是否也会出现同样问题。"
+  ]
+}

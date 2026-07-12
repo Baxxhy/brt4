@@ -1,0 +1,380 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+[ENH]: ContourSet.set_paths
+### Problem
+
+To get contour labelling working with its special transforms, Cartopy has a [workaround](https://github.com/SciTools/cartopy/blob/2ed668c17b4e52421f15c5be3761719c75c5311a/lib/cartopy/mpl/contour.py#L89-L108) where it replaces all the paths on the `ContourSet` with transformed versions.  This currently looks like
+
+```python
+paths = cs.get_paths()
+paths[:] = transformed_paths
+``` 
+
+which doesn’t smell very good.
+
+### Proposed solution
+
+The above would smell better as 
+
+```python
+cs.set_paths(transformed_paths)
+``` 
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：lib/matplotlib/contour.py
+对象名称：ContourSet
+节点类型：class
+父节点：contour
+行号范围：706-1476
+代码：
+class ContourSet(ContourLabeler, mcoll.Collection):
+    """
+    Store a set of contour lines or filled regions.
+
+    User-callable method: `~.Axes.clabel`
+
+    Parameters
+    ----------
+    ax : `~matplotlib.axes.Axes`
+
+    levels : [level0, level1, ..., leveln]
+        A list of floating point numbers indicating the contour levels.
+
+    allsegs : [level0segs, level1segs, ...]
+        List of all the polygon segments for all the *levels*.
+        For contour lines ``len(allsegs) == len(levels)``, and for
+        filled contour regions ``len(allsegs) = len(levels)-1``. The lists
+        should look like ::
+
+            level0segs = [polygon0, polygon1, ...]
+            polygon0 = [[x0, y0], [x1, y1], ...]
+
+    allkinds : ``None`` or [level0kinds, level1kinds, ...]
+        Optional list of all the polygon vertex kinds (code types), as
+        described and used in Path. This is used to allow multiply-
+        connected paths such as holes within filled polygons.
+        If not ``None``, ``len(allkinds) == len(allsegs)``. The lists
+        should look like ::
+
+            level0kinds = [polygon0kinds, ...]
+            polygon0kinds = [vertexcode0, vertexcode1, ...]
+
+        If *allkinds* is not ``None``, usually all polygons for a
+        particular contour level are grouped together so that
+        ``level0segs = [polygon0]`` and ``level0kinds = [polygon0kinds]``.
+
+    **kwargs
+        Keyword arguments are as described in the docstring of
+        `~.Axes.contour`.
+
+    %(contour_set_attributes)s
+    """
+    def __init__(self, ax, *args,
+                 levels=None, filled=False, linewidths=None, linestyles=None,
+                 hatches=(None,), alpha=None, origin=None, extent=None,
+                 cmap=None, colors=None, norm=None, vmin=None, vmax=None,
+                 extend='neither', antialiased=None, nchunk=0, locator=None,
+                 transform=None, negative_linestyles=None, clip_path=None,
+                 **kwargs):
+    allsegs = _api.deprecated("3.8", pending=True)(property(lambda self: [
+        p.vertices for c in self.collections for p in c.get_paths()]))
+    allkinds = _api.deprecated("3.8", pending=True)(property(lambda self: [
+        p.codes for c in self.collections for p in c.get_paths()]))
+    tcolors = _api.deprecated("3.8")(property(lambda self: [
+        (tuple(rgba),) for rgba in self.to_rgba(self.cvalues, self.alpha)]))
+    tlinewidths = _api.deprecated("3.8")(property(lambda self: [
+        (w,) for w in self.get_linewidths()]))
+    alpha = property(lambda self: self.get_alpha())
+    linestyles = property(lambda self: self._orig_linestyles)
+    @_api.deprecated("3.8")
+    @property
+    def collections(self):
+    def get_transform(self):
+    def __getstate__(self):
+    def legend_elements(self, variable_name='x', str_format=str):
+    def _process_args(self, *args, **kwargs):
+    def _make_paths_from_contour_generator(self):
+    def _get_lowers_and_uppers(self):
+    def changed(self):
+    def _autolev(self, N):
+    def _process_contour_level_args(self, args, z_dtype):
+    def _process_levels(self):
+    def _process_colors(self):
+    def _process_linewidths(self, linewidths):
+    def _process_linestyles(self, linestyles):
+    def _find_nearest_contour(self, xy, indices=None):
+    @_api.deprecated("3.8")
+    def find_nearest_contour(self, x, y, indices=None, pixel=True):
+    def draw(self, renderer):
+
+
+【源码片段 2】
+文件路径：lib/matplotlib/collections.py
+对象名称：get_paths
+节点类型：class_function
+父节点：Collection
+行号范围：206-207
+代码：
+    def get_paths(self):
+        return self._paths
+
+
+【源码片段 3】
+文件路径：lib/matplotlib/collections.py
+对象名称：set_paths
+节点类型：class_function
+父节点：Collection
+行号范围：209-210
+代码：
+    def set_paths(self, paths):
+        raise NotImplementedError
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：lib/matplotlib/tests/test_contour.py
+测试名称：test_contour_clip_path
+测试代码：
+def test_contour_clip_path():
+    fig, ax = plt.subplots()
+    data = [[0, 1], [1, 0]]
+    circle = mpatches.Circle([0.5, 0.5], 0.5, transform=ax.transAxes)
+    cs = ax.contour(data, clip_path=circle)
+    assert cs.get_clip_path() is not None
+
+【相关测试 2】
+测试文件：lib/matplotlib/tests/test_contour.py
+测试名称：test_contour_manual
+测试代码：
+@pytest.mark.parametrize("split_collections", [False, True])
+@image_comparison(baseline_images=['contour_manual'],
+                  extensions=['png'], remove_text=True, tol=0.89)
+def test_contour_manual(split_collections):
+    # Manually specifying contour lines/polygons to plot.
+    from matplotlib.contour import ContourSet
+
+    fig, ax = plt.subplots(figsize=(4, 4))
+    cmap = 'viridis'
+
+    # Segments only (no 'kind' codes).
+    lines0 = [[[2, 0], [1, 2], [1, 3]]]  # Single line.
+    lines1 = [[[3, 0], [3, 2]], [[3, 3], [3, 4]]]  # Two lines.
+    filled01 = [[[0, 0], [0, 4], [1, 3], [1, 2], [2, 0]]]
+    filled12 = [[[2, 0], [3, 0], [3, 2], [1, 3], [1, 2]],  # Two polygons.
+                [[1, 4], [3, 4], [3, 3]]]
+    ContourSet(ax, [0, 1, 2], [filled01, filled12], filled=True, cmap=cmap)
+    ContourSet(ax, [1, 2], [lines0, lines1], linewidths=3, colors=['r', 'k'])
+
+    # Segments and kind codes (1 = MOVETO, 2 = LINETO, 79 = CLOSEPOLY).
+    segs = [[[4, 0], [7, 0], [7, 3], [4, 3], [4, 0],
+             [5, 1], [5, 2], [6, 2], [6, 1], [5, 1]]]
+    kinds = [[1, 2, 2, 2, 79, 1, 2, 2, 2, 79]]  # Polygon containing hole.
+    ContourSet(ax, [2, 3], [segs], [kinds], filled=True, cmap=cmap)
+    ContourSet(ax, [2], [segs], [kinds], colors='k', linewidths=3)
+
+    _maybe_split_collections(split_collections)
+
+【相关测试 3】
+测试文件：lib/matplotlib/tests/test_contour.py
+测试名称：test_quadcontourset_reuse
+测试代码：
+def test_quadcontourset_reuse():
+    # If QuadContourSet returned from one contour(f) call is passed as first
+    # argument to another the underlying C++ contour generator will be reused.
+    x, y = np.meshgrid([0.0, 1.0], [0.0, 1.0])
+    z = x + y
+    fig, ax = plt.subplots()
+    qcs1 = ax.contourf(x, y, z)
+    qcs2 = ax.contour(x, y, z)
+    assert qcs2._contour_generator != qcs1._contour_generator
+    qcs3 = ax.contour(qcs1, z)
+    assert qcs3._contour_generator == qcs1._contour_generator
+
+【相关测试 4】
+测试文件：lib/matplotlib/tests/test_triangulation.py
+测试名称：test_tricontour_path
+测试代码：
+def test_tricontour_path():
+    x = [0, 4, 4, 0, 2]
+    y = [0, 0, 4, 4, 2]
+    triang = mtri.Triangulation(x, y)
+    _, ax = plt.subplots()
+
+    # Line strip from boundary to boundary
+    cs = ax.tricontour(triang, [1, 0, 0, 0, 0], levels=[0.5])
+    paths = cs.get_paths()
+    assert len(paths) == 1
+    expected_vertices = [[2, 0], [1, 1], [0, 2]]
+    assert_array_almost_equal(paths[0].vertices, expected_vertices)
+    assert_array_equal(paths[0].codes, [1, 2, 2])
+    assert_array_almost_equal(
+        paths[0].to_polygons(closed_only=False), [expected_vertices])
+
+    # Closed line loop inside domain
+    cs = ax.tricontour(triang, [0, 0, 0, 0, 1], levels=[0.5])
+    paths = cs.get_paths()
+    assert len(paths) == 1
+    expected_vertices = [[3, 1], [3, 3], [1, 3], [1, 1], [3, 1]]
+    assert_array_almost_equal(paths[0].vertices, expected_vertices)
+    assert_array_equal(paths[0].codes, [1, 2, 2, 2, 79])
+    assert_array_almost_equal(paths[0].to_polygons(), [expected_vertices])
+
+【相关测试 5】
+测试文件：lib/matplotlib/tests/test_contour.py
+测试名称：test_labels
+测试代码：
+@pytest.mark.parametrize("split_collections", [False, True])
+@image_comparison(['contour_test_label_transforms.png'],
+                  remove_text=True, style='mpl20', tol=1.1)
+def test_labels(split_collections):
+    # Adapted from pylab_examples example code: contour_demo.py
+    # see issues #2475, #2843, and #2818 for explanation
+    delta = 0.025
+    x = np.arange(-3.0, 3.0, delta)
+    y = np.arange(-2.0, 2.0, delta)
+    X, Y = np.meshgrid(x, y)
+    Z1 = np.exp(-(X**2 + Y**2) / 2) / (2 * np.pi)
+    Z2 = (np.exp(-(((X - 1) / 1.5)**2 + ((Y - 1) / 0.5)**2) / 2) /
+          (2 * np.pi * 0.5 * 1.5))
+
+    # difference of Gaussians
+    Z = 10.0 * (Z2 - Z1)
+
+    fig, ax = plt.subplots(1, 1)
+    CS = ax.contour(X, Y, Z)
+    disp_units = [(216, 177), (359, 290), (521, 406)]
+    data_units = [(-2, .5), (0, -1.5), (2.8, 1)]
+
+    CS.clabel()
+
+    for x, y in data_units:
+        CS.add_label_near(x, y, inline=True, transform=None)
+
+    for x, y in disp_units:
+        CS.add_label_near(x, y, inline=True, transform=False)
+
+    _maybe_split_collections(split_collections)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

@@ -1,0 +1,120 @@
+instance_id: sympy__sympy-15809
+
+issue_summary: 无参数的 Min() 和 Max() 函数当前抛出 ValueError，但根据数学定义应分别返回正无穷和负无穷。
+
+trigger_condition:
+{
+  "text": "调用 Min() 或 Max() 函数时不传入任何参数。",
+  "evidence": [
+    "Issue 描述：'Zero-argument Min() and Max()'",
+    "相关测试 1：'raises(ValueError, lambda: Max())'",
+    "相关测试 2：'raises(ValueError, lambda: Min())'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "调用无参数的 Min() 或 Max() 函数时抛出 ValueError: The Max/Min functions must have arguments.",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 描述：'Right now `Min()` and `Max()` with no arguments raise `ValueError: The Max/Min functions must have arguments.`'",
+    "相关测试 1 和 2 中的 raises 语句。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "无参数的 Min() 应返回正无穷 (oo)，无参数的 Max() 应返回负无穷 (-oo)。",
+  "evidence": [
+    "Issue 描述：'It might be mathematically more convenient to have them return `oo` and `-oo`, respectively.'",
+    "Issue 引用的维基百科链接解释了空集在扩展实数中的上下确界。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "Min",
+    "kind": "class",
+    "source_path": "sympy/functions/elementary/miscellaneous.py",
+    "reason": "Issue 直接讨论 Min 函数在无参数时的行为。"
+  },
+  {
+    "name": "Max",
+    "kind": "class",
+    "source_path": "sympy/functions/elementary/miscellaneous.py",
+    "reason": "Issue 直接讨论 Max 函数在无参数时的行为。"
+  },
+  {
+    "name": "oo",
+    "kind": "global_var",
+    "source_path": "sympy/stats/crv_types.py",
+    "reason": "预期返回值涉及正无穷符号。"
+  },
+  {
+    "name": "S.NegativeInfinity",
+    "kind": "unknown",
+    "source_path": "",
+    "reason": "预期返回值涉及负无穷符号。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "测试中使用 raises(ValueError, lambda: Max()) 和 raises(ValueError, lambda: Min()) 来验证无参数调用会抛出异常。",
+    "target_pattern": "将调用改为直接调用 Max() 和 Min()，并断言其返回值等于 oo 或 -oo。",
+    "reason": "当前测试验证的是抛出异常的错误行为，变异后可以验证修复后的正确返回值。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "Min() 和 Max() 的直接调用结果。",
+    "reason": "Issue 的核心是函数的返回值，观测返回值可以直接判断行为是否符合预期。"
+  },
+  {
+    "kind": "exception",
+    "expression_hint": "调用 Min() 或 Max() 时是否抛出 ValueError。",
+    "reason": "当前行为会抛出异常，观测异常是否消失是判断修复是否生效的指标。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "断言无参数的 Min() 返回值等于正无穷 (oo)。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的 repr 字符串或复杂的类型结构。",
+    "reason": "Issue 明确期望返回 oo 这个符号对象，直接相等断言最稳定。"
+  },
+  {
+    "assertion_goal": "断言无参数的 Max() 返回值等于负无穷 (S.NegativeInfinity)。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的 repr 字符串或复杂的类型结构。",
+    "reason": "Issue 明确期望返回 -oo 这个符号对象，直接相等断言最稳定。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 sympy 中的 Min, Max, oo, S 等符号。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "无参数调用时，函数内部是应该在初始化/实例化阶段就返回 identity 值，还是需要在某个 `_eval` 方法中处理？",
+  "修复后，是否还需要处理其他边界情况，例如只有一个参数时的行为？",
+  "oo 和 S.NegativeInfinity 在 sympy 中的确切导入路径和表示是否与预期完全一致？"
+]

@@ -1,0 +1,147 @@
+{
+  "issue_summary": "迁移操作优化时未能减少 AddIndex/RemoveIndex 操作。",
+  "trigger_condition": {
+    "text": "当优化器处理包含 AddIndex 和 RemoveIndex 操作的迁移操作列表时。",
+    "evidence": ["Issue 描述提到 'optimizing migration operations' 和 'reduce AddIndex/RemoveIndex operations'。", "源码片段 3 显示了 MigrationOptimizer.optimize 方法，它是优化的入口点。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "优化后的迁移操作列表没有减少，仍然包含冗余的 AddIndex 和 RemoveIndex 操作。",
+    "symptom_type": "performance",
+    "evidence": ["Issue 描述 'We should reduce AddIndex/RemoveIndex operations' 暗示当前没有减少。"],
+    "confidence": "medium"
+  },
+  "expected_behavior": {
+    "text": "优化器应该能够识别并合并或消除冗余的 AddIndex 和 RemoveIndex 操作，从而减少最终迁移操作的数量。",
+    "evidence": ["Issue 描述明确表示 'We should reduce AddIndex/RemoveIndex operations'，这是期望的目标。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "MigrationOptimizer.optimize",
+      "kind": "method",
+      "source_path": "django/db/migrations/optimizer.py",
+      "reason": "这是迁移操作优化的主入口点，Issue 直接相关。"
+    },
+    {
+      "name": "MigrationOptimizer.optimize_inner",
+      "kind": "method",
+      "source_path": "django/db/migrations/optimizer.py",
+      "reason": "被 optimize 方法调用，是执行具体优化的内部方法。"
+    },
+    {
+      "name": "AddIndex",
+      "kind": "class",
+      "source_path": "django/db/migrations/operations/models.py",
+      "reason": "Issue 明确提到需要减少的 AddIndex 操作。"
+    },
+    {
+      "name": "RemoveIndex",
+      "kind": "class",
+      "source_path": "django/db/migrations/operations/models.py",
+      "reason": "Issue 明确提到需要减少的 RemoveIndex 操作。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/migrations/optimizer.py",
+      "object": "MigrationOptimizer.optimize_inner",
+      "lines": "",
+      "reason": "优化逻辑的核心在此方法中，它负责扫描和组合操作，可能缺少对 AddIndex/RemoveIndex 的优化规则。"
+    },
+    {
+      "path": "django/db/migrations/optimizer.py",
+      "object": "MigrationOptimizer",
+      "lines": "",
+      "reason": "整个优化器类负责减少操作，Issue 表明其对索引操作的优化不足。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_rename_index",
+      "test_file": "tests/migrations/test_optimizer.py",
+      "why_relevant": "它测试了迁移优化器对 RenameIndex 操作的优化能力，展示了如何断言操作列表被优化（减少）。",
+      "reusable_parts": ["assertOptimizesTo 和 assertDoesNotOptimize 的调用模式", "migrations 模块中操作对象的构造方式", "OptimizerTests 测试类结构"],
+      "possible_gap": "该测试针对 RenameIndex，而非 AddIndex/RemoveIndex。需要变异操作类型和优化预期。"
+    },
+    {
+      "test_name": "test_optimize_through_fields",
+      "test_file": "tests/migrations/test_optimizer.py",
+      "why_relevant": "它测试了优化器跨多个操作（包括 CreateModel, AddField, RemoveField 等）进行折叠的能力，展示了复杂的优化场景。",
+      "reusable_parts": ["assertOptimizesTo 的使用", "构建复杂操作列表的模式", "测试优化器整体行为的框架"],
+      "possible_gap": "测试焦点是模型和字段操作，不包含索引操作。需要替换为索引相关的操作序列。"
+    },
+    {
+      "test_name": "test_add_remove_index",
+      "test_file": "tests/schema/tests.py",
+      "why_relevant": "它直接测试了 AddIndex 和 RemoveIndex 在数据库模式编辑器中的执行，展示了索引的添加和移除行为。",
+      "reusable_parts": ["Index 对象的构造", "connection.schema_editor() 上下文管理器", "使用 get_indexes 检查数据库状态"],
+      "possible_gap": "这是一个数据库模式测试，而非迁移优化器测试。它不涉及操作列表的优化。"
+    },
+    {
+      "test_name": "test_remove_indexes",
+      "test_file": "tests/migrations/test_autodetector.py",
+      "why_relevant": "它测试了自动检测器对索引移除的检测，并断言会生成 RemoveIndex 操作，涉及索引迁移操作。",
+      "reusable_parts": ["assertOperationTypes 和 assertOperationAttributes 的断言风格", "对迁移变化中操作类型的检查"],
+      "possible_gap": "测试焦点是变更检测（autodetector），而非操作列表的优化（optimizer）。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试 test_rename_index 和 test_optimize_through_fields 中的操作列表包含 RenameIndex、CreateModel 等。",
+      "target_pattern": "构建包含 AddIndex 和 RemoveIndex 的操作列表，特别是针对同一模型或索引的连续、可能冗余的操作。",
+      "reason": "Issue 表明优化器未能减少这些操作，因此需要构造可能被优化的序列作为输入。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "测试直接调用 assertOptimizesTo 并比较输入和输出列表。",
+      "target_pattern": "调用 MigrationOptimizer.optimize 方法，传入包含 AddIndex/RemoveIndex 的操作列表，并观察输出列表是否被减少。",
+      "reason": "需要直接测试优化器对特定操作类型的处理。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "state",
+      "expression_hint": "optimize 方法调用前后的操作列表长度和内容。",
+      "reason": "Issue 的核心是操作列表是否被减少，比较输入和输出列表是关键。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "优化后列表中操作对象的类型，特别是是否仍包含 AddIndex 或 RemoveIndex。",
+      "reason": "判断优化是否成功消除了目标操作类型。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "优化后的操作列表应比原始列表短（或至少不长），且不应包含可合并的 AddIndex/RemoveIndex 对。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "断言完整的、具体的操作列表相等，因为优化后的确切形式未知。避免断言不相关的操作细节。",
+      "reason": "Issue 目标是“减少”操作，因此断言长度关系或特定操作类型的缺失是稳定且对齐的。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 migrations 模块中的操作类（如 AddIndex, RemoveIndex）和 models 模块中的 Index 类来构建测试输入。",
+      "source": "retrieved_source",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试应继承自 SimpleTestCase 或类似的测试基类，如 OptimizerTests。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要模拟或提供 app_label 参数给优化器。",
+      "source": "retrieved_source",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "具体哪些 AddIndex/RemoveIndex 操作序列是可优化的（例如，对同一索引的连续添加和移除？对同一模型的不同索引？）。",
+    "优化后的正确输出具体应该是什么（是完全移除某些操作，还是合并成其他操作）？",
+    "除了 AddIndex 和 RemoveIndex，是否还有其他索引相关操作（如 RenameIndex）的优化也存在问题？"
+  ]
+}

@@ -1,0 +1,112 @@
+instance_id: sympy__sympy-18763
+
+issue_summary: Subs 对象的 LaTeX 打印在乘以系数时缺少必要的括号，导致表达式语义不明确。
+
+trigger_condition:
+{
+  "text": "创建一个系数与 Subs 对象相乘的表达式，其中 Subs 内部的表达式以负号或加减运算开头，然后调用 latex() 函数。",
+  "evidence": [
+    "Issue 示例：3*Subs(-x+y, (x,),(1,))",
+    "相关测试 1 展示了 Subs 的 LaTeX 打印。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "生成的 LaTeX 字符串中，Subs 内部的表达式没有被括号包裹，导致乘法运算的优先级在视觉上不清晰。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 中给出的错误 LaTeX 输出：'3 \\left. - x + y \\right|_{\\substack{ x=1 }}'",
+    "Issue 中期望的 LaTeX 输出包含括号：'3 \\left. \\left(- x + y\\right) \\right|_{\\substack{ x=1 }}'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当系数与 Subs 对象相乘时，如果 Subs 内部的表达式需要括号来明确运算顺序（例如以负号或加减运算开头），生成的 LaTeX 字符串应在 Subs 内部表达式周围添加括号。",
+  "evidence": [
+    "Issue 中描述的期望输出：'3 \\left. \\left(- x + y\\right) \\right|_{\\substack{ x=1 }}'"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "Subs",
+    "kind": "class",
+    "source_path": "sympy/core/function.py",
+    "reason": "Issue 直接涉及 Subs 类的 LaTeX 打印行为。"
+  },
+  {
+    "name": "latex",
+    "kind": "function",
+    "source_path": "",
+    "reason": "Issue 的核心是 LaTeX 打印输出不正确。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "Subs(x*y, (x, y), (1, 2))",
+    "target_pattern": "3*Subs(-x+y, (x,),(1,))",
+    "reason": "Issue 示例表明，当 Subs 内部表达式以负号开头并与系数相乘时，会触发括号缺失问题。",
+    "confidence": "high"
+  },
+  {
+    "slot": "operator",
+    "current_pattern": "Subs 内部为乘法或加法（正项开头）",
+    "target_pattern": "Subs 内部为以负号或加减运算开头的表达式",
+    "reason": "括号缺失问题可能特定于需要明确优先级的情况，如表达式以负号开头。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "latex(3*Subs(-x+y, (x,),(1,)))",
+    "reason": "直接观察 LaTeX 打印输出是否包含必要的括号，这是 Issue 的核心。"
+  },
+  {
+    "kind": "repr",
+    "expression_hint": "str(3*Subs(-x+y, (x,),(1,)))",
+    "reason": "检查字符串表示，以确认表达式结构是否正确构建。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "生成的 LaTeX 字符串应在 Subs 内部表达式周围包含括号，当该表达式以负号或加减运算开头时。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "避免对整个 LaTeX 字符串进行精确相等断言，因为格式细节可能变化。",
+    "reason": "Issue 关注的是括号的存在与否，而不是整个字符串的精确格式。使用 contains_fragment 检查 '\\left(' 和 '\\right)' 等模式更稳定。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要从 sympy 导入 Subs, symbols (x, y)，以及 latex 打印函数。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要在 sympy/printing/tests/test_latex.py 的上下文中运行，或类似地导入相关模块。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "括号插入的确切规则是什么？是否所有以负号开头的表达式都需要括号，还是仅在某些运算符组合下需要？",
+  "除了 LaTeX 打印，其他打印方式（如 str）是否也有类似问题？",
+  "缺陷的确切位置是在 _print_Subs、_print_Mul 还是其他相关函数中？"
+]

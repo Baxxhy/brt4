@@ -1,0 +1,112 @@
+{
+  "issue_summary": "使用 extension 参数调用 factor 函数时，错误地丢弃了多项式的一个因子 (y-1)。",
+  "trigger_condition": {
+    "text": "对多项式 `x*y - x - y + 1`（即 `(x-1)*(y-1)` 的展开形式）调用 `factor(z, extension=[I])`。",
+    "evidence": ["Issue 中的代码片段显示 `factor(z, extension=[I])` 返回 `x - 1`，而 `factor(z)` 返回 `(x - 1)*(y - 1)`。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "`factor` 函数在指定 `extension=[I]` 时返回了不完整的因式分解结果，缺少了因子 `(y-1)`。",
+    "symptom_type": "wrong_return",
+    "evidence": ["Issue 中的输出对比：`factor(z)` 返回 `(x - 1)*(y - 1)`，而 `factor(z, extension=[I])` 返回 `x - 1`。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "无论是否指定 `extension` 参数，`factor` 函数都应返回完整的因式分解结果，即 `(x - 1)*(y - 1)`。",
+    "evidence": ["Issue 中 `factor(z)` 的正确行为返回了完整因子。相关测试 `test_factor` 中也包含对 `factor` 函数正确性的断言。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "factor",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 直接报告了 `factor` 函数在特定参数下的错误行为。"
+    },
+    {
+      "name": "expand",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 中用于构造输入多项式 `z`。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "",
+      "object": "",
+      "lines": "",
+      "reason": "iCoRe 检索出的相关源码片段与 `factor` 函数的核心逻辑无关（涉及 vector 和 geometry 模块）。缺陷可能位于 polys 模块中处理 `extension` 参数的因式分解逻辑中。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_factor",
+      "test_file": "sympy/polys/tests/test_polytools.py",
+      "why_relevant": "该测试广泛测试了 `factor` 函数，包括使用 `extension` 参数（如 `extension=I`）的场景。",
+      "reusable_parts": ["imports (如 `from sympy import ...`)", "`factor` 和 `expand` 的调用模式", "使用 `assert` 比较因式分解结果"],
+      "possible_gap": "现有测试可能未覆盖 `extension` 参数对多变量多项式（如 `x*y - x - y + 1`）因式分解的影响。"
+    },
+    {
+      "test_name": "test_issue_5786",
+      "test_file": "sympy/polys/tests/test_polytools.py",
+      "why_relevant": "该测试标记为 `@XFAIL`，涉及 `extension` 参数下的因式分解问题，可能与当前 Issue 相关。",
+      "reusable_parts": ["使用 `extension` 参数调用 `factor`", "使用 `expand` 验证结果"],
+      "possible_gap": "该测试针对的是不同的多项式（`(x - I*y)*(z - I*t)`），且标记为预期失败，可能不直接适用于当前 Issue。"
+    },
+    {
+      "test_name": "test_dup_ext_factor",
+      "test_file": "sympy/polys/tests/test_factortools.py",
+      "why_relevant": "该测试直接测试了扩展域上的因式分解（`dup_ext_factor`），与 `extension` 参数的核心逻辑相关。",
+      "reusable_parts": ["代数扩展域（如 `QQ.algebraic_field(I)`）的构造", "多项式环的创建", "因式分解结果的断言模式"],
+      "possible_gap": "该测试使用底层 `dup_ext_factor` 方法，而非用户直接调用的 `factor` 函数，且主要针对单变量多项式。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中 `factor` 的输入多为单变量多项式（如 `x**4 + 1`）或已明确测试 `extension` 的多项式。",
+      "target_pattern": "输入应为多变量多项式 `x*y - x - y + 1`（即 `(x-1)*(y-1)` 的展开）。",
+      "reason": "Issue 表明缺陷在特定多变量多项式输入和 `extension=[I]` 参数组合下触发。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "相似测试中 `factor` 调用可能使用 `extension=I` 或 `extension=sqrt(2)`。",
+      "target_pattern": "使用 `extension=[I]`（列表形式）作为参数。",
+      "reason": "Issue 中触发缺陷的调用使用了 `extension=[I]`。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "`factor(z, extension=[I])` 的返回值，并与 `factor(z)` 的返回值或原始表达式 `(x-1)*(y-1)` 比较。",
+      "reason": "直接观察因式分解结果是否完整，是否缺少因子 `(y-1)`。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 `factor(z, extension=[I])` 的结果在数学上等于 `(x - 1)*(y - 1)`。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的字符串表示，因为因式顺序可能变化。",
+      "reason": "使用数学等式比较（如 `==` 或 `expand` 后比较）更稳定，不依赖于因式顺序或字符串表示。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 `factor`, `expand`, `I` 以及符号 `x`, `y`。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "构造输入多项式 `z = expand((x-1)*(y-1))`。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "缺陷是否也存在于其他 `extension` 值（如 `extension=sqrt(2)`）或其他多变量多项式中。",
+    "缺陷的确切位置在 polys 模块的哪个具体函数或方法中。",
+    "`extension` 参数为列表 `[I]` 与单个值 `I` 是否有区别。"
+  ]
+}

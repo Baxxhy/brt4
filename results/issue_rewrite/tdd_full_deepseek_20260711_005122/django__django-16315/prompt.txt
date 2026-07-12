@@ -1,0 +1,574 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+QuerySet.bulk_create() crashes on mixed case columns in unique_fields/update_fields.
+Description
+	
+Not sure exactly how to phrase this, but when I I'm calling bulk_update on the manager for a class with db_column set on fields the SQL is invalid. Ellipses indicate other fields excluded for clarity.
+class ActivityBlackListed(models.Model):
+	"""
+	Originally sourced from Activity_BlackListed in /home/josh/PNDS_Interim_MIS-Data.accdb (13 records)
+	"""
+	class Meta:
+		db_table = "Activity_BlackListed"
+	blacklistid = models.IntegerField(primary_key=True, db_column="BlacklistID")
+	sectorid = models.IntegerField(null=True, blank=True, db_column="SectorID")
+	...
+qs.bulk_create(instances, update_conflicts=True, update_fields=["sectorid", ...], unique_fields=["blacklistid"])
+The "INSERT" code does take into account the db_columns
+INSERT INTO "Activity_BlackListed" ("BlacklistID",...) VALUES (%s, ...),
+The code which is generated for "ON CONFLICT" uses the field name and not the db_column which leads to a syntax error
+'ON CONFLICT("blacklistid") DO UPDATE SET "sectorid" = EXCLUDED."sectorid", ...
+PostgreSQL returns ERROR: column "blacklistid" does not exist at character 1508
+What should be generated is I think:
+'ON CONFLICT("BlacklistID") DO UPDATE SET "SectorID" = EXCLUDED."SectorID", ...
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/db/models/query.py
+对象名称：bulk_create
+节点类型：class_function
+父节点：QuerySet
+行号范围：746-841
+代码：
+    def bulk_create(
+        self,
+        objs,
+        batch_size=None,
+        ignore_conflicts=False,
+        update_conflicts=False,
+        update_fields=None,
+        unique_fields=None,
+    ):
+        """
+        Insert each of the instances into the database. Do *not* call
+        save() on each of the instances, do not send any pre/post_save
+        signals, and do not set the primary key attribute if it is an
+        autoincrement field (except if features.can_return_rows_from_bulk_insert=True).
+        Multi-table models are not supported.
+        """
+        # When you bulk insert you don't get the primary keys back (if it's an
+        # autoincrement, except if can_return_rows_from_bulk_insert=True), so
+        # you can't insert into the child tables which references this. There
+        # are two workarounds:
+        # 1) This could be implemented if you didn't have an autoincrement pk
+        # 2) You could do it by doing O(n) normal inserts into the parent
+        #    tables to get the primary keys back and then doing a single bulk
+        #    insert into the childmost table.
+        # We currently set the primary keys on the objects when using
+        # PostgreSQL via the RETURNING ID clause. It should be possible for
+        # Oracle as well, but the semantics for extracting the primary keys is
+        # trickier so it's not done yet.
+        if batch_size is not None and batch_size <= 0:
+            raise ValueError("Batch size must be a positive integer.")
+        # Check that the parents share the same concrete model with the our
+        # model to detect the inheritance pattern ConcreteGrandParent ->
+        # MultiTableParent -> ProxyChild. Simply checking self.model._meta.proxy
+        # would not identify that case as involving multiple tables.
+        for parent in self.model._meta.get_parent_list():
+            if parent._meta.concrete_model is not self.model._meta.concrete_model:
+                raise ValueError("Can't bulk create a multi-table inherited model")
+        if not objs:
+            return objs
+        opts = self.model._meta
+        if unique_fields:
+            # Primary key is allowed in unique_fields.
+            unique_fields = [
+                opts.pk.name if name == "pk" else name for name in unique_fields
+            ]
+        on_conflict = self._check_bulk_create_options(
+            ignore_conflicts,
+            update_conflicts,
+            update_fields,
+            unique_fields,
+        )
+        self._for_write = True
+        fields = opts.concrete_fields
+        objs = list(objs)
+        self._prepare_for_bulk_create(objs)
+        with transaction.atomic(using=self.db, savepoint=False):
+            objs_with_pk, objs_without_pk = partition(lambda o: o.pk is None, objs)
+            if objs_with_pk:
+                returned_columns = self._batched_insert(
+                    objs_with_pk,
+                    fields,
+                    batch_size,
+                    on_conflict=on_conflict,
+                    update_fields=update_fields,
+                    unique_fields=unique_fields,
+                )
+                for obj_with_pk, results in zip(objs_with_pk, returned_columns):
+                    for result, field in zip(results, opts.db_returning_fields):
+                        if field != opts.pk:
+                            setattr(obj_with_pk, field.attname, result)
+                for obj_with_pk in objs_with_pk:
+                    obj_with_pk._state.adding = False
+                    obj_with_pk._state.db = self.db
+            if objs_without_pk:
+                fields = [f for f in fields if not isinstance(f, AutoField)]
+                returned_columns = self._batched_insert(
+                    objs_without_pk,
+                    fields,
+                    batch_size,
+                    on_conflict=on_conflict,
+                    update_fields=update_fields,
+                    unique_fields=unique_fields,
+                )
+                connection = connections[self.db]
+                if (
+                    connection.features.can_return_rows_from_bulk_insert
+                    and on_conflict is None
+                ):
+                    assert len(returned_columns) == len(objs_without_pk)
+                for obj_without_pk, results in zip(objs_without_pk, returned_columns):
+                    for result, field in zip(results, opts.db_returning_fields):
+                        setattr(obj_without_pk, field.attname, result)
+                    obj_without_pk._state.adding = False
+                    obj_without_pk._state.db = self.db
+
+        return objs
+
+
+【源码片段 2】
+文件路径：django/db/models/base.py
+对象名称：Model
+节点类型：class
+父节点：base
+行号范围：459-2450
+代码：
+class Model(AltersData, metaclass=ModelBase):
+    def __init__(self, *args, **kwargs):
+    @classmethod
+    def from_db(cls, db, field_names, values):
+    def __repr__(self):
+    def __str__(self):
+    def __eq__(self, other):
+    def __hash__(self):
+    def __reduce__(self):
+    def __getstate__(self):
+    def __setstate__(self, state):
+    def _get_pk_val(self, meta=None):
+    def _set_pk_val(self, value):
+    pk = property(_get_pk_val, _set_pk_val)
+    def get_deferred_fields(self):
+    def refresh_from_db(self, using=None, fields=None):
+    async def arefresh_from_db(self, using=None, fields=None):
+    def serializable_value(self, field_name):
+    def save(
+        self, force_insert=False, force_update=False, using=None, update_fields=None
+    ):
+    save.alters_data = True
+    async def asave(
+        self, force_insert=False, force_update=False, using=None, update_fields=None
+    ):
+    asave.alters_data = True
+    def save_base(
+        self,
+        raw=False,
+        force_insert=False,
+        force_update=False,
+        using=None,
+        update_fields=None,
+    ):
+    save_base.alters_data = True
+    def _save_parents(self, cls, using, update_fields):
+    def _save_table(
+        self,
+        raw=False,
+        cls=None,
+        force_insert=False,
+        force_update=False,
+        using=None,
+        update_fields=None,
+    ):
+    def _do_update(self, base_qs, using, pk_val, values, update_fields, forced_update):
+    def _do_insert(self, manager, using, fields, returning_fields, raw):
+    def _prepare_related_fields_for_save(self, operation_name, fields=None):
+    def delete(self, using=None, keep_parents=False):
+    delete.alters_data = True
+    async def adelete(self, using=None, keep_parents=False):
+    adelete.alters_data = True
+    def _get_FIELD_display(self, field):
+    def _get_next_or_previous_by_FIELD(self, field, is_next, **kwargs):
+    def _get_next_or_previous_in_order(self, is_next):
+    def _get_field_value_map(self, meta, exclude=None):
+    def prepare_database_save(self, field):
+    def clean(self):
+    def validate_unique(self, exclude=None):
+    def _get_unique_checks(self, exclude=None, include_meta_constraints=False):
+    def _perform_unique_checks(self, unique_checks):
+    def _perform_date_checks(self, date_checks):
+    def date_error_message(self, lookup_type, field_name, unique_for):
+    def unique_error_message(self, model_class, unique_check):
+    def get_constraints(self):
+    def validate_constraints(self, exclude=None):
+    def full_clean(self, exclude=None, validate_unique=True, validate_constraints=True):
+    def clean_fields(self, exclude=None):
+    @classmethod
+    def check(cls, **kwargs):
+    @classmethod
+    def _check_default_pk(cls):
+    @classmethod
+    def _check_swappable(cls):
+    @classmethod
+    def _check_model(cls):
+    @classmethod
+    def _check_managers(cls, **kwargs):
+    @classmethod
+    def _check_fields(cls, **kwargs):
+    @classmethod
+    def _check_m2m_through_same_relationship(cls):
+    @classmethod
+    def _check_id_field(cls):
+    @classmethod
+    def _check_field_name_clashes(cls):
+    @classmethod
+    def _check_column_name_clashes(cls):
+    @classmethod
+    def _check_model_name_db_lookup_clashes(cls):
+    @classmethod
+    def _check_property_name_related_field_accessor_clashes(cls):
+    @classmethod
+    def _check_single_primary_key(cls):
+    @classmethod
+    def _check_index_together(cls):
+    @classmethod
+    def _check_unique_together(cls):
+    @classmethod
+    def _check_indexes(cls, databases):
+    @classmethod
+    def _check_local_fields(cls, fields, option):
+    @classmethod
+    def _check_ordering(cls):
+    @classmethod
+    def _check_long_column_names(cls, databases):
+    @classmethod
+    def _get_expr_references(cls, expr):
+    @classmethod
+    def _check_constraints(cls, databases):
+
+
+【源码片段 3】
+文件路径：django/db/models/query.py
+对象名称：bulk_update
+节点类型：class_function
+父节点：QuerySet
+行号范围：861-911
+代码：
+    def bulk_update(self, objs, fields, batch_size=None):
+        """
+        Update the given fields in each of the given objects in the database.
+        """
+        if batch_size is not None and batch_size <= 0:
+            raise ValueError("Batch size must be a positive integer.")
+        if not fields:
+            raise ValueError("Field names must be given to bulk_update().")
+        objs = tuple(objs)
+        if any(obj.pk is None for obj in objs):
+            raise ValueError("All bulk_update() objects must have a primary key set.")
+        fields = [self.model._meta.get_field(name) for name in fields]
+        if any(not f.concrete or f.many_to_many for f in fields):
+            raise ValueError("bulk_update() can only be used with concrete fields.")
+        if any(f.primary_key for f in fields):
+            raise ValueError("bulk_update() cannot be used with primary key fields.")
+        if not objs:
+            return 0
+        for obj in objs:
+            obj._prepare_related_fields_for_save(
+                operation_name="bulk_update", fields=fields
+            )
+        # PK is used twice in the resulting update query, once in the filter
+        # and once in the WHEN. Each field will also have one CAST.
+        self._for_write = True
+        connection = connections[self.db]
+        max_batch_size = connection.ops.bulk_batch_size(["pk", "pk"] + fields, objs)
+        batch_size = min(batch_size, max_batch_size) if batch_size else max_batch_size
+        requires_casting = connection.features.requires_casted_case_in_updates
+        batches = (objs[i : i + batch_size] for i in range(0, len(objs), batch_size))
+        updates = []
+        for batch_objs in batches:
+            update_kwargs = {}
+            for field in fields:
+                when_statements = []
+                for obj in batch_objs:
+                    attr = getattr(obj, field.attname)
+                    if not hasattr(attr, "resolve_expression"):
+                        attr = Value(attr, output_field=field)
+                    when_statements.append(When(pk=obj.pk, then=attr))
+                case_statement = Case(*when_statements, output_field=field)
+                if requires_casting:
+                    case_statement = Cast(case_statement, output_field=field)
+                update_kwargs[field.attname] = case_statement
+            updates.append(([obj.pk for obj in batch_objs], update_kwargs))
+        rows_updated = 0
+        queryset = self.using(self.db)
+        with transaction.atomic(using=self.db, savepoint=False):
+            for pks, update_kwargs in updates:
+                rows_updated += queryset.filter(pk__in=pks).update(**update_kwargs)
+        return rows_updated
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/queries/test_bulk_update.py
+测试名称：BulkUpdateTests.test_custom_db_columns
+测试代码：
+class BulkUpdateTests(TestCase):
+    def test_custom_db_columns(self):
+        model = CustomDbColumn.objects.create(custom_column=1)
+        model.custom_column = 2
+        CustomDbColumn.objects.bulk_update([model], fields=["custom_column"])
+        model.refresh_from_db()
+        self.assertEqual(model.custom_column, 2)
+
+【相关测试 2】
+测试文件：tests/bulk_create/tests.py
+测试名称：BulkCreateTests.test_update_conflicts_unique_fields_pk
+测试代码：
+class BulkCreateTests(TestCase):
+    @skipUnlessDBFeature(
+        "supports_update_conflicts", "supports_update_conflicts_with_target"
+    )
+    def test_update_conflicts_unique_fields_pk(self):
+        TwoFields.objects.bulk_create(
+            [
+                TwoFields(f1=1, f2=1, name="a"),
+                TwoFields(f1=2, f2=2, name="b"),
+            ]
+        )
+        self.assertEqual(TwoFields.objects.count(), 2)
+
+        obj1 = TwoFields.objects.get(f1=1)
+        obj2 = TwoFields.objects.get(f1=2)
+        conflicting_objects = [
+            TwoFields(pk=obj1.pk, f1=3, f2=3, name="c"),
+            TwoFields(pk=obj2.pk, f1=4, f2=4, name="d"),
+        ]
+        TwoFields.objects.bulk_create(
+            conflicting_objects,
+            update_conflicts=True,
+            unique_fields=["pk"],
+            update_fields=["name"],
+        )
+        self.assertEqual(TwoFields.objects.count(), 2)
+        self.assertCountEqual(
+            TwoFields.objects.values("f1", "f2", "name"),
+            [
+                {"f1": 1, "f2": 1, "name": "c"},
+                {"f1": 2, "f2": 2, "name": "d"},
+            ],
+        )
+
+【相关测试 3】
+测试文件：tests/bulk_create/tests.py
+测试名称：BulkCreateTests._test_update_conflicts
+测试代码：
+class BulkCreateTests(TestCase):
+    def _test_update_conflicts(self, unique_fields):
+        UpsertConflict.objects.bulk_create(
+            [
+                UpsertConflict(number=1, rank=1, name="John"),
+                UpsertConflict(number=2, rank=2, name="Mary"),
+                UpsertConflict(number=3, rank=3, name="Hannah"),
+            ]
+        )
+        self.assertEqual(UpsertConflict.objects.count(), 3)
+
+        conflicting_objects = [
+            UpsertConflict(number=1, rank=4, name="Steve"),
+            UpsertConflict(number=2, rank=2, name="Olivia"),
+            UpsertConflict(number=3, rank=1, name="Hannah"),
+        ]
+        UpsertConflict.objects.bulk_create(
+            conflicting_objects,
+            update_conflicts=True,
+            update_fields=["name", "rank"],
+            unique_fields=unique_fields,
+        )
+        self.assertEqual(UpsertConflict.objects.count(), 3)
+        self.assertCountEqual(
+            UpsertConflict.objects.values("number", "rank", "name"),
+            [
+                {"number": 1, "rank": 4, "name": "Steve"},
+                {"number": 2, "rank": 2, "name": "Olivia"},
+                {"number": 3, "rank": 1, "name": "Hannah"},
+            ],
+        )
+
+        UpsertConflict.objects.bulk_create(
+            conflicting_objects + [UpsertConflict(number=4, rank=4, name="Mark")],
+            update_conflicts=True,
+            update_fields=["name", "rank"],
+            unique_fields=unique_fields,
+        )
+        self.assertEqual(UpsertConflict.objects.count(), 4)
+        self.assertCountEqual(
+            UpsertConflict.objects.values("number", "rank", "name"),
+            [
+                {"number": 1, "rank": 4, "name": "Steve"},
+                {"number": 2, "rank": 2, "name": "Olivia"},
+                {"number": 3, "rank": 1, "name": "Hannah"},
+                {"number": 4, "rank": 4, "name": "Mark"},
+            ],
+        )
+
+【相关测试 4】
+测试文件：tests/bulk_create/tests.py
+测试名称：BulkCreateTests.test_update_conflicts_unique_fields
+测试代码：
+class BulkCreateTests(TestCase):
+    @skipUnlessDBFeature(
+        "supports_update_conflicts", "supports_update_conflicts_with_target"
+    )
+    def test_update_conflicts_unique_fields(self):
+        self._test_update_conflicts(unique_fields=["number"])
+
+【相关测试 5】
+测试文件：tests/bulk_create/tests.py
+测试名称：BulkCreateTests.test_update_conflicts_invalid_update_fields
+测试代码：
+class BulkCreateTests(TestCase):
+    @skipUnlessDBFeature(
+        "supports_update_conflicts",
+        "supports_update_conflicts_with_target",
+    )
+    def test_update_conflicts_invalid_update_fields(self):
+        msg = "bulk_create() can only be used with concrete fields in update_fields."
+        # Reverse one-to-one relationship.
+        with self.assertRaisesMessage(ValueError, msg):
+            Country.objects.bulk_create(
+                self.data,
+                update_conflicts=True,
+                update_fields=["relatedmodel"],
+                unique_fields=["pk"],
+            )
+        # Many-to-many relationship.
+        with self.assertRaisesMessage(ValueError, msg):
+            RelatedModel.objects.bulk_create(
+                [RelatedModel(country=self.data[0])],
+                update_conflicts=True,
+                update_fields=["big_auto_fields"],
+                unique_fields=["country"],
+            )
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

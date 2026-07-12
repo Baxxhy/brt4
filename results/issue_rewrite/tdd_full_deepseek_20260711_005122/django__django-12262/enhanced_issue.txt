@@ -1,0 +1,138 @@
+instance_id: django__django-12262
+
+issue_summary: 自定义模板标签在提供带默认值的关键字参数时错误地抛出 TemplateSyntaxError，且重复关键字参数时错误消息不准确。
+
+trigger_condition:
+{
+  "text": "使用 @register.simple_tag 或 @register.inclusion_tag 装饰一个只包含关键字参数（可能带默认值）的函数，然后在模板中调用该标签并传入关键字参数。",
+  "evidence": [
+    "Issue 中提供的示例：@register.simple_tag def hello(*, greeting='hello') 和模板调用 {% hello greeting='hi' %}。",
+    "Issue 中提到的 inclusion tags 有相同问题。",
+    "相关测试 1 和 3 中测试了 simple_tag 和 inclusion_tag 的错误情况。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "当传入关键字参数时，抛出 TemplateSyntaxError，错误消息为“'hello' received unexpected keyword argument 'greeting'”。当重复传入同一个关键字参数时，错误消息为“'hi' received unexpected keyword argument 'greeting'”而不是预期的“'hi' received multiple values for keyword argument 'greeting'”。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中明确描述了这两个错误。",
+    "相关测试 1 和 3 中也包含对 TemplateSyntaxError 的断言。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "对于只包含关键字参数（带或不带默认值）的 simple_tag 和 inclusion_tag，应该能够正常接受传入的关键字参数。当重复传入同一个关键字参数时，应抛出正确的错误消息，指出收到了多个值。",
+  "evidence": [
+    "Issue 中暗示了这是 bug，并提到已有修复。",
+    "相关测试 2 中展示了 simple_keyword_only_param 和 simple_keyword_only_default 标签的正常工作示例。",
+    "相关测试 1 和 3 中包含了对于“received multiple values for keyword argument”的正确错误消息的测试用例。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "Library.simple_tag",
+    "kind": "method",
+    "source_path": "django/template/library.py",
+    "reason": "Issue 中涉及的装饰器，用于注册自定义标签。"
+  },
+  {
+    "name": "parse_bits",
+    "kind": "function",
+    "source_path": "",
+    "reason": "在 simple_tag 的 compile_func 中被调用，用于解析模板标签参数，可能与参数处理逻辑缺陷相关。"
+  },
+  {
+    "name": "SimpleNode",
+    "kind": "class",
+    "source_path": "",
+    "reason": "simple_tag 最终返回的节点，负责执行标签函数。"
+  },
+  {
+    "name": "TemplateSyntaxError",
+    "kind": "class",
+    "source_path": "django/template/exceptions.py",
+    "reason": "Issue 中观察到的异常类型。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "相关测试 1 中测试了 simple_keyword_only_param 缺少参数的错误。",
+    "target_pattern": "创建一个仅包含带默认值的关键字参数的 simple_tag，并在模板中传入该关键字参数。",
+    "reason": "Issue 表明，当函数签名是 (*, greeting='hello') 时，传入 greeting='hi' 会错误地触发“unexpected keyword argument”。",
+    "confidence": "high"
+  },
+  {
+    "slot": "argument",
+    "current_pattern": "相关测试 1 中测试了“received multiple values for keyword argument 'eggs'”。",
+    "target_pattern": "创建一个仅包含关键字参数（无默认值）的 simple_tag，并在模板中重复传入同一个关键字参数。",
+    "reason": "Issue 表明，重复传入关键字参数时，错误消息是“unexpected keyword argument”而不是“multiple values”。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "TemplateSyntaxError 的 args[0] 或 __str__() 输出。",
+    "reason": "Issue 的核心是错误消息不正确。观测抛出的异常及其消息内容可以判断是否触发了缺陷。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "渲染后的模板字符串。",
+    "reason": "对于正常情况（修复后），标签应能正确执行并输出预期字符串。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当调用仅包含关键字参数（带默认值）的 simple_tag 并传入有效关键字参数时，不应抛出 TemplateSyntaxError，且渲染结果正确。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的、硬编码的异常消息字符串，因为修复可能会微调措辞。",
+    "reason": "修复后，标签应正常工作，因此断言渲染结果等于预期值。"
+  },
+  {
+    "assertion_goal": "当重复传入同一个关键字参数时，抛出的 TemplateSyntaxError 消息应包含“received multiple values for keyword argument”片段。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "断言异常消息完全等于某个字符串。",
+    "reason": "Issue 指出当前错误消息是错误的。修复后，错误消息应正确指出重复参数问题。使用 contains_fragment 更稳定。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 TagTestCase 或类似测试基类，它提供了 self.engine（一个 Engine 实例）用于加载模板和自定义标签库。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要定义一个自定义模板标签库（例如 custom.py），并在其中使用 @register.simple_tag 注册测试函数。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试模板中需要使用 {% load custom %} 来加载自定义标签库。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "parse_bits 函数的确切实现和它在处理仅关键字参数时的逻辑缺陷细节。",
+  "inclusion_tag 的内部实现是否完全复用 simple_tag 的代码路径，还是存在细微差别。",
+  "修复补丁的具体位置和修改内容。"
+]

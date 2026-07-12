@@ -1,0 +1,119 @@
+instance_id: matplotlib__matplotlib-24026
+
+issue_summary: stackplot 函数在 colors 参数中使用 'CN' 颜色别名时会抛出 ValueError，而 plot 和 Rectangle 支持该别名。
+
+trigger_condition:
+{
+  "text": "调用 ax.stackplot(x, y_data, colors=['C2', 'C3', 'C4']) 时，colors 参数包含 'CN' 格式的颜色别名。",
+  "evidence": [
+    "Issue 中的示例代码和错误堆栈显示调用 stackplot 并传递 colors=['C2', 'C3', 'C4'] 导致 ValueError。",
+    "源码片段 4 显示 validate_color_for_prop_cycle 函数会拒绝 'CN' 格式的字符串。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "抛出 ValueError: Cannot put cycle reference ('C2') in prop_cycler。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中的错误堆栈显示该异常来自 validate_color_for_prop_cycle 函数。",
+    "源码片段 4 中的代码会抛出此异常。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "stackplot 函数应能接受 'CN' 格式的颜色别名作为 colors 参数，并正确绘制图形，不改变 Axes 的颜色循环器。",
+  "evidence": [
+    "Issue 描述中用户希望保持颜色同步，并指出 ax.plot() 和 Rectangle 支持 'CN' 别名。",
+    "相关测试 1 (test_cn) 表明 'C0', 'C1' 等别名在其他上下文中被解析为颜色。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "stackplot",
+    "kind": "function",
+    "source_path": "lib/matplotlib/stackplot.py",
+    "reason": "Issue 直接报告了该函数的缺陷行为。"
+  },
+  {
+    "name": "set_prop_cycle",
+    "kind": "method",
+    "source_path": "lib/matplotlib/axes/_base.py",
+    "reason": "错误堆栈显示 stackplot 内部调用了此方法，且该方法负责设置属性循环器。"
+  },
+  {
+    "name": "validate_color_for_prop_cycle",
+    "kind": "function",
+    "source_path": "lib/matplotlib/rcsetup.py",
+    "reason": "该函数直接抛出了观察到的异常，是验证逻辑的关键部分。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "相似测试 test_stackplot 中调用 stackplot 时不使用 colors 参数。",
+    "target_pattern": "在调用 stackplot 时添加 colors 参数，其值为包含 'CN' 别名的列表，例如 colors=['C2', 'C3', 'C4']。",
+    "reason": "Issue 表明 colors 参数包含 'CN' 别名是触发错误的直接原因。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "相似测试 test_cn 中通过 rcParams 全局设置颜色循环。",
+    "target_pattern": "在测试中不依赖全局 rcParams 设置，而是直接通过 stackplot 的 colors 参数传递 'CN' 别名。",
+    "reason": "Issue 的用例是在单个函数调用中指定颜色，而非全局配置。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用 ax.stackplot(x, y_data, colors=['C2', 'C3', 'C4']) 时是否抛出 ValueError。",
+    "reason": "Issue 的核心错误现象就是抛出特定异常。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "stackplot 的返回值（PolyCollection 列表）或图形状态（ax.patches, ax.collections）。",
+    "reason": "观察函数是否成功执行并生成图形元素，而非抛出异常。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "使用 'CN' 别名调用 stackplot 不应抛出 ValueError，且应成功创建图形元素。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言具体的颜色值或完整的图形输出，因为这些可能依赖于全局配置。",
+    "reason": "Issue 的核心是异常，因此断言不抛出异常是直接且稳定的验证方式。修复后，调用应正常完成。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要创建图形和坐标轴 (fig, ax = plt.subplots())，并准备测试数据。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要导入 matplotlib.pyplot as plt, numpy as np, 以及相关的颜色模块。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "stackplot 函数内部处理 colors 参数并调用 set_prop_cycle 的确切逻辑和位置。",
+  "修复后，'CN' 别名在 stackplot 的 colors 参数中应该如何被解析（是映射到当前颜色循环，还是作为独立颜色）。",
+  "除了抛出异常，stackplot 调用失败是否还会对 Axes 的 prop_cycler 状态产生其他副作用。"
+]

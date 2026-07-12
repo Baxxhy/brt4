@@ -1,0 +1,311 @@
+{
+  "instance_id": "sphinx-doc__sphinx-9602",
+  "issue_summary": "当类型注解包含 Literal 时，Sphinx 的 nitpick 功能错误地将字面值标记为缺失的 py:class 引用。",
+  "trigger_condition": {
+    "text": "使用 Sphinx autodoc 处理包含 Literal[True] 或 Literal[False] 等字面值类型注解的函数，并启用 nitpick 模式（-n -W）。",
+    "evidence": [
+      "Issue 描述：'When a value is present in a type annotation as `Literal`, sphinx will treat the value as a `py:class`.'",
+      "Issue 中的重现步骤：'Setup a simple function which uses Literal, then attempt to autodoc it.'"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "构建时出现 nitpick 警告，提示字面值（如 True）作为类引用缺失。",
+    "symptom_type": "warning",
+    "evidence": [
+      "Issue 描述：'With nitpick enabled, values like `Literal[True]` end up failing, because `True` is not a class.'",
+      "Issue 标题：'Nitpick flags Literal annotation values as missing py:class'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "Literal 注解中的字面值（如 True）不应触发 nitpick 警告，因为它们不是类引用。",
+    "evidence": [
+      "Issue 中的期望行为：'`Literal[True]` (or whatever literal value) should be present in the type annotation but should not trigger the nitpick warning.'"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "_parse_annotation",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试 1 测试了此函数，它负责解析类型注解并生成文档树节点，可能与 Literal 的处理有关。"
+    },
+    {
+      "name": "restify",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试 2 测试了此函数处理 Literal 类型，可能影响文档生成。"
+    },
+    {
+      "name": "stringify",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试 3 测试了此函数处理 Literal 类型，可能影响文档生成。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "",
+      "object": "",
+      "lines": "",
+      "reason": "Issue 未提供源码，但根据问题描述，可能位于处理类型注解并生成 nitpick 引用的代码区域。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_parse_annotation",
+      "test_file": "tests/test_domain_py.py",
+      "why_relevant": "它测试了类型注解的解析，包括如何为不同类型（如 int, None）生成 pending_xref 节点，这与 Literal 值的引用生成逻辑相关。",
+      "reusable_parts": [
+        "app fixture",
+        "_parse_annotation 调用",
+        "assert_node 断言风格"
+      ],
+      "possible_gap": "该测试未覆盖 Literal 类型，也未测试在 nitpick 启用时的警告行为。"
+    },
+    {
+      "test_name": "test_restify_type_Literal",
+      "test_file": "tests/test_util_typing.py",
+      "why_relevant": "它直接测试了 restify 函数对 Literal 类型的处理，展示了如何将 Literal 转换为 reStructuredText 表示。",
+      "reusable_parts": [
+        "import typing",
+        "Literal 的构造",
+        "assert 等式断言"
+      ],
+      "possible_gap": "它只测试了 restify 的输出格式，未与 nitpick 或 autodoc 集成，也未检查警告。"
+    },
+    {
+      "test_name": "test_nitpick_ignore",
+      "test_file": "tests/test_config.py",
+      "why_relevant": "它测试了 nitpick 忽略配置，展示了如何设置 nitpick 并检查警告输出，这与触发条件中的 -n -W 相关。",
+      "reusable_parts": [
+        "@pytest.mark.sphinx 装饰器",
+        "confoverrides 配置",
+        "app.builder.build_all() 调用",
+        "检查 warning.getvalue()"
+      ],
+      "possible_gap": "它使用预定义的忽略规则来消除警告，而不是测试 Literal 值是否被错误标记为缺失类引用。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "test_parse_annotation 中测试了 int, List[int], None 等类型注解。",
+      "target_pattern": "将输入改为包含 Literal[True] 或 Literal[False] 的类型注解。",
+      "reason": "Issue 表明 Literal 字面值会被错误处理，改变输入可能触发缺陷路径。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "test_nitpick_ignore 中设置了 nitpick_ignore 来消除警告。",
+      "target_pattern": "不设置 nitpick_ignore，并启用 nitpick 模式（类似 -n -W）。",
+      "reason": "Issue 在启用 nitpick 时触发，需要配置来激活警告检查。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "warning",
+      "expression_hint": "warning.getvalue() 或 status.getvalue() 中的输出内容。",
+      "reason": "Issue 的核心错误现象是 nitpick 警告，观察警告输出可以确认是否出现关于 True/False 作为缺失 py:class 的警告。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "解析 Literal[True] 后生成的 pending_xref 节点的 reftype 和 reftarget 属性。",
+      "reason": "Issue 指出字面值被错误标记为 py:class，检查生成的引用类型可以确认错误。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证在 nitpick 启用下，处理包含 Literal[True] 的注解时，不会产生关于 'True' 作为缺失 py:class 的警告。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "避免断言完整的警告字符串，因为具体措辞可能变化。",
+      "reason": "Issue 期望没有警告，断言警告输出中不包含相关片段（如 'py:class' 和 'True'）更稳定。"
+    },
+    {
+      "assertion_goal": "验证为 Literal[True] 中的 'True' 生成的引用不是 reftype='class'。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的文档树结构，除非必要。",
+      "reason": "直接检查引用类型是否符合预期（可能应为 'obj' 或其他），这与缺陷根源相关。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要 Sphinx app fixture，并配置启用 nitpick（nitpicky=True）和将警告视为错误（warningiserror=True）。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要创建一个简单的 Python 模块，其中包含使用 Literal 类型注解的函数，以供 autodoc 处理。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可以使用 test_parse_annotation 中的 _parse_annotation 辅助函数来隔离测试注解解析。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "处理 Literal 字面值时，正确的 reftype 应该是什么（例如 'obj' 或完全不应生成引用）？",
+    "缺陷的确切代码位置在哪里？是解析、字符串化还是引用生成阶段？",
+    "除了 True/False，其他字面值（如 1, 'str'）是否也有同样问题？"
+  ],
+  "raw": {
+    "issue_summary": "当类型注解包含 Literal 时，Sphinx 的 nitpick 功能错误地将字面值标记为缺失的 py:class 引用。",
+    "trigger_condition": {
+      "text": "使用 Sphinx autodoc 处理包含 Literal[True] 或 Literal[False] 等字面值类型注解的函数，并启用 nitpick 模式（-n -W）。",
+      "evidence": [
+        "Issue 描述：'When a value is present in a type annotation as `Literal`, sphinx will treat the value as a `py:class`.'",
+        "Issue 中的重现步骤：'Setup a simple function which uses Literal, then attempt to autodoc it.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "构建时出现 nitpick 警告，提示字面值（如 True）作为类引用缺失。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 描述：'With nitpick enabled, values like `Literal[True]` end up failing, because `True` is not a class.'",
+        "Issue 标题：'Nitpick flags Literal annotation values as missing py:class'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Literal 注解中的字面值（如 True）不应触发 nitpick 警告，因为它们不是类引用。",
+      "evidence": [
+        "Issue 中的期望行为：'`Literal[True]` (or whatever literal value) should be present in the type annotation but should not trigger the nitpick warning.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "_parse_annotation",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 1 测试了此函数，它负责解析类型注解并生成文档树节点，可能与 Literal 的处理有关。"
+      },
+      {
+        "name": "restify",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 2 测试了此函数处理 Literal 类型，可能影响文档生成。"
+      },
+      {
+        "name": "stringify",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 3 测试了此函数处理 Literal 类型，可能影响文档生成。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 未提供源码，但根据问题描述，可能位于处理类型注解并生成 nitpick 引用的代码区域。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_parse_annotation",
+        "test_file": "tests/test_domain_py.py",
+        "why_relevant": "它测试了类型注解的解析，包括如何为不同类型（如 int, None）生成 pending_xref 节点，这与 Literal 值的引用生成逻辑相关。",
+        "reusable_parts": [
+          "app fixture",
+          "_parse_annotation 调用",
+          "assert_node 断言风格"
+        ],
+        "possible_gap": "该测试未覆盖 Literal 类型，也未测试在 nitpick 启用时的警告行为。"
+      },
+      {
+        "test_name": "test_restify_type_Literal",
+        "test_file": "tests/test_util_typing.py",
+        "why_relevant": "它直接测试了 restify 函数对 Literal 类型的处理，展示了如何将 Literal 转换为 reStructuredText 表示。",
+        "reusable_parts": [
+          "import typing",
+          "Literal 的构造",
+          "assert 等式断言"
+        ],
+        "possible_gap": "它只测试了 restify 的输出格式，未与 nitpick 或 autodoc 集成，也未检查警告。"
+      },
+      {
+        "test_name": "test_nitpick_ignore",
+        "test_file": "tests/test_config.py",
+        "why_relevant": "它测试了 nitpick 忽略配置，展示了如何设置 nitpick 并检查警告输出，这与触发条件中的 -n -W 相关。",
+        "reusable_parts": [
+          "@pytest.mark.sphinx 装饰器",
+          "confoverrides 配置",
+          "app.builder.build_all() 调用",
+          "检查 warning.getvalue()"
+        ],
+        "possible_gap": "它使用预定义的忽略规则来消除警告，而不是测试 Literal 值是否被错误标记为缺失类引用。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_parse_annotation 中测试了 int, List[int], None 等类型注解。",
+        "target_pattern": "将输入改为包含 Literal[True] 或 Literal[False] 的类型注解。",
+        "reason": "Issue 表明 Literal 字面值会被错误处理，改变输入可能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "test_nitpick_ignore 中设置了 nitpick_ignore 来消除警告。",
+        "target_pattern": "不设置 nitpick_ignore，并启用 nitpick 模式（类似 -n -W）。",
+        "reason": "Issue 在启用 nitpick 时触发，需要配置来激活警告检查。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "warning.getvalue() 或 status.getvalue() 中的输出内容。",
+        "reason": "Issue 的核心错误现象是 nitpick 警告，观察警告输出可以确认是否出现关于 True/False 作为缺失 py:class 的警告。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "解析 Literal[True] 后生成的 pending_xref 节点的 reftype 和 reftarget 属性。",
+        "reason": "Issue 指出字面值被错误标记为 py:class，检查生成的引用类型可以确认错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在 nitpick 启用下，处理包含 Literal[True] 的注解时，不会产生关于 'True' 作为缺失 py:class 的警告。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言完整的警告字符串，因为具体措辞可能变化。",
+        "reason": "Issue 期望没有警告，断言警告输出中不包含相关片段（如 'py:class' 和 'True'）更稳定。"
+      },
+      {
+        "assertion_goal": "验证为 Literal[True] 中的 'True' 生成的引用不是 reftype='class'。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的文档树结构，除非必要。",
+        "reason": "直接检查引用类型是否符合预期（可能应为 'obj' 或其他），这与缺陷根源相关。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要 Sphinx app fixture，并配置启用 nitpick（nitpicky=True）和将警告视为错误（warningiserror=True）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建一个简单的 Python 模块，其中包含使用 Literal 类型注解的函数，以供 autodoc 处理。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用 test_parse_annotation 中的 _parse_annotation 辅助函数来隔离测试注解解析。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "处理 Literal 字面值时，正确的 reftype 应该是什么（例如 'obj' 或完全不应生成引用）？",
+      "缺陷的确切代码位置在哪里？是解析、字符串化还是引用生成阶段？",
+      "除了 True/False，其他字面值（如 1, 'str'）是否也有同样问题？"
+    ]
+  }
+}

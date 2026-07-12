@@ -1,0 +1,137 @@
+instance_id: django__django-13925
+
+issue_summary: 在 Django 3.2 alpha 中，继承自已定义主键父类的模型被错误地触发了 models.W042 警告，提示使用了自动创建的主键。
+
+trigger_condition:
+{
+  "text": "在 Django 3.2 alpha 环境下，运行 `make_migrations` 或系统检查时，存在继承自已定义主键父类的模型（例如，继承自定义了主键的 `Entity` 类的 `User` 类）。",
+  "evidence": [
+    "Issue 描述：'I have models which inherit from other models, and they should inherit the primary key.'",
+    "Issue 描述：'These models should not use auto-created primary keys! I already defined the primary key in the ancestor of the model.'",
+    "相关测试 1 涉及继承链中的主键设置。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "系统检查发出 models.W042 警告，提示模型使用了自动创建的主键，并建议配置 DEFAULT_AUTO_FIELD 或 AppConfig.default_auto_field。",
+  "symptom_type": "warning",
+  "evidence": [
+    "Issue 中列出了多个模型的 W042 警告信息。",
+    "相关测试 2 展示了在未定义主键类型的模型上触发 W042 警告。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "继承自已明确定义主键父类的模型不应触发 models.W042 警告，系统检查应识别出主键已通过继承正确设置。",
+  "evidence": [
+    "Issue 描述：'These models should not use auto-created primary keys! I already defined the primary key in the ancestor of the model.'",
+    "相关测试 1 验证了继承链中主键被正确设置，没有提到警告。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "django.db.models.Model",
+    "kind": "class",
+    "source_path": "django/db/models/base.py",
+    "reason": "Issue 涉及模型继承和主键定义。"
+  },
+  {
+    "name": "django.core.checks.model_checks.check_all_models",
+    "kind": "function",
+    "source_path": "django/core/checks/model_checks.py",
+    "reason": "该检查函数负责生成 models.W042 警告。"
+  },
+  {
+    "name": "Model._meta.pk",
+    "kind": "property",
+    "source_path": "",
+    "reason": "用于检查模型的主键字段。"
+  },
+  {
+    "name": "Model._meta.local_fields",
+    "kind": "property",
+    "source_path": "",
+    "reason": "相关测试 1 中用于检查本地主键字段数量。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "相关测试 2 中，模型类没有定义任何字段（无主键）。",
+    "target_pattern": "创建一个继承自已定义主键父类的模型类（例如，父类有 `id = models.IntegerField(primary_key=True)`），子类不覆盖主键。",
+    "reason": "Issue 表明，当模型通过继承获得主键时，系统检查错误地认为它没有定义主键类型。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "相关测试 2 直接调用 `checks.run_checks`。",
+    "target_pattern": "在变异后的测试中，可能需要先创建模型实例或运行 `makemigrations` 命令来触发系统检查。",
+    "reason": "Issue 是在运行 `make_migrations` 时观察到警告的。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "warning",
+    "expression_hint": "运行系统检查后返回的警告列表，特别是 `id='models.W042'` 的警告。",
+    "reason": "Issue 的核心现象是出现了不应出现的 W042 警告。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "继承模型 `ChildModel._meta.pk` 的属性（如 `model`, `field`）及其与父模型主键的关系。",
+    "reason": "需要确认继承模型的主键是否确实指向了父类定义的主键字段。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证对于继承自有主键父类的模型，系统检查不会产生 `id='models.W042'` 的警告。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言完整的警告消息字符串，因为提示文本可能因配置而异。",
+    "reason": "修复后，W042 警告应消失。断言警告列表中不包含特定 ID 的警告是稳定且与 Issue 对齐的。"
+  },
+  {
+    "assertion_goal": "验证继承模型的主键字段是其父类定义的主键字段。",
+    "preferred_assertion_style": "isinstance",
+    "avoid": "断言主键字段的完整 repr 或内部名称。",
+    "reason": "这可以确认主键继承关系是否正确建立，是问题的根本。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 `@isolate_apps` 装饰器来隔离测试应用，防止模型注册冲突。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要使用 `TestCase` 或 `SimpleTestCase`，因为涉及模型检查和元数据，不一定需要数据库。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要显式设置或覆盖 `DEFAULT_AUTO_FIELD` 配置，以控制测试环境。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "触发警告的确切代码路径和条件（例如，是否需要运行 `makemigrations`，还是仅导入模型或运行检查即可）。",
+  "哪些具体的继承模式会触发此 Bug（例如，多级继承、混合抽象/具体继承）。",
+  "修复后，继承模型的主键字段在 `_meta.local_fields` 中的表现是否会有变化。"
+]

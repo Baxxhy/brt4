@@ -1,0 +1,172 @@
+```json
+{
+    "issue_summary": "Django 4.2 中，对包含 Window 函数的注解字段进行聚合操作会引发数据库分组错误。",
+    "trigger_condition": {
+        "text": "对一个已使用 Window 函数（如 Window(Sum(...))）进行注解（annotate）的 QuerySet 调用 aggregate 方法，聚合目标包含该注解字段。",
+        "evidence": ["Issue 中的示例代码：queryset.annotate(cumul_DJR=Coalesce(Window(Sum(\"DJR\"), order_by=F(\"date\").asc()), 0.0)).aggregate(cumul_DJR_total=Sum(\"cumul_DJR\"))"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "执行查询时抛出数据库异常：psycopg2.errors.GroupingError: aggregate function calls cannot contain window function calls。",
+        "symptom_type": "exception",
+        "evidence": ["Issue 描述：\"The specific error was psycopg2.errors.GroupingError: aggregate function calls cannot contain window function calls\""],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "对包含 Window 函数注解的字段进行聚合操作应能成功执行，生成正确的聚合结果，而不引发数据库分组错误。",
+        "evidence": ["Issue 标题和描述暗示这是一个回归问题（\"since 4.2\"），表明在 4.2 版本之前此操作是可行的。相关测试 test_aggregate_over_complex_annotation 展示了聚合操作可以作用于复杂注解字段。"],
+        "confidence": "medium"
+    },
+    "target_apis": [
+        {
+            "name": "QuerySet.annotate",
+            "kind": "method",
+            "source_path": "django/db/models/query.py",
+            "reason": "用于创建包含 Window 函数注解的查询集。"
+        },
+        {
+            "name": "QuerySet.aggregate",
+            "kind": "method",
+            "source_path": "django/db/models/query.py",
+            "reason": "用于对查询集（特别是包含 Window 注解的字段）进行聚合操作，是触发错误的直接调用。"
+        },
+        {
+            "name": "Window",
+            "kind": "class",
+            "source_path": "django/db/models/expressions.py",
+            "reason": "创建窗口函数表达式，是问题中注解的核心组件。"
+        },
+        {
+            "name": "Sum",
+            "kind": "class",
+            "source_path": "django/db/models/aggregates.py",
+            "reason": "在 Window 函数内部和 aggregate 方法中都被用作聚合函数。"
+        },
+        {
+            "name": "Coalesce",
+            "kind": "class",
+            "source_path": "django/db/models/functions/comparison.py",
+            "reason": "Issue 示例中与 Window 函数一起使用，用于处理空值。"
+        },
+        {
+            "name": "F",
+            "kind": "class",
+            "source_path": "django/db/models/expressions.py",
+            "reason": "用于在 Window 的 order_by 参数中引用模型字段。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/db/models/query.py",
+            "object": "QuerySet.aggregate",
+            "lines": "561-584",
+            "reason": "该方法处理聚合逻辑，最终调用 query.get_aggregation。当聚合目标是一个包含 Window 函数的注解字段时，可能未正确处理其 SQL 生成，导致非法嵌套。"
+        },
+        {
+            "path": "django/db/models/expressions.py",
+            "object": "Window",
+            "lines": "1697-1810",
+            "reason": "Window 类包含 contains_over_clause = True 属性。在聚合上下文中，可能需要特殊处理以避免将 OVER 子句错误地嵌套在聚合函数内。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "AggregateTestCase.test_aggregate_over_complex_annotation",
+            "test_file": "tests/aggregation/tests.py",
+            "why_relevant": "该测试展示了在 annotate 创建的复杂字段（Sum(F(...)+F(...))）上进行聚合操作（Max, Sum）。这与 Issue 中在 annotate 创建的字段上聚合的模式相似。",
+            "reusable_parts": ["TestCase 基类使用、Author 模型 fixture、annotate 与 aggregate 的链式调用模式、使用 Max 和 Sum 聚合函数、对聚合结果进行数值断言（assertEqual）的风格。"],
+            "possible_gap": "该测试的注解字段不包含 Window 函数，因此不会触发 Window 函数在聚合上下文中的特定错误。"
+        },
+        {
+            "test_name": "WindowFunctionTests.test_window_expression_within_subquery",
+            "test_file": "tests/expressions_window/tests.py",
+            "why_relevant": "该测试使用了 Window 函数进行注解，并涉及查询操作。展示了 Window 函数在 annotate 中的基本用法和 Employee 模型 fixture。",
+            "reusable_parts": ["@skipUnlessDBFeature(\"supports_over_clause\") 装饰器、Employee 模型 fixture、Window 函数的构造（partition_by, order_by）、使用 values 和 filter 进行查询。"],
+            "possible_gap": "该测试没有进行聚合操作（aggregate），而是将包含 Window 注解的子查询用于过滤（filter），因此不会触发聚合时的错误。"
+        },
+        {
+            "test_name": "WindowFunctionTests.test_fail_insert",
+            "test_file": "tests/expressions_window/tests.py",
+            "why_relevant": "该测试验证了 Window 表达式在 INSERT 语句中不被允许，会引发 FieldError。这表明 Django 对 Window 函数在某些查询上下文中的使用有限制。",
+            "reusable_parts": ["使用 assertRaisesMessage 捕获特定异常消息的模式、Window 与 Sum 和 Value 的组合构造。"],
+            "possible_gap": "该测试针对 INSERT 操作，而 Issue 发生在 SELECT 查询的聚合阶段，错误类型（FieldError vs GroupingError）和上下文不同。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "argument",
+            "current_pattern": "相似测试 test_aggregate_over_complex_annotation 中，注解字段是 Sum(F(\"age\") + F(\"friends__age\"))，一个不包含 Window 的普通聚合表达式。",
+            "target_pattern": "将注解字段变异为包含 Window 函数的表达式，例如 Coalesce(Window(Sum(\"field\"), order_by=F(\"date\").asc()), 0.0)。",
+            "reason": "Issue 明确指出错误发生在聚合包含 Window 函数的注解字段时。将注解内容替换为 Window 表达式是触发缺陷路径的关键变异。",
+            "confidence": "high"
+        },
+        {
+            "slot": "call_chain",
+            "current_pattern": "相似测试中，链式调用为：Model.objects.annotate(...).aggregate(...)。",
+            "target_pattern": "保持相同的链式调用顺序，但确保 aggregate 的参数引用的是由 Window 函数注解的字段别名（如 \"cumul_DJR\"）。",
+            "reason": "Issue 示例展示了完全相同的调用链模式。确保 aggregate 作用于正确的字段别名是复现的必要条件。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "exception",
+            "expression_hint": "在执行 queryset.aggregate(...) 时捕获的异常及其消息。",
+            "reason": "Issue 明确给出了错误类型和消息片段（psycopg2.errors.GroupingError）。观测是否抛出此异常是判断缺陷是否触发的直接依据。"
+        },
+        {
+            "kind": "sql",
+            "expression_hint": "在调用 aggregate 前后，检查生成的 SQL 查询字符串（例如通过 str(queryset.query) 或 connection.queries）。",
+            "reason": "错误根源是生成了非法的 SQL（聚合函数内包含窗口函数）。观察生成的 SQL 是否包含类似 SUM( ... OVER ... ) 的非法结构，有助于定位问题。"
+        },
+        {
+            "kind": "return_value",
+            "expression_hint": "如果未发生异常，观察 aggregate 方法返回的字典结果，检查聚合值是否正确。",
+            "reason": "在修复后的预期行为中，聚合应成功并返回计算结果。观测返回值可用于验证正确性。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "验证对包含 Window 函数注解的字段进行聚合操作会引发特定的数据库分组错误（GroupingError）。",
+            "preferred_assertion_style": "raises",
+            "avoid": "避免断言完整的、可能因数据库驱动或版本而异的异常消息字符串。避免断言与错误无关的查询结果。",
+            "reason": "Issue 的核心是操作会引发异常。使用 raises 断言异常类型（或包含关键字的异常消息）能稳定地捕获缺陷行为。"
+        },
+        {
+            "assertion_goal": "（针对修复后的预期行为）验证聚合操作成功执行并返回一个包含预期聚合值的字典。",
+            "preferred_assertion_style": "equals",
+            "avoid": "避免断言具体的、可能因测试数据而异的数值，除非有明确的测试数据支撑。避免断言完整的 SQL 字符串。",
+            "reason": "修复后，聚合应正常工作。对返回的字典值进行断言可以验证功能的正确性，数值断言应基于可控的测试数据。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要使用支持 OVER 子句的数据库后端（如 PostgreSQL）。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要一个包含数值字段（如 \"DJR\", \"date\"）和足够测试数据的 Django 模型。",
+            "source": "issue",
+            "confidence": "high"
+        },
+        {
+            "hint": "测试类应继承自 django.test.TestCase 以利用数据库事务和 fixtures。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "可能需要使用 @skipUnlessDBFeature(\"supports_over_clause\") 装饰器来跳过不支持窗口函数的数据库。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "错误是否只发生在 PostgreSQL 上，还是也发生在其他支持窗口函数的数据库（如 MySQL 8+， SQLite 3.25+）上。",
+        "是否所有聚合函数（Sum, Max, Avg 等）在作用于 Window 注解字段时都会出错，还是特定于某些聚合函数。",
+        "除了 Coalesce(Window(Sum(...), ...)) 这种模式，其他 Window 函数组合（如直接 Window(Sum(...))）是否也会触发同样错误。",
+        "Django 内部是在哪个具体步骤（SQL 编译、表达式解析）产生了非法的 SQL 结构。",
+        "除了 aggregate 方法，其他涉及表达式求值的操作（如 values().aggregate()）是否也会受影响。"
+    ]
+}
+```

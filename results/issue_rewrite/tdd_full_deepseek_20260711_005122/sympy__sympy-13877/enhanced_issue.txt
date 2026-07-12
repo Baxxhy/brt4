@@ -1,0 +1,137 @@
+instance_id: sympy__sympy-13877
+
+issue_summary: 使用 Bareiss 算法计算特定符号矩阵的行列式时，在因子化过程中因 NaN 比较引发 TypeError 异常。
+
+trigger_condition:
+{
+  "text": "使用 det() 函数（默认方法为 'bareiss'）计算一个 n×n 矩阵的行列式，其中矩阵元素为 i + a*j（i, j 为索引，a 为符号变量），当 n=5 时返回 nan，当 n=6 时引发异常。",
+  "evidence": [
+    "Issue 中展示了 f(5) 返回 nan，f(6) 引发 TypeError: Invalid NaN comparison 的调用序列。",
+    "Issue 中 f 的定义为 lambda n: det(Matrix([[i + a*j for i in range(n)] for j in range(n)]))。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "计算 n=6 的矩阵行列式时，在 sympy.core.exprtools.factor_terms 函数中，对表达式进行因子化时尝试比较 a.as_coeff_Mul()[0] < 0，其中 a 可能为 NaN，导致 TypeError: Invalid NaN comparison 异常。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 的堆栈跟踪显示异常来自 sympy.core.expr.__lt__，并最终追溯到 sympy.core.exprtools.factor_terms 中的生成器表达式。",
+    "Issue 中 f(5) 返回 nan，表明在 n=5 时已出现中间结果为 NaN 的情况。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "对于给定的符号矩阵，det() 函数应能正确计算其行列式表达式，或至少返回一个有效的符号表达式（可能为零或化简后的多项式），而不应引发 TypeError 异常或返回 nan。",
+  "evidence": [
+    "Issue 中 f(1), f(2), f(3), f(4) 均返回了有效的符号表达式或数值（0, -a, 展开式, 0）。",
+    "相关测试 1 展示了 det() 函数对包含符号变量 x, y, z 的矩阵能正确返回符号表达式（如 z**2 - x*y）。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "sympy.matrices.dense.Matrix",
+    "kind": "class",
+    "source_path": "sympy/matrices/dense.py",
+    "reason": "用于构造触发问题的矩阵。"
+  },
+  {
+    "name": "sympy.matrices.matrices.MatrixDeterminant.det",
+    "kind": "method",
+    "source_path": "sympy/matrices/matrices.py",
+    "reason": "Issue 中调用的计算行列式的主要入口，默认使用 Bareiss 算法。"
+  },
+  {
+    "name": "sympy.matrices.matrices.MatrixDeterminant._eval_det_bareiss",
+    "kind": "method",
+    "source_path": "sympy/matrices/matrices.py",
+    "reason": "det() 方法在 n>3 且 method='bareiss' 时调用的具体实现，堆栈跟踪显示异常发生在此算法执行过程中。"
+  },
+  {
+    "name": "sympy.matrices.expressions.determinant.det",
+    "kind": "function",
+    "source_path": "sympy/matrices/expressions/determinant.py",
+    "reason": "Issue 中直接调用的 det 函数，最终会调用矩阵的 det 方法。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相关测试 1 中构造了如 Matrix(( (x, y, z), (1, 0, 0), (y, z, x) )) 的符号矩阵。",
+    "target_pattern": "构造 Matrix([[i + a*j for i in range(n)] for j in range(n)])，其中 n >= 5，a 为符号变量。",
+    "reason": "Issue 表明这种特定元素模式和维度（n=5,6）会触发 Bareiss 算法中的问题，导致中间结果出现 NaN 并最终引发异常。",
+    "confidence": "high"
+  },
+  {
+    "slot": "argument",
+    "current_pattern": "相关测试 1 中调用 det() 时显式指定 method='bareiss'。",
+    "target_pattern": "调用 det() 时不指定 method 参数，使用默认的 'bareiss' 方法（与 Issue 一致）。",
+    "reason": "Issue 中未指定方法，使用默认值。确保测试执行路径与 Issue 完全一致。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "在调用 det() 时捕获 TypeError 异常，并检查异常消息是否包含 'Invalid NaN comparison'。",
+    "reason": "Issue 的核心错误现象就是抛出此特定异常。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "对于 n=5 的矩阵，观察 det() 的返回值是否为 sympy.nan 或一个非 NaN 的符号表达式。",
+    "reason": "Issue 显示 n=5 时返回 nan，这是错误的前兆，也是观测点。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "对于 n=1 到 n=4 的矩阵，观察 det() 的返回值，确认其与 Issue 中给出的结果一致（0, -a, 展开式, 0）。",
+    "reason": "确认测试环境与 Issue 描述的基础行为一致，并建立正确行为的基线。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "对于 n=6 的矩阵，调用 det() 不应引发 TypeError 异常。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言完整的异常消息字符串，因为具体措辞可能变化。",
+    "reason": "修复后，计算应正常完成或引发其他更合理的异常（如算法不适用），而不是 'Invalid NaN comparison'。"
+  },
+  {
+    "assertion_goal": "对于 n=5 的矩阵，det() 的返回值不应是 sympy.nan。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言返回一个具体的、猜测的符号表达式，因为正确的表达式可能未知。",
+    "reason": "修复后，算法应能处理该矩阵并返回一个有效的符号表达式（可能为零或化简后的多项式），而不是 NaN。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要从 sympy 导入 Matrix, det, symbols（用于定义符号变量 a）。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试函数可以是一个独立的函数，类似于 Issue 中的 f，接受参数 n。",
+    "source": "issue",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "Bareiss 算法对于这种符号矩阵是否在理论上有效？Issue 末尾提出了质疑，但未得到确认。",
+  "除了 n=5 和 n=6，是否还有其他维度或元素模式会触发此问题？",
+  "修复后的正确返回值（对于 n=5,6）具体应该是什么符号表达式？这可能需要数学推导或参考其他算法（如 'berkowitz'）的结果。",
+  "bug 的根本原因是在 Bareiss 算法实现中（_eval_det_bareiss 的 entry 计算），还是在更底层的 cancel/factor_terms 函数中处理特定表达式时？"
+]

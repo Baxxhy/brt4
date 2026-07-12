@@ -1,0 +1,505 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Argument invariance of codegen.ast String
+Currently, the `codegen.ast` `String` class does not support argument invariance like:
+`expr.func(*expr.args) == expr`, but instead uses the invariance `expr.func(**expr.kwargs()) == expr`.
+The former should hold for any `Basic` subclass, which `String` is.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/codegen/ast.py
+对象名称：String
+节点类型：class
+父节点：ast
+行号范围：872-908
+代码：
+class String(Token):
+    """ SymPy object representing a string.
+
+    Atomic object which is not an expression (as opposed to Symbol).
+
+    Parameters
+    ==========
+
+    text : str
+
+    Examples
+    ========
+
+    >>> from sympy.codegen.ast import String
+    >>> f = String('foo')
+    >>> f
+    foo
+    >>> str(f)
+    'foo'
+    >>> f.text
+    'foo'
+    >>> print(repr(f))
+    String('foo')
+
+    """
+    __slots__ = ('text',)
+    not_in_args = ['text']
+    is_Atom = True
+    @classmethod
+    def _construct_text(cls, text):
+    def _sympystr(self, printer, *args, **kwargs):
+
+
+【源码片段 2】
+文件路径：sympy/core/basic.py
+对象名称：func
+节点类型：class_function
+父节点：Basic
+行号范围：694-717
+代码：
+    def func(self):
+        """
+        The top-level function in an expression.
+
+        The following should hold for all objects::
+
+            >> x == x.func(*x.args)
+
+        Examples
+        ========
+
+        >>> from sympy.abc import x
+        >>> a = 2*x
+        >>> a.func
+        <class 'sympy.core.mul.Mul'>
+        >>> a.args
+        (2, x)
+        >>> a.func(*a.args)
+        2*x
+        >>> a == a.func(*a.args)
+        True
+
+        """
+        return self.__class__
+
+
+【源码片段 3】
+文件路径：sympy/core/basic.py
+对象名称：args
+节点类型：class_function
+父节点：Basic
+行号范围：720-749
+代码：
+    def args(self) -> 'Tuple[Basic, ...]':
+        """Returns a tuple of arguments of 'self'.
+
+        Examples
+        ========
+
+        >>> from sympy import cot
+        >>> from sympy.abc import x, y
+
+        >>> cot(x).args
+        (x,)
+
+        >>> cot(x).args[0]
+        x
+
+        >>> (x*y).args
+        (x, y)
+
+        >>> (x*y).args[1]
+        y
+
+        Notes
+        =====
+
+        Never use self._args, always use self.args.
+        Only use _args in __new__ when creating a new function.
+        Don't override .args() from Basic (so that it's easy to
+        change the interface in the future if needed).
+        """
+        return self._args
+
+
+【源码片段 4】
+文件路径：sympy/codegen/ast.py
+对象名称：kwargs
+节点类型：class_function
+父节点：Token
+行号范围：320-336
+代码：
+    def kwargs(self, exclude=(), apply=None):
+        """ Get instance's attributes as dict of keyword arguments.
+
+        Parameters
+        ==========
+
+        exclude : collection of str
+            Collection of keywords to exclude.
+
+        apply : callable, optional
+            Function to apply to all values.
+        """
+        kwargs = {k: getattr(self, k) for k in self.__slots__ if k not in exclude}
+        if apply is not None:
+            return {k: apply(v) for k, v in kwargs.items()}
+        else:
+            return kwargs
+
+
+【源码片段 5】
+文件路径：sympy/core/basic.py
+对象名称：Basic
+节点类型：class
+父节点：basic
+行号范围：34-1896
+代码：
+class Basic(Printable, metaclass=ManagedProperties):
+    """
+    Base class for all SymPy objects.
+
+    Notes and conventions
+    =====================
+
+    1) Always use ``.args``, when accessing parameters of some instance:
+
+    >>> from sympy import cot
+    >>> from sympy.abc import x, y
+
+    >>> cot(x).args
+    (x,)
+
+    >>> cot(x).args[0]
+    x
+
+    >>> (x*y).args
+    (x, y)
+
+    >>> (x*y).args[1]
+    y
+
+
+    2) Never use internal methods or variables (the ones prefixed with ``_``):
+
+    >>> cot(x)._args    # do not use this, use cot(x).args instead
+    (x,)
+
+
+    3)  By "SymPy object" we mean something that can be returned by
+        ``sympify``.  But not all objects one encounters using SymPy are
+        subclasses of Basic.  For example, mutable objects are not:
+
+        >>> from sympy import Basic, Matrix, sympify
+        >>> A = Matrix([[1, 2], [3, 4]]).as_mutable()
+        >>> isinstance(A, Basic)
+        False
+
+        >>> B = sympify(A)
+        >>> isinstance(B, Basic)
+        True
+    """
+    __slots__ = ('_mhash',              # hash value
+                 '_args',               # arguments
+                 '_assumptions'
+                )
+    is_number = False
+    is_Atom = False
+    is_Symbol = False
+    is_symbol = False
+    is_Indexed = False
+    is_Dummy = False
+    is_Wild = False
+    is_Function = False
+    is_Add = False
+    is_Mul = False
+    is_Pow = False
+    is_Number = False
+    is_Float = False
+    is_Rational = False
+    is_Integer = False
+    is_NumberSymbol = False
+    is_Order = False
+    is_Derivative = False
+    is_Piecewise = False
+    is_Poly = False
+    is_AlgebraicNumber = False
+    is_Relational = False
+    is_Equality = False
+    is_Boolean = False
+    is_Not = False
+    is_Matrix = False
+    is_Vector = False
+    is_Point = False
+    is_MatAdd = False
+    is_MatMul = False
+    def __new__(cls, *args):
+    def copy(self):
+    def __getnewargs__(self):
+    def __getstate__(self):
+    def __reduce_ex__(self, protocol):
+    def __hash__(self):
+    def _hashable_content(self):
+    @property
+    def assumptions0(self):
+    def compare(self, other):
+    @staticmethod
+    def _compare_pretty(a, b):
+    @classmethod
+    def fromiter(cls, args, **assumptions):
+    @classmethod
+    def class_key(cls):
+    @cacheit
+    def sort_key(self, order=None):
+    def __eq__(self, other):
+    def __ne__(self, other):
+    def dummy_eq(self, other, symbol=None):
+    def atoms(self, *types):
+    @property
+    def free_symbols(self) -> 'Set[Basic]':
+    @property
+    def expr_free_symbols(self):
+    def as_dummy(self):
+    @property
+    def canonical_variables(self):
+    def rcall(self, *args):
+    @staticmethod
+    def _recursive_call(expr_to_call, on_args):
+    def is_hypergeometric(self, k):
+    @property
+    def is_comparable(self):
+    @property
+    def func(self):
+    @property
+    def args(self) -> 'Tuple[Basic, ...]':
+    @property
+    def _sorted_args(self):
+    def as_content_primitive(self, radical=False, clear=True):
+    def subs(self, *args, **kwargs):
+    @cacheit
+    def _subs(self, old, new, **hints):
+    def _eval_subs(self, old, new):
+    def xreplace(self, rule):
+    def _xreplace(self, rule):
+    @cacheit
+    def has(self, *patterns):
+    def _has(self, pattern):
+    def _has_matcher(self):
+    def replace(self, query, value, map=False, simultaneous=True, exact=None):
+    def find(self, query, group=False):
+    def count(self, query):
+    def matches(self, expr, repl_dict=None, old=False):
+    def match(self, pattern, old=False):
+    def count_ops(self, visual=None):
+    def doit(self, **hints):
+    def simplify(self, **kwargs):
+    def refine(self, assumption=True):
+    def _eval_derivative_n_times(self, s, n):
+    def rewrite(self, *args, deep=True, **hints):
+    def _rewrite(self, pattern, rule, method, **hints):
+    def _eval_rewrite(self, rule, args, **hints):
+    _constructor_postprocessor_mapping = {}  # type: ignore
+    @classmethod
+    def _exec_constructor_postprocessors(cls, obj):
+
+
+    def _sage_(self):
+    def could_extract_minus_sign(self):
+
+
+【源码片段 6】
+文件路径：sympy/parsing/latex/_antlr/latexparser.py
+对象名称：expr
+节点类型：class_function
+父节点：LaTeXParser
+行号范围：629-643
+代码：
+    def expr(self):
+
+        localctx = LaTeXParser.ExprContext(self, self._ctx, self.state)
+        self.enterRule(localctx, 6, self.RULE_expr)
+        try:
+            self.enterOuterAlt(localctx, 1)
+            self.state = 97
+            self.additive(0)
+        except RecognitionException as re:
+            localctx.exception = re
+            self._errHandler.reportError(self, re)
+            self._errHandler.recover(self, re)
+        finally:
+            self.exitRule()
+        return localctx
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/codegen/tests/test_ast.py
+测试名称：test_String
+测试代码：
+def test_String():
+    st = String('foobar')
+    assert st.is_Atom
+    assert st == String('foobar')
+    assert st.text == 'foobar'
+    assert st.func(**st.kwargs()) == st
+
+
+    class Signifier(String):
+        pass
+
+    si = Signifier('foobar')
+    assert si != st
+    assert si.text == st.text
+    s = String('foo')
+    assert str(s) == 'foo'
+    assert repr(s) == "String('foo')"
+
+【相关测试 2】
+测试文件：sympy/codegen/tests/test_ast.py
+测试名称：test_Node
+测试代码：
+def test_Node():
+    n = Node()
+    assert n == Node()
+    assert n.func(*n.args) == n
+
+【相关测试 3】
+测试文件：sympy/vector/tests/test_coordsysrect.py
+测试名称：test_func_args
+测试代码：
+def test_func_args():
+    A = CoordSys3D('A')
+    assert A.x.func(*A.x.args) == A.x
+    expr = 3*A.x + 4*A.y
+    assert expr.func(*expr.args) == expr
+    assert A.i.func(*A.i.args) == A.i
+    v = A.x*A.i + A.y*A.j + A.z*A.k
+    assert v.func(*v.args) == v
+    assert A.origin.func(*A.origin.args) == A.origin
+
+【相关测试 4】
+测试文件：sympy/core/tests/test_args.py
+测试名称：test_sympy__codegen__ast__String
+测试代码：
+def test_sympy__codegen__ast__String():
+    from sympy.codegen.ast import String
+    assert _test_args(String('foobar'))
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

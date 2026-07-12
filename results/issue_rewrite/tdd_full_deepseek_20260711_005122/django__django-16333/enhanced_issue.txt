@@ -1,0 +1,136 @@
+instance_id: django__django-16333
+
+issue_summary: UserCreationForm 在自定义 User 模型包含 ManyToManyField 时，不会保存 ManyToMany 表单字段的数据。
+
+trigger_condition:
+{
+  "text": "使用 UserCreationForm 或其子类，且关联的自定义 User 模型包含 ManyToManyField；表单数据中包含该 ManyToMany 字段的有效数据；调用 form.save(commit=True)。",
+  "evidence": [
+    "Issue 描述：'When using contrib.auth.forms.UserCreationForm with a custom User model which has ManyToManyField fields'",
+    "源码片段 2 显示 UserCreationForm.save 方法在 commit=True 时没有调用 save_m2m()。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "表单 ManyToMany 字段的数据在调用 save(commit=True) 后没有被保存到数据库，相关关系未建立。",
+  "symptom_type": "state_not_updated",
+  "evidence": [
+    "Issue 描述：'the data in all related form fields (e.g. a ModelMultipleChoiceField) is not saved'",
+    "源码片段 2 显示 UserCreationForm.save 方法没有调用 save_m2m()。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "UserCreationForm.save(commit=True) 应该像其父类 ModelForm 一样，在保存实例后也保存 ManyToMany 关系数据。",
+  "evidence": [
+    "Issue 描述：'This is because unlike its parent class django.forms.ModelForm, UserCreationForm.save(commit=True) omits to call self.save_m2m().'",
+    "源码片段 4 显示 BaseModelFormSet 中存在 save_m2m 方法，表明 ModelForm 体系支持保存多对多关系。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "django.contrib.auth.forms.UserCreationForm",
+    "kind": "class",
+    "source_path": "django/contrib/auth/forms.py",
+    "reason": "Issue 直接报告此表单类存在缺陷。"
+  },
+  {
+    "name": "UserCreationForm.save",
+    "kind": "method",
+    "source_path": "django/contrib/auth/forms.py",
+    "reason": "Issue 指出此方法缺少对 save_m2m() 的调用。"
+  },
+  {
+    "name": "django.forms.models.ModelForm",
+    "kind": "class",
+    "source_path": "django/forms/models.py",
+    "reason": "UserCreationForm 的父类，其 save 方法预期应处理多对多字段。"
+  },
+  {
+    "name": "django.forms.models.ModelMultipleChoiceField",
+    "kind": "class",
+    "source_path": "django/forms/models.py",
+    "reason": "Issue 中举例的多对多表单字段类型。"
+  },
+  {
+    "name": "django.db.models.fields.related.ManyToManyField",
+    "kind": "class",
+    "source_path": "django/db/models/fields/related.py",
+    "reason": "Issue 中提到的自定义 User 模型字段类型。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "相关测试中使用默认 User 模型或自定义模型但不包含 ManyToManyField。",
+    "target_pattern": "使用一个包含 ManyToManyField 的自定义 User 模型，并在表单数据中为该字段提供有效值。",
+    "reason": "Issue 明确指出缺陷仅在自定义 User 模型包含 ManyToManyField 时触发。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "相关测试在调用 form.save() 后，没有检查 ManyToMany 关系是否被保存。",
+    "target_pattern": "在调用 form.save(commit=True) 后，添加对保存的 User 实例的 ManyToMany 关系字段的查询和断言。",
+    "reason": "为了观测缺陷现象（关系未保存）并验证修复后的正确行为（关系已保存）。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "state",
+    "expression_hint": "调用 form.save(commit=True) 返回的 user 实例上，其 ManyToMany 字段的 .all() 查询结果。",
+    "reason": "可以直接观测 ManyToMany 关系数据是否被正确保存到数据库。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "form.save(commit=True) 的返回值（User 实例）本身。",
+    "reason": "确保主实例被保存，这是调用 save_m2m() 的前提。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "保存后，User 实例的 ManyToMany 字段应包含表单中提交的相关对象。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的 SQL 查询或过于具体的对象 repr。",
+    "reason": "直接验证业务逻辑状态（关系集合），不依赖实现细节。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要一个继承自 AbstractUser 或 AbstractBaseUser 的自定义 User 模型，并添加一个 ManyToManyField。可能需要配置 AUTH_USER_MODEL 设置。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要创建 ManyToMany 关系所指向的相关模型实例作为测试数据。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "使用 django.test.TestCase 以确保数据库事务和清理。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "UserCreationForm 的父类 ModelForm 的 save 方法在 commit=True 时是否会自动调用 save_m2m()，还是需要子类显式调用？",
+  "自定义 User 模型中 ManyToManyField 的具体定义（如 through 模型）是否会影响缺陷触发？",
+  "除了 commit=True 的情况，commit=False 时 UserCreationForm 的行为是否符合预期？"
+]

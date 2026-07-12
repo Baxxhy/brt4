@@ -1,0 +1,102 @@
+{
+  "issue_summary": "pylint 未遵循 XDG Base Directory Specification，将数据文件存储在 $HOME/.pylint.d 而非 $HOME/.local/share/pylint。",
+  "trigger_condition": {
+    "text": "运行 pylint 时，未设置 PYLINTHOME 环境变量，且用户主目录存在。",
+    "evidence": ["Issue 描述 .pylint.d 目录出现在 home 文件夹。", "相关测试 1 测试了默认 PYLINT_HOME 的构造。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "在用户主目录下创建了 .pylint.d 目录，而非符合 XDG 规范的 $HOME/.local/share/pylint 目录。",
+    "symptom_type": "state_not_updated",
+    "evidence": ["Issue 明确指出数据存储在了错误的目录 $HOME/.pylint.d。", "相关测试 1 验证了默认 PYLINT_HOME 的构造。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "pylint 的数据文件应存储在符合 XDG Base Directory Specification 的目录，例如 $HOME/.local/share/pylint 或 $XDG_DATA_HOME/pylint。",
+    "evidence": ["Issue 引用 XDG 规范，指定数据文件应存储在 $HOME/.local/share/<PROGRAM_NAME>。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "config.PYLINT_HOME",
+      "kind": "variable",
+      "source_path": "",
+      "reason": "相关测试 1 直接断言此变量，它决定了 pylint 数据目录的位置。"
+    },
+    {
+      "name": "config.find_pylintrc",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试 2、3、4 测试此函数，涉及配置文件的查找路径，可能与数据目录的配置逻辑相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "",
+      "object": "",
+      "lines": "",
+      "reason": "iCoRe 未提供相关源代码片段，无法推断具体位置。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_pylint_home",
+      "test_file": "tests/lint/unittest_lint.py",
+      "why_relevant": "该测试直接验证了 PYLINT_HOME 的默认值和环境变量覆盖，与 Issue 核心（数据目录路径）直接相关。",
+      "reusable_parts": ["import os, tempfile, config", "使用 os.environ 设置 PYLINTHOME", "使用 reload(config)", "对 config.PYLINT_HOME 的断言风格"],
+      "possible_gap": "该测试验证的是当前（不符合 XDG 规范的）默认行为，没有测试 XDG 规范下的预期路径。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "默认 PYLINT_HOME 为 $HOME/.pylint.d 或 .pylint.d。",
+      "target_pattern": "PYLINT_HOME 应基于 XDG_DATA_HOME 或 $HOME/.local/share/pylint 构造。",
+      "reason": "Issue 要求数据目录遵循 XDG 规范，需要改变默认路径的构造逻辑。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "config",
+      "expression_hint": "config.PYLINT_HOME 的值",
+      "reason": "该变量直接决定了数据目录的路径，观察其值可以判断是否符合 XDG 规范。"
+    },
+    {
+      "kind": "file_output",
+      "expression_hint": "os.path.exists 检查 $HOME/.pylint.d 和 $HOME/.local/share/pylint 目录",
+      "reason": "Issue 的核心是文件存储位置错误，观察实际创建的目录位置是关键。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 config.PYLINT_HOME 指向符合 XDG 规范的数据目录（例如 $HOME/.local/share/pylint）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言路径完全等于一个硬编码的、可能因环境变化的字符串（如完整主目录路径）。",
+      "reason": "断言应验证路径的语义（符合 XDG 规范），而非具体的、可能因用户环境而异的完整字符串。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 pytest 的 usefixtures(\"pop_pylintrc\") 或类似机制来隔离配置。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 fake_home() 或临时目录来模拟干净的用户主目录环境。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要处理 os.environ 以设置或清理 PYLINTHOME 环境变量。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "具体的修复实现细节：是修改 config.PYLINT_HOME 的默认值计算，还是修改使用此变量的文件操作代码？",
+    "XDG 规范的优先级：是否应优先检查 $XDG_DATA_HOME 环境变量？",
+    "向后兼容性：如果旧目录已存在，如何处理迁移？",
+    "iCoRe 未提供相关源码，无法定位具体的缺陷代码行。"
+  ]
+}

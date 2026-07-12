@@ -1,0 +1,482 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+[Bug]: `align` in `HPacker` is reversed
+### Bug summary
+
+For the `align` parameter in `HPacker`, the options `top` and `bottom` seems reversed
+
+### Code for reproduction
+
+```python
+import matplotlib.pyplot as plt
+from matplotlib.offsetbox import DrawingArea, HPacker, VPacker, AnchoredOffsetbox, TextArea
+from matplotlib.patches import Rectangle
+
+da1 = DrawingArea(10, 20)
+rect1 = Rectangle((0, 0), 10, 20)
+da1.add_artist(rect1)
+
+da2 = DrawingArea(10, 30)
+rect2 = Rectangle((0, 0), 10, 30)
+da2.add_artist(rect2)
+
+align = "bottom"
+
+pack = HPacker(children=[da1, da2], pad=10, sep=10, align=align)
+title = TextArea(f"align='{align}'")
+pack = VPacker(children=[title, pack], sep=10, pad=10, align="center")
+
+box = AnchoredOffsetbox(child=pack, loc="center")
+
+_, ax = plt.subplots()
+ax.add_artist(box)
+```
+
+
+### Actual outcome
+
+![download](https://user-images.githubusercontent.com/23433306/200162888-702626bf-ad47-40e2-8751-7dffe91df85c.png)
+
+
+### Expected outcome
+
+![download](https://user-images.githubusercontent.com/23433306/200162908-e0e9dfd5-6f8b-4aac-975e-bb363d809c41.png)
+
+
+### Additional information
+
+_No response_
+
+### Operating system
+
+_No response_
+
+### Matplotlib Version
+
+3.6.2
+
+### Matplotlib Backend
+
+_No response_
+
+### Python version
+
+_No response_
+
+### Jupyter version
+
+_No response_
+
+### Installation
+
+_No response_
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：lib/matplotlib/offsetbox.py
+对象名称：HPacker
+节点类型：class
+父节点：offsetbox
+行号范围：459-493
+代码：
+class HPacker(PackerBase):
+    """
+    HPacker packs its children horizontally, automatically adjusting their
+    relative positions at draw time.
+    """
+    def get_extent_offsets(self, renderer):
+
+
+【源码片段 2】
+文件路径：lib/matplotlib/offsetbox.py
+对象名称：VPacker
+节点类型：class
+父节点：offsetbox
+行号范围：418-456
+代码：
+class VPacker(PackerBase):
+    """
+    VPacker packs its children vertically, automatically adjusting their
+    relative positions at draw time.
+    """
+    def get_extent_offsets(self, renderer):
+
+
+【源码片段 3】
+文件路径：lib/matplotlib/offsetbox.py
+对象名称：DrawingArea
+节点类型：class
+父节点：offsetbox
+行号范围：568-676
+代码：
+class DrawingArea(OffsetBox):
+    """
+    The DrawingArea can contain any Artist as a child. The DrawingArea
+    has a fixed width and height. The position of children relative to
+    the parent is fixed. The children can be clipped at the
+    boundaries of the parent.
+    """
+    def __init__(self, width, height, xdescent=0., ydescent=0., clip=False):
+    @property
+    def clip_children(self):
+    @clip_children.setter
+    def clip_children(self, val):
+    def get_transform(self):
+    def set_transform(self, t):
+    def set_offset(self, xy):
+    def get_offset(self):
+    def get_extent(self, renderer):
+    def add_artist(self, a):
+    def draw(self, renderer):
+
+
+
+【源码片段 4】
+文件路径：lib/matplotlib/offsetbox.py
+对象名称：TextArea
+节点类型：class
+父节点：offsetbox
+行号范围：679-798
+代码：
+class TextArea(OffsetBox):
+    """
+    The TextArea is a container artist for a single Text instance.
+
+    The text is placed at (0, 0) with baseline+left alignment, by default. The
+    width and height of the TextArea instance is the width and height of its
+    child text.
+    """
+    @_api.make_keyword_only("3.6", name="textprops")
+    def __init__(self, s,
+                 textprops=None,
+                 multilinebaseline=False,
+                 ):
+    def set_text(self, s):
+    def get_text(self):
+    def set_multilinebaseline(self, t):
+    def get_multilinebaseline(self):
+    def set_transform(self, t):
+    def set_offset(self, xy):
+    def get_offset(self):
+    def get_extent(self, renderer):
+    def draw(self, renderer):
+
+
+【源码片段 5】
+文件路径：lib/matplotlib/offsetbox.py
+对象名称：AnchoredOffsetbox
+节点类型：class
+父节点：offsetbox
+行号范围：884-1069
+代码：
+class AnchoredOffsetbox(OffsetBox):
+    """
+    An offset box placed according to location *loc*.
+
+    AnchoredOffsetbox has a single child.  When multiple children are needed,
+    use an extra OffsetBox to enclose them.  By default, the offset box is
+    anchored against its parent axes. You may explicitly specify the
+    *bbox_to_anchor*.
+    """
+    zorder = 5  # zorder of the legend
+    codes = {'upper right': 1,
+             'upper left': 2,
+             'lower left': 3,
+             'lower right': 4,
+             'right': 5,
+             'center left': 6,
+             'center right': 7,
+             'lower center': 8,
+             'upper center': 9,
+             'center': 10,
+             }
+    @_api.make_keyword_only("3.6", name="pad")
+    def __init__(self, loc,
+                 pad=0.4, borderpad=0.5,
+                 child=None, prop=None, frameon=True,
+                 bbox_to_anchor=None,
+                 bbox_transform=None,
+                 **kwargs):
+    def set_child(self, child):
+    def get_child(self):
+    def get_children(self):
+    def get_extent(self, renderer):
+    def get_bbox_to_anchor(self):
+    def set_bbox_to_anchor(self, bbox, transform=None):
+    def get_offset(self, width, height, xdescent, ydescent, renderer):
+    def update_frame(self, bbox, fontsize=None):
+    def draw(self, renderer):
+
+
+【源码片段 6】
+文件路径：lib/matplotlib/patches.py
+对象名称：Rectangle
+节点类型：class
+父节点：patches
+行号范围：664-880
+代码：
+class Rectangle(Patch):
+    """
+    A rectangle defined via an anchor point *xy* and its *width* and *height*.
+
+    The rectangle extends from ``xy[0]`` to ``xy[0] + width`` in x-direction
+    and from ``xy[1]`` to ``xy[1] + height`` in y-direction. ::
+
+      :                +------------------+
+      :                |                  |
+      :              height               |
+      :                |                  |
+      :               (xy)---- width -----+
+
+    One may picture *xy* as the bottom left corner, but which corner *xy* is
+    actually depends on the direction of the axis and the sign of *width*
+    and *height*; e.g. *xy* would be the bottom right corner if the x-axis
+    was inverted or if *width* was negative.
+    """
+    def __str__(self):
+    @_docstring.dedent_interpd
+    @_api.make_keyword_only("3.6", name="angle")
+    def __init__(self, xy, width, height, angle=0.0, *,
+                 rotation_point='xy', **kwargs):
+    def get_path(self):
+    def _convert_units(self):
+    def get_patch_transform(self):
+    @property
+    def rotation_point(self):
+    @rotation_point.setter
+    def rotation_point(self, value):
+    def get_x(self):
+    def get_y(self):
+    def get_xy(self):
+    def get_corners(self):
+    def get_center(self):
+    def get_width(self):
+    def get_height(self):
+    def get_angle(self):
+    def set_x(self, x):
+    def set_y(self, y):
+    def set_angle(self, angle):
+    def set_xy(self, xy):
+    def set_width(self, w):
+    def set_height(self, h):
+    def set_bounds(self, *args):
+    def get_bbox(self):
+    xy = property(get_xy, set_xy)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：lib/matplotlib/tests/test_offsetbox.py
+测试名称：test_offsetbox_loc_codes
+测试代码：
+def test_offsetbox_loc_codes():
+    # Check that valid string location codes all work with an AnchoredOffsetbox
+    codes = {'upper right': 1,
+             'upper left': 2,
+             'lower left': 3,
+             'lower right': 4,
+             'right': 5,
+             'center left': 6,
+             'center right': 7,
+             'lower center': 8,
+             'upper center': 9,
+             'center': 10,
+             }
+    fig, ax = plt.subplots()
+    da = DrawingArea(100, 100)
+    for code in codes:
+        anchored_box = AnchoredOffsetbox(loc=code, child=da)
+        ax.add_artist(anchored_box)
+    fig.canvas.draw()
+
+【相关测试 2】
+测试文件：lib/matplotlib/tests/test_offsetbox.py
+测试名称：test_get_packed_offsets_expand
+测试代码：
+@pytest.mark.parametrize('widths, total, sep, expected', [
+    _Params(  # total=None (implicit 1)
+        [.1, .1, .1], total=None, sep=None, expected=(1, [0, .45, .9])),
+    _Params(  # total larger than sum of widths
+        [3, 1, 2], total=10, sep=1, expected=(10, [0, 5, 8])),
+    _Params(  # total smaller sum of widths: overlapping boxes
+        [3, 1, 2], total=5, sep=1, expected=(5, [0, 2.5, 3])),
+])
+def test_get_packed_offsets_expand(widths, total, sep, expected):
+    result = _get_packed_offsets(widths, total, sep, mode='expand')
+    assert result[0] == expected[0]
+    assert_allclose(result[1], expected[1])
+
+【相关测试 3】
+测试文件：lib/matplotlib/tests/test_offsetbox.py
+测试名称：test_get_packed_offsets_fixed
+测试代码：
+@pytest.mark.parametrize('widths, total, sep, expected', [
+    _Params(  # total=None
+        [3, 1, 2], total=None, sep=1, expected=(8, [0, 4, 6])),
+    _Params(  # total larger than required
+        [3, 1, 2], total=10, sep=1, expected=(10, [0, 4, 6])),
+    _Params(  # total smaller than required
+        [3, 1, 2], total=5, sep=1, expected=(5, [0, 4, 6])),
+])
+def test_get_packed_offsets_fixed(widths, total, sep, expected):
+    result = _get_packed_offsets(widths, total, sep, mode='fixed')
+    assert result[0] == expected[0]
+    assert_allclose(result[1], expected[1])
+
+【相关测试 4】
+测试文件：lib/matplotlib/tests/test_offsetbox.py
+测试名称：test_get_packed_offsets_equal
+测试代码：
+@pytest.mark.parametrize('widths, total, sep, expected', [
+    _Params(  # total larger than required
+        [3, 2, 1], total=6, sep=None, expected=(6, [0, 2, 4])),
+    _Params(  # total smaller sum of widths: overlapping boxes
+        [3, 2, 1, .5], total=2, sep=None, expected=(2, [0, 0.5, 1, 1.5])),
+    _Params(  # total larger than required
+        [.5, 1, .2], total=None, sep=1, expected=(6, [0, 2, 4])),
+    # the case total=None, sep=None is tested separately below
+])
+def test_get_packed_offsets_equal(widths, total, sep, expected):
+    result = _get_packed_offsets(widths, total, sep, mode='equal')
+    assert result[0] == expected[0]
+    assert_allclose(result[1], expected[1])
+
+【相关测试 5】
+测试文件：lib/matplotlib/tests/test_offsetbox.py
+测试名称：test_get_packed_offsets
+测试代码：
+@pytest.mark.parametrize('widths',
+                         ([150], [150, 150, 150], [0.1], [0.1, 0.1]))
+@pytest.mark.parametrize('total', (250, 100, 0, -1, None))
+@pytest.mark.parametrize('sep', (250, 1, 0, -1))
+@pytest.mark.parametrize('mode', ("expand", "fixed", "equal"))
+def test_get_packed_offsets(widths, total, sep, mode):
+    # Check a (rather arbitrary) set of parameters due to successive similar
+    # issue tickets (at least #10476 and #10784) related to corner cases
+    # triggered inside this function when calling higher-level functions
+    # (e.g. `Axes.legend`).
+    # These are just some additional smoke tests. The output is untested.
+    _get_packed_offsets(widths, total, sep, mode=mode)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

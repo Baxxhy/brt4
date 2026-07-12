@@ -1,0 +1,358 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Require a non-empty name for Blueprints
+Things do not work correctly if a Blueprint is given an empty name (e.g. #4944).
+It would be helpful if a `ValueError` was raised when trying to do that.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：src/flask/blueprints.py
+对象名称：Blueprint
+节点类型：class
+父节点：blueprints
+行号范围：117-621
+代码：
+class Blueprint(Scaffold):
+    """Represents a blueprint, a collection of routes and other
+    app-related functions that can be registered on a real application
+    later.
+
+    A blueprint is an object that allows defining application functions
+    without requiring an application object ahead of time. It uses the
+    same decorators as :class:`~flask.Flask`, but defers the need for an
+    application by recording them for later registration.
+
+    Decorating a function with a blueprint creates a deferred function
+    that is called with :class:`~flask.blueprints.BlueprintSetupState`
+    when the blueprint is registered on an application.
+
+    See :doc:`/blueprints` for more information.
+
+    :param name: The name of the blueprint. Will be prepended to each
+        endpoint name.
+    :param import_name: The name of the blueprint package, usually
+        ``__name__``. This helps locate the ``root_path`` for the
+        blueprint.
+    :param static_folder: A folder with static files that should be
+        served by the blueprint's static route. The path is relative to
+        the blueprint's root path. Blueprint static files are disabled
+        by default.
+    :param static_url_path: The url to serve static files from.
+        Defaults to ``static_folder``. If the blueprint does not have
+        a ``url_prefix``, the app's static route will take precedence,
+        and the blueprint's static files won't be accessible.
+    :param template_folder: A folder with templates that should be added
+        to the app's template search path. The path is relative to the
+        blueprint's root path. Blueprint templates are disabled by
+        default. Blueprint templates have a lower precedence than those
+        in the app's templates folder.
+    :param url_prefix: A path to prepend to all of the blueprint's URLs,
+        to make them distinct from the rest of the app's routes.
+    :param subdomain: A subdomain that blueprint routes will match on by
+        default.
+    :param url_defaults: A dict of default values that blueprint routes
+        will receive by default.
+    :param root_path: By default, the blueprint will automatically set
+        this based on ``import_name``. In certain situations this
+        automatic detection can fail, so the path can be specified
+        manually instead.
+
+    .. versionchanged:: 1.1.0
+        Blueprints have a ``cli`` group to register nested CLI commands.
+        The ``cli_group`` parameter controls the name of the group under
+        the ``flask`` command.
+
+    .. versionadded:: 0.7
+    """
+    _got_registered_once = False
+    def __init__(
+        self,
+        name: str,
+        import_name: str,
+        static_folder: t.Optional[t.Union[str, os.PathLike]] = None,
+        static_url_path: t.Optional[str] = None,
+        template_folder: t.Optional[t.Union[str, os.PathLike]] = None,
+        url_prefix: t.Optional[str] = None,
+        subdomain: t.Optional[str] = None,
+        url_defaults: t.Optional[dict] = None,
+        root_path: t.Optional[str] = None,
+        cli_group: t.Optional[str] = _sentinel,  # type: ignore
+    ):
+    def _check_setup_finished(self, f_name: str) -> None:
+    @setupmethod
+    def record(self, func: t.Callable) -> None:
+    @setupmethod
+    def record_once(self, func: t.Callable) -> None:
+    def make_setup_state(
+        self, app: "Flask", options: dict, first_registration: bool = False
+    ) -> BlueprintSetupState:
+    @setupmethod
+    def register_blueprint(self, blueprint: "Blueprint", **options: t.Any) -> None:
+    def register(self, app: "Flask", options: dict) -> None:
+    @setupmethod
+    def add_url_rule(
+        self,
+        rule: str,
+        endpoint: t.Optional[str] = None,
+        view_func: t.Optional[ft.RouteCallable] = None,
+        provide_automatic_options: t.Optional[bool] = None,
+        **options: t.Any,
+    ) -> None:
+    @setupmethod
+    def app_template_filter(
+        self, name: t.Optional[str] = None
+    ) -> t.Callable[[T_template_filter], T_template_filter]:
+    @setupmethod
+    def add_app_template_filter(
+        self, f: ft.TemplateFilterCallable, name: t.Optional[str] = None
+    ) -> None:
+    @setupmethod
+    def app_template_test(
+        self, name: t.Optional[str] = None
+    ) -> t.Callable[[T_template_test], T_template_test]:
+    @setupmethod
+    def add_app_template_test(
+        self, f: ft.TemplateTestCallable, name: t.Optional[str] = None
+    ) -> None:
+    @setupmethod
+    def app_template_global(
+        self, name: t.Optional[str] = None
+    ) -> t.Callable[[T_template_global], T_template_global]:
+    @setupmethod
+    def add_app_template_global(
+        self, f: ft.TemplateGlobalCallable, name: t.Optional[str] = None
+    ) -> None:
+    @setupmethod
+    def before_app_request(self, f: T_before_request) -> T_before_request:
+    @setupmethod
+    def after_app_request(self, f: T_after_request) -> T_after_request:
+    @setupmethod
+    def teardown_app_request(self, f: T_teardown) -> T_teardown:
+    @setupmethod
+    def app_context_processor(
+        self, f: T_template_context_processor
+    ) -> T_template_context_processor:
+    @setupmethod
+    def app_errorhandler(
+        self, code: t.Union[t.Type[Exception], int]
+    ) -> t.Callable[[T_error_handler], T_error_handler]:
+    @setupmethod
+    def app_url_value_preprocessor(
+        self, f: T_url_value_preprocessor
+    ) -> T_url_value_preprocessor:
+    @setupmethod
+    def app_url_defaults(self, f: T_url_defaults) -> T_url_defaults:
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/test_blueprints.py
+测试名称：test_dotted_name_not_allowed
+测试代码：
+def test_dotted_name_not_allowed(app, client):
+    with pytest.raises(ValueError):
+        flask.Blueprint("app.ui", __name__)
+
+【相关测试 2】
+测试文件：tests/test_blueprints.py
+测试名称：test_unique_blueprint_names
+测试代码：
+def test_unique_blueprint_names(app, client) -> None:
+    bp = flask.Blueprint("bp", __name__)
+    bp2 = flask.Blueprint("bp", __name__)
+
+    app.register_blueprint(bp)
+
+    with pytest.raises(ValueError):
+        app.register_blueprint(bp)  # same bp, same name, error
+
+    app.register_blueprint(bp, name="again")  # same bp, different name, ok
+
+    with pytest.raises(ValueError):
+        app.register_blueprint(bp2)  # different bp, same name, error
+
+    app.register_blueprint(bp2, name="alt")  # different bp, different name, ok
+
+【相关测试 3】
+测试文件：tests/test_blueprints.py
+测试名称：test_self_registration
+测试代码：
+def test_self_registration(app, client) -> None:
+    bp = flask.Blueprint("bp", __name__)
+    with pytest.raises(ValueError):
+        bp.register_blueprint(bp)
+
+【相关测试 4】
+测试文件：tests/test_blueprints.py
+测试名称：test_empty_url_defaults
+测试代码：
+def test_empty_url_defaults(app, client):
+    bp = flask.Blueprint("bp", __name__)
+
+    @bp.route("/", defaults={"page": 1})
+    @bp.route("/page/<int:page>")
+    def something(page):
+        return str(page)
+
+    app.register_blueprint(bp)
+
+    assert client.get("/").data == b"1"
+    assert client.get("/page/2").data == b"2"
+
+【相关测试 5】
+测试文件：tests/test_blueprints.py
+测试名称：test_blueprint_renaming
+测试代码：
+def test_blueprint_renaming(app, client) -> None:
+    bp = flask.Blueprint("bp", __name__)
+    bp2 = flask.Blueprint("bp2", __name__)
+
+    @bp.get("/")
+    def index():
+        return flask.request.endpoint
+
+    @bp.get("/error")
+    def error():
+        flask.abort(403)
+
+    @bp.errorhandler(403)
+    def forbidden(_: Exception):
+        return "Error", 403
+
+    @bp2.get("/")
+    def index2():
+        return flask.request.endpoint
+
+    bp.register_blueprint(bp2, url_prefix="/a", name="sub")
+    app.register_blueprint(bp, url_prefix="/a")
+    app.register_blueprint(bp, url_prefix="/b", name="alt")
+
+    assert client.get("/a/").data == b"bp.index"
+    assert client.get("/b/").data == b"alt.index"
+    assert client.get("/a/a/").data == b"bp.sub.index2"
+    assert client.get("/b/a/").data == b"alt.sub.index2"
+    assert client.get("/a/error").data == b"Error"
+    assert client.get("/b/error").data == b"Error"
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

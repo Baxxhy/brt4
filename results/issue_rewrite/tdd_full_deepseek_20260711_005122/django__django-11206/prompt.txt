@@ -1,0 +1,356 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+utils.numberformat.format renders small decimals in exponential notation.
+Description
+	
+When using utils.number_format with decimal_pos, extremely small numbers get displayed using exponential notation.
+>>> from django.utils.numberformat import format as nformat
+>>> nformat(Decimal('1e-199'), '.', decimal_pos=2)
+'0.00'
+>>> nformat(Decimal('1e-200'), '.', decimal_pos=2)
+'1.00e-200'
+This is caused by a hardcoded cut-off point in the internal logic, but I would argue that when a decimal_pos argument is supplied and the number to be formatted is smaller in absolute size than what can be encoded using the provided number of decimal positions, the returned string should be 0.0000...000 instead.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/utils/numberformat.py
+对象名称：format
+节点类型：top-level function
+父节点：numberformat
+行号范围：7-79
+代码：
+def format(number, decimal_sep, decimal_pos=None, grouping=0, thousand_sep='',
+           force_grouping=False, use_l10n=None):
+    """
+    Get a number (as a number or string), and return it as a string,
+    using formats defined as arguments:
+
+    * decimal_sep: Decimal separator symbol (for example ".")
+    * decimal_pos: Number of decimal positions
+    * grouping: Number of digits in every group limited by thousand separator.
+        For non-uniform digit grouping, it can be a sequence with the number
+        of digit group sizes following the format used by the Python locale
+        module in locale.localeconv() LC_NUMERIC grouping (e.g. (3, 2, 0)).
+    * thousand_sep: Thousand separator symbol (for example ",")
+    """
+    use_grouping = (use_l10n or (use_l10n is None and settings.USE_L10N)) and settings.USE_THOUSAND_SEPARATOR
+    use_grouping = use_grouping or force_grouping
+    use_grouping = use_grouping and grouping != 0
+    # Make the common case fast
+    if isinstance(number, int) and not use_grouping and not decimal_pos:
+        return mark_safe(number)
+    # sign
+    sign = ''
+    if isinstance(number, Decimal):
+        # Format values with more than 200 digits (an arbitrary cutoff) using
+        # scientific notation to avoid high memory usage in {:f}'.format().
+        _, digits, exponent = number.as_tuple()
+        if abs(exponent) + len(digits) > 200:
+            number = '{:e}'.format(number)
+            coefficient, exponent = number.split('e')
+            # Format the coefficient.
+            coefficient = format(
+                coefficient, decimal_sep, decimal_pos, grouping,
+                thousand_sep, force_grouping, use_l10n,
+            )
+            return '{}e{}'.format(coefficient, exponent)
+        else:
+            str_number = '{:f}'.format(number)
+    else:
+        str_number = str(number)
+    if str_number[0] == '-':
+        sign = '-'
+        str_number = str_number[1:]
+    # decimal part
+    if '.' in str_number:
+        int_part, dec_part = str_number.split('.')
+        if decimal_pos is not None:
+            dec_part = dec_part[:decimal_pos]
+    else:
+        int_part, dec_part = str_number, ''
+    if decimal_pos is not None:
+        dec_part = dec_part + ('0' * (decimal_pos - len(dec_part)))
+    dec_part = dec_part and decimal_sep + dec_part
+    # grouping
+    if use_grouping:
+        try:
+            # if grouping is a sequence
+            intervals = list(grouping)
+        except TypeError:
+            # grouping is a single value
+            intervals = [grouping, 0]
+        active_interval = intervals.pop(0)
+        int_part_gd = ''
+        cnt = 0
+        for digit in int_part[::-1]:
+            if cnt and cnt == active_interval:
+                if intervals:
+                    active_interval = intervals.pop(0) or active_interval
+                int_part_gd += thousand_sep[::-1]
+                cnt = 0
+            int_part_gd += digit
+            cnt += 1
+        int_part = int_part_gd[::-1]
+    return sign + int_part + dec_part
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/utils_tests/test_numberformat.py
+测试名称：TestNumberFormat.test_decimal_numbers
+测试代码：
+class TestNumberFormat(SimpleTestCase):
+    def test_decimal_numbers(self):
+        self.assertEqual(nformat(Decimal('1234'), '.'), '1234')
+        self.assertEqual(nformat(Decimal('1234.2'), '.'), '1234.2')
+        self.assertEqual(nformat(Decimal('1234'), '.', decimal_pos=2), '1234.00')
+        self.assertEqual(nformat(Decimal('1234'), '.', grouping=2, thousand_sep=','), '1234')
+        self.assertEqual(nformat(Decimal('1234'), '.', grouping=2, thousand_sep=',', force_grouping=True), '12,34')
+        self.assertEqual(nformat(Decimal('-1234.33'), '.', decimal_pos=1), '-1234.3')
+        self.assertEqual(nformat(Decimal('0.00000001'), '.', decimal_pos=8), '0.00000001')
+        self.assertEqual(nformat(Decimal('9e-19'), '.', decimal_pos=2), '0.00')
+        self.assertEqual(nformat(Decimal('.00000000000099'), '.', decimal_pos=0), '0')
+        self.assertEqual(
+            nformat(Decimal('1e16'), '.', thousand_sep=',', grouping=3, force_grouping=True),
+            '10,000,000,000,000,000'
+        )
+        self.assertEqual(
+            nformat(Decimal('1e16'), '.', decimal_pos=2, thousand_sep=',', grouping=3, force_grouping=True),
+            '10,000,000,000,000,000.00'
+        )
+        self.assertEqual(nformat(Decimal('3.'), '.'), '3')
+        self.assertEqual(nformat(Decimal('3.0'), '.'), '3.0')
+        # Very large & small numbers.
+        tests = [
+            ('9e9999', None, '9e+9999'),
+            ('9e9999', 3, '9.000e+9999'),
+            ('9e201', None, '9e+201'),
+            ('9e200', None, '9e+200'),
+            ('1.2345e999', 2, '1.23e+999'),
+            ('9e-999', None, '9e-999'),
+            ('1e-7', 8, '0.00000010'),
+            ('1e-8', 8, '0.00000001'),
+            ('1e-9', 8, '0.00000000'),
+            ('1e-10', 8, '0.00000000'),
+            ('1e-11', 8, '0.00000000'),
+            ('1' + ('0' * 300), 3, '1.000e+300'),
+            ('0.{}1234'.format('0' * 299), 3, '1.234e-300'),
+        ]
+        for value, decimal_pos, expected_value in tests:
+            with self.subTest(value=value):
+                self.assertEqual(nformat(Decimal(value), '.', decimal_pos), expected_value)
+
+【相关测试 2】
+测试文件：tests/utils_tests/test_numberformat.py
+测试名称：TestNumberFormat.test_format_number
+测试代码：
+class TestNumberFormat(SimpleTestCase):
+    def test_format_number(self):
+        self.assertEqual(nformat(1234, '.'), '1234')
+        self.assertEqual(nformat(1234.2, '.'), '1234.2')
+        self.assertEqual(nformat(1234, '.', decimal_pos=2), '1234.00')
+        self.assertEqual(nformat(1234, '.', grouping=2, thousand_sep=','), '1234')
+        self.assertEqual(nformat(1234, '.', grouping=2, thousand_sep=',', force_grouping=True), '12,34')
+        self.assertEqual(nformat(-1234.33, '.', decimal_pos=1), '-1234.3')
+        # The use_l10n parameter can force thousand grouping behavior.
+        with self.settings(USE_THOUSAND_SEPARATOR=True, USE_L10N=True):
+            self.assertEqual(nformat(1234, '.', grouping=3, thousand_sep=',', use_l10n=False), '1234')
+        with self.settings(USE_THOUSAND_SEPARATOR=True, USE_L10N=False):
+            self.assertEqual(nformat(1234, '.', grouping=3, thousand_sep=',', use_l10n=True), '1,234')
+
+【相关测试 3】
+测试文件：tests/utils_tests/test_numberformat.py
+测试名称：TestNumberFormat.test_float_numbers
+测试代码：
+class TestNumberFormat(SimpleTestCase):
+    def test_float_numbers(self):
+        # A float without a fractional part (3.) results in a ".0" when no
+        # deimal_pos is given. Contrast that with the Decimal('3.') case in
+        # test_decimal_numbers which doesn't return a fractional part.
+        self.assertEqual(nformat(3., '.'), '3.0')
+
+【相关测试 4】
+测试文件：tests/i18n/tests.py
+测试名称：FormattingTests.test_locale_independent
+测试代码：
+@override_settings(USE_L10N=True)
+class FormattingTests(SimpleTestCase):
+    def test_locale_independent(self):
+        """
+        Localization of numbers
+        """
+        with self.settings(USE_THOUSAND_SEPARATOR=False):
+            self.assertEqual('66666.66', nformat(self.n, decimal_sep='.', decimal_pos=2, grouping=3, thousand_sep=','))
+            self.assertEqual('66666A6', nformat(self.n, decimal_sep='A', decimal_pos=1, grouping=1, thousand_sep='B'))
+            self.assertEqual('66666', nformat(self.n, decimal_sep='X', decimal_pos=0, grouping=1, thousand_sep='Y'))
+
+        with self.settings(USE_THOUSAND_SEPARATOR=True):
+            self.assertEqual(
+                '66,666.66',
+                nformat(self.n, decimal_sep='.', decimal_pos=2, grouping=3, thousand_sep=',')
+            )
+            self.assertEqual(
+                '6B6B6B6B6A6',
+                nformat(self.n, decimal_sep='A', decimal_pos=1, grouping=1, thousand_sep='B')
+            )
+            self.assertEqual('-66666.6', nformat(-66666.666, decimal_sep='.', decimal_pos=1))
+            self.assertEqual('-66666.0', nformat(int('-66666'), decimal_sep='.', decimal_pos=1))
+            self.assertEqual('10000.0', nformat(self.long, decimal_sep='.', decimal_pos=1))
+            self.assertEqual(
+                '10,00,00,000.00',
+                nformat(100000000.00, decimal_sep='.', decimal_pos=2, grouping=(3, 2, 0), thousand_sep=',')
+            )
+            self.assertEqual(
+                '1,0,00,000,0000.00',
+                nformat(10000000000.00, decimal_sep='.', decimal_pos=2, grouping=(4, 3, 2, 1, 0), thousand_sep=',')
+            )
+            self.assertEqual(
+                '10000,00,000.00',
+                nformat(1000000000.00, decimal_sep='.', decimal_pos=2, grouping=(3, 2, -1), thousand_sep=',')
+            )
+            # This unusual grouping/force_grouping combination may be triggered by the intcomma filter (#17414)
+            self.assertEqual(
+                '10000',
+                nformat(self.long, decimal_sep='.', decimal_pos=0, grouping=0, force_grouping=True)
+            )
+            # date filter
+            self.assertEqual('31.12.2009 в 20:50', Template('{{ dt|date:"d.m.Y в H:i" }}').render(self.ctxt))
+            self.assertEqual('⌚ 10:15', Template('{{ t|time:"⌚ H:i" }}').render(self.ctxt))
+
+【相关测试 5】
+测试文件：tests/admin_utils/tests.py
+测试名称：UtilsTests.test_number_formats_display_for_field
+测试代码：
+class UtilsTests(SimpleTestCase):
+    def test_number_formats_display_for_field(self):
+        display_value = display_for_field(12345.6789, models.FloatField(), self.empty_value)
+        self.assertEqual(display_value, '12345.6789')
+
+        display_value = display_for_field(Decimal('12345.6789'), models.DecimalField(), self.empty_value)
+        self.assertEqual(display_value, '12345.6789')
+
+        display_value = display_for_field(12345, models.IntegerField(), self.empty_value)
+        self.assertEqual(display_value, '12345')
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

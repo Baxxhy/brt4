@@ -1,0 +1,334 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Callable storage on FileField fails to deconstruct when it returns default_storage
+Description
+	
+If the storage argument on a FileField is set to a callable that returns default_storage, it is omitted from the deconstructed form of the field, rather than being included as a reference to the callable as expected.
+For example, given a model definition:
+from django.core.files.storage import FileSystemStorage, default_storage
+from django.db import models
+import random
+other_storage = FileSystemStorage(location='/media/other')
+def get_storage():
+	return random.choice([default_storage, other_storage])
+class MyModel(models.Model):
+	my_file = models.FileField(storage=get_storage)
+repeatedly running makemigrations will randomly generate a migration that alternately includes or omits storage=myapp.models.get_storage on the FileField definition.
+This case was overlooked in the fix for #31941 - the deconstruct method tests if self.storage is not default_storage to determine whether to add the storage kwarg, but at this point self.storage is the evaluated version, so it wrongly returns false for a callable that returns default_storage.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/db/models/fields/files.py
+对象名称：FileField
+节点类型：class
+父节点：files
+行号范围：224-356
+代码：
+class FileField(Field):
+
+    attr_class = FieldFile
+    descriptor_class = FileDescriptor
+    description = _("File")
+    def __init__(
+        self, verbose_name=None, name=None, upload_to="", storage=None, **kwargs
+    ):
+    def check(self, **kwargs):
+    def _check_primary_key(self):
+    def _check_upload_to(self):
+    def deconstruct(self):
+    def get_internal_type(self):
+    def get_prep_value(self, value):
+    def pre_save(self, model_instance, add):
+    def contribute_to_class(self, cls, name, **kwargs):
+    def generate_filename(self, instance, filename):
+    def save_form_data(self, instance, data):
+    def formfield(self, **kwargs):
+
+
+【源码片段 2】
+文件路径：django/contrib/staticfiles/storage.py
+对象名称：storage
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 3】
+文件路径：django/db/models/fields/files.py
+对象名称：deconstruct
+节点类型：class_function
+父节点：FileField
+行号范围：293-300
+代码：
+    def deconstruct(self):
+        name, path, args, kwargs = super().deconstruct()
+        if kwargs.get("max_length") == 100:
+            del kwargs["max_length"]
+        kwargs["upload_to"] = self.upload_to
+        if self.storage is not default_storage:
+            kwargs["storage"] = getattr(self, "_storage_callable", self.storage)
+        return name, path, args, kwargs
+
+
+【源码片段 4】
+文件路径：django/contrib/messages/storage/__init__.py
+对象名称：default_storage
+节点类型：top-level function
+父节点：__init__
+行号范围：5-12
+代码：
+def default_storage(request):
+    """
+    Callable with the same interface as the storage classes.
+
+    This isn't just default_storage = import_string(settings.MESSAGE_STORAGE)
+    to avoid accessing the settings at the module level.
+    """
+    return import_string(settings.MESSAGE_STORAGE)(request)
+
+
+【源码片段 5】
+文件路径：django/core/files/storage/filesystem.py
+对象名称：FileSystemStorage
+节点类型：class
+父节点：filesystem
+行号范围：19-207
+代码：
+class FileSystemStorage(Storage, StorageSettingsMixin):
+    """
+    Standard filesystem storage
+    """
+    OS_OPEN_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    def __init__(
+        self,
+        location=None,
+        base_url=None,
+        file_permissions_mode=None,
+        directory_permissions_mode=None,
+    ):
+    @cached_property
+    def base_location(self):
+    @cached_property
+    def location(self):
+    @cached_property
+    def base_url(self):
+    @cached_property
+    def file_permissions_mode(self):
+    @cached_property
+    def directory_permissions_mode(self):
+    def _open(self, name, mode="rb"):
+    def _save(self, name, content):
+    def _ensure_location_group_id(self, full_path):
+    def delete(self, name):
+    def exists(self, name):
+    def listdir(self, path):
+    def path(self, name):
+    def size(self, name):
+    def url(self, name):
+    def _datetime_from_timestamp(self, ts):
+    def get_accessed_time(self, name):
+    def get_created_time(self, name):
+    def get_modified_time(self, name):
+
+
+【源码片段 6】
+文件路径：django/core/management/commands/makemigrations.py
+对象名称：makemigrations
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/file_storage/tests.py
+测试名称：FieldCallableFileStorageTests.test_deconstruction
+测试代码：
+class FieldCallableFileStorageTests(SimpleTestCase):
+    def test_deconstruction(self):
+        """
+        Deconstructing gives the original callable, not the evaluated value.
+        """
+        obj = Storage()
+        *_, kwargs = obj._meta.get_field("storage_callable").deconstruct()
+        storage = kwargs["storage"]
+        self.assertIs(storage, callable_storage)
+
+【相关测试 2】
+测试文件：tests/file_storage/tests.py
+测试名称：FieldCallableFileStorageTests.test_callable_function_storage_file_field
+测试代码：
+class FieldCallableFileStorageTests(SimpleTestCase):
+    def test_callable_function_storage_file_field(self):
+        storage = FileSystemStorage(location=self.temp_storage_location)
+
+        def get_storage():
+            return storage
+
+        obj = FileField(storage=get_storage)
+        self.assertEqual(obj.storage, storage)
+        self.assertEqual(obj.storage.location, storage.location)
+
+【相关测试 3】
+测试文件：tests/file_storage/tests.py
+测试名称：FieldCallableFileStorageTests.test_file_field_storage_none_uses_default_storage
+测试代码：
+class FieldCallableFileStorageTests(SimpleTestCase):
+    def test_file_field_storage_none_uses_default_storage(self):
+        self.assertEqual(FileField().storage, default_storage)
+
+【相关测试 4】
+测试文件：tests/file_storage/tests.py
+测试名称：FieldCallableFileStorageTests.test_callable_storage_file_field_in_model
+测试代码：
+class FieldCallableFileStorageTests(SimpleTestCase):
+    def test_callable_storage_file_field_in_model(self):
+        obj = Storage()
+        self.assertEqual(obj.storage_callable.storage, temp_storage)
+        self.assertEqual(obj.storage_callable.storage.location, temp_storage_location)
+        self.assertIsInstance(obj.storage_callable_class.storage, BaseStorage)
+
+【相关测试 5】
+测试文件：tests/file_storage/tests.py
+测试名称：FileFieldStorageTests.test_filefield_default
+测试代码：
+class FileFieldStorageTests(TestCase):
+    def test_filefield_default(self):
+        # Default values allow an object to access a single file.
+        temp_storage.save("tests/default.txt", ContentFile("default content"))
+        obj = Storage.objects.create()
+        self.assertEqual(obj.default.name, "tests/default.txt")
+        self.assertEqual(obj.default.read(), b"default content")
+        obj.default.close()
+
+        # But it shouldn't be deleted, even if there are no more objects using
+        # it.
+        obj.delete()
+        obj = Storage()
+        self.assertEqual(obj.default.read(), b"default content")
+        obj.default.close()
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

@@ -1,0 +1,263 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+The evaluate=False parameter to `parse_expr` is ignored for relationals
+See also #22305 and #22098
+
+This inequality evaluates even though `evaluate=False` is given:
+```python
+In [14]: parse_expr('1 < 2', evaluate=False)
+Out[14]: True
+```
+The result that should be returned is:
+```python
+In [15]: Lt(1, 2, evaluate=False)
+Out[15]: 1 < 2
+```
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/parsing/ast_parser.py
+对象名称：parse_expr
+节点类型：top-level function
+父节点：ast_parser
+行号范围：64-79
+代码：
+def parse_expr(s, local_dict):
+    """
+    Converts the string "s" to a SymPy expression, in local_dict.
+
+    It converts all numbers to Integers before feeding it to Python and
+    automatically creates Symbols.
+    """
+    global_dict = {}
+    exec('from sympy import *', global_dict)
+    try:
+        a = parse(s.strip(), mode="eval")
+    except SyntaxError:
+        raise SympifyError("Cannot parse %s." % repr(s))
+    a = Transform(local_dict, global_dict).visit(a)
+    e = compile(a, "<string>", "eval")
+    return eval(e, global_dict, local_dict)
+
+
+【源码片段 2】
+文件路径：sympy/core/relational.py
+对象名称：Lt
+节点类型：global_var
+父节点：relational
+行号范围：1173-1173
+代码：
+Lt = StrictLessThan
+
+
+【源码片段 3】
+文件路径：sympy/core/relational.py
+对象名称：relational
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/core/tests/test_relational.py
+测试名称：test_evaluate
+测试代码：
+def test_evaluate():
+    assert str(Eq(x, x, evaluate=False)) == 'Eq(x, x)'
+    assert Eq(x, x, evaluate=False).doit() == S.true
+    assert str(Ne(x, x, evaluate=False)) == 'Ne(x, x)'
+    assert Ne(x, x, evaluate=False).doit() == S.false
+
+    assert str(Ge(x, x, evaluate=False)) == 'x >= x'
+    assert str(Le(x, x, evaluate=False)) == 'x <= x'
+    assert str(Gt(x, x, evaluate=False)) == 'x > x'
+    assert str(Lt(x, x, evaluate=False)) == 'x < x'
+
+【相关测试 2】
+测试文件：sympy/parsing/tests/test_sympy_parser.py
+测试名称：test_recursive_evaluate_false_10560
+测试代码：
+def test_recursive_evaluate_false_10560():
+    inputs = {
+        '4*-3' : '4*-3',
+        '-4*3' : '(-4)*3',
+        "-2*x*y": '(-2)*x*y',
+        "x*-4*x": "x*(-4)*x"
+    }
+    for text, result in inputs.items():
+        assert parse_expr(text, evaluate=False) == parse_expr(result, evaluate=False)
+
+【相关测试 3】
+测试文件：sympy/parsing/tests/test_sympy_parser.py
+测试名称：test_function_evaluate_false
+测试代码：
+def test_function_evaluate_false():
+    inputs = [
+        'Abs(0)', 'im(0)', 're(0)', 'sign(0)', 'arg(0)', 'conjugate(0)',
+        'acos(0)', 'acot(0)', 'acsc(0)', 'asec(0)', 'asin(0)', 'atan(0)',
+        'acosh(0)', 'acoth(0)', 'acsch(0)', 'asech(0)', 'asinh(0)', 'atanh(0)',
+        'cos(0)', 'cot(0)', 'csc(0)', 'sec(0)', 'sin(0)', 'tan(0)',
+        'cosh(0)', 'coth(0)', 'csch(0)', 'sech(0)', 'sinh(0)', 'tanh(0)',
+        'exp(0)', 'log(0)', 'sqrt(0)',
+    ]
+    for case in inputs:
+        expr = parse_expr(case, evaluate=False)
+        assert case == str(expr) != str(expr.doit())
+    assert str(parse_expr('ln(0)', evaluate=False)) == 'log(0)'
+    assert str(parse_expr('cbrt(0)', evaluate=False)) == '0**(1/3)'
+
+【相关测试 4】
+测试文件：sympy/core/tests/test_sympify.py
+测试名称：test_evaluate_false
+测试代码：
+def test_evaluate_false():
+    cases = {
+        '2 + 3': Add(2, 3, evaluate=False),
+        '2**2 / 3': Mul(Pow(2, 2, evaluate=False), Pow(3, -1, evaluate=False), evaluate=False),
+        '2 + 3 * 5': Add(2, Mul(3, 5, evaluate=False), evaluate=False),
+        '2 - 3 * 5': Add(2, Mul(-1, Mul(3, 5,evaluate=False), evaluate=False), evaluate=False),
+        '1 / 3': Mul(1, Pow(3, -1, evaluate=False), evaluate=False),
+        'True | False': Or(True, False, evaluate=False),
+        '1 + 2 + 3 + 5*3 + integrate(x)': Add(1, 2, 3, Mul(5, 3, evaluate=False), x**2/2, evaluate=False),
+        '2 * 4 * 6 + 8': Add(Mul(2, 4, 6, evaluate=False), 8, evaluate=False),
+        '2 - 8 / 4': Add(2, Mul(-1, Mul(8, Pow(4, -1, evaluate=False), evaluate=False), evaluate=False), evaluate=False),
+        '2 - 2**2': Add(2, Mul(-1, Pow(2, 2, evaluate=False), evaluate=False), evaluate=False),
+    }
+    for case, result in cases.items():
+        assert sympify(case, evaluate=False) == result
+
+【相关测试 5】
+测试文件：sympy/core/tests/test_evalf.py
+测试名称：test_evaluate_false
+测试代码：
+def test_evaluate_false():
+    for no in [0, False]:
+        assert Add(3, 2, evaluate=no).is_Add
+        assert Mul(3, 2, evaluate=no).is_Mul
+        assert Pow(3, 2, evaluate=no).is_Pow
+    assert Pow(y, 2, evaluate=True) - Pow(y, 2, evaluate=True) == 0
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

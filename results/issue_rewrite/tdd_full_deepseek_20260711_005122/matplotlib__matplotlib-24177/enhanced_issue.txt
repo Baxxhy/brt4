@@ -1,0 +1,125 @@
+instance_id: matplotlib__matplotlib-24177
+
+issue_summary: 当使用 histtype='step' 且 density=True 时，matplotlib.axes.Axes.hist 的密度轴未正确自动缩放，导致数据缩放时密度值发生不应有的变化。
+
+trigger_condition:
+{
+  "text": "调用 Axes.hist 函数，设置参数 density=True 和 histtype='step'，输入数据为数值数组。",
+  "evidence": [
+    "Issue 中的代码示例：ax[1].hist(test_random, bins=100, density=True, histtype=\"step\")",
+    "Issue 描述：'if you set histtype=\"step\", the issue will occur'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "当数据缩放时，使用 histtype='step' 绘制的直方图密度值发生变化，而使用 histtype='bar' 时则正常。密度轴未自动调整以适应整个直方图。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 描述：'the densities changes if you rescale the whole data array'",
+    "Issue 描述：'the histogram's density axis (when setting density=True) is not automatically adjusted to fit the whole histogram'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "无论 histtype 设置为 'step' 还是 'bar'，当 density=True 时，直方图的密度轴都应正确自动缩放，并且对数据进行缩放不应影响归一化后的密度值。",
+  "evidence": [
+    "Issue 中的预期结果描述：'sometimes the randomised array would lead to identical left and right panel'，暗示不同 histtype 在相同条件下应有相似输出。",
+    "Issue 描述：'rescaling the data should only affect the x-axis values'，暗示密度值应保持不变。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "matplotlib.axes.Axes.hist",
+    "kind": "method",
+    "source_path": "",
+    "reason": "Issue 直接报告了该方法的缺陷行为。"
+  },
+  {
+    "name": "matplotlib.pyplot.hist",
+    "kind": "function",
+    "source_path": "lib/matplotlib/pyplot.py",
+    "reason": "检索到的相关源码，是 Axes.hist 的顶层包装。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "test_hist_step 中：ax.hist(d1, histtype=\"step\")",
+    "target_pattern": "ax.hist(data, density=True, histtype=\"step\")",
+    "reason": "Issue 表明缺陷需要 density=True 和 histtype='step' 同时存在。",
+    "confidence": "high"
+  },
+  {
+    "slot": "input",
+    "current_pattern": "test_hist_density 中：使用固定随机种子生成单一数据集。",
+    "target_pattern": "生成两组数据，其中一组是另一组的缩放版本（如乘以 scale 因子）。",
+    "reason": "Issue 通过缩放数据来展示密度值的不当变化，这是复现的关键。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "hist_step = ax.hist(data, density=True, histtype='step') 返回的 heights (第一个返回值)",
+    "reason": "Issue 的核心是密度值（直方图高度）计算错误。观察返回值可以直接量化问题。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "hist_bar = ax.hist(data, density=True, histtype='bar') 返回的 heights",
+    "reason": "与 histtype='step' 的结果进行对比，以确认缺陷是否特定于 'step' 类型。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "对于缩放前后的同一组数据，使用 histtype='step' 和 density=True 计算出的归一化直方图高度（密度）应保持恒定（或在一定容差内相等）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的图像像素或渲染输出相等，因为 Issue 关注的是数值计算。",
+    "reason": "Issue 明确指出缩放数据不应影响密度值，这是修复后应满足的核心语义。"
+  },
+  {
+    "assertion_goal": "在相同数据和参数下，histtype='step' 和 histtype='bar' 计算出的归一化直方图高度（密度）应一致。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言非密度相关的属性（如颜色、线条样式）相等。",
+    "reason": "Issue 暗示不同 histtype 在 density=True 时应有一致行为，这是验证修复的稳定方式。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 matplotlib.pyplot 和 numpy。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可以使用 np.random.randn 或类似方法生成测试数据。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要在无头模式下运行或使用非交互式后端以避免 GUI 问题。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "缺陷的确切源码位置（具体在 Axes.hist 的哪一段逻辑）。",
+  "histtype='stepfilled' 是否也受此缺陷影响。",
+  "除了数据缩放，是否还有其他因素（如 bins 数量、range 参数）会触发或影响此缺陷。",
+  "修复后密度轴‘自动调整’的具体数学定义或实现细节。"
+]

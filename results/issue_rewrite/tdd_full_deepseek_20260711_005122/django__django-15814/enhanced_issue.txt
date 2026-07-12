@@ -1,0 +1,125 @@
+instance_id: django__django-15814
+
+issue_summary: 在代理模型上使用 select_related() 后接 only() 方法会导致 ValueError: 'id' is not in list 异常。
+
+trigger_condition:
+{
+  "text": "在代理模型（proxy model）上构建查询集，先调用 select_related(\"custom\")，再调用 only(\"custom__name\")，然后对查询集求值（例如 list()）。",
+  "evidence": [
+    "Issue 描述中提供了模型定义和触发命令：list(AnotherModel.objects.select_related(\"custom\").only(\"custom__name\").all())。",
+    "Issue 的 traceback 指向 RelatedPopulator.__init__ 中的 self.pk_idx = self.init_list.index(self.model_cls._meta.pk.attname)。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "在查询集求值时抛出 ValueError: 'id' is not in list 异常。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 的 traceback 显示错误发生在 django/db/models/query.py 的 __init__ 方法中，具体是 self.pk_idx = self.init_list.index(self.model_cls._meta.pk.attname)。",
+    "错误消息是 ValueError: 'id' is not in list。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "查询集应能正常求值，返回结果列表，并且 only() 能正确限制加载的字段。",
+  "evidence": [
+    "Issue 描述中提到，如果将 django/db/models/sql/query.py 第 745 行的 opts = cur_model._meta 替换为 opts = cur_model._meta.concrete_model._meta，则一切工作正常。",
+    "相关测试 test_proxy_model_defer_with_select_related 展示了在代理模型上使用 select_related().only() 并成功获取数据的预期行为。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "QuerySet.select_related",
+    "kind": "method",
+    "source_path": "django/db/models/query.py",
+    "reason": "Issue 中触发 bug 的调用链起点之一。"
+  },
+  {
+    "name": "QuerySet.only",
+    "kind": "method",
+    "source_path": "django/db/models/query.py",
+    "reason": "Issue 中触发 bug 的调用链起点之一。"
+  },
+  {
+    "name": "RelatedPopulator.__init__",
+    "kind": "method",
+    "source_path": "django/db/models/query.py",
+    "reason": "异常直接发生在这个方法中。"
+  },
+  {
+    "name": "get_related_populators",
+    "kind": "function",
+    "source_path": "django/db/models/query.py",
+    "reason": "负责创建 RelatedPopulator 实例，与 select_related 和 only 的处理流程相关。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "相似测试中使用的是普通模型或特定的代理模型关系（如 Item/RelatedItem）。",
+    "target_pattern": "使用 Issue 中描述的模型关系：一个模型（AnotherModel）的外键指向一个代理模型（ProxyCustomModel），该代理模型的基类是 CustomModel。",
+    "reason": "Issue 明确指出问题发生在代理模型上，且与 select_related 和 only 的组合使用有关。改变模型关系可能触发缺陷路径。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "相似测试中可能先创建对象，再执行查询。",
+    "target_pattern": "确保查询链是 AnotherModel.objects.select_related(\"custom\").only(\"custom__name\").all()，然后立即求值（如 list()）。",
+    "reason": "Issue 中的错误是在查询集求值时发生的，精确复制调用链可能触发缺陷。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "在执行 list(query_set) 或迭代查询集时捕获的异常。",
+    "reason": "Issue 的核心错误是 ValueError 异常，观测是否抛出此异常是判断缺陷是否触发的直接方式。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "在 RelatedPopulator.__init__ 中，self.init_list 的内容以及 self.model_cls._meta.pk.attname 的值。",
+    "reason": "异常是因为主键字段名不在 init_list 中，观测这些值有助于理解缺陷条件。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "查询集求值不应抛出 ValueError 异常，应能成功获取数据列表。",
+    "preferred_assertion_style": "raises",
+    "avoid": "避免断言具体的异常消息字符串完全相等，因为消息可能因 Django 版本或配置略有不同。",
+    "reason": "Issue 的核心是异常，断言不抛出异常（或断言特定异常被抛出）能直接验证缺陷是否被触发或修复。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要定义 Issue 中描述的模型：CustomModel、ProxyCustomModel、AnotherModel。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要使用 TestCase 类并设置测试数据库。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "缺陷的确切根源是在 RelatedPopulator 中还是在 sql/query.py 的其他地方？",
+  "除了 Issue 中提到的模型关系，是否还有其他边界条件（如多级代理、抽象基类）会触发此缺陷？",
+  "修复后的具体行为细节（如加载了哪些字段、查询性能）在 Issue 中没有完全明确。"
+]

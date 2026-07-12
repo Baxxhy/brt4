@@ -1,0 +1,272 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Statement created by _create_unique_sql makes references_column always false
+Description
+	
+This is due to an instance of Table is passed as an argument to Columns when a string is expected.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/db/backends/base/schema.py
+对象名称：_create_unique_sql
+节点类型：class_function
+父节点：BaseDatabaseSchemaEditor
+行号范围：1225-1265
+代码：
+    def _create_unique_sql(
+        self, model, columns, name=None, condition=None, deferrable=None,
+        include=None, opclasses=None, expressions=None,
+    ):
+        if (
+            (
+                deferrable and
+                not self.connection.features.supports_deferrable_unique_constraints
+            ) or
+            (condition and not self.connection.features.supports_partial_indexes) or
+            (include and not self.connection.features.supports_covering_indexes) or
+            (expressions and not self.connection.features.supports_expression_indexes)
+        ):
+            return None
+
+        def create_unique_name(*args, **kwargs):
+            return self.quote_name(self._create_index_name(*args, **kwargs))
+
+        compiler = Query(model, alias_cols=False).get_compiler(connection=self.connection)
+        table = Table(model._meta.db_table, self.quote_name)
+        if name is None:
+            name = IndexName(model._meta.db_table, columns, '_uniq', create_unique_name)
+        else:
+            name = self.quote_name(name)
+        if condition or include or opclasses or expressions:
+            sql = self.sql_create_unique_index
+        else:
+            sql = self.sql_create_unique
+        if columns:
+            columns = self._index_columns(table, columns, col_suffixes=(), opclasses=opclasses)
+        else:
+            columns = Expressions(model._meta.db_table, expressions, compiler, self.quote_value)
+        return Statement(
+            sql,
+            table=table,
+            name=name,
+            columns=columns,
+            condition=self._index_condition_sql(condition),
+            deferrable=self._deferrable_constraint_sql(deferrable),
+            include=self._index_include_sql(model, include),
+        )
+
+
+【源码片段 2】
+文件路径：django/db/backends/ddl_references.py
+对象名称：Table
+节点类型：class
+父节点：ddl_references
+行号范围：42-57
+代码：
+class Table(Reference):
+    """Hold a reference to a table."""
+    def __init__(self, table, quote_name):
+    def references_table(self, table):
+    def rename_table_references(self, old_table, new_table):
+    def __str__(self):
+
+
+【源码片段 3】
+文件路径：django/db/backends/ddl_references.py
+对象名称：Columns
+节点类型：class
+父节点：ddl_references
+行号范围：77-96
+代码：
+class Columns(TableColumns):
+    """Hold a reference to one or many columns."""
+    def __init__(self, table, columns, quote_name, col_suffixes=()):
+    def __str__(self):
+
+
+【源码片段 4】
+文件路径：django/db/backends/ddl_references.py
+对象名称：references_column
+节点类型：class_function
+父节点：Reference
+行号范围：17-21
+代码：
+    def references_column(self, table, column):
+        """
+        Return whether or not this instance references the specified column.
+        """
+        return False
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/backends/test_ddl_references.py
+测试名称：ColumnsTests.test_references_column
+测试代码：
+class ColumnsTests(TableTests):
+    def test_references_column(self):
+        self.assertIs(self.reference.references_column('other', 'first_column'), False)
+        self.assertIs(self.reference.references_column('table', 'third_column'), False)
+        self.assertIs(self.reference.references_column('table', 'first_column'), True)
+
+【相关测试 2】
+测试文件：tests/backends/test_ddl_references.py
+测试名称：ColumnsTests.test_rename_column_references
+测试代码：
+class ColumnsTests(TableTests):
+    def test_rename_column_references(self):
+        self.reference.rename_column_references('other', 'first_column', 'third_column')
+        self.assertIs(self.reference.references_column('table', 'first_column'), True)
+        self.assertIs(self.reference.references_column('table', 'third_column'), False)
+        self.assertIs(self.reference.references_column('other', 'third_column'), False)
+        self.reference.rename_column_references('table', 'third_column', 'first_column')
+        self.assertIs(self.reference.references_column('table', 'first_column'), True)
+        self.assertIs(self.reference.references_column('table', 'third_column'), False)
+        self.reference.rename_column_references('table', 'first_column', 'third_column')
+        self.assertIs(self.reference.references_column('table', 'first_column'), False)
+        self.assertIs(self.reference.references_column('table', 'third_column'), True)
+
+【相关测试 3】
+测试文件：tests/schema/tests.py
+测试名称：SchemaTests.test_rename_column_renames_deferred_sql_references
+测试代码：
+class SchemaTests(TransactionTestCase):
+    def test_rename_column_renames_deferred_sql_references(self):
+        with connection.schema_editor() as editor:
+            editor.create_model(Author)
+            editor.create_model(Book)
+            old_title = Book._meta.get_field('title')
+            new_title = CharField(max_length=100, db_index=True)
+            new_title.set_attributes_from_name('renamed_title')
+            editor.alter_field(Book, old_title, new_title)
+            old_author = Book._meta.get_field('author')
+            new_author = ForeignKey(Author, CASCADE)
+            new_author.set_attributes_from_name('renamed_author')
+            editor.alter_field(Book, old_author, new_author)
+            self.assertGreater(len(editor.deferred_sql), 0)
+            for statement in editor.deferred_sql:
+                self.assertIs(statement.references_column('book', 'title'), False)
+                self.assertIs(statement.references_column('book', 'author_id'), False)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

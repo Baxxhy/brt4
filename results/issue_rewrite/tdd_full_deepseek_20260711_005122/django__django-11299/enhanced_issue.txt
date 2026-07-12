@@ -1,0 +1,150 @@
+instance_id: django__django-11299
+
+issue_summary: 在 SQLite 和 Oracle 上，包含 OR 和 AND 子句组合的 CheckConstraint 会生成带有错误完全限定字段名的 SQL，导致迁移失败。
+
+trigger_condition:
+{
+  "text": "创建一个包含 CheckConstraint 的模型，该约束的检查条件（check）是一个包含 OR 和 AND 子句组合的 Q 对象，然后对该模型执行迁移操作（AddConstraint）。",
+  "evidence": [
+    "Issue 中提供了示例模型 TestConstraint，其约束为 `models.Q(flag__exact=True, field_1__isnull=False) | models.Q(flag__exact=False)`。",
+    "Issue 描述了迁移操作 `migrations.AddConstraint` 会生成错误的 SQL。",
+    "相关测试 1 和 2 展示了使用 `migrations.CreateModel` 或 `migrations.AddConstraint` 操作来添加带有 `CheckConstraint` 的模型。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "迁移执行时，生成的 SQL 语句在 CHECK 约束中错误地包含了完全限定的表名（如 `\"new__app_testconstraint\".\"field_1\"`），导致 ALTER TABLE 操作失败，并抛出 `malformed database schema` 异常，提示列不存在。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中给出了错误的 SQL 片段：`\"new__app_testconstraint\".\"field_1\" IS NOT NULL`。",
+    "Issue 中描述了错误信息：`malformed database schema (app_testconstraint) - no such column: new__app_testconstraint.field_1`。",
+    "相关测试 1 和 2 在验证约束时使用了 `assertRaises(IntegrityError)`，表明约束失败是预期行为，但 Issue 中的失败是迁移过程本身的异常。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "迁移生成的 SQL 语句中，CHECK 约束应使用不包含表名的简单列名（如 `\"field_1\" IS NOT NULL`），从而允许迁移操作成功完成。",
+  "evidence": [
+    "Issue 中给出了正确的 SQL 示例：`CHECK (((\"field_1\" IS NOT NULL AND \"flag\" = 1) OR \"flag\" = 0))`。",
+    "源码片段 5 (SimpleCol) 的文档字符串说明：“Represents the SQL of a column name without the table name... to avoid a syntax error in check constraints.”"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "django.db.models.CheckConstraint",
+    "kind": "class",
+    "source_path": "django/db/models/constraints.py",
+    "reason": "Issue 的核心是关于 CheckConstraint 的行为。"
+  },
+  {
+    "name": "django.db.models.Q",
+    "kind": "class",
+    "source_path": "django/db/models/query_utils.py",
+    "reason": "Issue 中触发问题的约束条件使用 Q 对象构建，且涉及 OR 和 AND 组合。"
+  },
+  {
+    "name": "django.db.migrations.AddConstraint",
+    "kind": "class",
+    "source_path": "django/db/migrations/operations/models.py",
+    "reason": "Issue 中触发错误的操作是迁移中的 AddConstraint。"
+  },
+  {
+    "name": "django.db.models.expressions.Col",
+    "kind": "class",
+    "source_path": "django/db/models/expressions.py",
+    "reason": "Issue 推测问题与 AND 子句使用 Col 有关。"
+  },
+  {
+    "name": "django.db.models.expressions.SimpleCol",
+    "kind": "class",
+    "source_path": "django/db/models/expressions.py",
+    "reason": "Issue 推测问题与 OR 子句使用 SimpleCol 有关，且 SimpleCol 的文档明确说明用于避免检查约束的语法错误。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中，CheckConstraint 的 `check` 参数使用简单的 Q 对象，如 `models.Q(pink__gt=2)`。",
+    "target_pattern": "CheckConstraint 的 `check` 参数应使用包含 OR 和 AND 子句组合的复杂 Q 对象，例如 `models.Q(flag=True, field_1__isnull=False) | models.Q(flag=False)`。",
+    "reason": "Issue 明确指出问题发生在 OR 和 AND 子句组合时，AND 部分可能生成 Col，而 OR 部分生成 SimpleCol，导致 SQL 不一致。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "相似测试通常直接测试已存在模型上的约束，或使用 CreateModel 一次性创建带约束的模型。",
+    "target_pattern": "测试序列应模拟迁移场景：先创建基础模型，然后通过 AddConstraint 操作添加一个包含复杂 Q 对象的 CheckConstraint。",
+    "reason": "Issue 中的错误发生在迁移的 AddConstraint 步骤，该步骤会生成一个包含 `new__` 前缀临时表的 SQL，此时列名限定问题才会暴露。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "sql",
+    "expression_hint": "在 `AddConstraint.database_forwards` 方法执行期间，由 `CheckConstraint.create_sql` 或相关方法生成的 SQL 字符串。",
+    "reason": "Issue 的核心是生成的 SQL 错误。观察最终的 SQL 语句，检查 CHECK 子句中的列名是否被错误地加上了表名前缀。"
+  },
+  {
+    "kind": "exception",
+    "expression_hint": "执行 `schema_editor.execute()` 或迁移操作时捕获的异常。",
+    "reason": "Issue 描述了迁移失败并抛出 `malformed database schema` 异常。捕获此异常是缺陷触发的直接证据。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "在 Q 对象解析为 SQL 表达式树的过程中，观察各个叶子节点是 `Col` 还是 `SimpleCol` 实例。",
+    "reason": "Issue 推测缺陷源于 AND 和 OR 子句使用了不同的列表达式类。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证为 CheckConstraint 生成的 SQL 语句中，CHECK 条件内的列名不应包含表名前缀（如 `\"new__tablename\"`）。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言完整的、具体的 SQL 字符串相等，因为表名可能因测试环境而异。",
+    "reason": "Issue 的根源是错误地添加了表名前缀。断言列名不包含表名前缀是稳定且与问题核心对齐的验证方式。"
+  },
+  {
+    "assertion_goal": "验证执行包含复杂 OR/AND 约束的迁移操作不会抛出 `malformed database schema` 或类似的异常。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言不抛出任何异常，因为约束本身可能因数据无效而引发 IntegrityError，这是正常行为。",
+    "reason": "需要区分迁移过程本身的失败（缺陷）和约束逻辑执行时的失败（预期行为）。应断言迁移步骤（如 `database_forwards`）成功完成。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用支持表级 CHECK 约束的数据库后端进行测试，例如 SQLite（Issue 中提到的）或 PostgreSQL。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试应继承自类似 `OperationTestBase` 的类，以管理迁移状态和数据库连接。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要创建一个临时的 Django 应用和模型来模拟 Issue 中的场景。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "缺陷是否在所有数据库后端（如 Oracle）上以相同方式触发，还是仅限 SQLite。",
+  "Q 对象中 AND 和 OR 的具体嵌套结构是否是触发缺陷的必要条件，还是任何包含 OR 的复杂 Q 对象都会有问题。",
+  "在 `CreateModel` 操作中直接包含约束（而非后续 `AddConstraint`）是否也会触发同一缺陷。",
+  "Col 和 SimpleCol 的选择逻辑具体在代码的哪个位置，以及 OR 连接符如何影响该逻辑。"
+]

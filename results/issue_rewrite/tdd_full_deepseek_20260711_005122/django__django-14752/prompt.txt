@@ -1,0 +1,498 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Refactor AutocompleteJsonView to support extra fields in autocomplete response
+Description
+	 
+		(last modified by mrts)
+	 
+Adding data attributes to items in ordinary non-autocomplete foreign key fields that use forms.widgets.Select-based widgets is relatively easy. This enables powerful and dynamic admin site customizations where fields from related models are updated immediately when users change the selected item.
+However, adding new attributes to autocomplete field results currently requires extending contrib.admin.views.autocomplete.AutocompleteJsonView and fully overriding the AutocompleteJsonView.get() method. Here's an example:
+class MyModelAdmin(admin.ModelAdmin):
+	def get_urls(self):
+		return [
+			path('autocomplete/', CustomAutocompleteJsonView.as_view(admin_site=self.admin_site))
+			if url.pattern.match('autocomplete/')
+			else url for url in super().get_urls()
+		]
+class CustomAutocompleteJsonView(AutocompleteJsonView):
+	def get(self, request, *args, **kwargs):
+		self.term, self.model_admin, self.source_field, to_field_name = self.process_request(request)
+		if not self.has_perm(request):
+			raise PermissionDenied
+		self.object_list = self.get_queryset()
+		context = self.get_context_data()
+		return JsonResponse({
+			'results': [
+				{'id': str(getattr(obj, to_field_name)), 'text': str(obj), 'notes': obj.notes} # <-- customization here
+				for obj in context['object_list']
+			],
+			'pagination': {'more': context['page_obj'].has_next()},
+		})
+The problem with this is that as AutocompleteJsonView.get() keeps evolving, there's quite a lot of maintenance overhead required to catch up.
+The solutions is simple, side-effect- and risk-free: adding a result customization extension point to get() by moving the lines that construct the results inside JsonResponse constructor to a separate method. So instead of
+		return JsonResponse({
+			'results': [
+				{'id': str(getattr(obj, to_field_name)), 'text': str(obj)}
+				for obj in context['object_list']
+			],
+			'pagination': {'more': context['page_obj'].has_next()},
+		})
+there would be
+		return JsonResponse({
+			'results': [
+				self.serialize_result(obj, to_field_name) for obj in context['object_list']
+			],
+			'pagination': {'more': context['page_obj'].has_next()},
+		})
+where serialize_result() contains the original object to dictionary conversion code that would be now easy to override:
+def serialize_result(self, obj, to_field_name):
+	return {'id': str(getattr(obj, to_field_name)), 'text': str(obj)}
+The example CustomAutocompleteJsonView from above would now become succinct and maintainable:
+class CustomAutocompleteJsonView(AutocompleteJsonView):
+	def serialize_result(self, obj, to_field_name):
+		return super.serialize_result(obj, to_field_name) | {'notes': obj.notes}
+What do you think, is this acceptable? I'm more than happy to provide the patch.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/contrib/admin/views/autocomplete.py
+对象名称：AutocompleteJsonView
+节点类型：class
+父节点：autocomplete
+行号范围：7-102
+代码：
+class AutocompleteJsonView(BaseListView):
+    """Handle AutocompleteWidget's AJAX requests for data."""
+    paginate_by = 20
+    admin_site = None
+    def get(self, request, *args, **kwargs):
+    def get_paginator(self, *args, **kwargs):
+    def get_queryset(self):
+    def process_request(self, request):
+    def has_perm(self, request, obj=None):
+
+
+【源码片段 2】
+文件路径：django/views/generic/base.py
+对象名称：as_view
+节点类型：class_function
+父节点：View
+行号范围：48-83
+代码：
+    def as_view(cls, **initkwargs):
+        """Main entry point for a request-response process."""
+        for key in initkwargs:
+            if key in cls.http_method_names:
+                raise TypeError(
+                    'The method name %s is not accepted as a keyword argument '
+                    'to %s().' % (key, cls.__name__)
+                )
+            if not hasattr(cls, key):
+                raise TypeError("%s() received an invalid keyword %r. as_view "
+                                "only accepts arguments that are already "
+                                "attributes of the class." % (cls.__name__, key))
+
+        def view(request, *args, **kwargs):
+            self = cls(**initkwargs)
+            self.setup(request, *args, **kwargs)
+            if not hasattr(self, 'request'):
+                raise AttributeError(
+                    "%s instance has no 'request' attribute. Did you override "
+                    "setup() and forget to call super()?" % cls.__name__
+                )
+            return self.dispatch(request, *args, **kwargs)
+        view.view_class = cls
+        view.view_initkwargs = initkwargs
+
+        # __name__ and __qualname__ are intentionally left unchanged as
+        # view_class should be used to robustly determine the name of the view
+        # instead.
+        view.__doc__ = cls.__doc__
+        view.__module__ = cls.__module__
+        view.__annotations__ = cls.dispatch.__annotations__
+        # Copy possible attributes set by decorators, e.g. @csrf_exempt, from
+        # the dispatch method.
+        view.__dict__.update(cls.dispatch.__dict__)
+
+        return view
+
+
+【源码片段 3】
+文件路径：django/contrib/admin/views/autocomplete.py
+对象名称：get
+节点类型：class_function
+父节点：AutocompleteJsonView
+行号范围：12-33
+代码：
+    def get(self, request, *args, **kwargs):
+        """
+        Return a JsonResponse with search results of the form:
+        {
+            results: [{id: "123" text: "foo"}],
+            pagination: {more: true}
+        }
+        """
+        self.term, self.model_admin, self.source_field, to_field_name = self.process_request(request)
+
+        if not self.has_perm(request):
+            raise PermissionDenied
+
+        self.object_list = self.get_queryset()
+        context = self.get_context_data()
+        return JsonResponse({
+            'results': [
+                {'id': str(getattr(obj, to_field_name)), 'text': str(obj)}
+                for obj in context['object_list']
+            ],
+            'pagination': {'more': context['page_obj'].has_next()},
+        })
+
+
+【源码片段 4】
+文件路径：django/http/response.py
+对象名称：JsonResponse
+节点类型：class
+父节点：response
+行号范围：582-607
+代码：
+class JsonResponse(HttpResponse):
+    """
+    An HTTP response class that consumes data to be serialized to JSON.
+
+    :param data: Data to be dumped into json. By default only ``dict`` objects
+      are allowed to be passed due to a security flaw before ECMAScript 5. See
+      the ``safe`` parameter for more information.
+    :param encoder: Should be a json encoder class. Defaults to
+      ``django.core.serializers.json.DjangoJSONEncoder``.
+    :param safe: Controls if only ``dict`` objects may be serialized. Defaults
+      to ``True``.
+    :param json_dumps_params: A dictionary of kwargs passed to json.dumps().
+    """
+    def __init__(self, data, encoder=DjangoJSONEncoder, safe=True,
+                 json_dumps_params=None, **kwargs):
+
+
+【源码片段 5】
+文件路径：django/contrib/admin/options.py
+对象名称：get_urls
+节点类型：class_function
+父节点：ModelAdmin
+行号范围：617-638
+代码：
+    def get_urls(self):
+        from django.urls import path
+
+        def wrap(view):
+            def wrapper(*args, **kwargs):
+                return self.admin_site.admin_view(view)(*args, **kwargs)
+            wrapper.model_admin = self
+            return update_wrapper(wrapper, view)
+
+        info = self.model._meta.app_label, self.model._meta.model_name
+
+        return [
+            path('', wrap(self.changelist_view), name='%s_%s_changelist' % info),
+            path('add/', wrap(self.add_view), name='%s_%s_add' % info),
+            path('<path:object_id>/history/', wrap(self.history_view), name='%s_%s_history' % info),
+            path('<path:object_id>/delete/', wrap(self.delete_view), name='%s_%s_delete' % info),
+            path('<path:object_id>/change/', wrap(self.change_view), name='%s_%s_change' % info),
+            # For backwards compatibility (was the change url before 1.9)
+            path('<path:object_id>/', wrap(RedirectView.as_view(
+                pattern_name='%s:%s_%s_change' % ((self.admin_site.name,) + info)
+            ))),
+        ]
+
+
+【源码片段 6】
+文件路径：django/contrib/admin/views/autocomplete.py
+对象名称：process_request
+节点类型：class_function
+父节点：AutocompleteJsonView
+行号范围：48-98
+代码：
+    def process_request(self, request):
+        """
+        Validate request integrity, extract and return request parameters.
+
+        Since the subsequent view permission check requires the target model
+        admin, which is determined here, raise PermissionDenied if the
+        requested app, model or field are malformed.
+
+        Raise Http404 if the target model admin is not configured properly with
+        search_fields.
+        """
+        term = request.GET.get('term', '')
+        try:
+            app_label = request.GET['app_label']
+            model_name = request.GET['model_name']
+            field_name = request.GET['field_name']
+        except KeyError as e:
+            raise PermissionDenied from e
+
+        # Retrieve objects from parameters.
+        try:
+            source_model = apps.get_model(app_label, model_name)
+        except LookupError as e:
+            raise PermissionDenied from e
+
+        try:
+            source_field = source_model._meta.get_field(field_name)
+        except FieldDoesNotExist as e:
+            raise PermissionDenied from e
+        try:
+            remote_model = source_field.remote_field.model
+        except AttributeError as e:
+            raise PermissionDenied from e
+        try:
+            model_admin = self.admin_site._registry[remote_model]
+        except KeyError as e:
+            raise PermissionDenied from e
+
+        # Validate suitability of objects.
+        if not model_admin.get_search_fields(request):
+            raise Http404(
+                '%s must have search_fields for the autocomplete_view.' %
+                type(model_admin).__qualname__
+            )
+
+        to_field_name = getattr(source_field.remote_field, 'field_name', remote_model._meta.pk.attname)
+        to_field_name = remote_model._meta.get_field(to_field_name).attname
+        if not model_admin.to_field_allowed(request, to_field_name):
+            raise PermissionDenied
+
+        return term, model_admin, source_field, to_field_name
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/admin_views/test_autocomplete_view.py
+测试名称：AutocompleteJsonViewTests.test_success
+测试代码：
+class AutocompleteJsonViewTests(AdminViewBasicTestCase):
+    def test_success(self):
+        q = Question.objects.create(question='Is this a question?')
+        request = self.factory.get(self.url, {'term': 'is', **self.opts})
+        request.user = self.superuser
+        response = AutocompleteJsonView.as_view(**self.as_view_args)(request)
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content.decode('utf-8'))
+        self.assertEqual(data, {
+            'results': [{'id': str(q.pk), 'text': q.question}],
+            'pagination': {'more': False},
+        })
+
+【相关测试 2】
+测试文件：tests/admin_views/test_autocomplete_view.py
+测试名称：AutocompleteJsonViewTests.test_custom_to_field
+测试代码：
+class AutocompleteJsonViewTests(AdminViewBasicTestCase):
+    def test_custom_to_field(self):
+        q = Question.objects.create(question='Is this a question?')
+        request = self.factory.get(self.url, {'term': 'is', **self.opts, 'field_name': 'question_with_to_field'})
+        request.user = self.superuser
+        response = AutocompleteJsonView.as_view(**self.as_view_args)(request)
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content.decode('utf-8'))
+        self.assertEqual(data, {
+            'results': [{'id': str(q.uuid), 'text': q.question}],
+            'pagination': {'more': False},
+        })
+
+【相关测试 3】
+测试文件：tests/admin_views/test_autocomplete_view.py
+测试名称：AutocompleteJsonViewTests.test_custom_to_field_custom_pk
+测试代码：
+class AutocompleteJsonViewTests(AdminViewBasicTestCase):
+    def test_custom_to_field_custom_pk(self):
+        q = Question.objects.create(question='Is this a question?')
+        opts = {
+            'app_label': Question._meta.app_label,
+            'model_name': Question._meta.model_name,
+            'field_name': 'related_questions',
+        }
+        request = self.factory.get(self.url, {'term': 'is', **opts})
+        request.user = self.superuser
+        response = AutocompleteJsonView.as_view(**self.as_view_args)(request)
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content.decode('utf-8'))
+        self.assertEqual(data, {
+            'results': [{'id': str(q.big_id), 'text': q.question}],
+            'pagination': {'more': False},
+        })
+
+【相关测试 4】
+测试文件：tests/admin_views/test_autocomplete_view.py
+测试名称：AutocompleteJsonViewTests.test_limit_choices_to
+测试代码：
+class AutocompleteJsonViewTests(AdminViewBasicTestCase):
+    def test_limit_choices_to(self):
+        # Answer.question_with_to_field defines limit_choices_to to "those not
+        # starting with 'not'".
+        q = Question.objects.create(question='Is this a question?')
+        Question.objects.create(question='Not a question.')
+        request = self.factory.get(self.url, {'term': 'is', **self.opts, 'field_name': 'question_with_to_field'})
+        request.user = self.superuser
+        response = AutocompleteJsonView.as_view(**self.as_view_args)(request)
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content.decode('utf-8'))
+        self.assertEqual(data, {
+            'results': [{'id': str(q.uuid), 'text': q.question}],
+            'pagination': {'more': False},
+        })
+
+【相关测试 5】
+测试文件：tests/admin_views/test_autocomplete_view.py
+测试名称：AutocompleteJsonViewTests.test_get_paginator
+测试代码：
+class AutocompleteJsonViewTests(AdminViewBasicTestCase):
+    def test_get_paginator(self):
+        """Search results are paginated."""
+        class PKOrderingQuestionAdmin(QuestionAdmin):
+            ordering = ['pk']
+
+        Question.objects.bulk_create(Question(question=str(i)) for i in range(PAGINATOR_SIZE + 10))
+        # The first page of results.
+        request = self.factory.get(self.url, {'term': '', **self.opts})
+        request.user = self.superuser
+        with model_admin(Question, PKOrderingQuestionAdmin):
+            response = AutocompleteJsonView.as_view(**self.as_view_args)(request)
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content.decode('utf-8'))
+        self.assertEqual(data, {
+            'results': [{'id': str(q.pk), 'text': q.question} for q in Question.objects.all()[:PAGINATOR_SIZE]],
+            'pagination': {'more': True},
+        })
+        # The second page of results.
+        request = self.factory.get(self.url, {'term': '', 'page': '2', **self.opts})
+        request.user = self.superuser
+        with model_admin(Question, PKOrderingQuestionAdmin):
+            response = AutocompleteJsonView.as_view(**self.as_view_args)(request)
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content.decode('utf-8'))
+        self.assertEqual(data, {
+            'results': [{'id': str(q.pk), 'text': q.question} for q in Question.objects.all()[PAGINATOR_SIZE:]],
+            'pagination': {'more': False},
+        })
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

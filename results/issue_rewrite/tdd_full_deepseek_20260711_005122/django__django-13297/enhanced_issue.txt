@@ -1,0 +1,147 @@
+instance_id: django__django-13297
+
+issue_summary: Django 3.1 中 TemplateView.get_context_data() 的 kwargs 返回 SimpleLazyObject 类型，导致在数据库查询时崩溃。
+
+trigger_condition:
+{
+  "text": "使用 TemplateView 子类，在 get_context_data 方法中从 kwargs 获取 URL 参数（如 slug），并将该参数直接传递给 get_object_or_404 进行数据库查询。",
+  "evidence": [
+    "Issue 中提供的 OfferView 示例代码，其中 offer_slug = kwargs.get(\"offer_slug\", \"\")，然后 offer = get_object_or_404(Account, slug=offer_slug)。",
+    "Issue 中说明 URL 配置为 path(\"/offers/<slug:offer_slug>/\", OfferView.as_view(), name=\"offer_view\")。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "数据库查询时出现类型错误，具体为 SQLite 后端在绑定参数时抛出异常：'Error binding parameter 0 - probably unsupported type'。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中给出的错误信息：'Error binding parameter 0 - probably unsupported type' from django/db/backends/sqlite3/operations.py, line 144, in _quote_params_for_last_executed_query。",
+    "Issue 中说明 offer_slug 在 Django 3.1 中是 SimpleLazyObject 类型。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "从 TemplateView.get_context_data() 的 kwargs 中获取的 URL 参数（如 slug）应能直接作为字符串类型用于 get_object_or_404 等数据库查询函数，无需显式转换。",
+  "evidence": [
+    "Issue 中说明在 Django 3.0 中代码正常工作，无需显式转换。",
+    "Issue 中说明通过显式调用 str(offer_slug) 可以解决问题，暗示期望行为是参数能自动解析为字符串。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "TemplateView.get_context_data",
+    "kind": "method",
+    "source_path": "django/views/generic/base.py",
+    "reason": "Issue 的核心是该方法返回的 kwargs 参数值类型发生了变化。"
+  },
+  {
+    "name": "get_object_or_404",
+    "kind": "function",
+    "source_path": "django/shortcuts.py",
+    "reason": "Issue 中崩溃发生在将 SimpleLazyObject 传递给此函数进行数据库查询时。"
+  },
+  {
+    "name": "SimpleLazyObject",
+    "kind": "class",
+    "source_path": "django/utils/functional.py",
+    "reason": "Issue 中指出的导致问题的类型。"
+  },
+  {
+    "name": "TemplateView.get",
+    "kind": "method",
+    "source_path": "django/views/generic/base.py",
+    "reason": "它调用 get_context_data 并传递了经过 _wrap_url_kwargs_with_deprecation_warning 处理的 kwargs。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "相似测试中，传递给 get_context_data 或从 URL 解析的参数可能是普通字符串。",
+    "target_pattern": "传递给 get_context_data 的 kwargs 中的值应为 SimpleLazyObject 类型（模拟 Django 3.1 行为）。",
+    "reason": "Issue 表明在 Django 3.1 中，kwargs 中的值变成了 SimpleLazyObject，导致后续数据库查询失败。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "测试可能直接调用视图的 get_context_data 并传入普通字典。",
+    "target_pattern": "应模拟完整的请求处理链，通过 client.get 访问配置了 slug 参数的 URL，使得 kwargs 经过 _wrap_url_kwargs_with_deprecation_warning 处理。",
+    "reason": "SimpleLazyObject 可能是在 URL 解析和参数传递过程中被引入的，需要完整的调用链才能复现。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "type",
+    "expression_hint": "type(kwargs.get('offer_slug')) 或 type(context['offer_slug'])",
+    "reason": "Issue 的核心是参数类型从字符串变成了 SimpleLazyObject。"
+  },
+  {
+    "kind": "exception",
+    "expression_hint": "调用 get_object_or_404(Account, slug=offer_slug) 时是否抛出异常",
+    "reason": "Issue 中观察到的错误现象是数据库查询时抛出异常。"
+  },
+  {
+    "kind": "sql",
+    "expression_hint": "由 get_object_or_404 触发的 SQL 查询及其参数绑定",
+    "reason": "错误信息指向 SQL 参数绑定失败，观察生成的 SQL 和参数类型有助于诊断。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "从 get_context_data 的 kwargs 中获取的 URL 参数，在传递给 get_object_or_404 时，不应引发类型错误异常，且查询应成功返回对象。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的 SQL 字符串或完整的异常消息，因为这些可能因数据库后端或 Django 版本而异。",
+    "reason": "Issue 的期望行为是参数能像字符串一样工作，因此断言查询成功（如返回对象非空或状态码为 200）是稳定且与语义对齐的。"
+  },
+  {
+    "assertion_goal": "传递给 get_object_or_404 的 slug 参数的类型应能被数据库后端正确处理（或隐式转换为字符串）。",
+    "preferred_assertion_style": "isinstance",
+    "avoid": "断言参数必须是 str 类型，因为修复可能允许 SimpleLazyObject 但能正确工作。",
+    "reason": "修复可能使 SimpleLazyObject 在数据库查询中透明工作，因此断言焦点是功能正常而非严格类型。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 TestCase 和 Client 来模拟 HTTP 请求，以触发完整的 URL 解析和视图调用链。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要配置 ROOT_URLCONF 来定义包含 slug 参数的 URL 模式。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要在数据库中创建测试用的模型实例（如 Account 或 Author），并设置 slug 字段。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要针对 Django 3.1 的特定行为进行测试，但测试框架本身应版本无关。",
+    "source": "issue",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "SimpleLazyObject 是在哪个具体步骤被引入到 kwargs 中的（是 _wrap_url_kwargs_with_deprecation_warning 还是其他中间件/解析器）。",
+  "除了 SQLite 后端，其他数据库后端（如 PostgreSQL, MySQL）是否会有相同的行为和错误信息。",
+  "是否所有从 URL 捕获的参数（如 int, uuid, path）都会变成 SimpleLazyObject，还是仅限 slug 或字符串转换器。",
+  "修复后的正确行为是 kwargs 中的值自动解析为字符串，还是 get_object_or_404 等函数能处理 SimpleLazyObject。"
+]

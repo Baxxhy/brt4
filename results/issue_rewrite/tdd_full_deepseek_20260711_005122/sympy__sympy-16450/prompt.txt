@@ -1,0 +1,543 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Posify ignores is_finite assmptions
+Posify removes a finite assumption from a symbol:
+```julia
+In [1]: x = Symbol('x', finite=True)                                                                                                           
+
+In [2]: x._assumptions                                                                                                                         
+Out[2]: {'finite': True, 'infinite': False, 'commutative': True}
+
+In [3]: x.is_finite                                                                                                                            
+Out[3]: True
+
+In [4]: xp, _ = posify(x)                                                                                                                      
+
+In [5]: xp._assumptions                                                                                                                        
+Out[5]: 
+{'positive': True,
+ 'real': True,
+ 'hermitian': True,
+ 'imaginary': False,
+ 'negative': False,
+ 'nonnegative': True,
+ 'nonzero': True,
+ 'zero': False,
+ 'complex': True,
+ 'nonpositive': False,
+ 'commutative': True}
+
+In [6]: xp.is_finite                                                                                                                           
+
+In [7]: print(xp.is_finite)                                                                                                                    
+None
+```
+I think that posify should preserve the finiteness assumption. Possibly other assumptions should be preserved as well (integer, rational, prime, even, odd...).
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/simplify/simplify.py
+对象名称：posify
+节点类型：top-level function
+父节点：simplify
+行号范围：202-257
+代码：
+def posify(eq):
+    """Return eq (with generic symbols made positive) and a
+    dictionary containing the mapping between the old and new
+    symbols.
+
+    Any symbol that has positive=None will be replaced with a positive dummy
+    symbol having the same name. This replacement will allow more symbolic
+    processing of expressions, especially those involving powers and
+    logarithms.
+
+    A dictionary that can be sent to subs to restore eq to its original
+    symbols is also returned.
+
+    >>> from sympy import posify, Symbol, log, solve
+    >>> from sympy.abc import x
+    >>> posify(x + Symbol('p', positive=True) + Symbol('n', negative=True))
+    (_x + n + p, {_x: x})
+
+    >>> eq = 1/x
+    >>> log(eq).expand()
+    log(1/x)
+    >>> log(posify(eq)[0]).expand()
+    -log(_x)
+    >>> p, rep = posify(eq)
+    >>> log(p).expand().subs(rep)
+    -log(x)
+
+    It is possible to apply the same transformations to an iterable
+    of expressions:
+
+    >>> eq = x**2 - 4
+    >>> solve(eq, x)
+    [-2, 2]
+    >>> eq_x, reps = posify([eq, x]); eq_x
+    [_x**2 - 4, _x]
+    >>> solve(*eq_x)
+    [2]
+    """
+    eq = sympify(eq)
+    if iterable(eq):
+        f = type(eq)
+        eq = list(eq)
+        syms = set()
+        for e in eq:
+            syms = syms.union(e.atoms(Symbol))
+        reps = {}
+        for s in syms:
+            reps.update(dict((v, k) for k, v in posify(s)[1].items()))
+        for i, e in enumerate(eq):
+            eq[i] = e.subs(reps)
+        return f(eq), {r: s for s, r in reps.items()}
+
+    reps = {s: Dummy(s.name, positive=True)
+                 for s in eq.free_symbols if s.is_positive is None}
+    eq = eq.subs(reps)
+    return eq, {r: s for s, r in reps.items()}
+
+
+【源码片段 2】
+文件路径：sympy/assumptions/tests/test_query.py
+对象名称：Symbol
+节点类型：class_function
+父节点：MyAskHandler
+行号范围：2037-2038
+代码：
+        def Symbol(expr, assumptions):
+            return True
+
+
+【源码片段 3】
+文件路径：sympy/assumptions/ask.py
+对象名称：finite
+节点类型：class_function
+父节点：AssumptionKeys
+行号范围：329-357
+代码：
+    def finite(self):
+        """
+        Finite predicate.
+
+        ``Q.finite(x)`` is true if ``x`` is neither an infinity
+        nor a ``NaN``. In other words, ``ask(Q.finite(x))`` is true for all ``x``
+        having a bounded absolute value.
+
+        Examples
+        ========
+
+        >>> from sympy import Q, ask, Symbol, S, oo, I
+        >>> x = Symbol('x')
+        >>> ask(Q.finite(S.NaN))
+        False
+        >>> ask(Q.finite(oo))
+        False
+        >>> ask(Q.finite(1))
+        True
+        >>> ask(Q.finite(2 + 3*I))
+        True
+
+        References
+        ==========
+
+        .. [1] https://en.wikipedia.org/wiki/Finite
+
+        """
+        return Predicate('finite')
+
+
+【源码片段 4】
+文件路径：sympy/assumptions/ask.py
+对象名称：positive
+节点类型：class_function
+父节点：AssumptionKeys
+行号范围：396-431
+代码：
+    def positive(self):
+        r"""
+        Positive real number predicate.
+
+        ``Q.positive(x)`` is true iff ``x`` is real and `x > 0`, that is if ``x``
+        is in the interval `(0, \infty)`.  In particular, infinity is not
+        positive.
+
+        A few important facts about positive numbers:
+
+        - Note that ``Q.nonpositive`` and ``~Q.positive`` are *not* the same
+          thing. ``~Q.positive(x)`` simply means that ``x`` is not positive,
+          whereas ``Q.nonpositive(x)`` means that ``x`` is real and not
+          positive, i.e., ``Q.nonpositive(x)`` is logically equivalent to
+          `Q.negative(x) | Q.zero(x)``.  So for example, ``~Q.positive(I)`` is
+          true, whereas ``Q.nonpositive(I)`` is false.
+
+        - See the documentation of ``Q.real`` for more information about
+          related facts.
+
+        Examples
+        ========
+
+        >>> from sympy import Q, ask, symbols, I
+        >>> x = symbols('x')
+        >>> ask(Q.positive(x), Q.real(x) & ~Q.negative(x) & ~Q.zero(x))
+        True
+        >>> ask(Q.positive(1))
+        True
+        >>> ask(Q.nonpositive(I))
+        False
+        >>> ask(~Q.positive(I))
+        True
+
+        """
+        return Predicate('positive')
+
+
+【源码片段 5】
+文件路径：sympy/assumptions/ask.py
+对象名称：real
+节点类型：class_function
+父节点：AssumptionKeys
+行号范围：72-126
+代码：
+    def real(self):
+        r"""
+        Real number predicate.
+
+        ``Q.real(x)`` is true iff ``x`` is a real number, i.e., it is in the
+        interval `(-\infty, \infty)`.  Note that, in particular the infinities
+        are not real. Use ``Q.extended_real`` if you want to consider those as
+        well.
+
+        A few important facts about reals:
+
+        - Every real number is positive, negative, or zero.  Furthermore,
+          because these sets are pairwise disjoint, each real number is exactly
+          one of those three.
+
+        - Every real number is also complex.
+
+        - Every real number is finite.
+
+        - Every real number is either rational or irrational.
+
+        - Every real number is either algebraic or transcendental.
+
+        - The facts ``Q.negative``, ``Q.zero``, ``Q.positive``,
+          ``Q.nonnegative``, ``Q.nonpositive``, ``Q.nonzero``, ``Q.integer``,
+          ``Q.rational``, and ``Q.irrational`` all imply ``Q.real``, as do all
+          facts that imply those facts.
+
+        - The facts ``Q.algebraic``, and ``Q.transcendental`` do not imply
+          ``Q.real``; they imply ``Q.complex``. An algebraic or transcendental
+          number may or may not be real.
+
+        - The "non" facts (i.e., ``Q.nonnegative``, ``Q.nonzero``,
+          ``Q.nonpositive`` and ``Q.noninteger``) are not equivalent to not the
+          fact, but rather, not the fact *and* ``Q.real``.  For example,
+          ``Q.nonnegative`` means ``~Q.negative & Q.real``. So for example,
+          ``I`` is not nonnegative, nonzero, or nonpositive.
+
+        Examples
+        ========
+
+        >>> from sympy import Q, ask, symbols
+        >>> x = symbols('x')
+        >>> ask(Q.real(x), Q.positive(x))
+        True
+        >>> ask(Q.real(0))
+        True
+
+        References
+        ==========
+
+        .. [1] https://en.wikipedia.org/wiki/Real_number
+
+        """
+        return Predicate('real')
+
+
+【源码片段 6】
+文件路径：sympy/assumptions/ask.py
+对象名称：hermitian
+节点类型：class_function
+父节点：AssumptionKeys
+行号范围：37-51
+代码：
+    def hermitian(self):
+        """
+        Hermitian predicate.
+
+        ``ask(Q.hermitian(x))`` is true iff ``x`` belongs to the set of
+        Hermitian operators.
+
+        References
+        ==========
+
+        .. [1] http://mathworld.wolfram.com/HermitianOperator.html
+
+        """
+        # TODO: Add examples
+        return Predicate('hermitian')
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/simplify/tests/test_simplify.py
+测试名称：test_posify
+测试代码：
+def test_posify():
+    from sympy.abc import x
+
+    assert str(posify(
+        x +
+        Symbol('p', positive=True) +
+        Symbol('n', negative=True))) == '(_x + n + p, {_x: x})'
+
+    eq, rep = posify(1/x)
+    assert log(eq).expand().subs(rep) == -log(x)
+    assert str(posify([x, 1 + x])) == '([_x, _x + 1], {_x: x})'
+
+    x = symbols('x')
+    p = symbols('p', positive=True)
+    n = symbols('n', negative=True)
+    orig = [x, n, p]
+    modified, reps = posify(orig)
+    assert str(modified) == '[_x, n, p]'
+    assert [w.subs(reps) for w in modified] == orig
+
+    assert str(Integral(posify(1/x + y)[0], (y, 1, 3)).expand()) == \
+        'Integral(1/_x, (y, 1, 3)) + Integral(_y, (y, 1, 3))'
+    assert str(Sum(posify(1/x**n)[0], (n,1,3)).expand()) == \
+        'Sum(_x**(-n), (n, 1, 3))'
+
+【相关测试 2】
+测试文件：sympy/core/tests/test_noncommutative.py
+测试名称：test_posify
+测试代码：
+def test_posify():
+    assert posify(A)[0].is_commutative is False
+    for q in (A*B/A, (A*B/A)**2, (A*B)**2, A*B - B*A):
+        p = posify(q)
+        assert p[0].subs(p[1]) == q
+
+【相关测试 3】
+测试文件：sympy/assumptions/tests/test_query.py
+测试名称：test_float_1
+测试代码：
+def test_float_1():
+    z = 1.0
+    assert ask(Q.commutative(z)) is True
+    assert ask(Q.integer(z)) is False
+    assert ask(Q.rational(z)) is None
+    assert ask(Q.real(z)) is True
+    assert ask(Q.complex(z)) is True
+    assert ask(Q.irrational(z)) is None
+    assert ask(Q.imaginary(z)) is False
+    assert ask(Q.positive(z)) is True
+    assert ask(Q.negative(z)) is False
+    assert ask(Q.even(z)) is False
+    assert ask(Q.odd(z)) is False
+    assert ask(Q.finite(z)) is True
+    assert ask(Q.prime(z)) is False
+    assert ask(Q.composite(z)) is False
+    assert ask(Q.hermitian(z)) is True
+    assert ask(Q.antihermitian(z)) is False
+
+    z = 7.2123
+    assert ask(Q.commutative(z)) is True
+    assert ask(Q.integer(z)) is False
+    assert ask(Q.rational(z)) is None
+    assert ask(Q.real(z)) is True
+    assert ask(Q.complex(z)) is True
+    assert ask(Q.irrational(z)) is None
+    assert ask(Q.imaginary(z)) is False
+    assert ask(Q.positive(z)) is True
+    assert ask(Q.negative(z)) is False
+    assert ask(Q.even(z)) is False
+    assert ask(Q.odd(z)) is False
+    assert ask(Q.finite(z)) is True
+    assert ask(Q.prime(z)) is False
+    assert ask(Q.composite(z)) is False
+    assert ask(Q.hermitian(z)) is True
+    assert ask(Q.antihermitian(z)) is False
+
+    # test for issue #12168
+    assert ask(Q.rational(math.pi)) is None
+
+【相关测试 4】
+测试文件：sympy/assumptions/tests/test_sathandlers.py
+测试名称：test_CheckOldAssump
+测试代码：
+def test_CheckOldAssump():
+    # TODO: Make these tests more complete
+
+    class Test1(Expr):
+        def _eval_is_positive(self):
+            return True
+        def _eval_is_negative(self):
+            return False
+
+    class Test2(Expr):
+        def _eval_is_finite(self):
+            return True
+        def _eval_is_positive(self):
+            return True
+        def _eval_is_negative(self):
+            return False
+
+    t1 = Test1()
+    t2 = Test2()
+
+    # We can't say if it's positive or negative in the old assumptions without
+    # bounded. Remember, True means "no new knowledge", and
+    # Q.positive(t2) means "t2 is positive."
+    assert CheckOldAssump(Q.positive(t1)) == True
+    assert CheckOldAssump(Q.negative(t1)) == ~Q.negative(t1)
+
+    assert CheckOldAssump(Q.positive(t2)) == Q.positive(t2)
+    assert CheckOldAssump(Q.negative(t2)) == ~Q.negative(t2)
+
+【相关测试 5】
+测试文件：sympy/core/tests/test_arit.py
+测试名称：test_Pow_is_finite
+测试代码：
+def test_Pow_is_finite():
+    x = Symbol('x', real=True)
+    p = Symbol('p', positive=True)
+    n = Symbol('n', negative=True)
+
+    assert (x**2).is_finite is None  # x could be oo
+    assert (x**x).is_finite is None  # ditto
+    assert (p**x).is_finite is None  # ditto
+    assert (n**x).is_finite is None  # ditto
+    assert (1/S.Pi).is_finite
+    assert (sin(x)**2).is_finite is True
+    assert (sin(x)**x).is_finite is None
+    assert (sin(x)**exp(x)).is_finite is None
+    assert (1/sin(x)).is_finite is None  # if zero, no, otherwise yes
+    assert (1/exp(x)).is_finite is None  # x could be -oo
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

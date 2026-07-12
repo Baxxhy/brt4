@@ -1,0 +1,241 @@
+{
+  "instance_id": "pytest-dev__pytest-6202",
+  "issue_summary": "pytest 在生成测试报告标题时，错误地将参数化测试名中的 '.[' 替换为 '['，导致显示错误。",
+  "trigger_condition": {
+    "text": "当参数化测试的参数值包含 '.[' 子字符串时，例如参数值为 '..['。",
+    "evidence": [
+      "Issue 中提供的失败报告显示测试名为 'test_boo[..[]'，但标题显示为 'test_boo[.[]'。",
+      "Issue 中用户指出参数化值为 '..['。",
+      "源码片段 5 显示 `getmodpath` 方法返回 `s.replace(\".[\", \"[\")`。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "测试报告标题中显示的测试名称不正确，'..[' 被错误地替换为 '.['。",
+    "symptom_type": "serialization_error",
+    "evidence": [
+      "Issue 中提供的失败报告输出显示 'test_boo[..[]' 被显示为 'test_boo[.[]'。",
+      "Issue 中提到该问题也导致 vscode-python 测试发现错误。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "测试报告标题应正确显示参数化测试的完整名称，不应对 '.[' 进行替换。",
+    "evidence": [
+      "Issue 中用户建议将 `return s.replace(\".[\", \"[\")` 改为 `return s` 以解决问题。",
+      "Issue 中用户表示修改后通过了所有测试。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "PyobjMixin.getmodpath",
+      "kind": "method",
+      "source_path": "src/_pytest/python.py",
+      "reason": "Issue 中追踪到问题根源在于此方法中的字符串替换操作。"
+    },
+    {
+      "name": "PyobjMixin.reportinfo",
+      "kind": "method",
+      "source_path": "src/_pytest/python.py",
+      "reason": "此方法调用 `getmodpath` 来生成报告信息。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "src/_pytest/python.py",
+      "object": "PyobjMixin.getmodpath",
+      "lines": "271-289",
+      "reason": "Issue 明确指出 `return s.replace(\".[\", \"[\")` 这行代码导致了问题。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_escaped_parametrized_names_xml",
+      "test_file": "testing/test_junitxml.py",
+      "why_relevant": "该测试涉及参数化测试名称的转义和序列化，与 Issue 中测试报告标题生成相关。",
+      "reusable_parts": [
+        "使用 `@pytest.mark.parametrize` 创建参数化测试",
+        "使用 `testdir` fixture 创建测试文件",
+        "断言测试用例名称"
+      ],
+      "possible_gap": "该测试关注 XML 输出中的转义，而 Issue 是关于控制台报告标题中的字符串替换。"
+    },
+    {
+      "test_name": "test_keyword_option_parametrize",
+      "test_file": "testing/test_mark.py",
+      "why_relevant": "该测试涉及参数化测试名称的生成和匹配，与 Issue 中测试名称的显示问题相关。",
+      "reusable_parts": [
+        "使用 `@pytest.mark.parametrize` 创建参数化测试",
+        "使用 `testdir` fixture 和 `inline_run`",
+        "断言生成的测试节点ID"
+      ],
+      "possible_gap": "该测试的参数值不包含 '.[' 字符串，因此不会触发特定替换。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "参数化值为普通字符串，如 '\\x00'、None、1.3、'2-3'。",
+      "target_pattern": "参数化值包含 '.[' 子字符串，例如 '..['。",
+      "reason": "Issue 显示当参数值包含 '.[' 时，`getmodpath` 中的替换逻辑会被错误触发。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "str",
+      "expression_hint": "测试报告标题字符串，例如通过 `pytest` 运行后捕获的 `stdout` 中的失败标题行。",
+      "reason": "Issue 中的错误现象直接体现在报告标题的字符串内容上。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "`PyobjMixin.getmodpath()` 方法的返回值。",
+      "reason": "该方法的返回值被用于构建报告标题，观察其值可以确认替换是否发生。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "测试报告标题中显示的测试名称应包含完整的参数化值，不应将 '.[' 替换为 '['。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的、硬编码的报告标题字符串，因为格式可能变化。",
+      "reason": "Issue 的核心是字符串替换错误，断言标题包含正确的子字符串片段更稳定。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 `testdir` fixture 创建包含参数化测试的临时测试文件。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "使用 `pytest` 运行测试并捕获输出。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "`getmodpath` 方法中 `s.replace(\".[\", \"[\")` 这行代码的原始目的是什么。",
+    "除了报告标题，这个替换是否在其他地方（如测试发现）也引起了问题。"
+  ],
+  "raw": {
+    "issue_summary": "pytest 在生成测试报告标题时，错误地将参数化测试名中的 '.[' 替换为 '['，导致显示错误。",
+    "trigger_condition": {
+      "text": "当参数化测试的参数值包含 '.[' 子字符串时，例如参数值为 '..['。",
+      "evidence": [
+        "Issue 中提供的失败报告显示测试名为 'test_boo[..[]'，但标题显示为 'test_boo[.[]'。",
+        "Issue 中用户指出参数化值为 '..['。",
+        "源码片段 5 显示 `getmodpath` 方法返回 `s.replace(\".[\", \"[\")`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "测试报告标题中显示的测试名称不正确，'..[' 被错误地替换为 '.['。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 中提供的失败报告输出显示 'test_boo[..[]' 被显示为 'test_boo[.[]'。",
+        "Issue 中提到该问题也导致 vscode-python 测试发现错误。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "测试报告标题应正确显示参数化测试的完整名称，不应对 '.[' 进行替换。",
+      "evidence": [
+        "Issue 中用户建议将 `return s.replace(\".[\", \"[\")` 改为 `return s` 以解决问题。",
+        "Issue 中用户表示修改后通过了所有测试。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "PyobjMixin.getmodpath",
+        "kind": "method",
+        "source_path": "src/_pytest/python.py",
+        "reason": "Issue 中追踪到问题根源在于此方法中的字符串替换操作。"
+      },
+      {
+        "name": "PyobjMixin.reportinfo",
+        "kind": "method",
+        "source_path": "src/_pytest/python.py",
+        "reason": "此方法调用 `getmodpath` 来生成报告信息。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/python.py",
+        "object": "PyobjMixin.getmodpath",
+        "lines": "271-289",
+        "reason": "Issue 明确指出 `return s.replace(\".[\", \"[\")` 这行代码导致了问题。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_escaped_parametrized_names_xml",
+        "test_file": "testing/test_junitxml.py",
+        "why_relevant": "该测试涉及参数化测试名称的转义和序列化，与 Issue 中测试报告标题生成相关。",
+        "reusable_parts": [
+          "使用 `@pytest.mark.parametrize` 创建参数化测试",
+          "使用 `testdir` fixture 创建测试文件",
+          "断言测试用例名称"
+        ],
+        "possible_gap": "该测试关注 XML 输出中的转义，而 Issue 是关于控制台报告标题中的字符串替换。"
+      },
+      {
+        "test_name": "test_keyword_option_parametrize",
+        "test_file": "testing/test_mark.py",
+        "why_relevant": "该测试涉及参数化测试名称的生成和匹配，与 Issue 中测试名称的显示问题相关。",
+        "reusable_parts": [
+          "使用 `@pytest.mark.parametrize` 创建参数化测试",
+          "使用 `testdir` fixture 和 `inline_run`",
+          "断言生成的测试节点ID"
+        ],
+        "possible_gap": "该测试的参数值不包含 '.[' 字符串，因此不会触发特定替换。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "参数化值为普通字符串，如 '\\x00'、None、1.3、'2-3'。",
+        "target_pattern": "参数化值包含 '.[' 子字符串，例如 '..['。",
+        "reason": "Issue 显示当参数值包含 '.[' 时，`getmodpath` 中的替换逻辑会被错误触发。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "str",
+        "expression_hint": "测试报告标题字符串，例如通过 `pytest` 运行后捕获的 `stdout` 中的失败标题行。",
+        "reason": "Issue 中的错误现象直接体现在报告标题的字符串内容上。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`PyobjMixin.getmodpath()` 方法的返回值。",
+        "reason": "该方法的返回值被用于构建报告标题，观察其值可以确认替换是否发生。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "测试报告标题中显示的测试名称应包含完整的参数化值，不应将 '.[' 替换为 '['。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、硬编码的报告标题字符串，因为格式可能变化。",
+        "reason": "Issue 的核心是字符串替换错误，断言标题包含正确的子字符串片段更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 `testdir` fixture 创建包含参数化测试的临时测试文件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 `pytest` 运行测试并捕获输出。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "`getmodpath` 方法中 `s.replace(\".[\", \"[\")` 这行代码的原始目的是什么。",
+      "除了报告标题，这个替换是否在其他地方（如测试发现）也引起了问题。"
+    ]
+  }
+}

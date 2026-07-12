@@ -1,0 +1,146 @@
+{
+  "issue_summary": "在 filter 中使用带有空查询集的 Exists 子查询时，整个 WHERE 子句被错误地移除。",
+  "trigger_condition": {
+    "text": "使用 QuerySet.filter() 方法，其中一个参数是取反的 Exists 对象，且该 Exists 对象的子查询是一个通过 .none() 方法得到的空查询集。",
+    "evidence": ["Issue 中的示例：`MyModel.objects.filter(~models.Exists(MyModel.objects.none()), name='test')`", "源码片段 4 显示了 `none()` 方法会设置查询为空。", "源码片段 1 显示了 `Exists` 类及其 `__invert__` 方法。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "生成的查询对象是 `EmptyResultSet` 异常，并且 WHERE 子句完全缺失。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 中：`>>> print(qs.query)` 输出 `EmptyResultSet`", "Issue 中：\"WHERE block is missing completely\"", "源码片段 5 定义了 `EmptyResultSet` 异常。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "查询应生成一个包含正确 WHERE 子句的 SQL 语句，该子句应包含对 `name='test'` 的过滤以及一个基于 `EXISTS` 子查询的条件。",
+    "evidence": ["Issue 描述暗示 WHERE 子句应该存在。", "相关测试 1 和 2 展示了 `WhereNode` 处理空节点和 `NothingNode` 的正常逻辑，表明查询构建应能处理复杂条件。"],
+    "confidence": "medium"
+  },
+  "target_apis": [
+    {
+      "name": "django.db.models.Exists",
+      "kind": "class",
+      "source_path": "django/db/models/expressions.py",
+      "reason": "Issue 的核心是使用 `Exists` 表达式。"
+    },
+    {
+      "name": "django.db.models.query.QuerySet.filter",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "触发 bug 的 API 调用。"
+    },
+    {
+      "name": "django.db.models.query.QuerySet.none",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "用于创建 `Exists` 子查询的空查询集。"
+    },
+    {
+      "name": "django.db.models.sql.where.WhereNode",
+      "kind": "class",
+      "source_path": "",
+      "reason": "相关测试表明 WHERE 子句的构建是问题的核心。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/expressions.py",
+      "object": "Exists",
+      "lines": "1199-1231",
+      "reason": "`Exists` 类负责处理子查询和取反逻辑，可能与空查询集交互时产生问题。"
+    },
+    {
+      "path": "django/db/models/query.py",
+      "object": "QuerySet.query",
+      "lines": "",
+      "reason": "查询对象的构建和 `set_empty()` 的调用可能导致 WHERE 子句被过早丢弃。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "WhereNodeTest.test_empty_nodes",
+      "test_file": "tests/queries/tests.py",
+      "why_relevant": "它直接测试了 `WhereNode` 如何处理空节点和 `NothingNode`，并检查 `EmptyResultSet` 异常，这与 Issue 中观察到的异常相关。",
+      "reusable_parts": ["`WhereNode` 的导入和使用", "`EmptyResultSet` 异常的断言", "`MockCompiler` 的模拟"],
+      "possible_gap": "该测试使用模拟的 `WhereNode` 和 `NothingNode`，而不是通过实际的 `QuerySet.filter()` 和 `Exists` 表达式来构建查询。"
+    },
+    {
+      "test_name": "WhereNodeTest.test_empty_full_handling_conjunction",
+      "test_file": "tests/queries/tests.py",
+      "why_relevant": "它测试了 `WhereNode` 中 `AND`/`OR` 连接符与 `NothingNode` 的交互，这类似于 `Exists` 子查询条件与其他条件组合的场景。",
+      "reusable_parts": ["`WhereNode` 的构造", "`EmptyResultSet` 异常的断言", "`DummyNode` 的使用"],
+      "possible_gap": "它没有使用真实的 Django 模型和 `QuerySet` API。"
+    },
+    {
+      "test_name": "ExistsSql.test_exists",
+      "test_file": "tests/queries/tests.py",
+      "why_relevant": "它测试了 `Exists` 查询的基本功能，并检查生成的 SQL。",
+      "reusable_parts": ["`CaptureQueriesContext` 的使用", "对生成 SQL 的断言风格", "`Tag` 模型的使用"],
+      "possible_gap": "它没有测试 `Exists` 与 `filter()` 结合使用，也没有测试取反或空子查询的情况。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试通常使用简单的模型查询或模拟节点。",
+      "target_pattern": "创建一个 `QuerySet.filter()` 调用，其参数包含 `~Exists(queryset.none())` 和另一个普通条件（如 `name='test'`）。",
+      "reason": "Issue 表明这种特定的输入组合触发了 WHERE 子句丢失的 bug。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "测试中的查询集通常包含数据或使用 `DummyNode`。",
+      "target_pattern": "使 `Exists` 的子查询是一个通过 `.none()` 方法得到的空查询集。",
+      "reason": "空查询集是触发 `EmptyResultSet` 和 WHERE 子句丢失的关键。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "sql",
+      "expression_hint": "生成的 SQL 字符串，特别是 WHERE 子句的存在和内容。",
+      "reason": "Issue 明确指出 WHERE 子句完全缺失，观察 SQL 可以直接验证问题。"
+    },
+    {
+      "kind": "exception",
+      "expression_hint": "在构建查询或执行查询时是否抛出 `EmptyResultSet` 异常。",
+      "reason": "Issue 显示 `print(qs.query)` 输出 `EmptyResultSet`，表明异常在查询构建阶段就被抛出。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "`qs.query` 对象的字符串表示或内部状态。",
+      "reason": "Issue 使用 `print(qs.query)` 来检查查询，这是观察查询对象状态的关键点。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "生成的 SQL 应包含一个 WHERE 子句，其中包含对 `name` 字段的条件以及一个与 `EXISTS` 相关的条件。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的 SQL 字符串相等，因为不同数据库后端的 SQL 可能不同。",
+      "reason": "Issue 是关于 WHERE 子句缺失，因此断言 SQL 包含 WHERE 关键字和相关字段名是稳定且相关的。"
+    },
+    {
+      "assertion_goal": "查询构建不应在调用 `print(qs.query)` 或类似操作时引发 `EmptyResultSet` 异常。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言不引发任何异常；应具体针对 `EmptyResultSet`。",
+      "reason": "当前行为会抛出 `EmptyResultSet`，修复后应不再抛出（或只在真正不可能的情况下抛出）。注意：根据规则9，修复后应正常，所以此断言用于验证当前缺陷状态，但最终测试的断言极性应与 `expected_behavior` 一致。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要一个 Django 测试用例（如 `TestCase`）和一个简单的模型（如 `MyModel`，具有 `name` 字段）。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 `CaptureQueriesContext` 来捕获和检查生成的 SQL。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "`Exists` 的 `__invert__` 方法与空查询集交互的确切内部逻辑。",
+    "`query.set_empty()` 方法被调用后，对后续 WHERE 子句构建的完整影响路径。",
+    "Issue 中提到的 #33018 的具体内容及其与此问题的相似程度。"
+  ]
+}

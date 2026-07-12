@@ -1,0 +1,458 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+vector add 0 error
+```python
+from sympy.physics.vector import ReferenceFrame, Vector
+from sympy import symbols
+sum([N.x, (0 * N.x)])
+```
+gives
+```
+---------------------------------------------------------------------------
+TypeError                                 Traceback (most recent call last)
+<ipython-input-1-0b9155eecc0e> in <module>()
+      2 from sympy import symbols
+      3 N = ReferenceFrame('N')
+----> 4 sum([N.x, (0 * N.x)])
+
+/usr/local/lib/python3.6/site-packages/sympy/physics/vector/vector.py in __add__(self, other)
+     59         """The add operator for Vector. """
+     60         #if other == 0: return self
+---> 61         other = _check_vector(other)
+     62         return Vector(self.args + other.args)
+     63 
+
+/usr/local/lib/python3.6/site-packages/sympy/physics/vector/vector.py in _check_vector(other)
+    708 def _check_vector(other):
+    709     if not isinstance(other, Vector):
+--> 710         raise TypeError('A Vector must be supplied')
+    711     return other
+
+TypeError: A Vector must be supplied
+```
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/physics/vector/vector.py
+对象名称：Vector
+节点类型：class
+父节点：vector
+行号范围：10-712
+代码：
+class Vector(object):
+    """The class used to define vectors.
+
+    It along with ReferenceFrame are the building blocks of describing a
+    classical mechanics system in PyDy and sympy.physics.vector.
+
+    Attributes
+    ==========
+
+    simp : Boolean
+        Let certain methods use trigsimp on their outputs
+
+    """
+    simp = False
+    def __init__(self, inlist):
+    def __hash__(self):
+    def __add__(self, other):
+    def __and__(self, other):
+    def __div__(self, other):
+    __truediv__ = __div__
+    def __eq__(self, other):
+    def __mul__(self, other):
+    def __ne__(self, other):
+    def __neg__(self):
+    def __or__(self, other):
+    def _latex(self, printer=None):
+    def _pretty(self, printer=None):
+    def __ror__(self, other):
+    def __rsub__(self, other):
+    def __str__(self, printer=None, order=True):
+    def __sub__(self, other):
+    def __xor__(self, other):
+    _sympystr = __str__
+    _sympyrepr = _sympystr
+    __repr__ = __str__
+    __radd__ = __add__
+    __rand__ = __and__
+    __rmul__ = __mul__
+    def separate(self):
+    def dot(self, other):
+    def cross(self, other):
+    def outer(self, other):
+    def diff(self, var, frame, var_in_dcm=True):
+    def express(self, otherframe, variables=False):
+    def to_matrix(self, reference_frame):
+    def doit(self, **hints):
+    def dt(self, otherframe):
+    def simplify(self):
+    def subs(self, *args, **kwargs):
+    def magnitude(self):
+    def normalize(self):
+    def applyfunc(self, f):
+    def free_symbols(self, reference_frame):
+
+
+【源码片段 2】
+文件路径：sympy/physics/vector/vector.py
+对象名称：__add__
+节点类型：class_function
+父节点：Vector
+行号范围：58-61
+代码：
+    def __add__(self, other):
+        """The add operator for Vector. """
+        other = _check_vector(other)
+        return Vector(self.args + other.args)
+
+
+【源码片段 3】
+文件路径：sympy/physics/vector/vector.py
+对象名称：_check_vector
+节点类型：top-level function
+父节点：vector
+行号范围：723-726
+代码：
+def _check_vector(other):
+    if not isinstance(other, Vector):
+        raise TypeError('A Vector must be supplied')
+    return other
+
+
+【源码片段 4】
+文件路径：sympy/physics/vector/frame.py
+对象名称：ReferenceFrame
+节点类型：class
+父节点：frame
+行号范围：79-829
+代码：
+class ReferenceFrame(object):
+    """A reference frame in classical mechanics.
+
+    ReferenceFrame is a class used to represent a reference frame in classical
+    mechanics. It has a standard basis of three unit vectors in the frame's
+    x, y, and z directions.
+
+    It also can have a rotation relative to a parent frame; this rotation is
+    defined by a direction cosine matrix relating this frame's basis vectors to
+    the parent frame's basis vectors.  It can also have an angular velocity
+    vector, defined in another frame.
+
+    """
+    _count = 0
+    def __init__(self, name, indices=None, latexs=None, variables=None):
+    def __getitem__(self, ind):
+    def __iter__(self):
+    def __str__(self):
+    __repr__ = __str__
+    def _dict_list(self, other, num):
+    def _w_diff_dcm(self, otherframe):
+    def variable_map(self, otherframe):
+    def ang_acc_in(self, otherframe):
+    def ang_vel_in(self, otherframe):
+    def dcm(self, otherframe):
+    def orient(self, parent, rot_type, amounts, rot_order=''):
+    def orientnew(self, newname, rot_type, amounts, rot_order='',
+                  variables=None, indices=None, latexs=None):
+    def set_ang_acc(self, otherframe, value):
+    def set_ang_vel(self, otherframe, value):
+    @property
+    def x(self):
+    @property
+    def y(self):
+    @property
+    def z(self):
+    def partial_velocity(self, frame, *gen_speeds):
+
+
+【源码片段 5】
+文件路径：sympy/physics/vector/frame.py
+对象名称：x
+节点类型：class_function
+父节点：ReferenceFrame
+行号范围：777-779
+代码：
+    def x(self):
+        """The basis Vector for the ReferenceFrame, in the x direction. """
+        return self._x
+
+
+【源码片段 6】
+文件路径：bin/sympy_time_cache.py
+对象名称：sum
+节点类型：global_var
+父节点：sympy_time_cache
+行号范围：127-127
+代码：
+sum = old_sum
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/physics/vector/tests/test_vector.py
+测试名称：test_Vector
+测试代码：
+def test_Vector():
+    assert A.x != A.y
+    assert A.y != A.z
+    assert A.z != A.x
+
+    v1 = x*A.x + y*A.y + z*A.z
+    v2 = x**2*A.x + y**2*A.y + z**2*A.z
+    v3 = v1 + v2
+    v4 = v1 - v2
+
+    assert isinstance(v1, Vector)
+    assert dot(v1, A.x) == x
+    assert dot(v1, A.y) == y
+    assert dot(v1, A.z) == z
+
+    assert isinstance(v2, Vector)
+    assert dot(v2, A.x) == x**2
+    assert dot(v2, A.y) == y**2
+    assert dot(v2, A.z) == z**2
+
+    assert isinstance(v3, Vector)
+    # We probably shouldn't be using simplify in dot...
+    assert dot(v3, A.x) == x**2 + x
+    assert dot(v3, A.y) == y**2 + y
+    assert dot(v3, A.z) == z**2 + z
+
+    assert isinstance(v4, Vector)
+    # We probably shouldn't be using simplify in dot...
+    assert dot(v4, A.x) == x - x**2
+    assert dot(v4, A.y) == y - y**2
+    assert dot(v4, A.z) == z - z**2
+
+    assert v1.to_matrix(A) == Matrix([[x], [y], [z]])
+    q = symbols('q')
+    B = A.orientnew('B', 'Axis', (q, A.x))
+    assert v1.to_matrix(B) == Matrix([[x],
+                                      [ y * cos(q) + z * sin(q)],
+                                      [-y * sin(q) + z * cos(q)]])
+
+    #Test the separate method
+    B = ReferenceFrame('B')
+    v5 = x*A.x + y*A.y + z*B.z
+    assert Vector(0).separate() == {}
+    assert v1.separate() == {A: v1}
+    assert v5.separate() == {A: x*A.x + y*A.y, B: z*B.z}
+
+    #Test the free_symbols property
+    v6 = x*A.x + y*A.y + z*A.z
+    assert v6.free_symbols(A) == {x,y,z}
+
+【相关测试 2】
+测试文件：sympy/vector/tests/test_vector.py
+测试名称：test_vector
+测试代码：
+def test_vector():
+    assert isinstance(i, BaseVector)
+    assert i != j
+    assert j != k
+    assert k != i
+    assert i - i == Vector.zero
+    assert i + Vector.zero == i
+    assert i - Vector.zero == i
+    assert Vector.zero != 0
+    assert -Vector.zero == Vector.zero
+
+    v1 = a*i + b*j + c*k
+    v2 = a**2*i + b**2*j + c**2*k
+    v3 = v1 + v2
+    v4 = 2 * v1
+    v5 = a * i
+
+    assert isinstance(v1, VectorAdd)
+    assert v1 - v1 == Vector.zero
+    assert v1 + Vector.zero == v1
+    assert v1.dot(i) == a
+    assert v1.dot(j) == b
+    assert v1.dot(k) == c
+    assert i.dot(v2) == a**2
+    assert j.dot(v2) == b**2
+    assert k.dot(v2) == c**2
+    assert v3.dot(i) == a**2 + a
+    assert v3.dot(j) == b**2 + b
+    assert v3.dot(k) == c**2 + c
+
+    assert v1 + v2 == v2 + v1
+    assert v1 - v2 == -1 * (v2 - v1)
+    assert a * v1 == v1 * a
+
+    assert isinstance(v5, VectorMul)
+    assert v5.base_vector == i
+    assert v5.measure_number == a
+    assert isinstance(v4, Vector)
+    assert isinstance(v4, VectorAdd)
+    assert isinstance(v4, Vector)
+    assert isinstance(Vector.zero, VectorZero)
+    assert isinstance(Vector.zero, Vector)
+    assert isinstance(v1 * 0, VectorZero)
+
+    assert v1.to_matrix(C) == Matrix([[a], [b], [c]])
+
+    assert i.components == {i: 1}
+    assert v5.components == {i: a}
+    assert v1.components == {i: a, j: b, k: c}
+
+    assert VectorAdd(v1, Vector.zero) == v1
+    assert VectorMul(a, v1) == v1*a
+    assert VectorMul(1, i) == i
+    assert VectorAdd(v1, Vector.zero) == v1
+    assert VectorMul(0, Vector.zero) == Vector.zero
+
+【相关测试 3】
+测试文件：sympy/vector/tests/test_vector.py
+测试名称：test_vector_simplify
+测试代码：
+def test_vector_simplify():
+    A, s, k, m = symbols('A, s, k, m')
+
+    test1 = (1 / a + 1 / b) * i
+    assert (test1 & i) != (a + b) / (a * b)
+    test1 = simplify(test1)
+    assert (test1 & i) == (a + b) / (a * b)
+    assert test1.simplify() == simplify(test1)
+
+    test2 = (A**2 * s**4 / (4 * pi * k * m**3)) * i
+    test2 = simplify(test2)
+    assert (test2 & i) == (A**2 * s**4 / (4 * pi * k * m**3))
+
+    test3 = ((4 + 4 * a - 2 * (2 + 2 * a)) / (2 + 2 * a)) * i
+    test3 = simplify(test3)
+    assert (test3 & i) == 0
+
+    test4 = ((-4 * a * b**2 - 2 * b**3 - 2 * a**2 * b) / (a + b)**2) * i
+    test4 = simplify(test4)
+    assert (test4 & i) == -2 * b
+
+    v = (sin(a)+cos(a))**2*i - j
+    assert trigsimp(v) == (2*sin(a + pi/4)**2)*i + (-1)*j
+    assert trigsimp(v) == v.trigsimp()
+
+    assert simplify(Vector.zero) == Vector.zero
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

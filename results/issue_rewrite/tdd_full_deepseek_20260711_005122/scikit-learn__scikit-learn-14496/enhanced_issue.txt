@@ -1,0 +1,121 @@
+instance_id: scikit-learn__scikit-learn-14496
+
+issue_summary: 当 min_samples 为浮点数时，OPTICS 在计算后未转换为整数，导致传递给 NearestNeighbors 时引发类型错误。
+
+trigger_condition:
+{
+  "text": "使用 OPTICS 类，将 min_samples 参数设置为一个介于 0 和 1 之间的浮点数（例如 0.1），然后调用 fit 方法。",
+  "evidence": [
+    "Issue 中的代码示例：`clust = OPTICS(metric='minkowski', n_jobs=-1, min_samples=0.1)` 和 `clust.fit(data)`。",
+    "源码片段 1 中 OPTICS 类的文档说明 min_samples 可以是 'float between 0 and 1'。",
+    "源码片段 4 中 compute_optics_graph 函数包含 `if min_samples <= 1: min_samples = max(2, min_samples * n_samples)` 代码，但结果仍是浮点数。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "在调用 fit 时，NearestNeighbors 的实例化因 n_neighbors 参数为浮点数而引发 TypeError。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中的错误信息：`TypeError: n_neighbors does not take <class 'numpy.float64'> value, enter integer value`。",
+    "Issue 指出错误发生在 `optics_.py` 第 456 行 `nbrs.fit(X)` 调用中，该行位于 compute_optics_graph 函数内。",
+    "源码片段 4 中第 448 行附近有 `nbrs = NearestNeighbors(n_neighbors=min_samples, ...)`，其中 min_samples 可能为浮点数。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当 min_samples 为浮点数时，OPTICS 应将其正确转换为整数（例如通过四舍五入），以便能够成功实例化 NearestNeighbors 并完成拟合。",
+  "evidence": [
+    "Issue 中建议的修复：`min_samples = int(round(max(2, min_samples * n_samples)))`。",
+    "源码片段 1 中 OPTICS 类的文档说明 min_samples 作为分数时会被 'rounded to be at least 2'。",
+    "源码片段 4 中 compute_optics_graph 函数的文档也提到 'rounded to be at least 2'。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "OPTICS",
+    "kind": "class",
+    "source_path": "sklearn/cluster/optics_.py",
+    "reason": "Issue 直接报告了 OPTICS 类在使用浮点数 min_samples 时的缺陷。"
+  },
+  {
+    "name": "OPTICS.fit",
+    "kind": "method",
+    "source_path": "sklearn/cluster/optics_.py",
+    "reason": "触发缺陷的入口方法。"
+  },
+  {
+    "name": "compute_optics_graph",
+    "kind": "function",
+    "source_path": "sklearn/cluster/optics_.py",
+    "reason": "Issue 中错误堆栈指向此函数，它包含有问题的 min_samples 转换逻辑。"
+  },
+  {
+    "name": "NearestNeighbors",
+    "kind": "class",
+    "source_path": "sklearn/neighbors/base.py",
+    "reason": "错误最终由 NearestNeighbors 因 n_neighbors 参数类型不正确而引发。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "相似测试中 min_samples 参数通常设置为整数（如 3, 4, 9, 10, 20）。",
+    "target_pattern": "将 min_samples 参数设置为一个介于 0 和 1 之间的浮点数（如 0.1）。",
+    "reason": "Issue 表明当 min_samples 为浮点数时，转换逻辑有缺陷，导致类型错误。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用 `clust.fit(X)` 时是否引发 TypeError，特别是关于 n_neighbors 不接受浮点数的消息。",
+    "reason": "Issue 的核心错误现象是 TypeError，观测此异常可直接确认缺陷是否被触发。"
+  },
+  {
+    "kind": "type",
+    "expression_hint": "在 compute_optics_graph 函数中，转换后 `min_samples` 变量的类型（应为 int）。",
+    "reason": "缺陷根源在于转换后 min_samples 仍是浮点数，观测其类型可帮助定位问题。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当 min_samples 为浮点数时，OPTICS.fit 应正常完成而不引发 TypeError。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言具体的聚类标签或距离值，因为这些可能因数据随机性而变化，且与核心类型错误无关。",
+    "reason": "Issue 的核心是类型错误异常，修复后该异常应消失。使用 `pytest.raises` 或其否定形式来验证异常的存在或缺失是直接且稳定的。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要准备一个简单的数据集（如使用 numpy 数组或 make_blobs）用于 OPTICS 拟合。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要导入 pytest 和 sklearn 相关模块。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "Issue 中提到的第 439-440 行在提供的源码片段 4 中对应哪几行？提供的片段行号范围是 331-492，但具体行号可能因版本不同而略有差异。",
+  "除了 min_samples 为浮点数外，是否还有其他边界条件（如 min_samples 恰好为 1.0 或非常接近 0）会触发不同行为？",
+  "修复后，四舍五入的具体规则（例如 round 的舍入方式）是否在所有情况下都符合预期？"
+]

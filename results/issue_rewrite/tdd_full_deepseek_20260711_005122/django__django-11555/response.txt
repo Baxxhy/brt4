@@ -1,0 +1,146 @@
+{
+  "issue_summary": "在 Meta.ordering 包含表达式时，对父模型使用 order_by() 会导致崩溃。",
+  "trigger_condition": {
+    "text": "在多表继承场景下，当子模型的 Meta.ordering 包含查询表达式（如 F 表达式）时，对父模型执行 order_by() 操作。",
+    "evidence": ["Issue 描述：'order_by() a parent model crash when Meta.ordering contains expressions.'", "Issue 描述：'The bug occurs because the field is an OrderBy object, not a string, during get_order_dir.'", "相关测试 4 展示了多表继承模型（Restaurant）的 Meta.ordering 配置。", "相关测试 1、2、3 展示了在 Meta.ordering 或 order_by() 中使用 F 表达式。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "在测试数据库设置期间发生崩溃，异常可能源于 get_order_dir 函数期望字段名为字符串，但实际收到了 OrderBy 对象。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 描述：'The bug occurs because the field is an OrderBy object, not a string, during get_order_dir.'", "Issue 描述：'The linked stacktrace should make the issue obvious...'", "源码片段 1 显示 get_order_dir 函数对输入字段 field 进行了索引操作 field[0]，这要求 field 是序列类型（如字符串）。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "即使子模型的 Meta.ordering 包含查询表达式，对父模型执行 order_by() 也应正常工作，不应引发异常。",
+    "evidence": ["Issue 描述暗示这是一个 bug，修复后应能正常工作。", "相关测试 1、2、3 表明 Django 支持在 ordering 中使用 F 表达式。", "相关测试 4 表明多表继承模型支持 Meta.ordering。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "get_order_dir",
+      "kind": "function",
+      "source_path": "django/db/models/sql/query.py",
+      "reason": "Issue 明确指出崩溃发生在该函数中，因为它接收了 OrderBy 对象而非字符串。"
+    },
+    {
+      "name": "OrderBy",
+      "kind": "class",
+      "source_path": "django/db/models/expressions.py",
+      "reason": "Issue 提到 field 是 OrderBy 对象，这是导致 get_order_dir 出错的原因。"
+    },
+    {
+      "name": "order_by",
+      "kind": "method",
+      "source_path": "",
+      "reason": "Issue 标题和描述中提到的触发操作。"
+    },
+    {
+      "name": "Meta.ordering",
+      "kind": "attribute",
+      "source_path": "",
+      "reason": "Issue 的核心触发条件是 Meta.ordering 包含表达式。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/sql/query.py",
+      "object": "get_order_dir",
+      "lines": "2212-2223",
+      "reason": "Issue 明确指出该函数在处理 OrderBy 对象时崩溃，因为它假设输入是字符串并进行了索引操作。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_default_ordering_by_f_expression",
+      "test_file": "tests/ordering/tests.py",
+      "why_relevant": "它测试了在 Meta.ordering 中使用 F 表达式，这是 Issue 触发条件的一部分。",
+      "reusable_parts": ["OrderedByFArticle 模型定义（推断）", "使用 F 表达式进行默认排序", "assertQuerysetEqual 断言风格"],
+      "possible_gap": "它没有涉及多表继承，也没有对父模型调用 order_by()。"
+    },
+    {
+      "test_name": "test_order_by_f_expression",
+      "test_file": "tests/ordering/tests.py",
+      "why_relevant": "它测试了使用 F 表达式进行 order_by() 调用，展示了正常的 API 用法。",
+      "reusable_parts": ["Article 模型（推断）", "F('headline') 表达式构造", "order_by(F(...)) 调用模式", "assertQuerysetEqual 断言风格"],
+      "possible_gap": "它没有涉及多表继承或 Meta.ordering 配置。"
+    },
+    {
+      "test_name": "test_meta_fields_and_ordering",
+      "test_file": "tests/model_inheritance/tests.py",
+      "why_relevant": "它测试了多表继承模型（Restaurant）的 Meta.ordering 配置。",
+      "reusable_parts": ["Restaurant 和 ItalianRestaurant 模型定义（推断）", "多表继承测试类结构", "检查 _meta.ordering 属性"],
+      "possible_gap": "它没有测试 order_by() 操作，也没有在 ordering 中使用表达式。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "相似测试中 Meta.ordering 可能使用普通字段名（如 ['-rating']）。",
+      "target_pattern": "将子模型的 Meta.ordering 设置为包含查询表达式（如 [F('some_field')]）。",
+      "reason": "Issue 触发条件是 Meta.ordering 包含表达式，这可能导致后续处理时产生 OrderBy 对象。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "相似测试可能直接对定义了 Meta.ordering 的模型进行查询。",
+      "target_pattern": "创建一个多表继承的子模型，其 Meta.ordering 包含表达式，然后对父模型进行查询并调用 order_by()。",
+      "reason": "Issue 描述表明 bug 发生在“order_by() a parent model”且“Meta.ordering contains expressions”的多表继承场景。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "在调用父模型查询集的 order_by() 方法时捕获异常。",
+      "reason": "Issue 的核心现象是崩溃/异常。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "在 get_order_dir 函数被调用前，检查传入的 field 参数的类型。",
+      "reason": "Issue 指出问题在于 field 是 OrderBy 对象而非字符串。"
+    },
+    {
+      "kind": "sql",
+      "expression_hint": "观察生成的 SQL 查询字符串，特别是 ORDER BY 子句。",
+      "reason": "排序问题通常反映在 SQL 中，且相关测试 3 检查了 SQL 片段。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "对父模型查询集调用 order_by() 不应引发 AttributeError、TypeError 或类似异常。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言完整的异常消息字符串，因为可能随版本变化。",
+      "reason": "Issue 的核心是异常崩溃，修复后应不再引发。"
+    },
+    {
+      "assertion_goal": "查询应能成功执行并返回结果，排序行为可能正确或至少不崩溃。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "断言精确的 SQL 字符串，因为实现细节可能变化。",
+      "reason": "修复后，基本的查询功能应恢复。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要一个多表继承模型结构：一个父模型和一个子模型，子模型的 Meta.ordering 包含 F 表达式。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要创建测试数据并插入数据库。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "使用 Django 的 TestCase 和数据库。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "Issue 提到 bug 只发生在测试数据库设置期间，而在 REPL 或脚本中不失败，具体原因不明。",
+    "确切的异常类型和完整堆栈跟踪未在提供材料中给出。",
+    "Meta.ordering 中表达式的具体形式（如 F('field').desc()）未明确说明。",
+    "对父模型调用 order_by() 时是否传递了参数，以及参数是什么，未明确说明。"
+  ]
+}

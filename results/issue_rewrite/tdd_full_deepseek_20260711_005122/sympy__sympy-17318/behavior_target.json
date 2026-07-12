@@ -1,0 +1,365 @@
+{
+  "instance_id": "sympy__sympy-17318",
+  "issue_summary": "sqrtdenest 函数在处理特定包含复数的平方根表达式时抛出 IndexError 异常，而非返回未化简的原始表达式。",
+  "trigger_condition": {
+    "text": "调用 sqrtdenest 函数，输入参数为表达式 (3 - sqrt(2)*sqrt(4 + 3*I) + 3*I)/2。",
+    "evidence": [
+      "Issue 中提供的触发输入：`sqrtdenest((3 - sqrt(2)*sqrt(4 + 3*I) + 3*I)/2)`"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "程序抛出 IndexError: tuple index out of range 异常，堆栈跟踪指向 _split_gcd 函数中的 `g = a[0]` 行。",
+    "symptom_type": "exception",
+    "evidence": [
+      "Issue 中提供的完整异常堆栈跟踪，显示错误发生在 `radsimp.py` 文件的 `_split_gcd` 函数中。",
+      "Issue 描述：`IndexError: tuple index out of range`"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当表达式无法被 denest 时，sqrtdenest 函数应返回未化简的原始表达式，而不应抛出异常。",
+    "evidence": [
+      "Issue 中明确说明：`If an expression cannot be denested it should be returned unchanged.`",
+      "Issue 中展示了修复后的新结果，返回了输入表达式本身：`3/2 - sqrt(2)*sqrt(4 + 3*I)/2 + 3*I/2`"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "sqrtdenest",
+      "kind": "function",
+      "source_path": "sympy/simplify/sqrtdenest.py",
+      "reason": "Issue 直接报告了该函数的缺陷，是测试需要调用的主入口。"
+    },
+    {
+      "name": "_sqrtdenest0",
+      "kind": "function",
+      "source_path": "sympy/simplify/sqrtdenest.py",
+      "reason": "堆栈跟踪显示 sqrtdenest 调用了 _sqrtdenest0，它是递归处理表达式的核心函数。"
+    },
+    {
+      "name": "_sqrtdenest1",
+      "kind": "function",
+      "source_path": "sympy/simplify/sqrtdenest.py",
+      "reason": "堆栈跟踪显示 _sqrtdenest0 调用了 _sqrtdenest1，后者调用了 _sqrt_match。"
+    },
+    {
+      "name": "_sqrt_match",
+      "kind": "function",
+      "source_path": "sympy/simplify/sqrtdenest.py",
+      "reason": "堆栈跟踪显示 _sqrtdenest1 调用了 _sqrt_match，后者调用了 split_surds。"
+    },
+    {
+      "name": "split_surds",
+      "kind": "function",
+      "source_path": "sympy/simplify/radsimp.py",
+      "reason": "堆栈跟踪显示 _sqrt_match 调用了 split_surds，后者调用了 _split_gcd。"
+    },
+    {
+      "name": "_split_gcd",
+      "kind": "function",
+      "source_path": "sympy/simplify/radsimp.py",
+      "reason": "堆栈跟踪显示 split_surds 调用了 _split_gcd，异常直接发生在此函数中。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/simplify/radsimp.py",
+      "object": "_split_gcd",
+      "lines": "1103-1126",
+      "reason": "异常直接发生在此函数的 `g = a[0]` 行，表明当输入参数 `a` 为空元组时会导致索引错误。"
+    },
+    {
+      "path": "sympy/simplify/radsimp.py",
+      "object": "split_surds",
+      "lines": "1062-1100",
+      "reason": "split_surds 调用了 _split_gcd，可能在某些情况下（如处理复数表达式）生成了空的 `surds` 列表，导致 _split_gcd 接收空参数。"
+    },
+    {
+      "path": "sympy/simplify/sqrtdenest.py",
+      "object": "_sqrt_match",
+      "lines": "140-215",
+      "reason": "_sqrt_match 调用了 split_surds，其逻辑可能对包含复数的表达式处理不当，导致传递给 split_surds 的参数不满足预期。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_sqrtdenest",
+      "test_file": "sympy/simplify/tests/test_sqrtdenest.py",
+      "why_relevant": "这是 sqrtdenest 函数的主要测试，包含了多种输入和预期输出的断言，展示了正常的测试模式。",
+      "reusable_parts": [
+        "导入 sqrtdenest 函数的方式",
+        "使用 sqrt 函数构造表达式",
+        "使用 assert sqrtdenest(i) == d[i] 的断言风格"
+      ],
+      "possible_gap": "现有测试用例主要针对实数域内的平方根表达式，没有包含触发异常的复数表达式。"
+    },
+    {
+      "test_name": "test_sqrtdenest2",
+      "test_file": "sympy/simplify/tests/test_sqrtdenest.py",
+      "why_relevant": "包含更多复杂的 sqrtdenest 测试用例，包括一些无法 denest 时应返回原表达式的场景（如 `assert sqrtdenest(z) == z`）。",
+      "reusable_parts": [
+        "构造复杂嵌套平方根表达式的方法",
+        "断言无法 denest 时表达式应保持不变的测试模式（`assert sqrtdenest(z) == z`）"
+      ],
+      "possible_gap": "测试用例中的表达式仍为实数，未涉及复数 `I`。"
+    },
+    {
+      "test_name": "test_issue_6241",
+      "test_file": "sympy/simplify/tests/test_sqrtdenest.py",
+      "why_relevant": "这是一个针对特定 Issue 的测试，展示了当 sqrtdenest 无法化简时应返回原表达式的模式。",
+      "reusable_parts": [
+        "针对特定失败场景的测试结构",
+        "断言表达式在无法 denest 时保持不变的断言模式"
+      ],
+      "possible_gap": "该测试的输入表达式不包含复数。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中的输入多为实数域内的平方根表达式，例如 sqrt(5 + 2*sqrt(6))。",
+      "target_pattern": "输入应包含复数 `I` 的平方根表达式，例如 (3 - sqrt(2)*sqrt(4 + 3*I) + 3*I)/2。",
+      "reason": "Issue 表明复数表达式的处理触发了异常路径，而现有测试未覆盖此场景。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "传递给 sqrtdenest 的参数通常是单个 sqrt 对象或简单的 Add/Mul 组合。",
+      "target_pattern": "参数应为包含复数、分数和多个 sqrt 项的 Add 表达式。",
+      "reason": "Issue 的触发输入是一个复杂的 Add 表达式，其内部 sqrt 的参数包含复数，这可能使 _sqrt_match 和 split_surds 的内部逻辑走向异常分支。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "调用 sqrtdenest(trigger_expr) 时是否抛出 IndexError 异常。",
+      "reason": "Issue 的核心现象是 IndexError 异常，观测此异常是判断缺陷是否被触发的直接方式。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "sqrtdenest(trigger_expr) 的返回值，观察其是否与输入表达式在数学上等价（或结构相同）。",
+      "reason": "修复后的预期行为是返回未化简的原始表达式，观测返回值可以验证修复是否成功。"
+    },
+    {
+      "kind": "repr",
+      "expression_hint": "返回值的字符串表示（repr），与输入表达式的 repr 进行稳定片段比较。",
+      "reason": "在无法 denest 时，函数可能返回结构相同但内部表示略有差异的对象，比较 repr 的稳定部分（如运算符和数字）可以判断是否返回了原表达式。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证对触发输入调用 sqrtdenest 不会抛出 IndexError 异常。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言完整的异常消息字符串，因为行号等可能变化。",
+      "reason": "Issue 的核心是异常，修复后应不再抛出。使用 `pytest.raises` 或 `assertRaises` 来验证无异常更稳定。"
+    },
+    {
+      "assertion_goal": "验证 sqrtdenest 对触发输入的返回值在数学上等于输入表达式。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言返回值的完整 repr 字符串完全相等，因为内部表示可能略有不同。",
+      "reason": "修复后的预期行为是返回未化简的表达式，使用 SymPy 的相等性检查（`==`）可以验证数学等价性，比字符串比较更稳定。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要从 sympy 导入 sqrt, I, sqrtdenest 等符号和函数。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能在一个普通的 Python 函数或 pytest 测试函数中运行，无需特殊 fixture。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "导致 _split_gcd 收到空参数的确切条件链，即复数表达式如何使 split_surds 产生空的 surds 列表。",
+    "除了给定的触发表达式，是否还有其他类似的复数表达式会触发相同的异常。",
+    "修复补丁的具体位置和方式（可能在 _split_gcd、split_surds 或 _sqrt_match 中添加空检查）。"
+  ],
+  "raw": {
+    "issue_summary": "sqrtdenest 函数在处理特定包含复数的平方根表达式时抛出 IndexError 异常，而非返回未化简的原始表达式。",
+    "trigger_condition": {
+      "text": "调用 sqrtdenest 函数，输入参数为表达式 (3 - sqrt(2)*sqrt(4 + 3*I) + 3*I)/2。",
+      "evidence": [
+        "Issue 中提供的触发输入：`sqrtdenest((3 - sqrt(2)*sqrt(4 + 3*I) + 3*I)/2)`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "程序抛出 IndexError: tuple index out of range 异常，堆栈跟踪指向 _split_gcd 函数中的 `g = a[0]` 行。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中提供的完整异常堆栈跟踪，显示错误发生在 `radsimp.py` 文件的 `_split_gcd` 函数中。",
+        "Issue 描述：`IndexError: tuple index out of range`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当表达式无法被 denest 时，sqrtdenest 函数应返回未化简的原始表达式，而不应抛出异常。",
+      "evidence": [
+        "Issue 中明确说明：`If an expression cannot be denested it should be returned unchanged.`",
+        "Issue 中展示了修复后的新结果，返回了输入表达式本身：`3/2 - sqrt(2)*sqrt(4 + 3*I)/2 + 3*I/2`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sqrtdenest",
+        "kind": "function",
+        "source_path": "sympy/simplify/sqrtdenest.py",
+        "reason": "Issue 直接报告了该函数的缺陷，是测试需要调用的主入口。"
+      },
+      {
+        "name": "_sqrtdenest0",
+        "kind": "function",
+        "source_path": "sympy/simplify/sqrtdenest.py",
+        "reason": "堆栈跟踪显示 sqrtdenest 调用了 _sqrtdenest0，它是递归处理表达式的核心函数。"
+      },
+      {
+        "name": "_sqrtdenest1",
+        "kind": "function",
+        "source_path": "sympy/simplify/sqrtdenest.py",
+        "reason": "堆栈跟踪显示 _sqrtdenest0 调用了 _sqrtdenest1，后者调用了 _sqrt_match。"
+      },
+      {
+        "name": "_sqrt_match",
+        "kind": "function",
+        "source_path": "sympy/simplify/sqrtdenest.py",
+        "reason": "堆栈跟踪显示 _sqrtdenest1 调用了 _sqrt_match，后者调用了 split_surds。"
+      },
+      {
+        "name": "split_surds",
+        "kind": "function",
+        "source_path": "sympy/simplify/radsimp.py",
+        "reason": "堆栈跟踪显示 _sqrt_match 调用了 split_surds，后者调用了 _split_gcd。"
+      },
+      {
+        "name": "_split_gcd",
+        "kind": "function",
+        "source_path": "sympy/simplify/radsimp.py",
+        "reason": "堆栈跟踪显示 split_surds 调用了 _split_gcd，异常直接发生在此函数中。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/simplify/radsimp.py",
+        "object": "_split_gcd",
+        "lines": "1103-1126",
+        "reason": "异常直接发生在此函数的 `g = a[0]` 行，表明当输入参数 `a` 为空元组时会导致索引错误。"
+      },
+      {
+        "path": "sympy/simplify/radsimp.py",
+        "object": "split_surds",
+        "lines": "1062-1100",
+        "reason": "split_surds 调用了 _split_gcd，可能在某些情况下（如处理复数表达式）生成了空的 `surds` 列表，导致 _split_gcd 接收空参数。"
+      },
+      {
+        "path": "sympy/simplify/sqrtdenest.py",
+        "object": "_sqrt_match",
+        "lines": "140-215",
+        "reason": "_sqrt_match 调用了 split_surds，其逻辑可能对包含复数的表达式处理不当，导致传递给 split_surds 的参数不满足预期。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_sqrtdenest",
+        "test_file": "sympy/simplify/tests/test_sqrtdenest.py",
+        "why_relevant": "这是 sqrtdenest 函数的主要测试，包含了多种输入和预期输出的断言，展示了正常的测试模式。",
+        "reusable_parts": [
+          "导入 sqrtdenest 函数的方式",
+          "使用 sqrt 函数构造表达式",
+          "使用 assert sqrtdenest(i) == d[i] 的断言风格"
+        ],
+        "possible_gap": "现有测试用例主要针对实数域内的平方根表达式，没有包含触发异常的复数表达式。"
+      },
+      {
+        "test_name": "test_sqrtdenest2",
+        "test_file": "sympy/simplify/tests/test_sqrtdenest.py",
+        "why_relevant": "包含更多复杂的 sqrtdenest 测试用例，包括一些无法 denest 时应返回原表达式的场景（如 `assert sqrtdenest(z) == z`）。",
+        "reusable_parts": [
+          "构造复杂嵌套平方根表达式的方法",
+          "断言无法 denest 时表达式应保持不变的测试模式（`assert sqrtdenest(z) == z`）"
+        ],
+        "possible_gap": "测试用例中的表达式仍为实数，未涉及复数 `I`。"
+      },
+      {
+        "test_name": "test_issue_6241",
+        "test_file": "sympy/simplify/tests/test_sqrtdenest.py",
+        "why_relevant": "这是一个针对特定 Issue 的测试，展示了当 sqrtdenest 无法化简时应返回原表达式的模式。",
+        "reusable_parts": [
+          "针对特定失败场景的测试结构",
+          "断言表达式在无法 denest 时保持不变的断言模式"
+        ],
+        "possible_gap": "该测试的输入表达式不包含复数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中的输入多为实数域内的平方根表达式，例如 sqrt(5 + 2*sqrt(6))。",
+        "target_pattern": "输入应包含复数 `I` 的平方根表达式，例如 (3 - sqrt(2)*sqrt(4 + 3*I) + 3*I)/2。",
+        "reason": "Issue 表明复数表达式的处理触发了异常路径，而现有测试未覆盖此场景。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "传递给 sqrtdenest 的参数通常是单个 sqrt 对象或简单的 Add/Mul 组合。",
+        "target_pattern": "参数应为包含复数、分数和多个 sqrt 项的 Add 表达式。",
+        "reason": "Issue 的触发输入是一个复杂的 Add 表达式，其内部 sqrt 的参数包含复数，这可能使 _sqrt_match 和 split_surds 的内部逻辑走向异常分支。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 sqrtdenest(trigger_expr) 时是否抛出 IndexError 异常。",
+        "reason": "Issue 的核心现象是 IndexError 异常，观测此异常是判断缺陷是否被触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "sqrtdenest(trigger_expr) 的返回值，观察其是否与输入表达式在数学上等价（或结构相同）。",
+        "reason": "修复后的预期行为是返回未化简的原始表达式，观测返回值可以验证修复是否成功。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "返回值的字符串表示（repr），与输入表达式的 repr 进行稳定片段比较。",
+        "reason": "在无法 denest 时，函数可能返回结构相同但内部表示略有差异的对象，比较 repr 的稳定部分（如运算符和数字）可以判断是否返回了原表达式。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对触发输入调用 sqrtdenest 不会抛出 IndexError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为行号等可能变化。",
+        "reason": "Issue 的核心是异常，修复后应不再抛出。使用 `pytest.raises` 或 `assertRaises` 来验证无异常更稳定。"
+      },
+      {
+        "assertion_goal": "验证 sqrtdenest 对触发输入的返回值在数学上等于输入表达式。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言返回值的完整 repr 字符串完全相等，因为内部表示可能略有不同。",
+        "reason": "修复后的预期行为是返回未化简的表达式，使用 SymPy 的相等性检查（`==`）可以验证数学等价性，比字符串比较更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要从 sympy 导入 sqrt, I, sqrtdenest 等符号和函数。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能在一个普通的 Python 函数或 pytest 测试函数中运行，无需特殊 fixture。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "导致 _split_gcd 收到空参数的确切条件链，即复数表达式如何使 split_surds 产生空的 surds 列表。",
+      "除了给定的触发表达式，是否还有其他类似的复数表达式会触发相同的异常。",
+      "修复补丁的具体位置和方式（可能在 _split_gcd、split_surds 或 _sqrt_match 中添加空检查）。"
+    ]
+  }
+}

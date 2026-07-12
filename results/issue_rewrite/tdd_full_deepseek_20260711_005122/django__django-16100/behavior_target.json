@@ -1,0 +1,345 @@
+{
+  "instance_id": "django__django-16100",
+  "issue_summary": "Django admin changelist_view 在处理 list_editable 数据时缺少事务包装，可能导致错误时数据库处于意外状态。",
+  "trigger_condition": {
+    "text": "向启用了 list_editable 的 Django admin changelist 视图发送 POST 请求以批量编辑数据，处理过程中发生错误。",
+    "evidence": [
+      "Issue 描述指出 changelist_view 可能改变数据库数据，但缺少事务。",
+      "源码片段 1 显示 changelist_view 方法处理 POST 请求和 list_editable 数据，并在第 1958-1980 行执行数据库保存操作。",
+      "相关测试 1、2、4 都展示了通过 POST 请求向 changelist 提交 list_editable 数据的操作模式。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "在处理 list_editable 数据时发生错误，可能导致数据库处于部分更新或不一致的状态。",
+    "symptom_type": "state_not_updated",
+    "evidence": [
+      "Issue 描述提到“prevent unexpected states in case of errors”，暗示错误可能导致不一致状态。",
+      "源码片段 1 中，第 1960-1979 行的循环会逐个保存对象，但没有事务包装。如果中间出错，已保存的对象不会被回滚。"
+    ],
+    "confidence": "medium"
+  },
+  "expected_behavior": {
+    "text": "changelist_view 在处理 list_editable 的 POST 请求时，相关的数据库操作应该被包装在一个事务中，以确保原子性，要么全部成功，要么在错误时全部回滚。",
+    "evidence": [
+      "Issue 描述明确指出“should be wrapped in a transaction”。",
+      "根据 Django 的常规实践，修改数据库的操作通常应使用事务。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "ModelAdmin.changelist_view",
+      "kind": "method",
+      "source_path": "django/contrib/admin/options.py",
+      "reason": "Issue 直接针对此方法，认为其缺少事务处理。"
+    },
+    {
+      "name": "ModelAdmin._get_list_editable_queryset",
+      "kind": "method",
+      "source_path": "django/contrib/admin/options.py",
+      "reason": "在 changelist_view 处理 list_editable 时被调用（源码第 1954 行），用于获取要编辑的对象。"
+    },
+    {
+      "name": "ModelAdmin.save_model",
+      "kind": "method",
+      "source_path": "django/contrib/admin/options.py",
+      "reason": "在 changelist_view 的保存循环中被调用（源码第 1967 行），执行实际的对象保存。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/contrib/admin/options.py",
+      "object": "ModelAdmin.changelist_view",
+      "lines": "1958-1980",
+      "reason": "Issue 明确指出此视图缺少事务。源码中，处理 list_editable POST 请求并保存数据的代码块（从 if formset.is_valid(): 开始）没有看到事务装饰器或上下文管理器。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "ChangeListTests.test_changelist_view_list_editable_changed_objects_uses_filter",
+      "test_file": "tests/admin_changelist/tests.py",
+      "why_relevant": "它直接测试通过 POST 请求向 changelist_view 提交 list_editable 数据并保存的场景，这正是触发条件。",
+      "reusable_parts": [
+        "测试类结构（@override_settings, TestCase）",
+        "创建 Swallow 测试对象",
+        "构建 superuser 并登录",
+        "构建 list_editable POST 数据（form-* 格式）",
+        "使用 self.client.post 发送请求",
+        "使用 CaptureQueriesContext 检查 SQL"
+      ],
+      "possible_gap": "该测试关注的是查询过滤，没有模拟或断言事务行为，也没有触发错误来观察数据库状态。"
+    },
+    {
+      "test_name": "ChangeListTests.test_multiuser_edit",
+      "test_file": "tests/admin_changelist/tests.py",
+      "why_relevant": "它测试了 list_editable 的复杂保存场景，涉及多个对象和分页，并验证了数据库状态的正确更新。",
+      "reusable_parts": [
+        "创建多个测试对象",
+        "构建包含多个对象的 list_editable POST 数据",
+        "使用 assertContains 检查成功消息",
+        "使用 refresh_from_db 验证对象状态更新",
+        "验证对象数量未变（防止意外创建）"
+      ],
+      "possible_gap": "测试在正常流程下运行成功，没有引入错误来测试事务回滚。"
+    },
+    {
+      "test_name": "ChangeListTests.test_get_list_editable_queryset",
+      "test_file": "tests/admin_changelist/tests.py",
+      "why_relevant": "它测试了 _get_list_editable_queryset 方法，该方法在 changelist_view 处理 list_editable 时被调用，是数据流的一部分。",
+      "reusable_parts": [
+        "使用 self.factory 创建请求对象",
+        "直接调用 ModelAdmin 方法进行测试",
+        "测试无效数据时的回退行为"
+      ],
+      "possible_gap": "这是一个单元测试，不涉及完整的视图调用和数据库保存事务。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试中，所有表单数据都是有效的，保存操作会成功完成。",
+      "target_pattern": "在保存循环中间引入一个错误，例如在某个 save_model 调用中引发异常，或者模拟数据库约束冲突。",
+      "reason": "为了暴露缺少事务的问题，需要让部分保存成功，然后后续保存失败，观察已成功部分是否被回滚。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "测试直接调用 client.post 并期望成功响应。",
+      "target_pattern": "在视图处理过程中（例如在 save_model 内）插入一个会引发异常的钩子或模拟。",
+      "reason": "需要强制让 changelist_view 在处理 list_editable 数据时进入错误路径，以观察事务缺失的影响。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "state",
+      "expression_hint": "在触发错误前后，检查相关数据库表（例如 Swallow）中测试对象的字段值。",
+      "reason": "如果事务缺失，部分对象的更改可能被持久化，而后续对象的更改没有。通过比较对象在测试前后的状态可以检测到这种不一致。"
+    },
+    {
+      "kind": "sql",
+      "expression_hint": "使用类似 CaptureQueriesContext 的工具捕获在 changelist_view POST 处理期间执行的所有 SQL 语句。",
+      "reason": "可以观察是否有 BEGIN/COMMIT/ROLLBACK 语句，或者多个 UPDATE 语句在没有事务包裹的情况下独立执行。"
+    },
+    {
+      "kind": "exception",
+      "expression_hint": "观察 changelist_view 在处理过程中是否抛出异常，以及异常的类型和消息。",
+      "reason": "Issue 关注的是“in case of errors”时的行为，因此需要捕获并检查抛出的异常。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证在 list_editable 处理过程中发生错误时，所有相关的数据库更改都被回滚，没有对象被部分更新。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "避免断言具体的异常消息字符串或完整的 SQL 语句，因为这些可能因 Django 版本或配置而变化。",
+      "reason": "事务的核心保证是原子性。断言错误前后数据库状态一致（或回滚到之前的状态）直接对应 Issue 的期望行为。"
+    },
+    {
+      "assertion_goal": "验证在正常成功情况下，所有预期的更改都被正确保存。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言不相关的对象属性或数量，除非它们与 list_editable 字段直接相关。",
+      "reason": "确保测试的变异只影响事务行为，而不破坏正常的保存功能。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 Django 的 TestCase（或 TransactionTestCase），因为它提供了测试数据库和事务支持。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要创建一个启用了 list_editable 的 ModelAdmin 子类（如测试中的 SwallowAdmin）和相应的模型。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要构建一个超级用户并通过 client.force_login 登录，因为 admin 视图需要权限。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 mock.patch 来在 save_model 等方法中模拟异常，以触发错误条件。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "Issue 没有提供具体的错误场景示例（例如哪种错误会导致问题）。",
+    "不清楚 Django 的默认数据库配置或中间件是否已经提供了某种级别的事务，或者是否完全缺失。",
+    "不确定在错误发生时，用户会看到什么（例如，是返回错误页面，还是静默失败）。",
+    "需要确认在 list_editable 处理之外，changelist_view 的其他部分（如 bulk actions）是否也存在同样的事务缺失问题。"
+  ],
+  "raw": {
+    "issue_summary": "Django admin changelist_view 在处理 list_editable 数据时缺少事务包装，可能导致错误时数据库处于意外状态。",
+    "trigger_condition": {
+      "text": "向启用了 list_editable 的 Django admin changelist 视图发送 POST 请求以批量编辑数据，处理过程中发生错误。",
+      "evidence": [
+        "Issue 描述指出 changelist_view 可能改变数据库数据，但缺少事务。",
+        "源码片段 1 显示 changelist_view 方法处理 POST 请求和 list_editable 数据，并在第 1958-1980 行执行数据库保存操作。",
+        "相关测试 1、2、4 都展示了通过 POST 请求向 changelist 提交 list_editable 数据的操作模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在处理 list_editable 数据时发生错误，可能导致数据库处于部分更新或不一致的状态。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述提到“prevent unexpected states in case of errors”，暗示错误可能导致不一致状态。",
+        "源码片段 1 中，第 1960-1979 行的循环会逐个保存对象，但没有事务包装。如果中间出错，已保存的对象不会被回滚。"
+      ],
+      "confidence": "medium"
+    },
+    "expected_behavior": {
+      "text": "changelist_view 在处理 list_editable 的 POST 请求时，相关的数据库操作应该被包装在一个事务中，以确保原子性，要么全部成功，要么在错误时全部回滚。",
+      "evidence": [
+        "Issue 描述明确指出“should be wrapped in a transaction”。",
+        "根据 Django 的常规实践，修改数据库的操作通常应使用事务。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ModelAdmin.changelist_view",
+        "kind": "method",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "Issue 直接针对此方法，认为其缺少事务处理。"
+      },
+      {
+        "name": "ModelAdmin._get_list_editable_queryset",
+        "kind": "method",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "在 changelist_view 处理 list_editable 时被调用（源码第 1954 行），用于获取要编辑的对象。"
+      },
+      {
+        "name": "ModelAdmin.save_model",
+        "kind": "method",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "在 changelist_view 的保存循环中被调用（源码第 1967 行），执行实际的对象保存。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/options.py",
+        "object": "ModelAdmin.changelist_view",
+        "lines": "1958-1980",
+        "reason": "Issue 明确指出此视图缺少事务。源码中，处理 list_editable POST 请求并保存数据的代码块（从 if formset.is_valid(): 开始）没有看到事务装饰器或上下文管理器。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ChangeListTests.test_changelist_view_list_editable_changed_objects_uses_filter",
+        "test_file": "tests/admin_changelist/tests.py",
+        "why_relevant": "它直接测试通过 POST 请求向 changelist_view 提交 list_editable 数据并保存的场景，这正是触发条件。",
+        "reusable_parts": [
+          "测试类结构（@override_settings, TestCase）",
+          "创建 Swallow 测试对象",
+          "构建 superuser 并登录",
+          "构建 list_editable POST 数据（form-* 格式）",
+          "使用 self.client.post 发送请求",
+          "使用 CaptureQueriesContext 检查 SQL"
+        ],
+        "possible_gap": "该测试关注的是查询过滤，没有模拟或断言事务行为，也没有触发错误来观察数据库状态。"
+      },
+      {
+        "test_name": "ChangeListTests.test_multiuser_edit",
+        "test_file": "tests/admin_changelist/tests.py",
+        "why_relevant": "它测试了 list_editable 的复杂保存场景，涉及多个对象和分页，并验证了数据库状态的正确更新。",
+        "reusable_parts": [
+          "创建多个测试对象",
+          "构建包含多个对象的 list_editable POST 数据",
+          "使用 assertContains 检查成功消息",
+          "使用 refresh_from_db 验证对象状态更新",
+          "验证对象数量未变（防止意外创建）"
+        ],
+        "possible_gap": "测试在正常流程下运行成功，没有引入错误来测试事务回滚。"
+      },
+      {
+        "test_name": "ChangeListTests.test_get_list_editable_queryset",
+        "test_file": "tests/admin_changelist/tests.py",
+        "why_relevant": "它测试了 _get_list_editable_queryset 方法，该方法在 changelist_view 处理 list_editable 时被调用，是数据流的一部分。",
+        "reusable_parts": [
+          "使用 self.factory 创建请求对象",
+          "直接调用 ModelAdmin 方法进行测试",
+          "测试无效数据时的回退行为"
+        ],
+        "possible_gap": "这是一个单元测试，不涉及完整的视图调用和数据库保存事务。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，所有表单数据都是有效的，保存操作会成功完成。",
+        "target_pattern": "在保存循环中间引入一个错误，例如在某个 save_model 调用中引发异常，或者模拟数据库约束冲突。",
+        "reason": "为了暴露缺少事务的问题，需要让部分保存成功，然后后续保存失败，观察已成功部分是否被回滚。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试直接调用 client.post 并期望成功响应。",
+        "target_pattern": "在视图处理过程中（例如在 save_model 内）插入一个会引发异常的钩子或模拟。",
+        "reason": "需要强制让 changelist_view 在处理 list_editable 数据时进入错误路径，以观察事务缺失的影响。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "在触发错误前后，检查相关数据库表（例如 Swallow）中测试对象的字段值。",
+        "reason": "如果事务缺失，部分对象的更改可能被持久化，而后续对象的更改没有。通过比较对象在测试前后的状态可以检测到这种不一致。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "使用类似 CaptureQueriesContext 的工具捕获在 changelist_view POST 处理期间执行的所有 SQL 语句。",
+        "reason": "可以观察是否有 BEGIN/COMMIT/ROLLBACK 语句，或者多个 UPDATE 语句在没有事务包裹的情况下独立执行。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "观察 changelist_view 在处理过程中是否抛出异常，以及异常的类型和消息。",
+        "reason": "Issue 关注的是“in case of errors”时的行为，因此需要捕获并检查抛出的异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在 list_editable 处理过程中发生错误时，所有相关的数据库更改都被回滚，没有对象被部分更新。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言具体的异常消息字符串或完整的 SQL 语句，因为这些可能因 Django 版本或配置而变化。",
+        "reason": "事务的核心保证是原子性。断言错误前后数据库状态一致（或回滚到之前的状态）直接对应 Issue 的期望行为。"
+      },
+      {
+        "assertion_goal": "验证在正常成功情况下，所有预期的更改都被正确保存。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言不相关的对象属性或数量，除非它们与 list_editable 字段直接相关。",
+        "reason": "确保测试的变异只影响事务行为，而不破坏正常的保存功能。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 Django 的 TestCase（或 TransactionTestCase），因为它提供了测试数据库和事务支持。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建一个启用了 list_editable 的 ModelAdmin 子类（如测试中的 SwallowAdmin）和相应的模型。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构建一个超级用户并通过 client.force_login 登录，因为 admin 视图需要权限。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 mock.patch 来在 save_model 等方法中模拟异常，以触发错误条件。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "Issue 没有提供具体的错误场景示例（例如哪种错误会导致问题）。",
+      "不清楚 Django 的默认数据库配置或中间件是否已经提供了某种级别的事务，或者是否完全缺失。",
+      "不确定在错误发生时，用户会看到什么（例如，是返回错误页面，还是静默失败）。",
+      "需要确认在 list_editable 处理之外，changelist_view 的其他部分（如 bulk actions）是否也存在同样的事务缺失问题。"
+    ]
+  }
+}

@@ -1,0 +1,131 @@
+```json
+{
+    "issue_summary": "FileInput 在已有初始数据时不应输出 required 属性。",
+    "trigger_condition": {
+        "text": "使用 FileInput 小部件渲染一个表单字段，该字段已有初始数据（例如，编辑已保存的模型实例时文件已存在）。",
+        "evidence": ["Issue 描述：'when a file is already set (e.g. already saved on a model instance that is being edited)'", "源码片段 3 显示 ClearableFileInput.use_required_attribute 在 initial 存在时返回 False"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "生成的 HTML input 元素包含了 required 属性，即使已有初始文件存在。",
+        "symptom_type": "wrong_return",
+        "evidence": ["Issue 描述：'required is not output on the html input element... when a file is already set'", "相关测试 1 显示 ClearableFileInput 在 initial 存在时 use_required_attribute 返回 False"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "当 FileInput 小部件有初始数据时，其 use_required_attribute 方法应返回 False，从而不在生成的 HTML 中包含 required 属性。",
+        "evidence": ["Issue 描述：'should be moved to FileInput.use_required_attribute() so that required is not output... when a file is already set'", "源码片段 3 显示 ClearableFileInput 已实现此逻辑：'return super().use_required_attribute(initial) and not initial'"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "FileInput.use_required_attribute",
+            "kind": "method",
+            "source_path": "django/forms/widgets.py",
+            "reason": "Issue 建议将 ClearableFileInput.use_required_attribute 的逻辑移到 FileInput.use_required_attribute 中。"
+        },
+        {
+            "name": "ClearableFileInput.use_required_attribute",
+            "kind": "method",
+            "source_path": "django/forms/widgets.py",
+            "reason": "当前已实现所需逻辑，是 Issue 建议的参考实现。"
+        },
+        {
+            "name": "FileInput",
+            "kind": "class",
+            "source_path": "django/forms/widgets.py",
+            "reason": "缺陷涉及的核心小部件类。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/forms/widgets.py",
+            "object": "FileInput.use_required_attribute",
+            "lines": "",
+            "reason": "Issue 明确指出 FileInput 缺少了 ClearableFileInput 中已有的逻辑，导致在初始数据存在时仍可能返回 True。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "ClearableFileInputTest.test_use_required_attribute",
+            "test_file": "tests/forms_tests/widget_tests/test_clearablefileinput.py",
+            "why_relevant": "它直接测试了 ClearableFileInput.use_required_attribute 方法，该方法的行为正是 Issue 期望 FileInput 应具有的行为。",
+            "reusable_parts": ["测试类结构 (WidgetTest)", "assertIs 断言风格", "use_required_attribute 方法的调用方式", "对 initial 参数使用 None 和字符串值的模式"],
+            "possible_gap": "它测试的是 ClearableFileInput，而不是有缺陷的 FileInput。"
+        },
+        {
+            "test_name": "TextInputTest.test_use_required_attribute",
+            "test_file": "tests/forms_tests/widget_tests/test_textinput.py",
+            "why_relevant": "它测试了另一个 Input 子类的 use_required_attribute 方法，展示了测试该方法的通用模式。",
+            "reusable_parts": ["测试类结构", "assertIs 断言风格", "对 initial 参数使用不同值的模式"],
+            "possible_gap": "它测试的是 TextInput，其行为与 FileInput 预期不同（始终返回 True）。"
+        },
+        {
+            "test_name": "FileInputTest.test_render",
+            "test_file": "tests/forms_tests/widget_tests/test_fileinput.py",
+            "why_relevant": "它测试了 FileInput 的渲染行为，与生成 HTML 属性相关。",
+            "reusable_parts": ["FileInputTest 类结构", "check_html 辅助方法的使用", "对 FileInput 小部件的实例化"],
+            "possible_gap": "它没有测试 use_required_attribute 方法，而是测试最终渲染的 HTML。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "argument",
+            "current_pattern": "相似测试中，对 use_required_attribute 的调用可能使用 None 或空字符串作为 initial 参数。",
+            "target_pattern": "使用一个非空的字符串（如 'resume.txt'）作为 initial 参数，模拟已有初始文件的情况。",
+            "reason": "根据 Issue 和 ClearableFileInput 测试，当 initial 为非空时，use_required_attribute 应返回 False。",
+            "confidence": "high"
+        },
+        {
+            "slot": "object_state",
+            "current_pattern": "相似测试中，测试的是 ClearableFileInput 或 TextInput 小部件。",
+            "target_pattern": "测试对象应改为普通的 FileInput 小部件。",
+            "reason": "缺陷存在于 FileInput 类中，而不是其子类 ClearableFileInput。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "return_value",
+            "expression_hint": "widget.use_required_attribute(initial_value)",
+            "reason": "Issue 的核心是 use_required_attribute 方法的返回值决定了 required 属性是否输出。"
+        },
+        {
+            "kind": "file_output",
+            "expression_hint": "渲染后 HTML 字符串中是否包含 'required' 属性片段",
+            "reason": "错误的返回值会导致生成的 HTML 包含不必要的 required 属性。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "当 FileInput 小部件的 initial 参数为非空值时，use_required_attribute 方法应返回 False。",
+            "preferred_assertion_style": "equals",
+            "avoid": "断言完整的 HTML 字符串，因为模板可能变化。",
+            "reason": "直接验证核心方法的返回值，这是决定 HTML 属性的根本原因，且稳定不依赖模板细节。"
+        },
+        {
+            "assertion_goal": "当 FileInput 小部件的 initial 参数为 None 时，use_required_attribute 方法应返回 True（保持浏览器验证能力）。",
+            "preferred_assertion_style": "equals",
+            "avoid": "仅断言一种情况。",
+            "reason": "需要确保在无初始数据时，required 属性仍能正确输出以触发浏览器验证。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要使用 WidgetTest 测试基类或其类似结构来实例化小部件。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "测试需要创建 FileInput 小部件的实例。",
+            "source": "retrieved_source",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "FileInput 的父类 Input 或 Widget 中 use_required_attribute 的默认实现是什么？这决定了 super().use_required_attribute(initial) 的返回值。",
+        "除了字符串，还有哪些类型的值会被视为有效的 'initial' 数据？",
+        "是否所有 FileInput 的使用场景（如表单、模型表单）都会正确传递 initial 参数？"
+    ]
+}
+```

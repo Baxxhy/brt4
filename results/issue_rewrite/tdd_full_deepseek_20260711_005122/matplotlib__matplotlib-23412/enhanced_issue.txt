@@ -1,0 +1,140 @@
+instance_id: matplotlib__matplotlib-23412
+
+issue_summary: 在 patch 对象（如 Rectangle、Ellipse）上设置带偏移量的虚线线型时，偏移量参数无效。
+
+trigger_condition:
+{
+  "text": "使用元组格式的 `linestyle` 参数（例如 `(offset, (on_off_seq))`）创建或设置 Patch 对象（如 Rectangle、Ellipse）的边线样式。",
+  "evidence": [
+    "Issue 中的复现代码展示了使用 `ls=(0,(10,10))` 和 `ls=(10,(10,10))` 创建 Rectangle 对象。",
+    "Issue 提到在 Ellipse patch 对象上也发现了同样的问题。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "具有不同偏移量的虚线边线在视觉上重叠，没有显示出预期的偏移效果。",
+  "symptom_type": "unknown",
+  "evidence": [
+    "Issue 中的图片和描述：“the patch edge lines overlap, not adhering to the offset.”"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "Patch 对象的边线样式应正确支持虚线元组中的偏移量参数，使得具有不同偏移量的虚线图案在视觉上错开。",
+  "evidence": [
+    "Issue 中展示了 Line2D 对象使用相同线型参数时，偏移量有效，两条线错开显示。",
+    "相关测试 test_dash_offset 表明系统支持对线条设置偏移量。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "matplotlib.patches.Rectangle",
+    "kind": "class",
+    "source_path": "lib/matplotlib/patches.py",
+    "reason": "Issue 复现代码中使用的对象，用于演示缺陷。"
+  },
+  {
+    "name": "matplotlib.patches.Ellipse",
+    "kind": "class",
+    "source_path": "lib/matplotlib/patches.py",
+    "reason": "Issue 中提到在该类上也存在相同问题。"
+  },
+  {
+    "name": "matplotlib.patches.Patch.set_linestyle",
+    "kind": "method",
+    "source_path": "lib/matplotlib/patches.py",
+    "reason": "设置线型的方法，可能是缺陷相关的入口点。"
+  },
+  {
+    "name": "matplotlib.lines.Line2D.set_dashes",
+    "kind": "method",
+    "source_path": "lib/matplotlib/lines.py",
+    "reason": "作为对比，Line2D 正确支持偏移量，其相关方法可能提供正确行为的参考。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "相关测试中使用的线型参数，如 `linestyle=(0, (5, 7, 10, 7))`（偏移量为0）。",
+    "target_pattern": "使用非零偏移量的线型参数，如 `linestyle=(10, (10, 10))`。",
+    "reason": "Issue 表明当偏移量非零时，Patch 对象的边线样式渲染不正确。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object",
+    "current_pattern": "相关测试中使用的 PathPatch 或 PathCollection 对象。",
+    "target_pattern": "使用更简单的 Patch 子类，如 Rectangle 或 Ellipse。",
+    "reason": "Issue 的复现代码使用了 Rectangle 和 Ellipse，且表明问题存在于这些基本 patch 对象上。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "state",
+    "expression_hint": "Patch 对象内部存储的线型信息，例如 `patch.get_linestyle()` 的返回值。",
+    "reason": "检查传入的带偏移量的虚线元组是否被正确存储。"
+  },
+  {
+    "kind": "file_output",
+    "expression_hint": "渲染后生成的图像或图像数据（如通过 `fig.canvas.draw()` 或 `fig.savefig`）。",
+    "reason": "缺陷表现为视觉上的重叠，需要通过图像比较或像素分析来验证偏移量是否生效。"
+  },
+  {
+    "kind": "unknown",
+    "expression_hint": "绘制过程中传递给底层渲染器（如 `draw_path`）的虚线模式参数。",
+    "reason": "偏移量信息可能在从 Patch 属性转换到渲染命令的过程中丢失或错误处理。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证两个具有不同虚线偏移量的 Patch 对象的边线在渲染图像上不重叠（或存在可测量的位移）。",
+    "preferred_assertion_style": "before_after_relation",
+    "avoid": "直接断言完整的图像像素相等，或断言内部未导出的渲染器状态。",
+    "reason": "缺陷本质是视觉渲染错误，通过比较两个 patch 的渲染结果（如提取边缘像素位置）可以稳定地验证偏移效果。"
+  },
+  {
+    "assertion_goal": "验证 Patch 对象的 `get_linestyle()` 方法返回的元组与设置的值一致。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的 repr 字符串或与渲染无关的内部属性。",
+    "reason": "确保线型参数（包括偏移量）被正确存储，这是渲染正确的前提。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "使用 `plt.subplots()` 创建图形和坐标轴，并使用 `ax.add_patch()` 添加 patch 对象。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要使用非交互式后端（如 'agg'）进行无头测试和图像捕获。",
+    "source": "issue",
+    "confidence": "medium"
+  },
+  {
+    "hint": "参考现有测试，使用 `@image_comparison` 装饰器或手动使用 `fig.savefig` 到字节流进行图像比较。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "缺陷的确切位置是在 Patch 的 `set_linestyle` 方法、`draw` 方法，还是在将线型信息传递给渲染器的某个转换步骤中。",
+  "除了 Rectangle 和 Ellipse，其他 Patch 子类（如 Polygon、FancyBboxPatch）是否也受此影响。",
+  "线型元组中更复杂的模式（如多于两个元素的 on_off_seq）是否也存在问题。"
+]

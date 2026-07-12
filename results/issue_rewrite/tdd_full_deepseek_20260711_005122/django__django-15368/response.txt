@@ -1,0 +1,135 @@
+```json
+{
+    "issue_summary": "bulk_update() 将 F('...') 表达式错误地当作字符串处理，而不是解析为列引用。",
+    "trigger_condition": {
+        "text": "将一个 F('field_name') 表达式直接赋值给模型实例的字段，然后对该实例调用 bulk_update()。",
+        "evidence": ["Issue 中的 Repro 部分：'assign plain F(...) to some model instance field' 和 'save with bulk_update'。", "Issue 中的示例代码：'o.c8 = F('name')' 和 'SelfRef.objects.bulk_update([o], ['c8'])'。"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "数据库更新后，字段值被设置为字符串 'F(name)'，而不是解析为对 'name' 列的引用。生成的 SQL 语句将 F() 的字符串表示形式作为字面值插入。",
+        "symptom_type": "wrong_sql",
+        "evidence": ["Issue 中：'o.c8' 返回 'F(name)'。", "Issue 中显示的 SQL 片段：'SET \"c8\" = CASE WHEN ... THEN \\'F(name)\\''。", "Issue 描述：'The created SQL contains the string repr of F(), instead of resolving to the column name'。"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "bulk_update() 应能正确处理 F('field_name') 表达式，将其解析为对指定列的引用，并在生成的 SQL 中正确使用该列名。",
+        "evidence": ["Issue 中提到的修复建议：'It works, if the type check gets replaced...' 表明预期行为是 F() 表达式被解析。", "相关测试 1 (test_field_references) 展示了 bulk_update 与 F('num') + 1 表达式配合工作正常，暗示 F 表达式应被支持。", "相关测试 3 (test_object_update) 展示了 save() 方法能正确处理 F 表达式，暗示类似功能应适用于 bulk_update。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "QuerySet.bulk_update",
+            "kind": "method",
+            "source_path": "django/db/models/query.py",
+            "reason": "这是 Issue 报告的直接缺陷所在方法。"
+        },
+        {
+            "name": "F",
+            "kind": "class",
+            "source_path": "django/db/models/expressions.py",
+            "reason": "Issue 的核心是关于 F 表达式在 bulk_update 中的错误处理。"
+        },
+        {
+            "name": "Expression",
+            "kind": "class",
+            "source_path": "django/db/models/expressions.py",
+            "reason": "源码片段 1 显示 bulk_update 使用 isinstance(attr, Expression) 进行类型检查，而 F 是 Expression 的子类。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/db/models/query.py",
+            "object": "QuerySet.bulk_update",
+            "lines": "639-685",
+            "reason": "Issue 明确指出问题根源在 query.py 第 673 行附近的类型检查。源码片段 1 显示该方法内部有 'if not isinstance(attr, Expression):' 检查，但 Issue 表明 F 实例可能未被正确识别。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_field_references",
+            "test_file": "tests/queries/test_bulk_update.py",
+            "why_relevant": "它直接测试 bulk_update 与 F 表达式（F('num') + 1）的配合使用，是功能上最接近的现有测试。",
+            "reusable_parts": ["BulkUpdateTests 测试类结构", "Number 模型的使用", "bulk_update 的调用方式", "使用 assertCountEqual 验证结果"],
+            "possible_gap": "该测试使用复合表达式 F('num') + 1，而 Issue 涉及的是纯 F('name') 表达式。测试中的表达式可能触发了不同的代码路径，绕过了有缺陷的类型检查。"
+        },
+        {
+            "test_name": "test_object_update",
+            "test_file": "tests/expressions/tests.py",
+            "why_relevant": "它测试了在单个对象上使用 F 表达式并通过 save() 更新，展示了 F 表达式在标准更新流程中的预期行为。",
+            "reusable_parts": ["BasicExpressionsTests 测试类", "F('field_name') 表达式的赋值模式", "refresh_from_db() 和 assertEqual 的验证模式"],
+            "possible_gap": "它使用 save() 方法而非 bulk_update()，因此不直接触发有缺陷的代码路径。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "input",
+            "current_pattern": "相关测试 1 中：number.num = F('num') + 1 （复合表达式）。",
+            "target_pattern": "根据 Issue：obj.field = F('other_field') （纯 F 表达式）。",
+            "reason": "Issue 表明纯 F 表达式在 bulk_update 的类型检查中未被识别为 Expression，而复合表达式可能被识别。这个变异可能使测试走向缺陷路径。",
+            "confidence": "high"
+        },
+        {
+            "slot": "argument",
+            "current_pattern": "相关测试 1 中：bulk_update 更新的是与 F 表达式相同的字段（'num'）。",
+            "target_pattern": "根据 Issue：bulk_update 可以更新一个字段，而 F 表达式引用另一个字段（如 'c8' 和 'name'）。",
+            "reason": "这更贴近 Issue 的示例，并确保测试的是字段间引用，而非自增。",
+            "confidence": "medium"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "sql",
+            "expression_hint": "生成的 SQL 查询字符串（例如通过 connection.queries 获取）。",
+            "reason": "Issue 显示错误直接体现在 SQL 中，将 'F(name)' 作为字符串字面值插入。观察 SQL 是否包含列名而非字符串表示是判断缺陷是否触发的关键。"
+        },
+        {
+            "kind": "state",
+            "expression_hint": "调用 refresh_from_db() 后，模型实例字段的值。",
+            "reason": "Issue 显示更新后字段值错误地变为字符串 'F(name)'。观察更新后的实际值可以验证行为是否正确。"
+        },
+        {
+            "kind": "type",
+            "expression_hint": "赋值给模型字段的 attr 的类型（在 bulk_update 内部或测试中）。",
+            "reason": "核心问题似乎是类型检查。观察 attr 是否是 F 实例以及 isinstance(attr, Expression) 的结果有助于定位问题。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "验证 bulk_update 后，目标字段的值等于源字段的值（即 F 表达式被正确解析）。",
+            "preferred_assertion_style": "equals",
+            "avoid": "断言完整的、具体的 SQL 字符串，因为 SQL 生成可能因数据库后端而异。",
+            "reason": "这直接对应 Issue 中观察到的错误（字段值变成字符串 'F(...)'），并且是功能性的、稳定的断言。"
+        },
+        {
+            "assertion_goal": "验证生成的 SQL 包含对正确列名的引用，而不是 'F(...)' 的字符串字面值。",
+            "preferred_assertion_style": "contains_fragment",
+            "avoid": "断言整个 SQL 语句完全匹配。",
+            "reason": "Issue 的核心是 SQL 生成错误。检查 SQL 是否包含列名片段（如 \"name\"）比检查完整字符串更稳定。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要一个 Django TestCase 和至少一个具有多个字段的模型（如 Issue 中的 SelfRef）。",
+            "source": "issue",
+            "confidence": "high"
+        },
+        {
+            "hint": "可能需要使用 django.db.connection 来检查查询日志。",
+            "source": "issue",
+            "confidence": "high"
+        },
+        {
+            "hint": "测试应创建并保存模型实例，然后进行赋值和 bulk_update 操作。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "F 类是否直接继承自 Expression 类，或者它们的确切继承关系如何（源码片段 2 和 4 显示不完整）。",
+        "bulk_update 方法中 'if not isinstance(attr, Expression):' 这一行（在源码片段 1 中）的确切行号是否与 Issue 提到的第 673 行完全一致。",
+        "除了纯 F 表达式，是否还有其他类型的表达式（如 Value、Func）在 bulk_update 中也会出现类似问题。",
+        "Issue 中建议的修复（检查 hasattr(attr, 'resolve_expression') 或 isinstance(attr, (Expression, F))）是否完全正确且无副作用。"
+    ]
+}
+```

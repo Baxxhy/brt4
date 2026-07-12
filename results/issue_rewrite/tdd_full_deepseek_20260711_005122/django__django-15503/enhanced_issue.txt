@@ -1,0 +1,119 @@
+instance_id: django__django-15503
+
+issue_summary: JSONField 的 has_key、has_keys、has_any_keys 查询在 SQLite、MySQL、Oracle 数据库上无法正确处理数值键。
+
+trigger_condition:
+{
+  "text": "在 SQLite 数据库后端，使用 models.JSONField() 的 __has_key 查询查找 JSON 数据中键为纯数字字符串（如 '1111'）的条目。",
+  "evidence": [
+    "Issue 中提供了测试代码：JsonFieldHasKeyTest.objects.filter(data__has_key='1111')",
+    "Issue 描述：'has_key lookup with numerical keys on SQLite database it fails to find the keys'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "查询返回计数为 0，而数据库中实际存在匹配的条目，导致断言失败。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 中测试结果：'AssertionError: 0 != 1 : Should have found 1 entry with key '1111''",
+    "Issue 说明：'it works on postgresql but fails on sqlite'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "JSONField 的 __has_key、__has_keys、__has_any_keys 查询应能正确处理键为数字字符串的情况，在所有支持的数据库后端（包括 SQLite、MySQL、Oracle）上返回正确匹配的条目。",
+  "evidence": [
+    "Issue 中测试期望：'Should have found 1 entry with key '1111''",
+    "Issue 说明：'it works on postgresql'，表明这是期望的正确行为"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "JSONField",
+    "kind": "class",
+    "source_path": "django/db/models/fields/json.py",
+    "reason": "Issue 的核心是关于 JSONField 的查询行为。"
+  },
+  {
+    "name": "QuerySet.filter",
+    "kind": "method",
+    "source_path": "",
+    "reason": "Issue 中通过 filter(data__has_key=...) 触发问题。"
+  },
+  {
+    "name": "has_key",
+    "kind": "lookup",
+    "source_path": "",
+    "reason": "Issue 直接关于 __has_key 查询，以及相关的 __has_keys 和 __has_any_keys。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中使用字母字符串作为键（如 'a', 'c', 'h'）。",
+    "target_pattern": "使用数字字符串作为键（如 '1111', '123'）。",
+    "reason": "Issue 表明当键为数字字符串时查询失败，这是触发缺陷的关键输入变异。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "测试可能默认使用支持 JSON 字段的数据库（如 PostgreSQL）。",
+    "target_pattern": "将数据库后端配置为 SQLite（或 MySQL、Oracle）。",
+    "reason": "Issue 指出问题仅发生在 SQLite、MySQL、Oracle 后端，而在 PostgreSQL 上正常。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "JsonFieldHasKeyTest.objects.filter(data__has_key='1111').count() 的返回值",
+    "reason": "Issue 的核心错误是查询计数返回 0 而非 1，直接观察此返回值可判断缺陷是否触发。"
+  },
+  {
+    "kind": "sql",
+    "expression_hint": "由 filter(data__has_key='1111') 生成的 SQL 查询语句",
+    "reason": "观察生成的 SQL 可以帮助理解数据库后端如何处理数字键查询，可能发现错误的类型转换或引号缺失。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证使用数字字符串键的 __has_key 查询能正确返回匹配的数据库对象。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的 SQL 字符串或完整的 repr 输出，因为不同数据库后端或 Django 版本的 SQL 可能变化。",
+    "reason": "Issue 的核心是查询结果计数错误，直接断言计数或查询集内容与预期匹配，这与 Issue 描述的错误现象和期望行为直接对齐。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用支持 JSONField 的数据库后端（如 SQLite），并创建包含数字字符串键的 JSONField 数据模型实例。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试类应继承自 django.test.TestCase，并使用 @skipUnlessDBFeature(\"supports_json_field\") 装饰器以确保数据库兼容性。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "缺陷的确切源码位置（可能在 JSONField 的查询转换逻辑、特定数据库后端的 SQL 编译逻辑，或键值处理逻辑中）。",
+  "除了 has_key，has_keys 和 has_any_keys 是否在所有提及的数据库后端上都有相同问题，还是仅在某些组合下出现。",
+  "数字字符串键的具体边界条件（例如，是否所有纯数字字符串都受影响，还是特定长度或格式）。"
+]

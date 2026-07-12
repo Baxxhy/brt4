@@ -1,0 +1,317 @@
+{
+  "instance_id": "django__django-16502",
+  "issue_summary": "Django 1.10 的 runserver 在处理 HTTP HEAD 请求时返回了响应体，违反了 RFC 2616 规范。",
+  "trigger_condition": {
+    "text": "使用 Django 1.10 或 1.11 的 runserver 启动开发服务器，并向其发送 HTTP HEAD 请求。",
+    "evidence": [
+      "Issue 描述：'starting in Django 1.10 the responses from runserver for HEAD requests are no longer compliant with the spec.'",
+      "Issue 复现步骤：'./manage.py runserver' 和 'curl -iX HEAD http://127.0.0.1:8000/'"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "HTTP HEAD 请求的响应中包含了响应体（HTML 内容），而规范要求 HEAD 请求不应返回响应体。在某些配置下还会导致 'Broken pipe' 错误。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 中 'Actual' 部分显示响应中包含 '<!DOCTYPE html>...'",
+      "Issue 描述：'In certain configurations this also results in \"Broken pipe\" error messages'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "HTTP HEAD 请求的响应不应包含任何响应体，只应返回响应头。",
+    "evidence": [
+      "Issue 描述：'For compliance with RFC 2616, section 4.3, response bodies must not be returned for HEAD requests.'",
+      "相关测试 1 中的断言：'self.assertEqual(response.content, b\"\")'"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "runserver",
+      "kind": "function",
+      "source_path": "django/contrib/staticfiles/management/commands/runserver.py",
+      "reason": "Issue 明确指出 runserver 是问题所在，且源码片段 1 指向此文件。"
+    },
+    {
+      "name": "WSGIServer",
+      "kind": "class",
+      "source_path": "django/core/servers/basehttp.py",
+      "reason": "源码片段 2 指向 WSGIServer 类，它是 runserver 使用的底层服务器。"
+    },
+    {
+      "name": "client.head",
+      "kind": "method",
+      "source_path": "",
+      "reason": "相关测试 1 使用此方法发送 HEAD 请求，是触发缺陷的 API 调用。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/core/servers/basehttp.py",
+      "object": "WSGIServer",
+      "lines": "",
+      "reason": "Issue 提到 #26052 移除了响应体剥离逻辑，并依赖服务器执行此操作。runserver 使用的 WSGIServer 可能未实现此剥离。"
+    },
+    {
+      "path": "django/contrib/staticfiles/management/commands/runserver.py",
+      "object": "runserver",
+      "lines": "",
+      "reason": "Issue 标题和描述直接指向 runserver 返回了 HEAD 请求的响应体。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "RequestMethodTests.test_head",
+      "test_file": "tests/test_client_regress/tests.py",
+      "why_relevant": "它直接测试 HEAD 请求，并断言响应体为空。",
+      "reusable_parts": [
+        "使用 self.client.head 发送 HEAD 请求",
+        "断言 response.content 为空"
+      ],
+      "possible_gap": "该测试使用 Django 的测试客户端，可能不经过实际的 runserver WSGI 服务器，因此可能无法复现 runserver 特有的缺陷。"
+    },
+    {
+      "test_name": "WSGIServerTestCase.test_broken_pipe_errors",
+      "test_file": "tests/servers/test_basehttp.py",
+      "why_relevant": "它直接测试 WSGIServer 并处理 Broken pipe 错误，Issue 提到了此错误。",
+      "reusable_parts": [
+        "导入和实例化 WSGIServer",
+        "处理错误和日志捕获"
+      ],
+      "possible_gap": "该测试主要关注错误处理，而不是 HEAD 请求的响应体内容。"
+    },
+    {
+      "test_name": "SingleThreadLiveServerViews.test_closes_connection_with_content_length",
+      "test_file": "tests/servers/tests.py",
+      "why_relevant": "它使用 HTTPConnection 直接与服务器交互，类似于 Issue 中 curl 的用法。",
+      "reusable_parts": [
+        "使用 HTTPConnection 发起请求",
+        "检查响应头和连接状态"
+      ],
+      "possible_gap": "该测试发送的是 GET 请求，而不是 HEAD 请求。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试 1 使用 self.client.head('/request_methods/') 并断言响应体为空。",
+      "target_pattern": "需要变异为使用一个真实的、通过 runserver 启动的服务器端点（如根路径 '/'），并发送 HEAD 请求。",
+      "reason": "Issue 的缺陷在于 runserver 的 WSGI 层未剥离响应体，而测试客户端可能绕过了这一层。",
+      "confidence": "medium"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "相关测试 3 直接实例化 WSGIServer 并调用 handle_error。",
+      "target_pattern": "需要变异为启动一个完整的 WSGIServer，向其发送 HEAD 请求，并检查响应。",
+      "reason": "直接测试 WSGIServer 处理 HEAD 请求的行为，可以隔离 runserver 命令的其他部分。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "HTTP HEAD 请求响应对象的 .content 属性或原始响应体字节流。",
+      "reason": "Issue 的核心是响应体是否为空。观察响应内容可以直接判断是否违反规范。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "服务器日志中是否出现 'Broken pipe' 错误信息。",
+      "reason": "Issue 提到在某些配置下会出现此错误，这是缺陷的另一个症状。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 HTTP HEAD 请求的响应体为空。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的 HTML 字符串或响应头顺序，这些可能不稳定。",
+      "reason": "Issue 的规范要求是响应体必须为空，这是一个稳定且直接的断言目标。"
+    },
+    {
+      "assertion_goal": "验证响应状态码为 200（或其他成功码）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言特定的响应头值（如 Date），除非与缺陷直接相关。",
+      "reason": "HEAD 请求应返回与对应 GET 请求相同的头部（不包括响应体），状态码是其中的关键部分。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "可能需要使用 LiveServerTestCase 或类似机制来启动一个真实的 runserver 实例。",
+      "source": "inference",
+      "confidence": "medium"
+    },
+    {
+      "hint": "需要使用类似 HTTPConnection 的低级 HTTP 客户端来发送 HEAD 请求并读取原始响应。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要设置 ROOT_URLCONF 指向一个简单的视图，用于测试。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "缺陷的确切位置是在 WSGIServer 类中，还是在 runserver 命令的某个特定包装层中？",
+    "除了根路径 '/'，是否所有通过 runserver 服务的视图都存在此问题？",
+    "在 Django 1.10 中，哪些具体的代码变更（如 #26052）导致了此回归？"
+  ],
+  "raw": {
+    "issue_summary": "Django 1.10 的 runserver 在处理 HTTP HEAD 请求时返回了响应体，违反了 RFC 2616 规范。",
+    "trigger_condition": {
+      "text": "使用 Django 1.10 或 1.11 的 runserver 启动开发服务器，并向其发送 HTTP HEAD 请求。",
+      "evidence": [
+        "Issue 描述：'starting in Django 1.10 the responses from runserver for HEAD requests are no longer compliant with the spec.'",
+        "Issue 复现步骤：'./manage.py runserver' 和 'curl -iX HEAD http://127.0.0.1:8000/'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "HTTP HEAD 请求的响应中包含了响应体（HTML 内容），而规范要求 HEAD 请求不应返回响应体。在某些配置下还会导致 'Broken pipe' 错误。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中 'Actual' 部分显示响应中包含 '<!DOCTYPE html>...'",
+        "Issue 描述：'In certain configurations this also results in \"Broken pipe\" error messages'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "HTTP HEAD 请求的响应不应包含任何响应体，只应返回响应头。",
+      "evidence": [
+        "Issue 描述：'For compliance with RFC 2616, section 4.3, response bodies must not be returned for HEAD requests.'",
+        "相关测试 1 中的断言：'self.assertEqual(response.content, b\"\")'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "runserver",
+        "kind": "function",
+        "source_path": "django/contrib/staticfiles/management/commands/runserver.py",
+        "reason": "Issue 明确指出 runserver 是问题所在，且源码片段 1 指向此文件。"
+      },
+      {
+        "name": "WSGIServer",
+        "kind": "class",
+        "source_path": "django/core/servers/basehttp.py",
+        "reason": "源码片段 2 指向 WSGIServer 类，它是 runserver 使用的底层服务器。"
+      },
+      {
+        "name": "client.head",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 1 使用此方法发送 HEAD 请求，是触发缺陷的 API 调用。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/servers/basehttp.py",
+        "object": "WSGIServer",
+        "lines": "",
+        "reason": "Issue 提到 #26052 移除了响应体剥离逻辑，并依赖服务器执行此操作。runserver 使用的 WSGIServer 可能未实现此剥离。"
+      },
+      {
+        "path": "django/contrib/staticfiles/management/commands/runserver.py",
+        "object": "runserver",
+        "lines": "",
+        "reason": "Issue 标题和描述直接指向 runserver 返回了 HEAD 请求的响应体。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "RequestMethodTests.test_head",
+        "test_file": "tests/test_client_regress/tests.py",
+        "why_relevant": "它直接测试 HEAD 请求，并断言响应体为空。",
+        "reusable_parts": [
+          "使用 self.client.head 发送 HEAD 请求",
+          "断言 response.content 为空"
+        ],
+        "possible_gap": "该测试使用 Django 的测试客户端，可能不经过实际的 runserver WSGI 服务器，因此可能无法复现 runserver 特有的缺陷。"
+      },
+      {
+        "test_name": "WSGIServerTestCase.test_broken_pipe_errors",
+        "test_file": "tests/servers/test_basehttp.py",
+        "why_relevant": "它直接测试 WSGIServer 并处理 Broken pipe 错误，Issue 提到了此错误。",
+        "reusable_parts": [
+          "导入和实例化 WSGIServer",
+          "处理错误和日志捕获"
+        ],
+        "possible_gap": "该测试主要关注错误处理，而不是 HEAD 请求的响应体内容。"
+      },
+      {
+        "test_name": "SingleThreadLiveServerViews.test_closes_connection_with_content_length",
+        "test_file": "tests/servers/tests.py",
+        "why_relevant": "它使用 HTTPConnection 直接与服务器交互，类似于 Issue 中 curl 的用法。",
+        "reusable_parts": [
+          "使用 HTTPConnection 发起请求",
+          "检查响应头和连接状态"
+        ],
+        "possible_gap": "该测试发送的是 GET 请求，而不是 HEAD 请求。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 使用 self.client.head('/request_methods/') 并断言响应体为空。",
+        "target_pattern": "需要变异为使用一个真实的、通过 runserver 启动的服务器端点（如根路径 '/'），并发送 HEAD 请求。",
+        "reason": "Issue 的缺陷在于 runserver 的 WSGI 层未剥离响应体，而测试客户端可能绕过了这一层。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 3 直接实例化 WSGIServer 并调用 handle_error。",
+        "target_pattern": "需要变异为启动一个完整的 WSGIServer，向其发送 HEAD 请求，并检查响应。",
+        "reason": "直接测试 WSGIServer 处理 HEAD 请求的行为，可以隔离 runserver 命令的其他部分。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "HTTP HEAD 请求响应对象的 .content 属性或原始响应体字节流。",
+        "reason": "Issue 的核心是响应体是否为空。观察响应内容可以直接判断是否违反规范。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "服务器日志中是否出现 'Broken pipe' 错误信息。",
+        "reason": "Issue 提到在某些配置下会出现此错误，这是缺陷的另一个症状。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 HTTP HEAD 请求的响应体为空。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 HTML 字符串或响应头顺序，这些可能不稳定。",
+        "reason": "Issue 的规范要求是响应体必须为空，这是一个稳定且直接的断言目标。"
+      },
+      {
+        "assertion_goal": "验证响应状态码为 200（或其他成功码）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言特定的响应头值（如 Date），除非与缺陷直接相关。",
+        "reason": "HEAD 请求应返回与对应 GET 请求相同的头部（不包括响应体），状态码是其中的关键部分。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要使用 LiveServerTestCase 或类似机制来启动一个真实的 runserver 实例。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要使用类似 HTTPConnection 的低级 HTTP 客户端来发送 HEAD 请求并读取原始响应。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要设置 ROOT_URLCONF 指向一个简单的视图，用于测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置是在 WSGIServer 类中，还是在 runserver 命令的某个特定包装层中？",
+      "除了根路径 '/'，是否所有通过 runserver 服务的视图都存在此问题？",
+      "在 Django 1.10 中，哪些具体的代码变更（如 #26052）导致了此回归？"
+    ]
+  }
+}

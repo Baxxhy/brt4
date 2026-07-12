@@ -1,0 +1,305 @@
+{
+  "instance_id": "django__django-16082",
+  "issue_summary": "当使用 MOD 运算符组合数值表达式时，如果操作数类型不同（Decimal 和 Integer），不会像其他数学运算符那样将结果解析为 Decimal 类型。",
+  "trigger_condition": {
+    "text": "创建一个 CombinedExpression，其 connector 为 MOD 运算符，且左右操作数的 output_field 分别为 DecimalField 和 IntegerField（或相反）。",
+    "evidence": [
+      "Issue 描述：\"When writing a Django expression for a query that does MOD, if the types of the query are different (Decimal and Integer), it doesn't resolve the result to a Decimal type, like it does for other mathematical operators.\"",
+      "相关测试 1 (test_resolve_output_field_number) 测试了 ADD, SUB, MUL, DIV 运算符对不同数值类型组合的输出字段解析，但未包含 MOD 运算符。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "CombinedExpression 的 output_field 属性没有被正确解析为 DecimalField，而是可能保持为 IntegerField 或其他类型。",
+    "symptom_type": "wrong_type",
+    "evidence": [
+      "Issue 描述：\"it doesn't resolve the result to a Decimal type, like it does for other mathematical operators.\"",
+      "相关测试 1 (test_resolve_output_field_number) 展示了对于 ADD, SUB, MUL, DIV 运算符，IntegerField 和 DecimalField 的组合应解析为 DecimalField。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当使用 MOD 运算符组合 IntegerField 和 DecimalField 表达式时，结果的 output_field 应被解析为 DecimalField，以保持与其他数学运算符（ADD, SUB, MUL, DIV）行为一致。",
+    "evidence": [
+      "Issue 描述：\"like it does for other mathematical operators.\"",
+      "相关测试 1 (test_resolve_output_field_number) 中，对于 ADD, SUB, MUL, DIV 运算符，IntegerField 和 DecimalField 的组合测试用例预期 combined 为 DecimalField。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "CombinedExpression",
+      "kind": "class",
+      "source_path": "",
+      "reason": "Issue 涉及组合表达式（Django expression for a query that does MOD），相关测试 1 和 4 都使用 CombinedExpression 来测试 output_field 的解析。"
+    },
+    {
+      "name": "Expression",
+      "kind": "class",
+      "source_path": "",
+      "reason": "相关测试 1 和 4 中，CombinedExpression 的左右操作数由 Expression 包装字段类型。"
+    },
+    {
+      "name": "Combinable.MOD",
+      "kind": "unknown",
+      "source_path": "",
+      "reason": "Issue 明确关于 MOD 运算符，相关测试 1 测试了其他运算符（ADD, SUB, MUL, DIV），但未包含 MOD。"
+    },
+    {
+      "name": "output_field",
+      "kind": "property",
+      "source_path": "",
+      "reason": "Issue 的核心是 output_field 的解析问题，相关测试 1 和 4 都直接断言 expr.output_field 的类型。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "",
+      "object": "CombinedExpression 或其相关方法中处理 MOD 运算符输出字段类型的逻辑",
+      "lines": "",
+      "reason": "Issue 表明 MOD 运算符在处理混合数值类型时行为与其他数学运算符不一致，这很可能在决定 CombinedExpression 的 output_field 的代码中。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "CombinedExpressionTests.test_resolve_output_field_number",
+      "test_file": "tests/expressions/tests.py",
+      "why_relevant": "该测试专门测试不同数值字段类型（IntegerField, DecimalField, FloatField, AutoField）在各种数学运算符（ADD, SUB, MUL, DIV）组合下，output_field 的解析是否正确。其结构和目标与 Issue 高度相似。",
+      "reusable_parts": [
+        "测试类 CombinedExpressionTests",
+        "使用 Expression 包装字段类型构造表达式",
+        "使用 connector 列表（可扩展）",
+        "使用 assertIsInstance(expr.output_field, combined) 断言风格",
+        "使用 subTest 组织多组参数"
+      ],
+      "possible_gap": "该测试的 connectors 列表未包含 Combinable.MOD 运算符，因此无法触发 Issue 描述的场景。"
+    },
+    {
+      "test_name": "ExpressionOperatorTests.test_right_hand_modulo",
+      "test_file": "tests/expressions/tests.py",
+      "why_relevant": "该测试实际使用了 MOD 运算符（%）进行数据库查询更新，展示了 MOD 运算符在整数上的应用。",
+      "reusable_parts": [
+        "使用了 F 表达式和 MOD 运算符",
+        "涉及数据库操作和断言",
+        "展示了 MOD 在查询中的使用方式"
+      ],
+      "possible_gap": "该测试只涉及整数（IntegerField）之间的 MOD 运算，没有测试 Decimal 和 Integer 的混合类型，因此无法触发 Issue。"
+    },
+    {
+      "test_name": "ExpressionOperatorTests.test_lefthand_modulo",
+      "test_file": "tests/expressions/tests.py",
+      "why_relevant": "同上，展示了 MOD 运算符的另一种使用方式。",
+      "reusable_parts": [
+        "使用了 F 表达式和 MOD 运算符",
+        "涉及数据库操作和断言"
+      ],
+      "possible_gap": "只涉及整数（IntegerField）之间的 MOD 运算，没有测试混合类型。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "operator",
+      "current_pattern": "相关测试 1 中的 connectors = [Combinable.ADD, Combinable.SUB, Combinable.MUL, Combinable.DIV]",
+      "target_pattern": "将 Combinable.MOD 添加到 connectors 列表中。",
+      "reason": "Issue 明确指出 MOD 运算符的行为与其他运算符不同。添加 MOD 到测试中可能暴露 output_field 解析错误。",
+      "confidence": "high"
+    },
+    {
+      "slot": "input",
+      "current_pattern": "相关测试 1 中的测试用例，例如 (IntegerField, DecimalField, DecimalField) 用于 ADD, SUB, MUL, DIV。",
+      "target_pattern": "为 MOD 运算符专门使用 (IntegerField, DecimalField, DecimalField) 和 (DecimalField, IntegerField, DecimalField) 测试用例。",
+      "reason": "Issue 描述的场景是 Decimal 和 Integer 类型使用 MOD 运算符，预期结果应为 Decimal。这直接对应测试用例。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "type",
+      "expression_hint": "expr.output_field 的类型，例如 type(expr.output_field) 或 isinstance(expr.output_field, DecimalField/IntegerField)。",
+      "reason": "Issue 的核心是 output_field 的类型解析错误。观察其类型可以直接判断 MOD 运算符是否被正确处理。"
+    },
+    {
+      "kind": "repr",
+      "expression_hint": "repr(expr) 或 str(expr)，可能包含表达式结构和推断的类型信息。",
+      "reason": "表达式的字符串表示可能揭示其内部构造和字段类型，有助于调试。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "当使用 MOD 运算符组合 IntegerField 和 DecimalField 表达式时，结果的 output_field 应为 DecimalField 的实例。",
+      "preferred_assertion_style": "isinstance",
+      "avoid": "避免断言完整的 SQL 字符串或表达式的完整 repr，因为这些可能不稳定或与类型问题无关。",
+      "reason": "Issue 是关于类型的，使用 isinstance 直接、稳定地检查 output_field 的类型是否符合预期（DecimalField）。这与相关测试 1 的断言风格一致。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 SimpleTestCase 或类似的测试基类，因为相关测试 1 和 4 使用了 SimpleTestCase，且不涉及数据库。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要从 django.db.models 导入必要的字段类（IntegerField, DecimalField 等）、Expression、CombinedExpression 和 Combinable。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "Combinable.MOD 常量的确切导入路径或名称。",
+    "MOD 运算符在处理 Decimal 和 Integer 时，output_field 解析错误的根本原因代码位置。",
+    "除了 IntegerField 和 DecimalField 的组合，其他数值类型组合（如 FloatField 和 DecimalField）使用 MOD 时是否也存在问题。",
+    "Issue 是否也涉及实际的数据库查询执行，还是仅停留在表达式构建层面。"
+  ],
+  "raw": {
+    "issue_summary": "当使用 MOD 运算符组合数值表达式时，如果操作数类型不同（Decimal 和 Integer），不会像其他数学运算符那样将结果解析为 Decimal 类型。",
+    "trigger_condition": {
+      "text": "创建一个 CombinedExpression，其 connector 为 MOD 运算符，且左右操作数的 output_field 分别为 DecimalField 和 IntegerField（或相反）。",
+      "evidence": [
+        "Issue 描述：\"When writing a Django expression for a query that does MOD, if the types of the query are different (Decimal and Integer), it doesn't resolve the result to a Decimal type, like it does for other mathematical operators.\"",
+        "相关测试 1 (test_resolve_output_field_number) 测试了 ADD, SUB, MUL, DIV 运算符对不同数值类型组合的输出字段解析，但未包含 MOD 运算符。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "CombinedExpression 的 output_field 属性没有被正确解析为 DecimalField，而是可能保持为 IntegerField 或其他类型。",
+      "symptom_type": "wrong_type",
+      "evidence": [
+        "Issue 描述：\"it doesn't resolve the result to a Decimal type, like it does for other mathematical operators.\"",
+        "相关测试 1 (test_resolve_output_field_number) 展示了对于 ADD, SUB, MUL, DIV 运算符，IntegerField 和 DecimalField 的组合应解析为 DecimalField。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当使用 MOD 运算符组合 IntegerField 和 DecimalField 表达式时，结果的 output_field 应被解析为 DecimalField，以保持与其他数学运算符（ADD, SUB, MUL, DIV）行为一致。",
+      "evidence": [
+        "Issue 描述：\"like it does for other mathematical operators.\"",
+        "相关测试 1 (test_resolve_output_field_number) 中，对于 ADD, SUB, MUL, DIV 运算符，IntegerField 和 DecimalField 的组合测试用例预期 combined 为 DecimalField。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "CombinedExpression",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 涉及组合表达式（Django expression for a query that does MOD），相关测试 1 和 4 都使用 CombinedExpression 来测试 output_field 的解析。"
+      },
+      {
+        "name": "Expression",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试 1 和 4 中，CombinedExpression 的左右操作数由 Expression 包装字段类型。"
+      },
+      {
+        "name": "Combinable.MOD",
+        "kind": "unknown",
+        "source_path": "",
+        "reason": "Issue 明确关于 MOD 运算符，相关测试 1 测试了其他运算符（ADD, SUB, MUL, DIV），但未包含 MOD。"
+      },
+      {
+        "name": "output_field",
+        "kind": "property",
+        "source_path": "",
+        "reason": "Issue 的核心是 output_field 的解析问题，相关测试 1 和 4 都直接断言 expr.output_field 的类型。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "CombinedExpression 或其相关方法中处理 MOD 运算符输出字段类型的逻辑",
+        "lines": "",
+        "reason": "Issue 表明 MOD 运算符在处理混合数值类型时行为与其他数学运算符不一致，这很可能在决定 CombinedExpression 的 output_field 的代码中。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "CombinedExpressionTests.test_resolve_output_field_number",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "该测试专门测试不同数值字段类型（IntegerField, DecimalField, FloatField, AutoField）在各种数学运算符（ADD, SUB, MUL, DIV）组合下，output_field 的解析是否正确。其结构和目标与 Issue 高度相似。",
+        "reusable_parts": [
+          "测试类 CombinedExpressionTests",
+          "使用 Expression 包装字段类型构造表达式",
+          "使用 connector 列表（可扩展）",
+          "使用 assertIsInstance(expr.output_field, combined) 断言风格",
+          "使用 subTest 组织多组参数"
+        ],
+        "possible_gap": "该测试的 connectors 列表未包含 Combinable.MOD 运算符，因此无法触发 Issue 描述的场景。"
+      },
+      {
+        "test_name": "ExpressionOperatorTests.test_right_hand_modulo",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "该测试实际使用了 MOD 运算符（%）进行数据库查询更新，展示了 MOD 运算符在整数上的应用。",
+        "reusable_parts": [
+          "使用了 F 表达式和 MOD 运算符",
+          "涉及数据库操作和断言",
+          "展示了 MOD 在查询中的使用方式"
+        ],
+        "possible_gap": "该测试只涉及整数（IntegerField）之间的 MOD 运算，没有测试 Decimal 和 Integer 的混合类型，因此无法触发 Issue。"
+      },
+      {
+        "test_name": "ExpressionOperatorTests.test_lefthand_modulo",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "同上，展示了 MOD 运算符的另一种使用方式。",
+        "reusable_parts": [
+          "使用了 F 表达式和 MOD 运算符",
+          "涉及数据库操作和断言"
+        ],
+        "possible_gap": "只涉及整数（IntegerField）之间的 MOD 运算，没有测试混合类型。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "operator",
+        "current_pattern": "相关测试 1 中的 connectors = [Combinable.ADD, Combinable.SUB, Combinable.MUL, Combinable.DIV]",
+        "target_pattern": "将 Combinable.MOD 添加到 connectors 列表中。",
+        "reason": "Issue 明确指出 MOD 运算符的行为与其他运算符不同。添加 MOD 到测试中可能暴露 output_field 解析错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中的测试用例，例如 (IntegerField, DecimalField, DecimalField) 用于 ADD, SUB, MUL, DIV。",
+        "target_pattern": "为 MOD 运算符专门使用 (IntegerField, DecimalField, DecimalField) 和 (DecimalField, IntegerField, DecimalField) 测试用例。",
+        "reason": "Issue 描述的场景是 Decimal 和 Integer 类型使用 MOD 运算符，预期结果应为 Decimal。这直接对应测试用例。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "expr.output_field 的类型，例如 type(expr.output_field) 或 isinstance(expr.output_field, DecimalField/IntegerField)。",
+        "reason": "Issue 的核心是 output_field 的类型解析错误。观察其类型可以直接判断 MOD 运算符是否被正确处理。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "repr(expr) 或 str(expr)，可能包含表达式结构和推断的类型信息。",
+        "reason": "表达式的字符串表示可能揭示其内部构造和字段类型，有助于调试。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当使用 MOD 运算符组合 IntegerField 和 DecimalField 表达式时，结果的 output_field 应为 DecimalField 的实例。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言完整的 SQL 字符串或表达式的完整 repr，因为这些可能不稳定或与类型问题无关。",
+        "reason": "Issue 是关于类型的，使用 isinstance 直接、稳定地检查 output_field 的类型是否符合预期（DecimalField）。这与相关测试 1 的断言风格一致。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的测试基类，因为相关测试 1 和 4 使用了 SimpleTestCase，且不涉及数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要从 django.db.models 导入必要的字段类（IntegerField, DecimalField 等）、Expression、CombinedExpression 和 Combinable。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Combinable.MOD 常量的确切导入路径或名称。",
+      "MOD 运算符在处理 Decimal 和 Integer 时，output_field 解析错误的根本原因代码位置。",
+      "除了 IntegerField 和 DecimalField 的组合，其他数值类型组合（如 FloatField 和 DecimalField）使用 MOD 时是否也存在问题。",
+      "Issue 是否也涉及实际的数据库查询执行，还是仅停留在表达式构建层面。"
+    ]
+  }
+}

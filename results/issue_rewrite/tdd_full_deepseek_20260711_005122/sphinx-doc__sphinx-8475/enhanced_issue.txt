@@ -1,0 +1,122 @@
+instance_id: sphinx-doc__sphinx-8475
+
+issue_summary: 当 HEAD 请求遇到 TooManyRedirects 异常时，linkchecker 没有回退到 GET 请求，导致原本能通过的链接被错误地报告为损坏。
+
+trigger_condition:
+{
+  "text": "对某些网站（如 https://idr.openmicroscopy.org/webclient/?show=well-119093）进行链接检查时，其 HEAD 请求会陷入无限重定向循环。",
+  "evidence": [
+    "Issue: 'Some websites will enter infinite redirect loops with HEAD requests.'",
+    "Issue: 'URLs like https://idr.openmicroscopy.org/webclient/?show=well-119093 used to pass the linkchecking prior to Sphinx 3.2.0 but are now failing as HEAD requests have been enforced'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "链接被报告为 broken，而不是在 HEAD 请求失败后回退到 GET 请求。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue: 'the GET fallback is ignored as the exception is of type `TooManyRedirects` and the link is reported as broken.'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当 HEAD 请求引发 TooManyRedirects 异常时，链接检查器应捕获此异常并尝试使用 GET 请求作为回退，以正确判断链接是否有效。",
+  "evidence": [
+    "Issue: 'This extends the except clause to retry with a GET request for such scenarios.'"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "linkcheck",
+    "kind": "module",
+    "source_path": "sphinx/builders/linkcheck.py",
+    "reason": "Issue 的主题是关于 linkchecker 的 GET 回退逻辑，相关源码文件是 linkcheck.py。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "mock",
+    "current_pattern": "测试中使用 http_server 模拟返回 302 重定向或 405 状态码的服务器。",
+    "target_pattern": "模拟一个对 HEAD 请求返回一系列重定向（例如，超过 requests 库默认限制），从而引发 TooManyRedirects 异常的服务器。",
+    "reason": "为了复现 Issue，需要将触发条件从普通的成功重定向或 405 错误，变异为导致无限重定向循环的场景。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "在相关测试中，linkchecker 对 URL 发出请求并处理响应。",
+    "target_pattern": "确保 linkchecker 对特定 URL 首先尝试 HEAD 请求，并且该请求会因重定向过多而失败。",
+    "reason": "Issue 的核心是 HEAD 请求路径上的异常处理逻辑有缺陷，需要确保测试执行流进入该路径。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "在 linkchecker 处理请求的代码附近，捕获或观察是否抛出了 requests.exceptions.TooManyRedirects 异常。",
+    "reason": "Issue 明确指出 TooManyRedirects 异常是触发 bug 的关键，观察此异常可以确认是否进入了缺陷路径。"
+  },
+  {
+    "kind": "file_output",
+    "expression_hint": "观察 linkcheck 输出文件（如 output.txt 或 output.json）中，目标 URL 的状态是 'broken' 还是 'working'/'redirected'。",
+    "reason": "Issue 的症状是链接被错误地报告为 broken。修复后，该链接应被正确标记（例如，通过 GET 回退后成功）。相关测试也通过检查输出文件来断言结果。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "观察 linkchecker 内部检查单个链接的函数返回值或状态码。",
+    "reason": "需要判断在 HEAD 请求失败后，是否尝试了 GET 请求，以及最终对链接可用性的判断。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "对于会引发 HEAD 请求 TooManyRedirects 的 URL，链接检查的最终结果不应是 'broken'（或应表明链接是有效的/可重定向的）。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言完整的异常消息字符串或精确的重定向次数。避免断言与特定网络延迟相关的输出顺序。",
+    "reason": "Issue 的核心是链接被错误标记。修复后，该标记应改变。使用 'not_contains_fragment' 可以稳定地检查输出中不包含错误的 'broken' 状态，而不依赖于具体的错误信息格式。"
+  },
+  {
+    "assertion_goal": "在测试的日志或内部状态中，应能观察到在 HEAD 请求失败后，有 GET 请求被发出。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "断言精确的请求日志行格式（如时间戳、IP）。",
+    "reason": "GET 回退是预期的修复行为。观察请求序列可以确认回退逻辑被正确触发。相关测试 (test_follows_redirects_on_GET) 也通过检查 stderr 中的请求日志来进行断言。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 pytest.mark.sphinx('linkcheck', testroot='...', freshenv=True) 装饰器来构建 Sphinx 应用并运行 linkcheck 构建器。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要使用一个自定义的 http_server handler 来模拟目标网站对 HEAD 请求的响应行为（引发重定向循环）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要使用 capsys fixture 来捕获标准输出和错误，以便检查日志。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "linkcheck.py 源码中处理请求和异常的确切代码位置和结构未知。",
+  "引发 TooManyRedirects 异常所需的具体重定向次数（是 requests 库的默认值还是可配置的）不确定。",
+  "修复后的正确输出（output.txt）中，对于此类链接的具体状态描述（如 'working', 'redirected'）和信息的精确格式不确定。",
+  "除了 TooManyRedirects，是否还有其他异常类型也需要被纳入 GET 回退逻辑，这一点不明确。"
+]

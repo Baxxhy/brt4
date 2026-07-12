@@ -1,0 +1,529 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Sum of the elements of an identity matrix is zero
+I think this is a bug.
+
+I created a matrix by M.T * M under an assumption that M is orthogonal.  SymPy successfully recognized that the result is an identity matrix.  I tested its identity-ness by element-wise, queries, and sum of the diagonal elements and received expected results.
+
+However, when I attempt to evaluate the total sum of the elements the result was 0 while 'n' is expected.
+
+```
+from sympy import *
+from sympy import Q as Query
+
+n = Symbol('n', integer=True, positive=True)
+i, j = symbols('i j', integer=True)
+M = MatrixSymbol('M', n, n)
+
+e = None
+with assuming(Query.orthogonal(M)):
+    e = refine((M.T * M).doit())
+
+# Correct: M.T * M is an identity matrix.
+print(e, e[0, 0], e[0, 1], e[1, 0], e[1, 1])
+
+# Correct: The output is True True
+print(ask(Query.diagonal(e)), ask(Query.integer_elements(e)))
+
+# Correct: The sum of the diagonal elements is n
+print(Sum(e[i, i], (i, 0, n-1)).doit())
+
+# So far so good
+# Total sum of the elements is expected to be 'n' but the answer is 0!
+print(Sum(Sum(e[i, j], (i, 0, n-1)), (j, 0, n-1)).doit())
+```
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/assumptions/handlers/matrices.py
+对象名称：MatrixSymbol
+节点类型：class_function
+父节点：AskSymmetricHandler
+行号范围：55-63
+代码：
+    def MatrixSymbol(expr, assumptions):
+        if not expr.is_square:
+            return False
+        # TODO: implement sathandlers system for the matrices.
+        # Now it duplicates the general fact: Implies(Q.diagonal, Q.symmetric).
+        if ask(Q.diagonal(expr), assumptions):
+            return True
+        if Q.symmetric(expr) in conjuncts(assumptions):
+            return True
+
+
+【源码片段 2】
+文件路径：sympy/core/tests/test_equal.py
+对象名称：T
+节点类型：class
+父节点：test_equal
+行号范围：46-47
+代码：
+    class T(object):
+
+
+【源码片段 3】
+文件路径：sympy/polys/rootisolation.py
+对象名称：refine
+节点类型：class_function
+父节点：RealInterval
+行号范围：1763-1765
+代码：
+    def refine(self):
+        """Perform one step of real root refinement algorithm. """
+        return self._inner_refine()
+
+
+【源码片段 4】
+文件路径：sympy/concrete/summations.py
+对象名称：Sum
+节点类型：class
+父节点：summations
+行号范围：23-731
+代码：
+class Sum(AddWithLimits, ExprWithIntLimits):
+    r"""Represents unevaluated summation.
+
+    ``Sum`` represents a finite or infinite series, with the first argument
+    being the general form of terms in the series, and the second argument
+    being ``(dummy_variable, start, end)``, with ``dummy_variable`` taking
+    all integer values from ``start`` through ``end``. In accordance with
+    long-standing mathematical convention, the end term is included in the
+    summation.
+
+    Finite sums
+    ===========
+
+    For finite sums (and sums with symbolic limits assumed to be finite) we
+    follow the summation convention described by Karr [1], especially
+    definition 3 of section 1.4. The sum:
+
+    .. math::
+
+        \sum_{m \leq i < n} f(i)
+
+    has *the obvious meaning* for `m < n`, namely:
+
+    .. math::
+
+        \sum_{m \leq i < n} f(i) = f(m) + f(m+1) + \ldots + f(n-2) + f(n-1)
+
+    with the upper limit value `f(n)` excluded. The sum over an empty set is
+    zero if and only if `m = n`:
+
+    .. math::
+
+        \sum_{m \leq i < n} f(i) = 0  \quad \mathrm{for} \quad  m = n
+
+    Finally, for all other sums over empty sets we assume the following
+    definition:
+
+    .. math::
+
+        \sum_{m \leq i < n} f(i) = - \sum_{n \leq i < m} f(i)  \quad \mathrm{for} \quad  m > n
+
+    It is important to note that Karr defines all sums with the upper
+    limit being exclusive. This is in contrast to the usual mathematical notation,
+    but does not affect the summation convention. Indeed we have:
+
+    .. math::
+
+        \sum_{m \leq i < n} f(i) = \sum_{i = m}^{n - 1} f(i)
+
+    where the difference in notation is intentional to emphasize the meaning,
+    with limits typeset on the top being inclusive.
+
+    Examples
+    ========
+
+    >>> from sympy.abc import i, k, m, n, x
+    >>> from sympy import Sum, factorial, oo, IndexedBase, Function
+    >>> Sum(k, (k, 1, m))
+    Sum(k, (k, 1, m))
+    >>> Sum(k, (k, 1, m)).doit()
+    m**2/2 + m/2
+    >>> Sum(k**2, (k, 1, m))
+    Sum(k**2, (k, 1, m))
+    >>> Sum(k**2, (k, 1, m)).doit()
+    m**3/3 + m**2/2 + m/6
+    >>> Sum(x**k, (k, 0, oo))
+    Sum(x**k, (k, 0, oo))
+    >>> Sum(x**k, (k, 0, oo)).doit()
+    Piecewise((1/(-x + 1), Abs(x) < 1), (Sum(x**k, (k, 0, oo)), True))
+    >>> Sum(x**k/factorial(k), (k, 0, oo)).doit()
+    exp(x)
+
+    Here are examples to do summation with symbolic indices.  You
+    can use either Function of IndexedBase classes:
+
+    >>> f = Function('f')
+    >>> Sum(f(n), (n, 0, 3)).doit()
+    f(0) + f(1) + f(2) + f(3)
+    >>> Sum(f(n), (n, 0, oo)).doit()
+    Sum(f(n), (n, 0, oo))
+    >>> f = IndexedBase('f')
+    >>> Sum(f[n]**2, (n, 0, 3)).doit()
+    f[0]**2 + f[1]**2 + f[2]**2 + f[3]**2
+
+    An example showing that the symbolic result of a summation is still
+    valid for seemingly nonsensical values of the limits. Then the Karr
+    convention allows us to give a perfectly valid interpretation to
+    those sums by interchanging the limits according to the above rules:
+
+    >>> S = Sum(i, (i, 1, n)).doit()
+    >>> S
+    n**2/2 + n/2
+    >>> S.subs(n, -4)
+    6
+    >>> Sum(i, (i, 1, -4)).doit()
+    6
+    >>> Sum(-i, (i, -3, 0)).doit()
+    6
+
+    An explicit example of the Karr summation convention:
+
+    >>> S1 = Sum(i**2, (i, m, m+n-1)).doit()
+    >>> S1
+    m**2*n + m*n**2 - m*n + n**3/3 - n**2/2 + n/6
+    >>> S2 = Sum(i**2, (i, m+n, m-1)).doit()
+    >>> S2
+    -m**2*n - m*n**2 + m*n - n**3/3 + n**2/2 - n/6
+    >>> S1 + S2
+    0
+    >>> S3 = Sum(i, (i, m, m-1)).doit()
+    >>> S3
+    0
+
+    See Also
+    ========
+
+    summation
+    Product, product
+
+    References
+    ==========
+
+    .. [1] Michael Karr, "Summation in Finite Terms", Journal of the ACM,
+           Volume 28 Issue 2, April 1981, Pages 305-350
+           http://dl.acm.org/citation.cfm?doid=322248.322255
+    .. [2] http://en.wikipedia.org/wiki/Summation#Capital-sigma_notation
+    .. [3] http://en.wikipedia.org/wiki/Empty_sum
+    """
+    __slots__ = ['is_commutative']
+    def __new__(cls, function, *symbols, **assumptions):
+    def _eval_is_zero(self):
+    def doit(self, **hints):
+    def eval_zeta_function(self, f, limits):
+    def _eval_derivative(self, x):
+    def _eval_difference_delta(self, n, step):
+    def _eval_simplify(self, ratio=1.7, measure=None):
+    def _eval_summation(self, f, x):
+    def is_convergent(self):
+    def is_absolutely_convergent(self):
+    def euler_maclaurin(self, m=0, n=0, eps=0, eval_integral=True):
+    def reverse_order(self, *indices):
+
+
+【源码片段 5】
+文件路径：sympy/concrete/summations.py
+对象名称：doit
+节点类型：class_function
+父节点：Sum
+行号范围：171-205
+代码：
+    def doit(self, **hints):
+        if hints.get('deep', True):
+            f = self.function.doit(**hints)
+        else:
+            f = self.function
+
+        if self.function.is_Matrix:
+            return self.expand().doit()
+
+        for n, limit in enumerate(self.limits):
+            i, a, b = limit
+            dif = b - a
+            if dif.is_integer and (dif < 0) == True:
+                a, b = b + 1, a - 1
+                f = -f
+
+            newf = eval_sum(f, (i, a, b))
+            if newf is None:
+                if f == self.function:
+                    zeta_function = self.eval_zeta_function(f, (i, a, b))
+                    if zeta_function is not None:
+                        return zeta_function
+                    return self
+                else:
+                    return self.func(f, *self.limits[n:])
+            f = newf
+
+        if hints.get('deep', True):
+            # eval_sum could return partially unevaluated
+            # result with Piecewise.  In this case we won't
+            # doit() recursively.
+            if not isinstance(f, Piecewise):
+                return f.doit(**hints)
+
+        return f
+
+
+【源码片段 6】
+文件路径：sympy/assumptions/ask.py
+对象名称：orthogonal
+节点类型：class_function
+父节点：AssumptionKeys
+行号范围：796-828
+代码：
+    def orthogonal(self):
+        """
+        Orthogonal matrix predicate.
+
+        ``Q.orthogonal(x)`` is true iff ``x`` is an orthogonal matrix.
+        A square matrix ``M`` is an orthogonal matrix if it satisfies
+        ``M^TM = MM^T = I`` where ``M^T`` is the transpose matrix of
+        ``M`` and ``I`` is an identity matrix. Note that an orthogonal
+        matrix is necessarily invertible.
+
+        Examples
+        ========
+
+        >>> from sympy import Q, ask, MatrixSymbol, Identity
+        >>> X = MatrixSymbol('X', 2, 2)
+        >>> Y = MatrixSymbol('Y', 2, 3)
+        >>> Z = MatrixSymbol('Z', 2, 2)
+        >>> ask(Q.orthogonal(Y))
+        False
+        >>> ask(Q.orthogonal(X*Z*X), Q.orthogonal(X) & Q.orthogonal(Z))
+        True
+        >>> ask(Q.orthogonal(Identity(3)))
+        True
+        >>> ask(Q.invertible(X), Q.orthogonal(X))
+        True
+
+        References
+        ==========
+
+        .. [1] https://en.wikipedia.org/wiki/Orthogonal_matrix
+
+        """
+        return Predicate('orthogonal')
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/concrete/tests/test_sums_products.py
+测试名称：test_matrix_sum
+测试代码：
+def test_matrix_sum():
+    A = Matrix([[0,1],[n,0]])
+    assert Sum(A,(n,0,3)).doit() == Matrix([[0, 4], [6, 0]])
+
+【相关测试 2】
+测试文件：sympy/concrete/tests/test_sums_products.py
+测试名称：test_Sum_doit
+测试代码：
+def test_Sum_doit():
+    assert Sum(n*Integral(a**2), (n, 0, 2)).doit() == a**3
+    assert Sum(n*Integral(a**2), (n, 0, 2)).doit(deep=False) == \
+        3*Integral(a**2)
+    assert summation(n*Integral(a**2), (n, 0, 2)) == 3*Integral(a**2)
+
+    # test nested sum evaluation
+    s = Sum( Sum( Sum(2,(z,1,n+1)), (y,x+1,n)), (x,1,n))
+    assert 0 == (s.doit() - n*(n+1)*(n-1)).factor()
+
+    assert Sum(KroneckerDelta(m, n), (m, -oo, oo)).doit() == Piecewise((1, And(-oo < n, n < oo)), (0, True))
+    assert Sum(x*KroneckerDelta(m, n), (m, -oo, oo)).doit() == Piecewise((x, And(-oo < n, n < oo)), (0, True))
+    assert Sum(Sum(KroneckerDelta(m, n), (m, 1, 3)), (n, 1, 3)).doit() == 3
+    assert Sum(Sum(KroneckerDelta(k, m), (m, 1, 3)), (n, 1, 3)).doit() == \
+           3 * Piecewise((1, And(S(1) <= k, k <= 3)), (0, True))
+    assert Sum(f(n) * Sum(KroneckerDelta(m, n), (m, 0, oo)), (n, 1, 3)).doit() == \
+           f(1) + f(2) + f(3)
+    assert Sum(f(n) * Sum(KroneckerDelta(m, n), (m, 0, oo)), (n, 1, oo)).doit() == \
+           Sum(Piecewise((f(n), And(Le(0, n), n < oo)), (0, True)), (n, 1, oo))
+    l = Symbol('l', integer=True, positive=True)
+    assert Sum(f(l) * Sum(KroneckerDelta(m, l), (m, 0, oo)), (l, 1, oo)).doit() == \
+           Sum(f(l), (l, 1, oo))
+
+    # issue 2597
+    nmax = symbols('N', integer=True, positive=True)
+    pw = Piecewise((1, And(S(1) <= n, n <= nmax)), (0, True))
+    assert Sum(pw, (n, 1, nmax)).doit() == Sum(pw, (n, 1, nmax))
+
+    q, s = symbols('q, s')
+    assert summation(1/n**(2*s), (n, 1, oo)) == Piecewise((zeta(2*s), 2*s > 1),
+        (Sum(n**(-2*s), (n, 1, oo)), True))
+    assert summation(1/(n+1)**s, (n, 0, oo)) == Piecewise((zeta(s), s > 1),
+        (Sum((n + 1)**(-s), (n, 0, oo)), True))
+    assert summation(1/(n+q)**s, (n, 0, oo)) == Piecewise(
+        (zeta(s, q), And(q > 0, s > 1)),
+        (Sum((n + q)**(-s), (n, 0, oo)), True))
+    assert summation(1/(n+q)**s, (n, q, oo)) == Piecewise(
+        (zeta(s, 2*q), And(2*q > 0, s > 1)),
+        (Sum((n + q)**(-s), (n, q, oo)), True))
+    assert summation(1/n**2, (n, 1, oo)) == zeta(2)
+    assert summation(1/n**s, (n, 0, oo)) == Sum(n**(-s), (n, 0, oo))
+
+【相关测试 3】
+测试文件：sympy/matrices/expressions/tests/test_matexpr.py
+测试名称：test_Identity
+测试代码：
+def test_Identity():
+    A = MatrixSymbol('A', n, m)
+    In = Identity(n)
+    Im = Identity(m)
+
+    assert A*Im == A
+    assert In*A == A
+
+    assert transpose(In) == In
+    assert In.inverse() == In
+    assert In.conjugate() == In
+
+【相关测试 4】
+测试文件：sympy/assumptions/tests/test_matrices.py
+测试名称：test_orthogonal
+测试代码：
+def test_orthogonal():
+    _test_orthogonal_unitary(Q.orthogonal)
+
+【相关测试 5】
+测试文件：sympy/matrices/tests/test_matrices.py
+测试名称：test_is_Identity
+测试代码：
+def test_is_Identity():
+    assert eye(3).is_Identity
+    assert eye(3).as_immutable().is_Identity
+    assert not zeros(3).is_Identity
+    assert not ones(3).is_Identity
+    # issue 6242
+    assert not Matrix([[1, 0, 0]]).is_Identity
+    # issue 8854
+    assert SparseMatrix(3,3, {(0,0):1, (1,1):1, (2,2):1}).is_Identity
+    assert not SparseMatrix(2,3, range(6)).is_Identity
+    assert not SparseMatrix(3,3, {(0,0):1, (1,1):1}).is_Identity
+    assert not SparseMatrix(3,3, {(0,0):1, (1,1):1, (2,2):1, (0,1):2, (0,2):3}).is_Identity
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

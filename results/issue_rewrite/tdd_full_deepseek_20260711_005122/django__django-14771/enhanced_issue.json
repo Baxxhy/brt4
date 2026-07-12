@@ -1,0 +1,355 @@
+{
+  "instance_id": "django__django-14771",
+  "issue_summary": "Django 的 auto-reloader 在重启子进程时没有正确传递 Python 的 -X 命令行选项。",
+  "trigger_condition": {
+    "text": "使用 Python 的 -X 选项（例如 -X utf8）启动 Django 的 runserver 命令，并启用 auto-reloader（默认行为）。",
+    "evidence": [
+      "Issue 中用户执行了 `python -X utf8 manage.py runserver 0.0.0.0:8005 -v3`，并观察到编码输出不一致。",
+      "Issue 中对比了使用 `--noreload` 和不使用的输出差异。",
+      "相关测试 1 和 2 涉及子进程参数构造和 `sys.warnoptions`。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "当 auto-reloader 生效时，子进程没有继承父进程的 -X 选项（如 -X utf8），导致程序行为（如文件编码）与预期不符。Issue 中表现为 `open` 函数使用的编码在 reloader 启动前后不同（UTF-8 vs cp936）。",
+    "symptom_type": "state_not_updated",
+    "evidence": [
+      "Issue 中显示运行 `runserver` 时，第一次打印 `=== UTF-8`，随后打印 `=== cp936`，表明 reloader 启动后编码改变。",
+      "使用 `--noreload` 时只打印 `=== UTF-8`，问题消失。",
+      "相关测试 1 测试了 `sys.warnoptions` 的传递。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "Django 的 auto-reloader 在重启子进程时，应正确传递所有 Python 命令行选项，包括 -X 选项，确保子进程的运行时环境与父进程一致。",
+    "evidence": [
+      "Issue 标题和描述表明 -X 选项应该被传递。",
+      "相关测试 1 测试了 `-W` 选项的传递，暗示其他 Python 选项也应被处理。",
+      "相关测试 2 和 3 展示了子进程参数构造的逻辑。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "autoreload.get_child_arguments",
+      "kind": "function",
+      "source_path": "django/utils/autoreload.py",
+      "reason": "该函数负责构造重启子进程时的命令行参数，是传递 -X 选项的关键位置。"
+    },
+    {
+      "name": "autoreload.restart_with_reloader",
+      "kind": "function",
+      "source_path": "django/utils/autoreload.py",
+      "reason": "该函数触发重启过程，会调用 `get_child_arguments`。"
+    },
+    {
+      "name": "sys._xoptions",
+      "kind": "unknown",
+      "source_path": "",
+      "reason": "Issue 中引用了 Python 文档中关于 `sys._xoptions` 的链接，它是存储 -X 选项的字典。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/utils/autoreload.py",
+      "object": "get_child_arguments",
+      "lines": "",
+      "reason": "该函数构造子进程参数。相关测试 1 测试了 `-W` 选项的传递，但可能未处理 `-X` 选项。"
+    },
+    {
+      "path": "django/utils/autoreload.py",
+      "object": "restart_with_reloader",
+      "lines": "",
+      "reason": "该函数是重启的入口，可能涉及参数传递的调用链。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "TestChildArguments.test_warnoptions",
+      "test_file": "tests/utils_tests/test_autoreload.py",
+      "why_relevant": "它直接测试了 `autoreload.get_child_arguments()` 函数，并验证了 `-W` 选项（另一种 Python 命令行选项）的传递。",
+      "reusable_parts": [
+        "测试类结构",
+        "对 `autoreload.get_child_arguments` 的调用",
+        "使用 mock 修改 `sys.warnoptions` 和 `sys.argv`",
+        "断言风格：比较返回的参数列表"
+      ],
+      "possible_gap": "该测试只关注 `-W` 选项（通过 `sys.warnoptions`），没有测试 `-X` 选项（通过 `sys._xoptions`）。"
+    },
+    {
+      "test_name": "RestartWithReloaderTests.test_python_m_django",
+      "test_file": "tests/utils_tests/test_autoreload.py",
+      "why_relevant": "它测试了通过 `-m django` 方式启动时的重启参数构造，涉及子进程参数列表的构建。",
+      "reusable_parts": [
+        "测试类结构",
+        "使用 mock 模拟 `django.__main__`",
+        "断言风格：检查 `subprocess.call` 的参数"
+      ],
+      "possible_gap": "它主要测试 `-Wall` 的添加，没有涉及从父进程继承 `-X` 选项的逻辑。"
+    },
+    {
+      "test_name": "RestartWithReloaderTests.test_manage_py",
+      "test_file": "tests/utils_tests/test_autoreload.py",
+      "why_relevant": "它测试了直接运行 `manage.py` 脚本时的重启参数构造，这是 Issue 中使用的模式。",
+      "reusable_parts": [
+        "测试类结构",
+        "使用 `tempfile.TemporaryDirectory` 创建临时 `manage.py`",
+        "使用 mock 修改 `__main__.__spec__`",
+        "断言风格：检查 `subprocess.call` 的参数"
+      ],
+      "possible_gap": "它同样只测试了 `-Wall` 的添加，没有测试 `-X` 选项的传递。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "测试中通过 `@mock.patch('sys.warnoptions', ['error'])` 设置 `-W` 选项。",
+      "target_pattern": "需要变异为通过 mock 设置 `sys._xoptions`（例如 `{'utf8': True}`）来模拟 `-X utf8` 命令行选项。",
+      "reason": "Issue 的核心是 `-X` 选项未被传递。`sys._xoptions` 是存储 `-X` 选项的字典。变异此配置可以让测试走向处理 `-X` 选项的代码路径。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "相似测试中 `get_child_arguments()` 返回的列表包含 `[sys.executable, '-Werror', ...]`。",
+      "target_pattern": "期望返回的列表应包含 `[sys.executable, '-Xutf8', ...]` 或类似的 `-X` 选项。",
+      "reason": "为了正确传递 `-X` 选项，构造的子进程参数列表必须包含它。断言需要验证这一点。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "`autoreload.get_child_arguments()` 的返回值（参数列表）。",
+      "reason": "直接观察构造出的子进程命令行参数列表，可以确认 `-X` 选项是否被包含。"
+    },
+    {
+      "kind": "config",
+      "expression_hint": "`sys._xoptions` 在测试开始时的值，以及在 `get_child_arguments` 函数内部被访问时的值。",
+      "reason": "确认测试是否正确模拟了 `-X` 选项的输入，以及代码是否读取了这个配置。"
+    },
+    {
+      "kind": "file_output",
+      "expression_hint": "子进程中 `open` 函数使用的编码（如 `stream.encoding`），类似于 Issue 中的打印语句。",
+      "reason": "这是 Issue 中观察到的直接现象，可以验证 `-X utf8` 是否在子进程中生效。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 `get_child_arguments()` 返回的参数列表中包含代表 `-X` 选项的字符串（如 `'-Xutf8'`）。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免断言完整的、硬编码的参数列表顺序，因为其他参数（如 `-Wall`）可能因版本或配置而变化。",
+      "reason": "核心需求是 `-X` 选项被传递，而不是参数列表的完全一致。`contains_fragment` 更稳定。"
+    },
+    {
+      "assertion_goal": "验证在启用 reloader 的情况下，子进程中的 `open` 函数使用的编码与父进程一致（例如都是 UTF-8）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言具体的、可能平台相关的编码字符串字面量（如 `cp936`），应关注一致性。",
+      "reason": "Issue 表明编码在 reloader 前后不一致。断言一致性直接对应预期行为。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 `unittest.mock` 来 patch `sys._xoptions` 以模拟 `-X` 命令行选项。",
+      "source": "inference",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要创建一个临时的 `manage.py` 文件来模拟项目结构，类似于 `test_manage_py`。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试类应继承自 `SimpleTestCase`，因为涉及 mock 和临时文件。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要 patch `subprocess.call` 或相关函数来拦截并检查重启调用，而不是真正启动子进程。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "`sys._xoptions` 的确切结构以及如何将其转换为命令行参数 `-Xkey=value` 或 `-Xkey` 的格式。",
+    "除了 `get_child_arguments`，是否还有其他函数或位置负责处理 `-X` 选项的传递。",
+    "`-X` 选项是否应该与 `-W`、`-O` 等选项以相同的方式被处理和传递。",
+    "在真实的重载场景中，观测文件编码的代码（如 Issue 中的 `print`）应该放在哪里才能被正确执行。"
+  ],
+  "raw": {
+    "issue_summary": "Django 的 auto-reloader 在重启子进程时没有正确传递 Python 的 -X 命令行选项。",
+    "trigger_condition": {
+      "text": "使用 Python 的 -X 选项（例如 -X utf8）启动 Django 的 runserver 命令，并启用 auto-reloader（默认行为）。",
+      "evidence": [
+        "Issue 中用户执行了 `python -X utf8 manage.py runserver 0.0.0.0:8005 -v3`，并观察到编码输出不一致。",
+        "Issue 中对比了使用 `--noreload` 和不使用的输出差异。",
+        "相关测试 1 和 2 涉及子进程参数构造和 `sys.warnoptions`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当 auto-reloader 生效时，子进程没有继承父进程的 -X 选项（如 -X utf8），导致程序行为（如文件编码）与预期不符。Issue 中表现为 `open` 函数使用的编码在 reloader 启动前后不同（UTF-8 vs cp936）。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 中显示运行 `runserver` 时，第一次打印 `=== UTF-8`，随后打印 `=== cp936`，表明 reloader 启动后编码改变。",
+        "使用 `--noreload` 时只打印 `=== UTF-8`，问题消失。",
+        "相关测试 1 测试了 `sys.warnoptions` 的传递。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Django 的 auto-reloader 在重启子进程时，应正确传递所有 Python 命令行选项，包括 -X 选项，确保子进程的运行时环境与父进程一致。",
+      "evidence": [
+        "Issue 标题和描述表明 -X 选项应该被传递。",
+        "相关测试 1 测试了 `-W` 选项的传递，暗示其他 Python 选项也应被处理。",
+        "相关测试 2 和 3 展示了子进程参数构造的逻辑。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "autoreload.get_child_arguments",
+        "kind": "function",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "该函数负责构造重启子进程时的命令行参数，是传递 -X 选项的关键位置。"
+      },
+      {
+        "name": "autoreload.restart_with_reloader",
+        "kind": "function",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "该函数触发重启过程，会调用 `get_child_arguments`。"
+      },
+      {
+        "name": "sys._xoptions",
+        "kind": "unknown",
+        "source_path": "",
+        "reason": "Issue 中引用了 Python 文档中关于 `sys._xoptions` 的链接，它是存储 -X 选项的字典。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/autoreload.py",
+        "object": "get_child_arguments",
+        "lines": "",
+        "reason": "该函数构造子进程参数。相关测试 1 测试了 `-W` 选项的传递，但可能未处理 `-X` 选项。"
+      },
+      {
+        "path": "django/utils/autoreload.py",
+        "object": "restart_with_reloader",
+        "lines": "",
+        "reason": "该函数是重启的入口，可能涉及参数传递的调用链。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestChildArguments.test_warnoptions",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "它直接测试了 `autoreload.get_child_arguments()` 函数，并验证了 `-W` 选项（另一种 Python 命令行选项）的传递。",
+        "reusable_parts": [
+          "测试类结构",
+          "对 `autoreload.get_child_arguments` 的调用",
+          "使用 mock 修改 `sys.warnoptions` 和 `sys.argv`",
+          "断言风格：比较返回的参数列表"
+        ],
+        "possible_gap": "该测试只关注 `-W` 选项（通过 `sys.warnoptions`），没有测试 `-X` 选项（通过 `sys._xoptions`）。"
+      },
+      {
+        "test_name": "RestartWithReloaderTests.test_python_m_django",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "它测试了通过 `-m django` 方式启动时的重启参数构造，涉及子进程参数列表的构建。",
+        "reusable_parts": [
+          "测试类结构",
+          "使用 mock 模拟 `django.__main__`",
+          "断言风格：检查 `subprocess.call` 的参数"
+        ],
+        "possible_gap": "它主要测试 `-Wall` 的添加，没有涉及从父进程继承 `-X` 选项的逻辑。"
+      },
+      {
+        "test_name": "RestartWithReloaderTests.test_manage_py",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "它测试了直接运行 `manage.py` 脚本时的重启参数构造，这是 Issue 中使用的模式。",
+        "reusable_parts": [
+          "测试类结构",
+          "使用 `tempfile.TemporaryDirectory` 创建临时 `manage.py`",
+          "使用 mock 修改 `__main__.__spec__`",
+          "断言风格：检查 `subprocess.call` 的参数"
+        ],
+        "possible_gap": "它同样只测试了 `-Wall` 的添加，没有测试 `-X` 选项的传递。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试中通过 `@mock.patch('sys.warnoptions', ['error'])` 设置 `-W` 选项。",
+        "target_pattern": "需要变异为通过 mock 设置 `sys._xoptions`（例如 `{'utf8': True}`）来模拟 `-X utf8` 命令行选项。",
+        "reason": "Issue 的核心是 `-X` 选项未被传递。`sys._xoptions` 是存储 `-X` 选项的字典。变异此配置可以让测试走向处理 `-X` 选项的代码路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中 `get_child_arguments()` 返回的列表包含 `[sys.executable, '-Werror', ...]`。",
+        "target_pattern": "期望返回的列表应包含 `[sys.executable, '-Xutf8', ...]` 或类似的 `-X` 选项。",
+        "reason": "为了正确传递 `-X` 选项，构造的子进程参数列表必须包含它。断言需要验证这一点。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "`autoreload.get_child_arguments()` 的返回值（参数列表）。",
+        "reason": "直接观察构造出的子进程命令行参数列表，可以确认 `-X` 选项是否被包含。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "`sys._xoptions` 在测试开始时的值，以及在 `get_child_arguments` 函数内部被访问时的值。",
+        "reason": "确认测试是否正确模拟了 `-X` 选项的输入，以及代码是否读取了这个配置。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "子进程中 `open` 函数使用的编码（如 `stream.encoding`），类似于 Issue 中的打印语句。",
+        "reason": "这是 Issue 中观察到的直接现象，可以验证 `-X utf8` 是否在子进程中生效。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 `get_child_arguments()` 返回的参数列表中包含代表 `-X` 选项的字符串（如 `'-Xutf8'`）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、硬编码的参数列表顺序，因为其他参数（如 `-Wall`）可能因版本或配置而变化。",
+        "reason": "核心需求是 `-X` 选项被传递，而不是参数列表的完全一致。`contains_fragment` 更稳定。"
+      },
+      {
+        "assertion_goal": "验证在启用 reloader 的情况下，子进程中的 `open` 函数使用的编码与父进程一致（例如都是 UTF-8）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言具体的、可能平台相关的编码字符串字面量（如 `cp936`），应关注一致性。",
+        "reason": "Issue 表明编码在 reloader 前后不一致。断言一致性直接对应预期行为。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 `unittest.mock` 来 patch `sys._xoptions` 以模拟 `-X` 命令行选项。",
+        "source": "inference",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建一个临时的 `manage.py` 文件来模拟项目结构，类似于 `test_manage_py`。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 `SimpleTestCase`，因为涉及 mock 和临时文件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要 patch `subprocess.call` 或相关函数来拦截并检查重启调用，而不是真正启动子进程。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "`sys._xoptions` 的确切结构以及如何将其转换为命令行参数 `-Xkey=value` 或 `-Xkey` 的格式。",
+      "除了 `get_child_arguments`，是否还有其他函数或位置负责处理 `-X` 选项的传递。",
+      "`-X` 选项是否应该与 `-W`、`-O` 等选项以相同的方式被处理和传递。",
+      "在真实的重载场景中，观测文件编码的代码（如 Issue 中的 `print`）应该放在哪里才能被正确执行。"
+    ]
+  }
+}

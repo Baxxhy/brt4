@@ -1,0 +1,297 @@
+{
+  "instance_id": "pydata__xarray-4687",
+  "issue_summary": "xr.where 在 DataArray 上使用时丢失了属性和 dtype。",
+  "trigger_condition": {
+    "text": "对带有 attrs 属性的 DataArray 调用 xr.where 函数。",
+    "evidence": [
+      "Issue 中的 MCVE: data2 = xr.where(data == 1, 5, 0)",
+      "Issue 中的 MCVE: xr.where(da==0, -1, da).attrs"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "生成的 DataArray 的 attrs 字典为空，且 dtype 可能被改变（例如从 np.int8 变为 np.int64）。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue: 'Using `xr.where` on a DataArray with attributes results in a new DataArray without attributes.'",
+      "Issue: 'Apart from loosing attributes the dtype is not conserved.'",
+      "Issue: 'xr.where(da==0, -1, da).attrs # shows: {}'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "xr.where 返回的 DataArray 应该保留输入 DataArray 的 attrs 属性，并且 dtype 应该被适当保留。",
+    "evidence": [
+      "Issue: 'Attributes should be preserved'",
+      "Issue: 'I would expect the attributes to remain in the data array.'",
+      "相关测试 1 中 attrs 被保留的测试模式: 'actual = da.where(da.values > 1); assert actual.attrs == da.attrs'"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "xr.where",
+      "kind": "function",
+      "source_path": "xarray/core/computation.py",
+      "reason": "Issue 直接报告此函数的行为问题。"
+    },
+    {
+      "name": "apply_ufunc",
+      "kind": "function",
+      "source_path": "xarray/core/computation.py",
+      "reason": "xr.where 内部调用了 apply_ufunc，Issue 提到可能需要传递 keep_attrs=True 参数给它。"
+    },
+    {
+      "name": "DataArray",
+      "kind": "class",
+      "source_path": "xarray/core/dataarray.py",
+      "reason": "Issue 涉及 DataArray 对象的 attrs 属性。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "xarray/core/computation.py",
+      "object": "where",
+      "lines": "1730-1820",
+      "reason": "xr.where 函数定义在此，它调用 apply_ufunc 时可能没有正确设置 keep_attrs 参数。"
+    },
+    {
+      "path": "xarray/core/computation.py",
+      "object": "apply_ufunc",
+      "lines": "",
+      "reason": "xr.where 通过 apply_ufunc 实现，其默认的 keep_attrs 行为可能导致属性丢失。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "TestDataset.test_where",
+      "test_file": "xarray/tests/test_dataset.py",
+      "why_relevant": "它测试了 where 方法在 Dataset 和 DataArray 上的行为，并包含了对 attrs 保留的断言。",
+      "reusable_parts": [
+        "imports",
+        "DataArray 和 Dataset 的构造",
+        "where 的调用",
+        "assert_identical 断言风格"
+      ],
+      "possible_gap": "该测试主要针对 Dataset.where 和 DataArray.where 方法，而非顶层的 xr.where 函数。它测试了 attrs 被保留的情况，这可能意味着 xr.where 的缺陷路径未被覆盖。"
+    },
+    {
+      "test_name": "test_where",
+      "test_file": "xarray/tests/test_computation.py",
+      "why_relevant": "它直接测试了顶层的 xr.where 函数，是生成缺陷复现测试最直接的起点。",
+      "reusable_parts": [
+        "imports",
+        "xr.where 的调用",
+        "assert_identical 断言风格"
+      ],
+      "possible_gap": "该测试没有设置或检查 DataArray 的 attrs 属性，因此无法复现属性丢失的问题。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试 3 中，xr.where 的输入是简单的 DataArray 和标量，没有 attrs。",
+      "target_pattern": "创建一个带有 attrs 属性的 DataArray 作为 xr.where 的输入之一。",
+      "reason": "Issue 表明只有当输入 DataArray 有 attrs 时，属性才会丢失。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "相关测试 3 中，xr.where 的参数是 cond, 1, 0。",
+      "target_pattern": "使用 DataArray 作为 x 或 y 参数，并确保 cond 涉及该 DataArray。",
+      "reason": "Issue 的 MCVE 中，x 或 y 是带有 attrs 的 DataArray。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "result.attrs",
+      "reason": "Issue 的核心是返回的 DataArray 的 attrs 字典为空。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "result.dtype",
+      "reason": "Issue 还提到 dtype 没有被保留，需要观察。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "断言 xr.where 返回的 DataArray 的 attrs 与输入 DataArray 的 attrs 相等。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的 repr 字符串或与具体数值无关的属性。",
+      "reason": "Issue 期望属性被保留，因此断言 attrs 字典相等是直接且稳定的验证方式。"
+    },
+    {
+      "assertion_goal": "断言 xr.where 返回的 DataArray 的 dtype 与预期一致（例如与输入 dtype 相同）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言与具体平台或版本相关的精确数值表示。",
+      "reason": "Issue 提到 dtype 未被保留，需要验证此行为。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 xarray 和 numpy 来构造 DataArray 和数组。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能需要在 TestCase 类中或作为独立函数运行。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "dtype 丢失的确切原因和条件是否总是发生，或者是否与 numpy 的行为有关。",
+    "xr.where 在 cond, x, y 参数不同类型组合下，attrs 保留的行为是否一致。",
+    "apply_ufunc 的默认 keep_attrs 行为在 xr.where 的调用链中是如何被确定的。"
+  ],
+  "raw": {
+    "issue_summary": "xr.where 在 DataArray 上使用时丢失了属性和 dtype。",
+    "trigger_condition": {
+      "text": "对带有 attrs 属性的 DataArray 调用 xr.where 函数。",
+      "evidence": [
+        "Issue 中的 MCVE: data2 = xr.where(data == 1, 5, 0)",
+        "Issue 中的 MCVE: xr.where(da==0, -1, da).attrs"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 DataArray 的 attrs 字典为空，且 dtype 可能被改变（例如从 np.int8 变为 np.int64）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue: 'Using `xr.where` on a DataArray with attributes results in a new DataArray without attributes.'",
+        "Issue: 'Apart from loosing attributes the dtype is not conserved.'",
+        "Issue: 'xr.where(da==0, -1, da).attrs # shows: {}'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "xr.where 返回的 DataArray 应该保留输入 DataArray 的 attrs 属性，并且 dtype 应该被适当保留。",
+      "evidence": [
+        "Issue: 'Attributes should be preserved'",
+        "Issue: 'I would expect the attributes to remain in the data array.'",
+        "相关测试 1 中 attrs 被保留的测试模式: 'actual = da.where(da.values > 1); assert actual.attrs == da.attrs'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xr.where",
+        "kind": "function",
+        "source_path": "xarray/core/computation.py",
+        "reason": "Issue 直接报告此函数的行为问题。"
+      },
+      {
+        "name": "apply_ufunc",
+        "kind": "function",
+        "source_path": "xarray/core/computation.py",
+        "reason": "xr.where 内部调用了 apply_ufunc，Issue 提到可能需要传递 keep_attrs=True 参数给它。"
+      },
+      {
+        "name": "DataArray",
+        "kind": "class",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "Issue 涉及 DataArray 对象的 attrs 属性。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/computation.py",
+        "object": "where",
+        "lines": "1730-1820",
+        "reason": "xr.where 函数定义在此，它调用 apply_ufunc 时可能没有正确设置 keep_attrs 参数。"
+      },
+      {
+        "path": "xarray/core/computation.py",
+        "object": "apply_ufunc",
+        "lines": "",
+        "reason": "xr.where 通过 apply_ufunc 实现，其默认的 keep_attrs 行为可能导致属性丢失。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestDataset.test_where",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "它测试了 where 方法在 Dataset 和 DataArray 上的行为，并包含了对 attrs 保留的断言。",
+        "reusable_parts": [
+          "imports",
+          "DataArray 和 Dataset 的构造",
+          "where 的调用",
+          "assert_identical 断言风格"
+        ],
+        "possible_gap": "该测试主要针对 Dataset.where 和 DataArray.where 方法，而非顶层的 xr.where 函数。它测试了 attrs 被保留的情况，这可能意味着 xr.where 的缺陷路径未被覆盖。"
+      },
+      {
+        "test_name": "test_where",
+        "test_file": "xarray/tests/test_computation.py",
+        "why_relevant": "它直接测试了顶层的 xr.where 函数，是生成缺陷复现测试最直接的起点。",
+        "reusable_parts": [
+          "imports",
+          "xr.where 的调用",
+          "assert_identical 断言风格"
+        ],
+        "possible_gap": "该测试没有设置或检查 DataArray 的 attrs 属性，因此无法复现属性丢失的问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 3 中，xr.where 的输入是简单的 DataArray 和标量，没有 attrs。",
+        "target_pattern": "创建一个带有 attrs 属性的 DataArray 作为 xr.where 的输入之一。",
+        "reason": "Issue 表明只有当输入 DataArray 有 attrs 时，属性才会丢失。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 3 中，xr.where 的参数是 cond, 1, 0。",
+        "target_pattern": "使用 DataArray 作为 x 或 y 参数，并确保 cond 涉及该 DataArray。",
+        "reason": "Issue 的 MCVE 中，x 或 y 是带有 attrs 的 DataArray。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "result.attrs",
+        "reason": "Issue 的核心是返回的 DataArray 的 attrs 字典为空。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "result.dtype",
+        "reason": "Issue 还提到 dtype 没有被保留，需要观察。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "断言 xr.where 返回的 DataArray 的 attrs 与输入 DataArray 的 attrs 相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 repr 字符串或与具体数值无关的属性。",
+        "reason": "Issue 期望属性被保留，因此断言 attrs 字典相等是直接且稳定的验证方式。"
+      },
+      {
+        "assertion_goal": "断言 xr.where 返回的 DataArray 的 dtype 与预期一致（例如与输入 dtype 相同）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言与具体平台或版本相关的精确数值表示。",
+        "reason": "Issue 提到 dtype 未被保留，需要验证此行为。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 xarray 和 numpy 来构造 DataArray 和数组。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在 TestCase 类中或作为独立函数运行。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "dtype 丢失的确切原因和条件是否总是发生，或者是否与 numpy 的行为有关。",
+      "xr.where 在 cond, x, y 参数不同类型组合下，attrs 保留的行为是否一致。",
+      "apply_ufunc 的默认 keep_attrs 行为在 xr.where 的调用链中是如何被确定的。"
+    ]
+  }
+}

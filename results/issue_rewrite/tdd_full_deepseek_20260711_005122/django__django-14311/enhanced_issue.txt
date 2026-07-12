@@ -1,0 +1,102 @@
+instance_id: django__django-14311
+
+issue_summary: 当使用 `python -m custom_module runserver` 启动非 Django 模块时，自动重新加载（autoreload）功能未能正确处理模块的完整点分名称。
+
+trigger_condition:
+{
+  "text": "使用 `python -m foo.bar.baz` 这样的命令启动一个非 Django 模块（其中 `baz` 是一个 `.py` 文件），并启用自动重新加载功能（例如通过 `runserver` 命令）。",
+  "evidence": [
+    "Issue 描述中提到：'When a dotted name for a module (for example, foo.bar.baz where baz.py resides under foo/bar) is specified like -m foo.bar.baz, the resulting arguments end up being -m foo.bar, which is uncalled for.'",
+    "相关测试 `test_run_as_non_django_module` 模拟了运行非 Django 模块的场景。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "自动重新加载器为子进程生成的参数不正确，错误地截断了模块名称（例如，将 `-m foo.bar.baz` 错误地生成为 `-m foo.bar`）。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 描述：'the resulting arguments end up being -m foo.bar, which is uncalled for.'",
+    "相关测试 `test_run_as_non_django_module` 展示了正确的参数生成应为 `[sys.executable, '-m', 'utils_tests.test_module', 'runserver']`，这表明错误会导致参数列表不匹配。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "自动重新加载器应能正确生成子进程参数，完整保留通过 `-m` 指定的模块点分名称（例如 `-m foo.bar.baz`）。",
+  "evidence": [
+    "Issue 标题和描述表明修复目标是 'Allow autoreloading of `python -m custom_module runserver`' 和 'Fixed detection when started non-django modules with \"python -m\" in autoreloader.'",
+    "相关测试 `test_run_as_non_django_module` 展示了对于非 Django 模块 `utils_tests.test_module`，期望的参数列表包含完整的模块名。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "autoreload.get_child_arguments",
+    "kind": "function",
+    "source_path": "",
+    "reason": "所有相关测试都调用了此函数来检查生成的子进程参数，Issue 的核心问题正是该函数生成的参数不正确。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "模拟 `sys.modules['__main__']` 为 `test_main`（对应模块 `utils_tests.test_module`）。",
+    "target_pattern": "模拟 `sys.modules['__main__']` 为一个更深层级的模块，例如 `foo.bar.baz`（其中 `baz` 是 `.py` 文件）。",
+    "reason": "Issue 明确指出问题发生在模块点分名称（如 `foo.bar.baz`）被指定时，而当前测试只覆盖了两层名称（`utils_tests.test_module`）。",
+    "confidence": "high"
+  },
+  {
+    "slot": "argument",
+    "current_pattern": "`sys.argv` 被模拟为 `[test_main.__file__, 'runserver']`。",
+    "target_pattern": "`sys.argv` 应反映通过 `-m` 启动的更深层级模块，但具体模式需根据 `get_child_arguments` 的实现推断。可能需要调整模拟的 `__file__` 属性或 `__spec__`。",
+    "reason": "`get_child_arguments` 函数依赖 `sys.argv` 和 `__main__` 模块的元数据来重构命令行。为了触发缺陷路径，需要模拟一个代表深层模块的 `__main__` 模块。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "`autoreload.get_child_arguments()` 的返回值，特别是列表中 `-m` 参数后面的字符串。",
+    "reason": "Issue 的核心是生成的参数列表错误。观察返回值可以直接判断模块名称是否被正确、完整地包含。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证 `get_child_arguments()` 返回的列表包含正确的 `-m` 参数和完整的模块点分名称（例如 `'foo.bar.baz'`）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言完整的、硬编码的列表，因为 Python 路径和模块名可能变化。应关注 `-m` 参数及其后模块名的结构。",
+    "reason": "Issue 的期望行为是参数列表正确。使用 `equals` 与预期的列表进行比较是最直接的验证方式，但预期列表的构造应基于测试设置动态生成。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 `unittest.mock` 来模拟 `sys.modules`、`sys.argv` 和可能的 `sys.warnoptions`。需要创建一个模拟模块对象来代表深层级的 `__main__` 模块。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试类应继承自 `SimpleTestCase`。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "`get_child_arguments` 函数内部处理模块名称的确切逻辑和缺陷位置尚不明确。",
+  "为了正确模拟一个代表 `foo.bar.baz`（文件）的 `__main__` 模块，需要设置的确切模块属性（如 `__spec__`、`__file__`）尚不确定。",
+  "修复后的正确参数列表对于深层模块的确切格式（例如，是否总是 `-m` 后跟完整名称）需要从现有正确测试中推断。"
+]

@@ -1,0 +1,411 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+ModelAdmin.lookup_allowed() incorrectly raises DisallowedModelAdminLookup lookup with foreign key as primary key
+Description
+	 
+		(last modified by Tim Graham)
+	 
+Wrote a failing test for tests/modeladmin/tests.py to demonstrate - same test/code passes on 1.8
+@isolate_apps('modeladmin')
+def test_lookup_allowed_foreign_primary(self):
+	class Country(models.Model):
+		name = models.CharField(max_length=256)
+	class Place(models.Model):
+		country = models.ForeignKey(Country, models.CASCADE)
+	class Restaurant(models.Model):
+		place = models.OneToOneField(Place, models.CASCADE, primary_key=True)
+	class Waiter(models.Model):
+		restaurant = models.ForeignKey(Restaurant, models.CASCADE)
+	class WaiterAdmin(ModelAdmin):
+		list_filter = [
+			'restaurant__place__country',
+		]
+	ma = WaiterAdmin(Waiter, self.site)
+	self.assertIs(ma.lookup_allowed('restaurant__place__country', 'test_value'), True)
+I think this is caused by the admin thinking that having a foreign key field as a primary key is the same as concrete inheritance. So when you try and check lookups for restaurant__place__country it thinks 'place' is the concrete parent of 'restaurant' and shortcuts it to restaurant__country which isn't in 'list_filter'. And you can't add restaurant__country to list_filter because country isn't actually on restaurant.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/contrib/auth/admin.py
+对象名称：lookup_allowed
+节点类型：class_function
+父节点：UserAdmin
+行号范围：109-113
+代码：
+    def lookup_allowed(self, lookup, value):
+        # Don't allow lookups involving passwords.
+        return not lookup.startswith("password") and super().lookup_allowed(
+            lookup, value
+        )
+
+
+【源码片段 2】
+文件路径：django/db/models/fields/related.py
+对象名称：ForeignKey
+节点类型：class
+父节点：related
+行号范围：899-1194
+代码：
+class ForeignKey(ForeignObject):
+    """
+    Provide a many-to-one relation by adding a column to the local model
+    to hold the remote value.
+
+    By default ForeignKey will target the pk of the remote model but this
+    behavior can be changed by using the ``to_field`` argument.
+    """
+    descriptor_class = ForeignKeyDeferredAttribute
+    many_to_many = False
+    many_to_one = True
+    one_to_many = False
+    one_to_one = False
+    rel_class = ManyToOneRel
+    empty_strings_allowed = False
+    default_error_messages = {
+        "invalid": _("%(model)s instance with %(field)s %(value)r does not exist.")
+    }
+    description = _("Foreign Key (type determined by related field)")
+    def __init__(
+        self,
+        to,
+        on_delete,
+        related_name=None,
+        related_query_name=None,
+        limit_choices_to=None,
+        parent_link=False,
+        to_field=None,
+        db_constraint=True,
+        **kwargs,
+    ):
+    def __class_getitem__(cls, *args, **kwargs):
+    def check(self, **kwargs):
+    def _check_on_delete(self):
+    def _check_unique(self, **kwargs):
+    def deconstruct(self):
+    def to_python(self, value):
+    @property
+    def target_field(self):
+    def validate(self, value, model_instance):
+    def resolve_related_fields(self):
+    def get_attname(self):
+    def get_attname_column(self):
+    def get_default(self):
+    def get_db_prep_save(self, value, connection):
+    def get_db_prep_value(self, value, connection, prepared=False):
+    def get_prep_value(self, value):
+    def contribute_to_related_class(self, cls, related):
+    def formfield(self, *, using=None, **kwargs):
+    def db_check(self, connection):
+    def db_type(self, connection):
+    def cast_db_type(self, connection):
+    def db_parameters(self, connection):
+    def convert_empty_strings(self, value, expression, connection):
+    def get_db_converters(self, connection):
+    def get_col(self, alias, output_field=None):
+
+
+【源码片段 3】
+文件路径：django/db/models/fields/related.py
+对象名称：OneToOneField
+节点类型：class
+父节点：related
+行号范围：1197-1244
+代码：
+class OneToOneField(ForeignKey):
+    """
+    A OneToOneField is essentially the same as a ForeignKey, with the exception
+    that it always carries a "unique" constraint with it and the reverse
+    relation always returns the object pointed to (since there will only ever
+    be one), rather than returning a list.
+    """
+    many_to_many = False
+    many_to_one = False
+    one_to_many = False
+    one_to_one = True
+    related_accessor_class = ReverseOneToOneDescriptor
+    forward_related_accessor_class = ForwardOneToOneDescriptor
+    rel_class = OneToOneRel
+    description = _("One-to-one relationship")
+    def __init__(self, to, on_delete, to_field=None, **kwargs):
+    def deconstruct(self):
+    def formfield(self, **kwargs):
+    def save_form_data(self, instance, data):
+    def _check_unique(self, **kwargs):
+
+
+【源码片段 4】
+文件路径：django/contrib/admin/exceptions.py
+对象名称：DisallowedModelAdminLookup
+节点类型：class
+父节点：exceptions
+行号范围：4-7
+代码：
+class DisallowedModelAdminLookup(SuspiciousOperation):
+    """Invalid filter was passed to admin view via URL querystring"""
+
+
+【源码片段 5】
+文件路径：django/test/utils.py
+对象名称：isolate_apps
+节点类型：class
+父节点：utils
+行号范围：898-926
+代码：
+class isolate_apps(TestContextDecorator):
+    """
+    Act as either a decorator or a context manager to register models defined
+    in its wrapped context to an isolated registry.
+
+    The list of installed apps the isolated registry should contain must be
+    passed as arguments.
+
+    Two optional keyword arguments can be specified:
+
+    `attr_name`: attribute assigned the isolated registry if used as a class
+                 decorator.
+
+    `kwarg_name`: keyword argument passing the isolated registry if used as a
+                  function decorator.
+    """
+    def __init__(self, *installed_apps, **kwargs):
+    def enable(self):
+    def disable(self):
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/modeladmin/tests.py
+测试名称：ModelAdminTests.test_lookup_allowed_onetoone
+测试代码：
+class ModelAdminTests(TestCase):
+    @isolate_apps("modeladmin")
+    def test_lookup_allowed_onetoone(self):
+        class Department(models.Model):
+            code = models.CharField(max_length=4, unique=True)
+
+        class Employee(models.Model):
+            department = models.ForeignKey(Department, models.CASCADE, to_field="code")
+
+        class EmployeeProfile(models.Model):
+            employee = models.OneToOneField(Employee, models.CASCADE)
+
+        class EmployeeInfo(models.Model):
+            employee = models.OneToOneField(Employee, models.CASCADE)
+            description = models.CharField(max_length=100)
+
+        class EmployeeProfileAdmin(ModelAdmin):
+            list_filter = [
+                "employee__employeeinfo__description",
+                "employee__department__code",
+            ]
+
+        ma = EmployeeProfileAdmin(EmployeeProfile, self.site)
+        # Reverse OneToOneField
+        self.assertIs(
+            ma.lookup_allowed("employee__employeeinfo__description", "test_value"), True
+        )
+        # OneToOneField and ForeignKey
+        self.assertIs(
+            ma.lookup_allowed("employee__department__code", "test_value"), True
+        )
+
+【相关测试 2】
+测试文件：tests/modeladmin/tests.py
+测试名称：ModelAdminTests.test_lookup_allowed_allows_nonexistent_lookup
+测试代码：
+class ModelAdminTests(TestCase):
+    def test_lookup_allowed_allows_nonexistent_lookup(self):
+        """
+        A lookup_allowed allows a parameter whose field lookup doesn't exist.
+        (#21129).
+        """
+
+        class BandAdmin(ModelAdmin):
+            fields = ["name"]
+
+        ma = BandAdmin(Band, self.site)
+        self.assertTrue(ma.lookup_allowed("name__nonexistent", "test_value"))
+
+【相关测试 3】
+测试文件：tests/one_to_one/tests.py
+测试名称：OneToOneTests.test_foreign_key
+测试代码：
+class OneToOneTests(TestCase):
+    def test_foreign_key(self):
+        # Add a Waiter to the Restaurant.
+        w = self.r1.waiter_set.create(name="Joe")
+        self.assertEqual(
+            repr(w), "<Waiter: Joe the waiter at Demon Dogs the restaurant>"
+        )
+
+        # Query the waiters
+        def assert_filter_waiters(**params):
+            self.assertSequenceEqual(Waiter.objects.filter(**params), [w])
+
+        assert_filter_waiters(restaurant__place__exact=self.p1.pk)
+        assert_filter_waiters(restaurant__place__exact=self.p1)
+        assert_filter_waiters(restaurant__place__pk=self.p1.pk)
+        assert_filter_waiters(restaurant__exact=self.r1.pk)
+        assert_filter_waiters(restaurant__exact=self.r1)
+        assert_filter_waiters(restaurant__pk=self.r1.pk)
+        assert_filter_waiters(restaurant=self.r1.pk)
+        assert_filter_waiters(restaurant=self.r1)
+        assert_filter_waiters(id__exact=w.pk)
+        assert_filter_waiters(pk=w.pk)
+        # Delete the restaurant; the waiter should also be removed
+        r = Restaurant.objects.get(pk=self.r1.pk)
+        r.delete()
+        self.assertEqual(Waiter.objects.count(), 0)
+
+【相关测试 4】
+测试文件：tests/model_regress/tests.py
+测试名称：ModelTests.test_primary_key_foreign_key_types
+测试代码：
+class ModelTests(TestCase):
+    def test_primary_key_foreign_key_types(self):
+        # Check Department and Worker (non-default PK type)
+        d = Department.objects.create(id=10, name="IT")
+        w = Worker.objects.create(department=d, name="Full-time")
+        self.assertEqual(str(w), "Full-time")
+
+【相关测试 5】
+测试文件：tests/basic/tests.py
+测试名称：ModelLookupTest.test_lookup_by_primary_key
+测试代码：
+class ModelLookupTest(TestCase):
+    def test_lookup_by_primary_key(self):
+        # Lookup by a primary key is the most common case, so Django
+        # provides a shortcut for primary-key exact lookups.
+        # The following is identical to articles.get(id=a.id).
+        self.assertEqual(Article.objects.get(pk=self.a.id), self.a)
+
+        # pk can be used as a shortcut for the primary key name in any query.
+        self.assertSequenceEqual(Article.objects.filter(pk__in=[self.a.id]), [self.a])
+
+        # Model instances of the same type and same ID are considered equal.
+        a = Article.objects.get(pk=self.a.id)
+        b = Article.objects.get(pk=self.a.id)
+        self.assertEqual(a, b)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

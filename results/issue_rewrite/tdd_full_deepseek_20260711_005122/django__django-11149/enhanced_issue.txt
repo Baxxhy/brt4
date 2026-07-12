@@ -1,0 +1,131 @@
+instance_id: django__django-11149
+
+issue_summary: 当用户只有查看权限时，ManyToManyField 自动生成的中间模型的 admin inline 仍然可编辑。
+
+trigger_condition:
+{
+  "text": "用户只有 view 权限，访问一个包含 ManyToManyField 自动生成的中间模型（through model）的 admin inline 页面（例如 TabularInline）。",
+  "evidence": [
+    "Issue 描述：'I have 2 view only permissions. I have a ManyToManyField represented in my main model as a TabularInline. But, my user with view only permissions can now add or remove these items at will!'",
+    "相关测试 1-4 展示了不同权限下 admin inline 的显示控制。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "只有 view 权限的用户在 admin 页面可以看到并操作（添加/删除）ManyToManyField 的 inline 表单元素。",
+  "symptom_type": "state_not_updated",
+  "evidence": [
+    "Issue 描述：'my user with view only permissions can now add or remove these items at will!'",
+    "相关测试 1 和 4 表明，在无 change 权限时，应不包含 inline 相关 HTML 元素（如 'Author_books-TOTAL_FORMS'）。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当用户只有 view 权限时，ManyToManyField 自动生成的中间模型的 admin inline 应不可编辑（即不显示添加/删除等表单控件）。",
+  "evidence": [
+    "相关测试 1 (test_inline_change_m2m_noperm) 和 4 (test_inline_add_m2m_noperm) 的断言表明，无权限时不应包含 inline 的 HTML 元素。",
+    "相关测试 3 (test_inline_change_m2m_change_perm) 表明，有 change 权限时才应包含这些元素。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "admin.TabularInline",
+    "kind": "class",
+    "source_path": "django/contrib/admin/options.py",
+    "reason": "Issue 中使用的 inline 类型是 TabularInline。"
+  },
+  {
+    "name": "models.ManyToManyField",
+    "kind": "class",
+    "source_path": "django/db/models/fields/related.py",
+    "reason": "Issue 涉及 ManyToManyField 及其自动生成的 through 模型。"
+  },
+  {
+    "name": "ManyToManyDescriptor.through",
+    "kind": "method",
+    "source_path": "django/db/models/fields/related_descriptors.py",
+    "reason": "Issue 中 admin.py 通过 `Report.photos.through` 获取中间模型用于 inline。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "相关测试中用户可能被赋予 add 或 change 权限，或者使用超级用户。",
+    "target_pattern": "用户只拥有 view 权限（无 add 和 change 权限）。",
+    "reason": "Issue 明确指出 bug 在用户只有 view 权限时触发。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "测试可能使用显式定义的 through 模型或特定的模型关系。",
+    "target_pattern": "使用自动生成的 through 模型（即不指定 through 参数的 ManyToManyField）。",
+    "reason": "Issue 中 admin.py 使用了 `Report.photos.through`，且未在 ManyToManyField 中指定 through 模型。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "state",
+    "expression_hint": "HTTP 响应内容中是否包含 inline 表单的 HTML 元素，如 'id_Author_books-TOTAL_FORMS'、'Add another' 按钮、DELETE 复选框。",
+    "reason": "Issue 的症状是这些元素在只有 view 权限时错误地出现。相关测试也通过检查这些元素存在与否来判断权限控制。"
+  },
+  {
+    "kind": "config",
+    "expression_hint": "用户对象的权限集合（user.user_permissions.all()）或 has_perm 检查结果。",
+    "reason": "需要确认测试设置的用户权限状态与 Issue 描述一致（只有 view）。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证只有 view 权限的用户访问 admin 页面时，响应中不包含 ManyToMany inline 的可编辑表单控件。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言完整的、可能因 Django 版本或模板而变化的 HTML 字符串。避免断言不相关的页面元素。",
+    "reason": "相关测试使用了 assertNotContains 检查特定 HTML 片段，这与 Issue 的预期行为一致，且对模板微小变化更稳健。"
+  },
+  {
+    "assertion_goal": "验证有 change 权限的用户访问时，响应中包含这些表单控件。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "同上。",
+    "reason": "提供对比，确保测试能区分正常和错误行为。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要创建具有 ManyToManyField 的模型（如 Report 和 Photo），并在 admin 中注册其自动生成的 through 模型为 TabularInline。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要创建测试用户，并只为其分配相关模型的 view 权限（无 add 和 change 权限）。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要使用 Django 的 TestCase 和 Client，并可能 override ROOT_URLCONF。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "自动生成的 through 模型与显式定义的 through 模型在权限检查上是否有区别？",
+  "bug 是否只影响 TabularInline，还是也影响 StackedInline？",
+  "权限检查的确切代码位置在哪里？",
+  "Django 2.1 中引入回归的具体变更是什么？"
+]

@@ -1,0 +1,372 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+OuterRef in exclude() or ~Q() uses wrong model.
+Description
+	
+The following test (added to tests/queries/test_qs_combinators) fails when trying to exclude results using OuterRef()
+def test_exists_exclude(self):
+	# filter()
+	qs = Number.objects.annotate(
+		foo=Exists(
+			Item.objects.filter(tags__category_id=OuterRef('pk'))
+		)
+	).filter(foo=True)
+	print(qs) # works
+	# exclude()
+	qs = Number.objects.annotate(
+		foo =Exists(
+			Item.objects.exclude(tags__category_id=OuterRef('pk'))
+		)
+	).filter(foo=True)
+	print(qs) # crashes
+	# filter(~Q())
+	qs = Number.objects.annotate(
+		foo =Exists(
+			Item.objects.filter(~Q(tags__category_id=OuterRef('pk')))
+		)
+	).filter(foo=True)
+	print(qs) # crashes
+It results in the following error
+ValueError: This queryset contains a reference to an outer query and may only be used in a subquery
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/db/models/expressions.py
+对象名称：OuterRef
+节点类型：class
+父节点：expressions
+行号范围：565-570
+代码：
+class OuterRef(F):
+    def resolve_expression(self, query=None, allow_joins=True, reuse=None,
+                           summarize=False, for_save=False, simple_col=False):
+
+
+【源码片段 2】
+文件路径：django/db/models/query.py
+对象名称：exclude
+节点类型：class_function
+父节点：QuerySet
+行号范围：896-902
+代码：
+    def exclude(self, *args, **kwargs):
+        """
+        Return a new QuerySet instance with NOT (args) ANDed to the existing
+        set.
+        """
+        self._not_support_combined_queries('exclude')
+        return self._filter_or_exclude(True, *args, **kwargs)
+
+
+【源码片段 3】
+文件路径：django/db/models/query.py
+对象名称：filter
+节点类型：class_function
+父节点：QuerySet
+行号范围：888-894
+代码：
+    def filter(self, *args, **kwargs):
+        """
+        Return a new QuerySet instance with the args ANDed to the existing
+        set.
+        """
+        self._not_support_combined_queries('filter')
+        return self._filter_or_exclude(False, *args, **kwargs)
+
+
+【源码片段 4】
+文件路径：django/db/models/expressions.py
+对象名称：Exists
+节点类型：class
+父节点：expressions
+行号范围：1074-1101
+代码：
+class Exists(Subquery):
+    template = 'EXISTS(%(subquery)s)'
+    output_field = fields.BooleanField()
+    def __init__(self, queryset, negated=False, **kwargs):
+    def __invert__(self):
+    def as_sql(self, compiler, connection, template=None, **extra_context):
+    def select_format(self, compiler, sql, params):
+
+
+【源码片段 5】
+文件路径：django/db/models/query_utils.py
+对象名称：Q
+节点类型：class
+父节点：query_utils
+行号范围：47-111
+代码：
+class Q(tree.Node):
+    """
+    Encapsulate filters as objects that can then be combined logically (using
+    `&` and `|`).
+    """
+    AND = 'AND'
+    OR = 'OR'
+    default = AND
+    conditional = True
+    def __init__(self, *args, _connector=None, _negated=False, **kwargs):
+    def _combine(self, other, conn):
+    def __or__(self, other):
+    def __and__(self, other):
+    def __invert__(self):
+    def resolve_expression(self, query=None, allow_joins=True, reuse=None, summarize=False, for_save=False):
+    def deconstruct(self):
+
+
+【源码片段 6】
+文件路径：django/db/models/query.py
+对象名称：annotate
+节点类型：class_function
+父节点：QuerySet
+行号范围：1026-1071
+代码：
+    def annotate(self, *args, **kwargs):
+        """
+        Return a query set in which the returned objects have been annotated
+        with extra data or aggregations.
+        """
+        self._not_support_combined_queries('annotate')
+        self._validate_values_are_expressions(args + tuple(kwargs.values()), method_name='annotate')
+        annotations = {}
+        for arg in args:
+            # The default_alias property may raise a TypeError.
+            try:
+                if arg.default_alias in kwargs:
+                    raise ValueError("The named annotation '%s' conflicts with the "
+                                     "default name for another annotation."
+                                     % arg.default_alias)
+            except TypeError:
+                raise TypeError("Complex annotations require an alias")
+            annotations[arg.default_alias] = arg
+        annotations.update(kwargs)
+
+        clone = self._chain()
+        names = self._fields
+        if names is None:
+            names = set(chain.from_iterable(
+                (field.name, field.attname) if hasattr(field, 'attname') else (field.name,)
+                for field in self.model._meta.get_fields()
+            ))
+
+        for alias, annotation in annotations.items():
+            if alias in names:
+                raise ValueError("The annotation '%s' conflicts with a field on "
+                                 "the model." % alias)
+            if isinstance(annotation, FilteredRelation):
+                clone.query.add_filtered_relation(annotation, alias)
+            else:
+                clone.query.add_annotation(annotation, alias, is_summary=False)
+
+        for alias, annotation in clone.query.annotations.items():
+            if alias in annotations and annotation.contains_aggregate:
+                if clone._fields is None:
+                    clone.query.group_by = True
+                else:
+                    clone.query.set_group_by()
+                break
+
+        return clone
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/queries/test_qs_combinators.py
+测试名称：QuerySetSetOperationTests.test_simple_union
+测试代码：
+@skipUnlessDBFeature('supports_select_union')
+class QuerySetSetOperationTests(TestCase):
+    def test_simple_union(self):
+        qs1 = Number.objects.filter(num__lte=1)
+        qs2 = Number.objects.filter(num__gte=8)
+        qs3 = Number.objects.filter(num=5)
+        self.assertNumbersEqual(qs1.union(qs2, qs3), [0, 1, 5, 8, 9], ordered=False)
+
+【相关测试 2】
+测试文件：tests/expressions/tests.py
+测试名称：BasicExpressionsTests.test_outerref
+测试代码：
+class BasicExpressionsTests(TestCase):
+    def test_outerref(self):
+        inner = Company.objects.filter(point_of_contact=OuterRef('pk'))
+        msg = (
+            'This queryset contains a reference to an outer query and may only '
+            'be used in a subquery.'
+        )
+        with self.assertRaisesMessage(ValueError, msg):
+            inner.exists()
+
+        outer = Employee.objects.annotate(is_point_of_contact=Exists(inner))
+        self.assertIs(outer.exists(), True)
+
+【相关测试 3】
+测试文件：tests/gis_tests/distapp/tests.py
+测试名称：DistanceTest.test_dwithin_subquery
+测试代码：
+class DistanceTest(TestCase):
+    @skipUnlessDBFeature('supports_dwithin_lookup')
+    def test_dwithin_subquery(self):
+        """dwithin lookup in a subquery using OuterRef as a parameter."""
+        qs = CensusZipcode.objects.annotate(
+            annotated_value=Exists(SouthTexasCity.objects.filter(
+                point__dwithin=(OuterRef('poly'), D(m=10)),
+            ))
+        ).filter(annotated_value=True)
+        self.assertEqual(self.get_names(qs), ['77002', '77025', '77401'])
+
+【相关测试 4】
+测试文件：tests/lookup/tests.py
+测试名称：LookupTests.test_nested_outerref_lhs
+测试代码：
+class LookupTests(TestCase):
+    def test_nested_outerref_lhs(self):
+        tag = Tag.objects.create(name=self.au1.alias)
+        tag.articles.add(self.a1)
+        qs = Tag.objects.annotate(
+            has_author_alias_match=Exists(
+                Article.objects.annotate(
+                    author_exists=Exists(
+                        Author.objects.filter(alias=OuterRef(OuterRef('name')))
+                    ),
+                ).filter(author_exists=True)
+            ),
+        )
+        self.assertEqual(qs.get(has_author_alias_match=True), tag)
+
+【相关测试 5】
+测试文件：tests/lookup/tests.py
+测试名称：LookupTests.test_exact_exists
+测试代码：
+class LookupTests(TestCase):
+    def test_exact_exists(self):
+        qs = Article.objects.filter(pk=OuterRef('pk'))
+        seasons = Season.objects.annotate(
+            pk_exists=Exists(qs),
+        ).filter(
+            pk_exists=Exists(qs),
+        )
+        self.assertCountEqual(seasons, Season.objects.all())
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

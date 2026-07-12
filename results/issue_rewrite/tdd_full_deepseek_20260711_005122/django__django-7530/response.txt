@@ -1,0 +1,159 @@
+```json
+{
+    "issue_summary": "makemigrations 命令在一致性检查中错误地调用 allow_migrate()，为每个应用传递了项目中所有模型的组合，而不是该应用自己的模型。",
+    "trigger_condition": {
+        "text": "运行 makemigrations 命令，且配置了自定义 DATABASE_ROUTERS，该路由器根据 (app_label, model) 对来决定是否允许迁移。",
+        "evidence": ["Issue 描述：\"makemigrations incorrectly calls allow_migrate() for each app with all the models in the project rather than for each app with the app's models.\"", "相关测试 1 展示了使用 DATABASE_ROUTERS 设置并调用 makemigrations 命令的场景。"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "路由器接收到无效的 (app_label, model) 组合，导致路由器逻辑出错（例如，因为并非所有分片都有相同的模型）。",
+        "symptom_type": "wrong_argument",
+        "evidence": ["Issue 描述：\"It broke the router I use because it was passing invalid combinations for shards since not all shards have the same models.\"", "相关测试 1 中，allow_migrate 被调用时传入了 model_name 参数，暗示了模型信息在调用中的重要性。"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "makemigrations 命令在一致性检查中调用 allow_migrate() 时，应为每个应用只传递该应用自己的模型，而不是所有项目的模型。",
+        "evidence": ["Issue 描述明确指出了错误行为（传递所有模型）和期望行为（传递应用自己的模型）。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "makemigrations",
+            "kind": "function",
+            "source_path": "django/core/management/commands/makemigrations.py",
+            "reason": "Issue 直接关于 makemigrations 命令的行为。"
+        },
+        {
+            "name": "allow_migrate",
+            "kind": "method",
+            "source_path": "django/db/utils.py",
+            "reason": "Issue 的核心是 allow_migrate() 方法被错误调用。"
+        },
+        {
+            "name": "ConnectionRouter",
+            "kind": "class",
+            "source_path": "django/db/utils.py",
+            "reason": "allow_migrate 方法是 ConnectionRouter 类的一部分。"
+        },
+        {
+            "name": "call_command",
+            "kind": "function",
+            "source_path": "",
+            "reason": "相关测试中用于触发 makemigrations 命令。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/core/management/commands/makemigrations.py",
+            "object": "makemigrations",
+            "lines": "",
+            "reason": "Issue 明确指出问题在 makemigrations 命令中。它是调用 allow_migrate 的源头。"
+        },
+        {
+            "path": "django/db/utils.py",
+            "object": "allow_migrate",
+            "lines": "292-304",
+            "reason": "这是被错误调用的方法。问题可能在于调用方（makemigrations）传递给它的参数。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_makemigrations_consistency_checks_respect_routers",
+            "test_file": "tests/migrations/test_commands.py",
+            "why_relevant": "该测试直接检查 makemigrations 命令的一致性检查如何与 DATABASE_ROUTERS 交互，并 mock 了 allow_migrate 方法。",
+            "reusable_parts": ["使用 MakeMigrationsTests 类", "使用 temporary_migration_module", "使用 call_command 调用 makemigrations", "使用 settings(DATABASE_ROUTERS=...)", "使用 mock.patch 模拟 allow_migrate 方法", "检查 allow_migrate 的调用参数"],
+            "possible_gap": "该测试主要关注 allow_migrate 是否被调用以及调用次数，但没有深入验证传递给 allow_migrate 的 (app_label, model) 对是否针对每个应用进行了正确的筛选。它可能使用了简化的模型集合。"
+        },
+        {
+            "test_name": "test_migrate_selection",
+            "test_file": "tests/multiple_database/tests.py",
+            "why_relevant": "测试了 router.allow_migrate_model 在不同路由器配置下的行为，展示了模型级迁移决策的预期逻辑。",
+            "reusable_parts": ["使用 RouterTestCase 和 override_settings", "使用 router.allow_migrate_model 方法", "涉及多个模型（User, Book）"],
+            "possible_gap": "测试的是 migrate 命令的底层逻辑，而不是 makemigrations 命令的一致性检查阶段。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "config",
+            "current_pattern": "相关测试 1 中使用了简单的 TestRouter 和 EmptyRouter，可能只涉及一个应用（'migrations'）和少量模型。",
+            "target_pattern": "配置一个更复杂的 DATABASE_ROUTERS，该路由器依赖于正确的 (app_label, model) 对，并且项目包含多个应用，每个应用有不同的模型集。",
+            "reason": "Issue 描述的问题在路由器需要区分不同应用的模型时才会显现。简单的路由器可能不会暴露问题。",
+            "confidence": "medium"
+        },
+        {
+            "slot": "mock",
+            "current_pattern": "相关测试 1 中 mock 了 allow_migrate 并检查其是否被调用以及调用参数（如 model_name）。",
+            "target_pattern": "在 mock 的 allow_migrate 中记录所有调用参数（特别是 app_label 和 model_name/hints），并断言对于每个 app_label，传入的 model_name 只属于该 app_label。",
+            "reason": "为了直接复现 Issue，需要观测 allow_migrate 接收到的实际参数组合，验证其错误模式。",
+            "confidence": "high"
+        },
+        {
+            "slot": "call_chain",
+            "current_pattern": "测试调用 makemigrations 命令并检查整体结果。",
+            "target_pattern": "在 makemigrations 命令执行过程中，插入钩子或使用 mock 来拦截对 allow_migrate 的调用，并检查调用上下文。",
+            "reason": "需要深入到 makemigrations 内部，观察其生成传递给 allow_migrate 的参数列表的过程。",
+            "confidence": "medium"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "argument",
+            "expression_hint": "router.allow_migrate(db, app_label, **hints) 调用中的 hints 参数（特别是 model_name 或 model）以及 app_label 的值。",
+            "reason": "Issue 的核心是传递给 allow_migrate 的 (app_label, model) 对不正确。观测这些参数可以直接验证缺陷。"
+        },
+        {
+            "kind": "call_sequence",
+            "expression_hint": "在 makemigrations 执行期间，对 allow_migrate 的调用序列，记录每次调用的 (app_label, model_name)。",
+            "reason": "可以揭示是否为一个 app_label 调用了属于其他 app_label 的模型。"
+        },
+        {
+            "kind": "state",
+            "expression_hint": "项目中的应用注册表（apps）中每个应用的模型列表。",
+            "reason": "作为基准，用于与传递给 allow_migrate 的模型列表进行比较。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "对于每个应用（app_label），在 makemigrations 的一致性检查中，传递给 allow_migrate 的模型名称（model_name）必须全部属于该应用。",
+            "preferred_assertion_style": "before_after_relation",
+            "avoid": "断言完整的调用次数或固定的参数列表，因为这会依赖于具体的项目配置。",
+            "reason": "这个断言直接对应 Issue 描述的期望行为：每个应用只看到自己的模型。它关注关系而非具体值，更稳定。"
+        },
+        {
+            "assertion_goal": "不允许出现这样的情况：一个应用的 allow_migrate 调用收到了另一个应用的模型名称。",
+            "preferred_assertion_style": "not_contains_fragment",
+            "avoid": "断言具体的异常消息或错误类型，因为错误表现可能因路由器实现而异。",
+            "reason": "这是对错误条件的否定断言，更通用。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要一个包含多个 Django 应用的测试项目，每个应用有自己的 models.py 定义不同的模型。",
+            "source": "inference",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要配置 DATABASE_ROUTERS 设置，其中包含一个自定义路由器，该路由器的 allow_migrate 方法对 (app_label, model) 敏感。",
+            "source": "issue",
+            "confidence": "high"
+        },
+        {
+            "hint": "使用 MigrationTestBase 或类似的测试基类来管理临时迁移模块。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "使用 mock.patch 来拦截和检查 ConnectionRouter.allow_migrate 或具体路由器实例的 allow_migrate 方法的调用。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "makemigrations 命令内部具体哪段代码负责收集模型并调用 allow_migrate。",
+        "传递给 allow_migrate 的模型信息是以 model_name 字符串形式在 hints 中，还是以其他形式（如 model 类）。",
+        "错误是否只在特定条件下（如使用 --check 选项）触发，还是所有 makemigrations 调用都会触发。",
+        "项目中“所有模型”的确切范围是什么（是已安装应用的所有模型，还是包括未安装应用的模型）。"
+    ]
+}
+```

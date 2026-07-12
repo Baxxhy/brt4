@@ -1,0 +1,301 @@
+{
+  "instance_id": "pydata__xarray-4629",
+  "issue_summary": "使用 combine_attrs='override' 参数合并 Dataset 时，合并结果的 attrs 与第一个源对象的 attrs 共享引用，导致修改合并结果的 attrs 会意外修改源对象的 attrs。",
+  "trigger_condition": {
+    "text": "调用 xr.merge 或 Dataset.merge 方法，参数 combine_attrs='override'，合并至少两个具有 attrs 的 Dataset 或 DataArray 对象。",
+    "evidence": [
+      "Issue 中的 MCVE 展示了 xr.merge([xds1, xds2], combine_attrs='override') 调用。",
+      "Issue 中用户指出问题在于 merge.py 第504行 combine_attrs == \"override\" 的分支。",
+      "相关测试 test_merge_arrays_attrs 的参数化用例包含 combine_attrs='override'。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "修改合并结果 (xds3) 的 attrs 后，第一个源对象 (xds1) 的 attrs 也随之改变，表明它们共享了同一个字典对象。",
+    "symptom_type": "state_not_updated",
+    "evidence": [
+      "Issue 中 MCVE 的输出显示：xds3.attrs['a'] = 'd' 后，xds1.a 的值从 'b' 变成了 'd'。",
+      "Issue 描述 \"an attribute value change in the merged product is reflected in the first source\"。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "合并后，合并结果的 attrs 应该是源对象 attrs 的独立副本，修改合并结果的 attrs 不应影响任何源对象的 attrs。",
+    "evidence": [
+      "Issue 中用户期望 \"the attrs of the merged product should be able to be changed without having any effect on the sources\"。",
+      "相关测试 test_merge_arrays_attrs 中，对于 combine_attrs='override'，expected_attrs 是 var1_attrs 的副本，暗示结果应独立。",
+      "Issue 中用户建议的修复是 `return dict(variable_attrs[0])`，即创建副本。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "xr.merge",
+      "kind": "function",
+      "source_path": "xarray/core/merge.py",
+      "reason": "Issue 的 MCVE 直接调用了此函数，它是合并操作的主要入口。"
+    },
+    {
+      "name": "Dataset.merge",
+      "kind": "method",
+      "source_path": "xarray/core/dataset.py",
+      "reason": "源码片段 2 显示 Dataset 类有此方法，它内部调用 dataset_merge_method。"
+    },
+    {
+      "name": "dataset_merge_method",
+      "kind": "function",
+      "source_path": "xarray/core/merge.py",
+      "reason": "Issue 中用户指出的问题行 (merge.py#L504) 很可能在此函数或相关函数中。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "xarray/core/merge.py",
+      "object": "处理 combine_attrs='override' 逻辑的函数或代码块",
+      "lines": "504",
+      "reason": "Issue 中用户明确指出问题在于 `return variable_attrs[0]` 这一行，应该返回副本。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_merge_arrays_attrs",
+      "test_file": "xarray/tests/test_merge.py",
+      "why_relevant": "它直接测试了 merge 函数在不同 combine_attrs 参数（包括 'override'）下对 attrs 的处理，提供了完整的测试框架、参数化用例和断言模式。",
+      "reusable_parts": [
+        "imports (xr, pytest)",
+        "参数化装饰器结构",
+        "create_test_data fixture 的使用",
+        "使用 xr.merge 的调用方式",
+        "assert actual.identical(expected) 的断言风格",
+        "对 MergeError 的异常检查模式"
+      ],
+      "possible_gap": "该测试只验证了合并后 attrs 的静态值是否正确，但没有验证 attrs 字典的独立性（即修改结果 attrs 是否影响源对象）。"
+    },
+    {
+      "test_name": "test_concat_combine_attrs_kwarg",
+      "test_file": "xarray/tests/test_concat.py",
+      "why_relevant": "它测试了 concat 函数的 combine_attrs 参数，包括 'override' 选项，展示了如何构造具有 attrs 的 Dataset 并验证合并后的 attrs 内容。",
+      "reusable_parts": [
+        "Dataset 构造方式",
+        "combine_attrs 参数的设置",
+        "assert_identical 的使用",
+        "对不同 combine_attrs 值的循环测试结构"
+      ],
+      "possible_gap": "测试的是 concat 而非 merge 函数，且同样没有测试 attrs 字典的独立性。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "相关测试中，调用 merge 后直接断言合并结果的 attrs 内容与预期字典相等。",
+      "target_pattern": "在调用 merge 后，增加一个步骤：修改合并结果的 attrs，然后检查源对象的 attrs 是否保持不变。",
+      "reason": "Issue 的核心是 attrs 的引用共享问题，仅检查静态值无法触发。修改结果 attrs 并观察源对象状态变化是触发缺陷的关键操作。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "测试中源对象的 attrs 在合并后可能不再被访问或检查。",
+      "target_pattern": "在合并前记录源对象 attrs 的副本或特定键值，在修改合并结果 attrs 后，再次检查源对象 attrs 是否与之前记录的一致。",
+      "reason": "为了检测到源对象 attrs 被意外修改，需要在操作前后对比其状态。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "state",
+      "expression_hint": "合并前 xds1.attrs['a'] 的值，合并后 xds3.attrs['a'] 的值，修改 xds3.attrs['a'] 后 xds1.attrs['a'] 的值。",
+      "reason": "通过观察特定键值在源对象和合并对象之间的变化关系，可以直接验证引用共享问题。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "xr.merge([xds1, xds2], combine_attrs='override') 返回的 Dataset 的 attrs 属性（id(xds3.attrs) 与 id(xds1.attrs) 是否相同）。",
+      "reason": "如果返回的 attrs 是同一个字典对象，则 id 会相同，表明是引用而非副本。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "修改合并结果 (xds3) 的 attrs 后，源对象 (xds1) 的 attrs 应保持不变。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "仅断言合并后 attrs 的初始静态值，或断言完整的 repr 字符串相等。",
+      "reason": "这种断言直接针对 Issue 描述的副作用，不依赖于 attrs 的具体值，只关注独立性，因此更稳定。"
+    },
+    {
+      "assertion_goal": "合并结果的 attrs 与任何源对象的 attrs 不是同一个字典对象。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "直接比较 id，因为实现可能变化；更稳定的是通过修改一个观察另一个是否变化来间接证明。",
+      "reason": "直接证明独立性，是修复后的核心保证。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 xr.Dataset 构造函数创建具有不同 attrs 的简单 Dataset 对象。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要导入 xarray 和 pytest。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可以放在一个类中（如 TestMergeFunction），遵循现有测试文件的组织方式。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "merge.py 中处理 combine_attrs='override' 的确切函数名和完整上下文。",
+    "除了 combine_attrs='override'，其他 combine_attrs 值（如 'drop', 'no_conflicts'）是否也存在类似的引用共享问题？Issue 中用户暗示其他情况使用了 dict(variable_attrs[0])，但需要确认。",
+    "DataArray 对象的 merge 是否受同样问题影响？"
+  ],
+  "raw": {
+    "issue_summary": "使用 combine_attrs='override' 参数合并 Dataset 时，合并结果的 attrs 与第一个源对象的 attrs 共享引用，导致修改合并结果的 attrs 会意外修改源对象的 attrs。",
+    "trigger_condition": {
+      "text": "调用 xr.merge 或 Dataset.merge 方法，参数 combine_attrs='override'，合并至少两个具有 attrs 的 Dataset 或 DataArray 对象。",
+      "evidence": [
+        "Issue 中的 MCVE 展示了 xr.merge([xds1, xds2], combine_attrs='override') 调用。",
+        "Issue 中用户指出问题在于 merge.py 第504行 combine_attrs == \"override\" 的分支。",
+        "相关测试 test_merge_arrays_attrs 的参数化用例包含 combine_attrs='override'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "修改合并结果 (xds3) 的 attrs 后，第一个源对象 (xds1) 的 attrs 也随之改变，表明它们共享了同一个字典对象。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 中 MCVE 的输出显示：xds3.attrs['a'] = 'd' 后，xds1.a 的值从 'b' 变成了 'd'。",
+        "Issue 描述 \"an attribute value change in the merged product is reflected in the first source\"。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "合并后，合并结果的 attrs 应该是源对象 attrs 的独立副本，修改合并结果的 attrs 不应影响任何源对象的 attrs。",
+      "evidence": [
+        "Issue 中用户期望 \"the attrs of the merged product should be able to be changed without having any effect on the sources\"。",
+        "相关测试 test_merge_arrays_attrs 中，对于 combine_attrs='override'，expected_attrs 是 var1_attrs 的副本，暗示结果应独立。",
+        "Issue 中用户建议的修复是 `return dict(variable_attrs[0])`，即创建副本。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xr.merge",
+        "kind": "function",
+        "source_path": "xarray/core/merge.py",
+        "reason": "Issue 的 MCVE 直接调用了此函数，它是合并操作的主要入口。"
+      },
+      {
+        "name": "Dataset.merge",
+        "kind": "method",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "源码片段 2 显示 Dataset 类有此方法，它内部调用 dataset_merge_method。"
+      },
+      {
+        "name": "dataset_merge_method",
+        "kind": "function",
+        "source_path": "xarray/core/merge.py",
+        "reason": "Issue 中用户指出的问题行 (merge.py#L504) 很可能在此函数或相关函数中。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/merge.py",
+        "object": "处理 combine_attrs='override' 逻辑的函数或代码块",
+        "lines": "504",
+        "reason": "Issue 中用户明确指出问题在于 `return variable_attrs[0]` 这一行，应该返回副本。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_merge_arrays_attrs",
+        "test_file": "xarray/tests/test_merge.py",
+        "why_relevant": "它直接测试了 merge 函数在不同 combine_attrs 参数（包括 'override'）下对 attrs 的处理，提供了完整的测试框架、参数化用例和断言模式。",
+        "reusable_parts": [
+          "imports (xr, pytest)",
+          "参数化装饰器结构",
+          "create_test_data fixture 的使用",
+          "使用 xr.merge 的调用方式",
+          "assert actual.identical(expected) 的断言风格",
+          "对 MergeError 的异常检查模式"
+        ],
+        "possible_gap": "该测试只验证了合并后 attrs 的静态值是否正确，但没有验证 attrs 字典的独立性（即修改结果 attrs 是否影响源对象）。"
+      },
+      {
+        "test_name": "test_concat_combine_attrs_kwarg",
+        "test_file": "xarray/tests/test_concat.py",
+        "why_relevant": "它测试了 concat 函数的 combine_attrs 参数，包括 'override' 选项，展示了如何构造具有 attrs 的 Dataset 并验证合并后的 attrs 内容。",
+        "reusable_parts": [
+          "Dataset 构造方式",
+          "combine_attrs 参数的设置",
+          "assert_identical 的使用",
+          "对不同 combine_attrs 值的循环测试结构"
+        ],
+        "possible_gap": "测试的是 concat 而非 merge 函数，且同样没有测试 attrs 字典的独立性。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试中，调用 merge 后直接断言合并结果的 attrs 内容与预期字典相等。",
+        "target_pattern": "在调用 merge 后，增加一个步骤：修改合并结果的 attrs，然后检查源对象的 attrs 是否保持不变。",
+        "reason": "Issue 的核心是 attrs 的引用共享问题，仅检查静态值无法触发。修改结果 attrs 并观察源对象状态变化是触发缺陷的关键操作。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中源对象的 attrs 在合并后可能不再被访问或检查。",
+        "target_pattern": "在合并前记录源对象 attrs 的副本或特定键值，在修改合并结果 attrs 后，再次检查源对象 attrs 是否与之前记录的一致。",
+        "reason": "为了检测到源对象 attrs 被意外修改，需要在操作前后对比其状态。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "合并前 xds1.attrs['a'] 的值，合并后 xds3.attrs['a'] 的值，修改 xds3.attrs['a'] 后 xds1.attrs['a'] 的值。",
+        "reason": "通过观察特定键值在源对象和合并对象之间的变化关系，可以直接验证引用共享问题。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "xr.merge([xds1, xds2], combine_attrs='override') 返回的 Dataset 的 attrs 属性（id(xds3.attrs) 与 id(xds1.attrs) 是否相同）。",
+        "reason": "如果返回的 attrs 是同一个字典对象，则 id 会相同，表明是引用而非副本。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "修改合并结果 (xds3) 的 attrs 后，源对象 (xds1) 的 attrs 应保持不变。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "仅断言合并后 attrs 的初始静态值，或断言完整的 repr 字符串相等。",
+        "reason": "这种断言直接针对 Issue 描述的副作用，不依赖于 attrs 的具体值，只关注独立性，因此更稳定。"
+      },
+      {
+        "assertion_goal": "合并结果的 attrs 与任何源对象的 attrs 不是同一个字典对象。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "直接比较 id，因为实现可能变化；更稳定的是通过修改一个观察另一个是否变化来间接证明。",
+        "reason": "直接证明独立性，是修复后的核心保证。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 xr.Dataset 构造函数创建具有不同 attrs 的简单 Dataset 对象。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 xarray 和 pytest。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可以放在一个类中（如 TestMergeFunction），遵循现有测试文件的组织方式。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "merge.py 中处理 combine_attrs='override' 的确切函数名和完整上下文。",
+      "除了 combine_attrs='override'，其他 combine_attrs 值（如 'drop', 'no_conflicts'）是否也存在类似的引用共享问题？Issue 中用户暗示其他情况使用了 dict(variable_attrs[0])，但需要确认。",
+      "DataArray 对象的 merge 是否受同样问题影响？"
+    ]
+  }
+}

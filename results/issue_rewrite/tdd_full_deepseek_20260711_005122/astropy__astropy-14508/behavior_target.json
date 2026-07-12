@@ -1,0 +1,335 @@
+{
+  "instance_id": "astropy__astropy-14508",
+  "issue_summary": "Card._format_float 函数对某些浮点数生成不必要的长字符串表示，导致 HIERARCH 卡片总长度超限并截断注释。",
+  "trigger_condition": {
+    "text": "使用 fits.Card 构造函数创建 HIERARCH 卡片，其值为一个特定的浮点数（如 0.009125），并附带一个较长的注释。",
+    "evidence": [
+      "Issue 中描述了使用 fits.Card('HIERARCH ESO IFM CL RADIUS', 0.009125, '[m] radius arround actuator to avoid') 会触发警告和截断。",
+      "Issue 指出 _format_float 函数将 0.009125 格式化为 '0.009124999999999999'。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "创建 Card 对象时抛出 VerifyWarning，提示卡片过长，注释被截断。生成的卡片字符串表示中，浮点数值被扩展为更长的字符串（如 0.009124999999999999），导致总长度超过 80 字符限制。",
+    "symptom_type": "warning",
+    "evidence": [
+      "Issue 中显示：'WARNING: VerifyWarning: Card is too long, comment will be truncated.'",
+      "Issue 中显示 str(new_c) 输出为 'HIERARCH ESO IFM CL RADIUS = 0.009124999999999999 / [m] radius arround actuator '，注释被截断。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "应能创建与从有效 FITS 文件读取的卡片具有完全相同字符串表示的 Card 对象，特别是浮点数值应使用紧凑的字符串表示，以确保卡片总长度不超过限制，完整保留注释。",
+    "evidence": [
+      "Issue 的 'Expected behavior' 部分：'Being able to create any valid FITS Card via `io.fits.Card`.'",
+      "Issue 中从文件读取的卡片 str(c) 输出为 'HIERARCH ESO IFM CL RADIUS = 0.009125 / [m] radius arround actuator to avoid    '，这是期望的输出。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "fits.Card",
+      "kind": "class",
+      "source_path": "astropy/io/fits/card.py",
+      "reason": "Issue 的核心是 Card 类的构造函数在创建特定浮点数卡片时行为异常。"
+    },
+    {
+      "name": "fits.getheader",
+      "kind": "function",
+      "source_path": "astropy/io/fits/convenience.py",
+      "reason": "Issue 中用于从文件读取正确卡片的 API。"
+    },
+    {
+      "name": "Card._format_float",
+      "kind": "function",
+      "source_path": "astropy/io/fits/card.py",
+      "reason": "Issue 明确指出此函数是问题的根源，它生成了不必要的长字符串。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "astropy/io/fits/card.py",
+      "object": "_format_float",
+      "lines": "1300-1328",
+      "reason": "Issue 直接链接到此函数，并指出它使用 f\"{value:.16G}\" 格式化浮点数，导致 0.009125 变成 '0.009124999999999999'。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "TestHeaderFunctions.test_card_image_constructed_too_long",
+      "test_file": "astropy/io/fits/tests/test_header.py",
+      "why_relevant": "此测试直接验证当构造的卡片图像过长时，注释会被截断并发出警告，与 Issue 中观察到的症状（VerifyWarning，注释截断）高度相关。",
+      "reusable_parts": [
+        "使用 fits.Card 构造函数",
+        "使用 pytest.warns 捕获 VerifyWarning",
+        "断言 str(c) 的输出",
+        "测试类 FitsTestCase 的上下文"
+      ],
+      "possible_gap": "该测试使用整数 9 或长字符串作为值，没有测试特定浮点数（如 0.009125）因 _format_float 产生不必要扩展而导致过长的情况。"
+    },
+    {
+      "test_name": "TestHeaderFunctions.test_hierarch_card_creation",
+      "test_file": "astropy/io/fits/tests/test_header.py",
+      "why_relevant": "此测试专门测试 HIERARCH 卡片的创建，包括手动创建和自动升级，与 Issue 中涉及的 HIERARCH 卡片类型相关。",
+      "reusable_parts": [
+        "使用 fits.Card 创建 HIERARCH 卡片",
+        "断言 str(c) 的输出格式",
+        "处理 AstropyUserWarning"
+      ],
+      "possible_gap": "该测试主要关注关键字升级和字符串值，没有测试浮点数值在 HIERARCH 卡片中的格式化问题及其对总长度的影响。"
+    },
+    {
+      "test_name": "TestHeaderFunctions.test_floating_point_value_card",
+      "test_file": "astropy/io/fits/tests/test_header.py",
+      "why_relevant": "此测试直接测试 Card 构造函数处理浮点数值，并检查其字符串表示，与 Issue 的核心（浮点数格式化）相关。",
+      "reusable_parts": [
+        "使用 fits.Card 创建浮点数卡片",
+        "断言 str(c) 的输出",
+        "处理浮点数科学计数法格式的变体"
+      ],
+      "possible_gap": "该测试使用一个非常大的浮点数（-4.6737463674763E+32），测试的是科学计数法格式，没有测试像 0.009125 这样的小数在非科学计数法下可能被不必要扩展的情况。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "test_card_image_constructed_too_long 中使用整数 9 或长字符串 'a'*68 作为 Card 的值。",
+      "target_pattern": "使用浮点数 0.009125 作为 Card 的值，并配以一个足够长的注释，使得使用紧凑表示（如 '0.009125'）时卡片有效，但使用扩展表示（如 '0.009124999999999999'）时会超长。",
+      "reason": "Issue 表明，正是这个特定的浮点数值在 _format_float 中被扩展，导致总长度计算变化，从而触发警告和截断。",
+      "confidence": "high"
+    },
+    {
+      "slot": "input",
+      "current_pattern": "test_hierarch_card_creation 中使用字符串或整数作为 HIERARCH 卡片的值。",
+      "target_pattern": "使用浮点数 0.009125 作为 HIERARCH 卡片的值，并提供一个注释。关键字使用 'HIERARCH ESO IFM CL RADIUS'。",
+      "reason": "Issue 中的具体场景是创建一个 HIERARCH 卡片。HIERARCH 卡片的关键字部分较长，会占用更多字符，使得浮点数表示的长度变化对总长度的影响更加敏感。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "warning",
+      "expression_hint": "使用 pytest.warns 捕获 fits.verify.VerifyWarning。",
+      "reason": "Issue 中明确观察到 VerifyWarning，这是错误的主要症状。"
+    },
+    {
+      "kind": "str",
+      "expression_hint": "观察 str(card_object) 的输出字符串。",
+      "reason": "Issue 通过比较 str(c) 和 str(new_c) 来展示问题：浮点数值表示不同，注释被截断。总长度和注释完整性是关键。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "观察 Card 对象的 .value 属性（应为浮点数 0.009125）和 .comment 属性。",
+      "reason": "需要确认构造的 Card 对象的值和注释内容是否正确，与从文件读取的卡片一致。"
+    },
+    {
+      "kind": "unknown",
+      "expression_hint": "在调用 _format_float 前后，观察其输入和输出字符串。",
+      "reason": "Issue 指出 _format_float 是根源，观察其格式化结果可以确认是否产生了不必要的扩展。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "新创建的 Card 对象的字符串表示应与从有效 FITS 文件读取的对应卡片的字符串表示在关键部分（浮点数值和完整注释）上匹配。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的 80 字符字符串完全相等，因为末尾填充空格可能变化。应关注浮点数值部分是否为紧凑形式（如 '0.009125'）以及注释是否完整。",
+      "reason": "Issue 的期望是能够创建与有效文件内容相同的卡片。浮点数值的紧凑表示和注释的完整性是核心。"
+    },
+    {
+      "assertion_goal": "创建 Card 对象时不应触发 VerifyWarning（或仅在真正超长时才触发）。",
+      "preferred_assertion_style": "warns",
+      "avoid": "避免断言完全不出现任何警告，因为其他警告（如 AstropyUserWarning）可能无关。应具体针对 VerifyWarning。",
+      "reason": "当前 bug 会导致不必要的 VerifyWarning。修复后，对于 Issue 中的输入，应不再因此原因触发此警告。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要 FitsTestCase 或类似的测试基类来提供临时文件处理功能（如果测试涉及从文件读取）。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    },
+    {
+      "hint": "可能需要一个包含特定 HIERARCH 卡片的有效 FITS 文件（如 Issue 中链接的 test.fits.gz）作为基准，或直接在测试代码中模拟其内容。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "使用 pytest.warns 上下文管理器来捕获和验证警告。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "_format_float 函数中 f\"{value:.16G}\" 的精确行为边界：哪些浮点数值会被不必要地扩展？除了 0.009125 还有哪些值？",
+    "Card 构造函数内部调用 _format_float 的确切时机和上下文，以及长度计算（80 字符限制）的具体逻辑在哪里？",
+    "除了 HIERARCH 卡片，普通关键字卡片是否也会受此影响？",
+    "使用 str(value) 作为备选方案是否在所有情况下都安全且符合 FITS 标准？"
+  ],
+  "raw": {
+    "issue_summary": "Card._format_float 函数对某些浮点数生成不必要的长字符串表示，导致 HIERARCH 卡片总长度超限并截断注释。",
+    "trigger_condition": {
+      "text": "使用 fits.Card 构造函数创建 HIERARCH 卡片，其值为一个特定的浮点数（如 0.009125），并附带一个较长的注释。",
+      "evidence": [
+        "Issue 中描述了使用 fits.Card('HIERARCH ESO IFM CL RADIUS', 0.009125, '[m] radius arround actuator to avoid') 会触发警告和截断。",
+        "Issue 指出 _format_float 函数将 0.009125 格式化为 '0.009124999999999999'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "创建 Card 对象时抛出 VerifyWarning，提示卡片过长，注释被截断。生成的卡片字符串表示中，浮点数值被扩展为更长的字符串（如 0.009124999999999999），导致总长度超过 80 字符限制。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 中显示：'WARNING: VerifyWarning: Card is too long, comment will be truncated.'",
+        "Issue 中显示 str(new_c) 输出为 'HIERARCH ESO IFM CL RADIUS = 0.009124999999999999 / [m] radius arround actuator '，注释被截断。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "应能创建与从有效 FITS 文件读取的卡片具有完全相同字符串表示的 Card 对象，特别是浮点数值应使用紧凑的字符串表示，以确保卡片总长度不超过限制，完整保留注释。",
+      "evidence": [
+        "Issue 的 'Expected behavior' 部分：'Being able to create any valid FITS Card via `io.fits.Card`.'",
+        "Issue 中从文件读取的卡片 str(c) 输出为 'HIERARCH ESO IFM CL RADIUS = 0.009125 / [m] radius arround actuator to avoid    '，这是期望的输出。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "fits.Card",
+        "kind": "class",
+        "source_path": "astropy/io/fits/card.py",
+        "reason": "Issue 的核心是 Card 类的构造函数在创建特定浮点数卡片时行为异常。"
+      },
+      {
+        "name": "fits.getheader",
+        "kind": "function",
+        "source_path": "astropy/io/fits/convenience.py",
+        "reason": "Issue 中用于从文件读取正确卡片的 API。"
+      },
+      {
+        "name": "Card._format_float",
+        "kind": "function",
+        "source_path": "astropy/io/fits/card.py",
+        "reason": "Issue 明确指出此函数是问题的根源，它生成了不必要的长字符串。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "astropy/io/fits/card.py",
+        "object": "_format_float",
+        "lines": "1300-1328",
+        "reason": "Issue 直接链接到此函数，并指出它使用 f\"{value:.16G}\" 格式化浮点数，导致 0.009125 变成 '0.009124999999999999'。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestHeaderFunctions.test_card_image_constructed_too_long",
+        "test_file": "astropy/io/fits/tests/test_header.py",
+        "why_relevant": "此测试直接验证当构造的卡片图像过长时，注释会被截断并发出警告，与 Issue 中观察到的症状（VerifyWarning，注释截断）高度相关。",
+        "reusable_parts": [
+          "使用 fits.Card 构造函数",
+          "使用 pytest.warns 捕获 VerifyWarning",
+          "断言 str(c) 的输出",
+          "测试类 FitsTestCase 的上下文"
+        ],
+        "possible_gap": "该测试使用整数 9 或长字符串作为值，没有测试特定浮点数（如 0.009125）因 _format_float 产生不必要扩展而导致过长的情况。"
+      },
+      {
+        "test_name": "TestHeaderFunctions.test_hierarch_card_creation",
+        "test_file": "astropy/io/fits/tests/test_header.py",
+        "why_relevant": "此测试专门测试 HIERARCH 卡片的创建，包括手动创建和自动升级，与 Issue 中涉及的 HIERARCH 卡片类型相关。",
+        "reusable_parts": [
+          "使用 fits.Card 创建 HIERARCH 卡片",
+          "断言 str(c) 的输出格式",
+          "处理 AstropyUserWarning"
+        ],
+        "possible_gap": "该测试主要关注关键字升级和字符串值，没有测试浮点数值在 HIERARCH 卡片中的格式化问题及其对总长度的影响。"
+      },
+      {
+        "test_name": "TestHeaderFunctions.test_floating_point_value_card",
+        "test_file": "astropy/io/fits/tests/test_header.py",
+        "why_relevant": "此测试直接测试 Card 构造函数处理浮点数值，并检查其字符串表示，与 Issue 的核心（浮点数格式化）相关。",
+        "reusable_parts": [
+          "使用 fits.Card 创建浮点数卡片",
+          "断言 str(c) 的输出",
+          "处理浮点数科学计数法格式的变体"
+        ],
+        "possible_gap": "该测试使用一个非常大的浮点数（-4.6737463674763E+32），测试的是科学计数法格式，没有测试像 0.009125 这样的小数在非科学计数法下可能被不必要扩展的情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_card_image_constructed_too_long 中使用整数 9 或长字符串 'a'*68 作为 Card 的值。",
+        "target_pattern": "使用浮点数 0.009125 作为 Card 的值，并配以一个足够长的注释，使得使用紧凑表示（如 '0.009125'）时卡片有效，但使用扩展表示（如 '0.009124999999999999'）时会超长。",
+        "reason": "Issue 表明，正是这个特定的浮点数值在 _format_float 中被扩展，导致总长度计算变化，从而触发警告和截断。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "test_hierarch_card_creation 中使用字符串或整数作为 HIERARCH 卡片的值。",
+        "target_pattern": "使用浮点数 0.009125 作为 HIERARCH 卡片的值，并提供一个注释。关键字使用 'HIERARCH ESO IFM CL RADIUS'。",
+        "reason": "Issue 中的具体场景是创建一个 HIERARCH 卡片。HIERARCH 卡片的关键字部分较长，会占用更多字符，使得浮点数表示的长度变化对总长度的影响更加敏感。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "使用 pytest.warns 捕获 fits.verify.VerifyWarning。",
+        "reason": "Issue 中明确观察到 VerifyWarning，这是错误的主要症状。"
+      },
+      {
+        "kind": "str",
+        "expression_hint": "观察 str(card_object) 的输出字符串。",
+        "reason": "Issue 通过比较 str(c) 和 str(new_c) 来展示问题：浮点数值表示不同，注释被截断。总长度和注释完整性是关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "观察 Card 对象的 .value 属性（应为浮点数 0.009125）和 .comment 属性。",
+        "reason": "需要确认构造的 Card 对象的值和注释内容是否正确，与从文件读取的卡片一致。"
+      },
+      {
+        "kind": "unknown",
+        "expression_hint": "在调用 _format_float 前后，观察其输入和输出字符串。",
+        "reason": "Issue 指出 _format_float 是根源，观察其格式化结果可以确认是否产生了不必要的扩展。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "新创建的 Card 对象的字符串表示应与从有效 FITS 文件读取的对应卡片的字符串表示在关键部分（浮点数值和完整注释）上匹配。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 80 字符字符串完全相等，因为末尾填充空格可能变化。应关注浮点数值部分是否为紧凑形式（如 '0.009125'）以及注释是否完整。",
+        "reason": "Issue 的期望是能够创建与有效文件内容相同的卡片。浮点数值的紧凑表示和注释的完整性是核心。"
+      },
+      {
+        "assertion_goal": "创建 Card 对象时不应触发 VerifyWarning（或仅在真正超长时才触发）。",
+        "preferred_assertion_style": "warns",
+        "avoid": "避免断言完全不出现任何警告，因为其他警告（如 AstropyUserWarning）可能无关。应具体针对 VerifyWarning。",
+        "reason": "当前 bug 会导致不必要的 VerifyWarning。修复后，对于 Issue 中的输入，应不再因此原因触发此警告。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要 FitsTestCase 或类似的测试基类来提供临时文件处理功能（如果测试涉及从文件读取）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要一个包含特定 HIERARCH 卡片的有效 FITS 文件（如 Issue 中链接的 test.fits.gz）作为基准，或直接在测试代码中模拟其内容。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 pytest.warns 上下文管理器来捕获和验证警告。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "_format_float 函数中 f\"{value:.16G}\" 的精确行为边界：哪些浮点数值会被不必要地扩展？除了 0.009125 还有哪些值？",
+      "Card 构造函数内部调用 _format_float 的确切时机和上下文，以及长度计算（80 字符限制）的具体逻辑在哪里？",
+      "除了 HIERARCH 卡片，普通关键字卡片是否也会受此影响？",
+      "使用 str(value) 作为备选方案是否在所有情况下都安全且符合 FITS 标准？"
+    ]
+  }
+}

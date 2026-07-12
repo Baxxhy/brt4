@@ -1,0 +1,134 @@
+{
+  "issue_summary": "SlicedLowLevelWCS 在特定 PC 矩阵耦合空间与波长维度时，world_to_pixel 返回错误结果。",
+  "trigger_condition": {
+    "text": "对一个具有非平凡 PC 矩阵（耦合空间与波长维度）的 3D WCS，使用 SlicedLowLevelWCS 对波长维度切片后，调用 HighLevelWCSWrapper.world_to_pixel 进行坐标转换。",
+    "evidence": ["Issue 描述：'I have a 3D WCS with dimensions corresponding to space, space, and wavelength and what some might call a non-trivial PCij matrix that couples the spectral and spatial dimensions.'", "Issue 代码：创建 fits_wcs 后，使用 SlicedLowLevelWCS(fits_wcs, 0) 切片，再调用 hl_sliced_wcs.world_to_pixel(pt)。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "对切片后的 WCS 调用 world_to_pixel 返回的第一个像素坐标值异常巨大（约 1.8e11），而预期应返回与完整 WCS 转换结果前两个分量相近的值（约 49.5 和 12）。",
+    "symptom_type": "wrong_return",
+    "evidence": ["Issue 代码输出：hl_sliced_wcs.world_to_pixel(pt) 返回 (array(1.81818182e+11), array(12.))，而完整 WCS 返回 (array(49.5), array(12.), array(2.44249065e-15))。", "Issue 描述：'The first pixel entry is essentially infinite.'"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "对切片后的 WCS 调用 world_to_pixel 应返回与完整 WCS 对应切片维度一致的、正确的像素坐标。",
+    "evidence": ["Issue 描述：'I would then expect that if I take the first slice (in wavelength of my cube and do a pixel_to_world on just the spatial coordinate from above, that I would get back the same first two components'", "Issue 中 pixel_to_world 操作在完整和切片 WCS 上均返回预期结果，表明 world_to_pixel 也应一致。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "astropy.wcs.wcsapi.SlicedLowLevelWCS",
+      "kind": "class",
+      "source_path": "astropy/wcs/wcsapi/wrappers/sliced_wcs.py",
+      "reason": "Issue 明确指出是 SlicedLowLevelWCS 的问题，且测试中用于切片 WCS。"
+    },
+    {
+      "name": "astropy.wcs.wcsapi.HighLevelWCSWrapper",
+      "kind": "class",
+      "source_path": "astropy/wcs/wcsapi/high_level_wcs_wrapper.py",
+      "reason": "Issue 中通过 HighLevelWCSWrapper 包装切片后的低层 WCS 并调用 world_to_pixel。"
+    },
+    {
+      "name": "HighLevelWCSWrapper.world_to_pixel",
+      "kind": "method",
+      "source_path": "astropy/wcs/wcsapi/high_level_api.py",
+      "reason": "触发错误的具体方法调用。"
+    },
+    {
+      "name": "astropy.wcs.WCS",
+      "kind": "class",
+      "source_path": "astropy/wcs/wcs.py",
+      "reason": "Issue 中用于创建原始 3D WCS 对象。"
+    },
+    {
+      "name": "astropy.wcs.utils.wcs_to_celestial_frame",
+      "kind": "function",
+      "source_path": "astropy/wcs/utils.py",
+      "reason": "Issue 代码中用于创建 SkyCoord 输入。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "astropy/wcs/wcsapi/wrappers/sliced_wcs.py",
+      "object": "SlicedLowLevelWCS.world_to_pixel_values",
+      "lines": "",
+      "reason": "Issue 核心是 SlicedLowLevelWCS 的 world_to_pixel 行为不一致，该方法可能未正确处理耦合维度切片后的坐标转换。"
+    },
+    {
+      "path": "astropy/wcs/wcsapi/wrappers/sliced_wcs.py",
+      "object": "SlicedLowLevelWCS._pixel_to_world_values_all",
+      "lines": "",
+      "reason": "world_to_pixel_values 可能依赖内部转换逻辑，而 pixel_to_world 工作正常，表明问题可能出在反向映射或维度处理上。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_celestial_slice",
+      "test_file": "astropy/wcs/wcsapi/wrappers/tests/test_sliced_wcs.py",
+      "why_relevant": "该测试涉及对 WCS_SPECTRAL_CUBE 进行切片并测试 world_to_pixel_values，与 Issue 场景相似。",
+      "reusable_parts": ["SlicedLowLevelWCS 构造", "world_to_pixel_values 调用", "assert_allclose 断言风格", "可能相关的 WCS_SPECTRAL_CUBE fixture"],
+      "possible_gap": "测试使用的 WCS_SPECTRAL_CUBE 可能具有不同的 PC 矩阵或维度耦合情况，未覆盖 Issue 中非平凡 PC 矩阵耦合空间与波长的场景。"
+    },
+    {
+      "test_name": "test_spectral_slice",
+      "test_file": "astropy/wcs/wcsapi/wrappers/tests/test_sliced_wcs.py",
+      "why_relevant": "该测试对光谱维度切片，测试 2D 切片 WCS 的 world_to_pixel_values，与 Issue 中波长切片类似。",
+      "reusable_parts": ["SlicedLowLevelWCS 切片构造", "world_to_pixel_values 调用与断言", "测试结构"],
+      "possible_gap": "测试可能使用简单的、未耦合的 WCS，未验证在耦合维度切片后 world_to_pixel 的正确性。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试中使用预定义的、可能未耦合的 WCS（如 WCS_SPECTRAL_CUBE）进行切片和转换。",
+      "target_pattern": "使用 Issue 中提供的具有非平凡 PC 矩阵（耦合空间与波长维度）的 3D WCS 头进行构造和切片。",
+      "reason": "Issue 表明缺陷在特定 PC 矩阵下触发，改变 WCS 输入可能使测试走向缺陷路径。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "测试中直接调用 SlicedLowLevelWCS.world_to_pixel_values 并传入数值参数。",
+      "target_pattern": "通过 HighLevelWCSWrapper 包装切片后的 WCS，并调用其 world_to_pixel 方法，传入 SkyCoord 等高阶对象。",
+      "reason": "Issue 中错误是通过 HighLevelWCSWrapper.world_to_pixel 观察到的，调用链可能影响内部处理。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "hl_sliced_wcs.world_to_pixel(pt) 的返回值，特别是第一个元素的值。",
+      "reason": "Issue 中错误表现为返回值异常巨大，观测该值可直接判断缺陷是否触发。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "fits_wcs.world_to_pixel(pt, 1.05*u.angstrom) 返回的前两个分量。",
+      "reason": "作为预期行为的基准，用于与切片后的结果比较。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "切片 WCS 的 world_to_pixel 返回的空间像素坐标应与完整 WCS 对应转换结果的前两个分量在容差内相等。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的、可能包含浮点误差的精确数值相等；避免断言与波长维度相关的返回值。",
+      "reason": "Issue 期望切片后空间坐标一致，使用容差比较（如 assert_allclose）更稳定且与现有测试风格一致。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要构造如 Issue 所述的具有特定 PC 矩阵的 3D WCS 头，并创建对应的 fits_wcs、SkyCoord 对象。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要导入 astropy.wcs, astropy.coordinates, astropy.units 及相关模块。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "缺陷是否仅存在于 HighLevelWCSWrapper.world_to_pixel 中，还是 SlicedLowLevelWCS.world_to_pixel_values 本身就有问题。",
+    "除了提供的 PC 矩阵示例外，其他类型的维度耦合或切片方式是否也会触发此缺陷。",
+    "SlicedLowLevelWCS 内部处理 dropped_world_dimensions 或 axis_correlation_matrix 时是否存在逻辑错误。"
+  ]
+}

@@ -1,0 +1,124 @@
+instance_id: sphinx-doc__sphinx-10466
+
+issue_summary: 在运行 make gettext 时，生成的 .pot 文件中出现了重复的 location 注释行。
+
+trigger_condition:
+{
+  "text": "运行 `make clean; make gettext` 命令生成 gettext 翻译模板文件。",
+  "evidence": [
+    "Issue 中描述了重现步骤：`make clean; make gettext`，然后检查生成的 `build/gettext/blender_manual.pot` 文件。",
+    "Issue 中给出了具体的重复 location 注释示例，如 `#: ../../manual/modeling/hair.rst:0` 重复出现。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "生成的 .pot 文件中，同一个 msgid 对应的 location 注释行（如 `#: ../../manual/modeling/hair.rst:0`）出现不必要的重复。",
+  "symptom_type": "wrong_order",
+  "evidence": [
+    "Issue 中展示了 .pot 文件截图和文本示例，其中 location 行重复出现。",
+    "Issue 标题和描述明确指出 `Message.locations duplicate unnecessarily`。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "生成的 .pot 文件中，每个 msgid 对应的 location 注释行应该是唯一的，没有重复。",
+  "evidence": [
+    "Issue 的 `Expected behavior` 部分说明：`There should only be ONE instance ... and there are NO duplications of other locations.`"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "sphinx.builders.gettext.Message.__init__",
+    "kind": "method",
+    "source_path": "sphinx/builders/gettext.py",
+    "reason": "Issue 指出问题出现在 `sphinx/builders/gettext.py` 的 `__init__` 方法中，该方法负责初始化 Message 对象，其 `locations` 参数可能包含重复项。"
+  },
+  {
+    "name": "sphinx.builders.gettext.Message",
+    "kind": "class",
+    "source_path": "sphinx/builders/gettext.py",
+    "reason": "Issue 中提到的 `Message` 类，其 `__init__` 方法直接处理 `locations` 列表。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试使用标准或简单的文档源文件来生成 .pot 文件。",
+    "target_pattern": "需要构造或使用一个会导致 `Message` 对象的 `locations` 列表参数包含重复元素的文档源结构。",
+    "reason": "Issue 表明当 `locations` 列表包含重复项时，`Message.__init__` 直接存储导致输出重复。需要变异测试输入以产生重复的 location 信息。",
+    "confidence": "medium"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "测试通过 `app.builder.build_all()` 触发整个构建流程，间接调用 `Message.__init__`。",
+    "target_pattern": "可能需要更直接地构造 `Message` 对象，或通过特定文档内容（如多次引用同一源位置）来触发重复 location 的收集。",
+    "reason": "为了精确复现，可能需要控制传递给 `Message.__init__` 的 `locations` 参数内容。",
+    "confidence": "low"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "file_output",
+    "expression_hint": "生成的 .pot 文件内容，特别是 `msgid` 块下的 `#:` 注释行。",
+    "reason": "Issue 的错误现象直接体现在生成的 .pot 文件内容中，重复的 location 行是主要观测目标。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "`Message` 对象初始化后的 `self.locations` 列表内容。",
+    "reason": "这是缺陷的直接表现位置，观察传入的 `locations` 参数和存储的 `self.locations` 是否包含重复项，可以定位问题是否在 `__init__` 方法中。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "对于给定的 msgid，其对应的 location 注释行集合应该是唯一的（无重复）。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言完整的 .pot 文件字符串完全相等，或断言 location 行的精确顺序（除非顺序也是问题的一部分）。",
+    "reason": "Issue 的核心是重复行，断言不应包含重复片段（如连续相同的 `#:` 行）能稳定地捕捉问题，且不依赖于文件的其他无关内容。"
+  },
+  {
+    "assertion_goal": "`Message` 对象的 `locations` 属性应等于传入 `locations` 参数的去重结果。",
+    "preferred_assertion_style": "equals",
+    "avoid": "直接比较 `self.locations` 和传入的 `locations` 参数是否相同（因为可能包含重复）。",
+    "reason": "这直接验证了 `__init__` 方法是否正确地处理了重复的 location 输入，是修复后的核心正确行为。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "使用 `@pytest.mark.sphinx('gettext', ...)` 装饰器来设置 Sphinx 应用和 gettext 构建器。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要准备特定的 .rst 源文档，这些文档中的某些元素（如交叉引用、特定指令）可能导致系统为同一消息收集到重复的源位置信息。",
+    "source": "inference",
+    "confidence": "medium"
+  },
+  {
+    "hint": "使用 `tmp_path` 或类似的 fixture 来处理输出目录。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "导致 `locations` 列表出现重复的具体文档结构或 Sphinx 扩展配置是什么？",
+  "重复的 location 信息是在哪个阶段（解析、收集、传递）被加入列表的？",
+  "除了 `Message.__init__`，Issue 中提到的 `babel` 相关方法是否也需要修改，或者 Sphinx 的调用链是否已经确保了去重？",
+  "`make gettext` 命令背后调用的具体 Sphinx API 调用序列是什么？"
+]

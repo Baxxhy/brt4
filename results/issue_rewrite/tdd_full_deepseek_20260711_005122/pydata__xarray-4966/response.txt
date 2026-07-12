@@ -1,0 +1,148 @@
+```json
+{
+    "issue_summary": "xarray 在使用 pydap 引擎读取带有 `_Unsigned=False` 属性的 OPeNDAP 数据时，未能正确处理有符号字节，导致数值解码错误。",
+    "trigger_condition": {
+        "text": "使用 `xr.open_dataset` 函数，指定 `engine=\"pydap\"`，读取一个来自 OPeNDAP 服务（如 thredds 服务器）的 netCDF 文件，该文件中的变量具有 `_Unsigned=False` 属性，且数据类型为字节（byte）。",
+        "evidence": ["Issue 中提供的代码示例：`xr.open_dataset(\"https://observations.ipsl.fr/thredds/dodsC/EUREC4A/PRODUCTS/testdata/netcdf_testfiles/test_NC_BYTE_neg.nc\", engine=\"pydap\")`", "Issue 描述：\"OPeNDAP only knows unsigned bytes, but there's a hack... adding an attribute `_Unsigned=False`... This hack is **not** handled by xarray\""],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "解码后的坐标值不正确（例如，-128 变成了 128，-1 变成了 255），并且抛出了一个 `SerializationWarning`，提示变量有 `_Unsigned` 属性但不是整数类型。",
+        "symptom_type": "wrong_return",
+        "evidence": ["Issue 中 `engine=\"pydap\"` 的输出显示坐标值为 `128.0 255.0 0.0 1.0 2.0 nan 127.0`，而 `engine=\"netcdf4\"` 的输出为 `-128.0 -1.0 0.0 1.0 2.0 nan 127.0`", "Issue 中警告信息：`SerializationWarning: variable 'test' has _Unsigned attribute but is not of integer type. Ignoring attribute.`"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "使用 pydap 引擎读取带有 `_Unsigned=False` 属性的字节变量时，应能正确解码出有符号的负数值，其解码结果应与 netcdf4 引擎的结果一致。",
+        "evidence": ["Issue 中 `engine=\"netcdf4\"` 的输出展示了正确的负数值", "Issue 描述暗示了对称处理：\"maybe should be handled symmetrically at the same place (i.e. `if .kind == \"u\" and unsigned == False`)\""],
+        "confidence": "medium"
+    },
+    "target_apis": [
+        {
+            "name": "xr.open_dataset",
+            "kind": "function",
+            "source_path": "xarray/backends/api.py",
+            "reason": "Issue 中触发 bug 的入口 API 调用。"
+        },
+        {
+            "name": "decode_cf_variable",
+            "kind": "function",
+            "source_path": "xarray/conventions.py",
+            "reason": "Issue 中引用的处理 `_Unsigned` 属性的位置，是解码流程的关键函数。"
+        },
+        {
+            "name": "variables.UnsignedIntegerCoder",
+            "kind": "class",
+            "source_path": "xarray/coding/variables.py",
+            "reason": "Issue 中提到的处理 `_Unsigned` 属性的具体编码器类，位于 `decode_cf_variable` 函数中。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "xarray/coding/variables.py",
+            "object": "UnsignedIntegerCoder.decode",
+            "lines": "",
+            "reason": "Issue 中明确指出处理 `_Unsigned=True` 约定的位置在此文件，并建议对称处理 `_Unsigned=False`。"
+        },
+        {
+            "path": "xarray/conventions.py",
+            "object": "decode_cf_variable",
+            "lines": "282-379",
+            "reason": "检索出的源码片段显示该函数是解码 CF 变量的核心，并调用了 `UnsignedIntegerCoder`。Issue 中的警告也来自此函数附近。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_decode_cf_with_conflicting_fill_missing_value",
+            "test_file": "xarray/tests/test_conventions.py",
+            "why_relevant": "它直接测试了 `decode_cf_variable` 函数处理特殊属性（如 `_FillValue`）的行为，并检查警告和输出。",
+            "reusable_parts": ["导入 `conventions` 模块", "使用 `decode_cf_variable` 函数", "使用 `assert_identical` 进行断言", "捕获警告的模式"],
+            "possible_gap": "该测试关注 `_FillValue` 和 `missing_value`，而非 `_Unsigned` 属性。它没有涉及 pydap 后端或远程数据源。"
+        },
+        {
+            "test_name": "TestPydap.test_cmp_local_file",
+            "test_file": "xarray/tests/test_backends.py",
+            "why_relevant": "它专门测试 pydap 后端，并比较从远程（模拟）源读取的数据与本地文件的差异。",
+            "reusable_parts": ["使用 `@requires_pydap` 装饰器", "`TestPydap` 类的结构", "使用 `assert_equal` 比较数据集", "可能的后端创建和比较逻辑"],
+            "possible_gap": "该测试没有涉及 `_Unsigned` 属性的处理，也没有构造带有此属性的特定测试数据。"
+        },
+        {
+            "test_name": "test_CFMaskCoder_decode",
+            "test_file": "xarray/tests/test_coding.py",
+            "why_relevant": "它测试了 `variables` 模块中的一个具体编码器（`CFMaskCoder`）的 `decode` 方法，与 `UnsignedIntegerCoder` 类似。",
+            "reusable_parts": ["从 `xarray.coding` 导入 `variables`", "构造 `xr.Variable` 对象并设置属性", "使用编码器的 `decode` 方法", "使用 `assert_identical` 断言"],
+            "possible_gap": "它测试的是掩码，而非无符号/有符号整数转换。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "config",
+            "current_pattern": "测试通常使用本地文件或模拟数据，不涉及特定的 `_Unsigned` 属性。",
+            "target_pattern": "构造或获取一个带有 `_Unsigned=False` 属性的字节类型变量，并通过 pydap 后端读取。",
+            "reason": "Issue 表明，只有当数据源通过 pydap 提供，且变量具有 `_Unsigned=False` 属性时，bug 才会触发。",
+            "confidence": "high"
+        },
+        {
+            "slot": "argument",
+            "current_pattern": "`decode_cf_variable` 的测试通常传入一个构造好的 `Variable` 对象。",
+            "target_pattern": "传入一个 `dtype` 为无符号字节（如 `np.uint8`）但带有 `_Unsigned=False` 编码属性的 `Variable` 对象。",
+            "reason": "Issue 建议的修复逻辑是检查 `if .kind == \"u\" and unsigned == False`，这需要测试数据满足此条件。",
+            "confidence": "medium"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "return_value",
+            "expression_hint": "`decoded_variable.values` 或解码后数据集的坐标值。",
+            "reason": "Issue 的核心错误是解码后的数值错误（负值变正值）。观察解码后的实际数值是判断 bug 是否触发的直接依据。"
+        },
+        {
+            "kind": "warning",
+            "expression_hint": "`warnings.catch_warnings` 捕获的 `SerializationWarning` 消息内容。",
+            "reason": "Issue 中提到了一个特定的警告，观察警告是否出现及其内容可以辅助判断属性是否被正确处理。"
+        },
+        {
+            "kind": "type",
+            "expression_hint": "`decoded_variable.dtype`。",
+            "reason": "观察解码后变量的数据类型，以确认转换是否正确发生（例如，是否从无符号类型转换为了有符号类型）。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "使用 pydap 引擎解码带有 `_Unsigned=False` 的字节变量，得到的数值应与使用 netcdf4 引擎解码的结果一致（特别是负值）。",
+            "preferred_assertion_style": "equals",
+            "avoid": "断言完整的 repr 字符串或所有属性完全相等，因为不同后端可能产生微小的元数据差异。",
+            "reason": "Issue 的核心是数值解码错误，因此断言数值相等是最直接、最稳定的验证方式。"
+        },
+        {
+            "assertion_goal": "在正确处理 `_Unsigned=False` 后，相关的 `SerializationWarning` 应不再出现（或内容改变）。",
+            "preferred_assertion_style": "not_contains_fragment",
+            "avoid": "断言警告的完整精确字符串，因为警告文本可能随版本变化。",
+            "reason": "Issue 中出现的警告是属性被忽略的迹象，修复后该警告应消失或变为其他内容。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要一个可访问的、包含带有 `_Unsigned=False` 属性的字节变量的 OPeNDAP 数据源（如 THREDDS 服务器）或一个能够模拟此行为的 mock/patch。",
+            "source": "issue",
+            "confidence": "high"
+        },
+        {
+            "hint": "可能需要使用 `@requires_pydap` 装饰器来确保测试在 pydap 可用时运行。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "测试可能需要在 `TestPydap` 类中编写，或者借鉴其创建和比较数据集的模式。",
+            "source": "retrieved_test",
+            "confidence": "medium"
+        }
+    ],
+    "uncertainties": [
+        "`_Unsigned=False` 属性在原始 netCDF 文件或 OPeNDAP 响应中的确切存储格式和位置。",
+        "除了 `UnsignedIntegerCoder.decode` 方法，是否还有其他代码路径（如特定后端的解码逻辑）需要修改。",
+        "对于非字节类型的整数变量（如 `uint16`），`_Unsigned=False` 是否也有意义并需要处理。",
+        "如何可靠地模拟或创建一个用于单元测试的、带有 `_Unsigned=False` 属性的 pydap 数据源。"
+    ]
+}
+```

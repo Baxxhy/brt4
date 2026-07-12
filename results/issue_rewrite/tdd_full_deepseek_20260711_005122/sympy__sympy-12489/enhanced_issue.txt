@@ -1,0 +1,131 @@
+instance_id: sympy__sympy-12489
+
+issue_summary: Permutation 类的 __new__ 方法内部使用硬编码的类引用创建实例，导致子类化失败，总是返回父类实例。
+
+trigger_condition:
+{
+  "text": "创建一个继承自 Permutation 的子类，并尝试实例化该子类。",
+  "evidence": [
+    "Issue 描述：'This makes subclassing Permutation impossible (besides overriding Permutation._af_new) as always instances of Permutation are returned.'",
+    "源码片段 2 显示 __new__ 方法最终调用 _af_new 创建实例。",
+    "源码片段 3 显示 _af_new 方法内部使用 `Basic.__new__(Perm, perm)`，其中 `Perm` 是 `Permutation` 的引用，而非动态的类参数。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "子类实例化后，返回的对象类型是父类 Permutation，而不是子类。",
+  "symptom_type": "wrong_type",
+  "evidence": [
+    "Issue 描述：'always instances of Permutation are returned'，表明子类化后得到的实例类型错误。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "子类化 Permutation 后，实例化子类应返回该子类的实例，并保持正确的继承关系和行为。",
+  "evidence": [
+    "Issue 描述中建议的解决方案：'use the mandatory reference to the class (the first argument of a classmethod) the method is called on for instance creation.'，这暗示了正确的行为应是使用调用者的类（子类）来创建实例。",
+    "Python 常规的类继承机制预期子类实例化返回子类对象。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "Permutation.__new__",
+    "kind": "method",
+    "source_path": "sympy/combinatorics/permutations.py",
+    "reason": "Issue 指出对象创建在 __new__ 中完成，且其内部调用链导致了子类化问题。"
+  },
+  {
+    "name": "Permutation._af_new",
+    "kind": "method",
+    "source_path": "sympy/combinatorics/permutations.py",
+    "reason": "Issue 明确指出 _af_new 是内部用于创建对象的方法，并且它硬编码了父类引用。"
+  },
+  {
+    "name": "Basic.__new__",
+    "kind": "method",
+    "source_path": "sympy/core/basic.py",
+    "reason": "源码片段 3 显示 _af_new 最终调用 Basic.__new__(Perm, perm)，这是实例创建的关键步骤。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "测试中直接使用 `Permutation(...)` 创建对象。",
+    "target_pattern": "定义一个继承自 `Permutation` 的子类（例如 `class SubPerm(Permutation): pass`），然后尝试创建该子类的实例 `SubPerm(...)`。",
+    "reason": "Issue 的核心是子类化失败，因此需要将测试对象从父类切换到子类，以触发内部创建逻辑的缺陷。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "测试中可能直接调用 `Permutation._af_new`（尽管测试中未显式调用，但它是内部方法）。",
+    "target_pattern": "在子类上下文中，观察或间接触发对 `_af_new` 的调用（例如通过子类的 `__new__`）。",
+    "reason": "Issue 指出 `_af_new` 是问题关键，它应该使用调用者的类来创建实例，但当前实现没有。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "type",
+    "expression_hint": "type(instance) 或 isinstance(instance, SubClass)",
+    "reason": "Issue 的症状是返回的对象类型错误（是父类而非子类），因此检查实例的类型是判断问题是否触发的直接方式。"
+  },
+  {
+    "kind": "repr",
+    "expression_hint": "repr(instance)",
+    "reason": "Permutation 的 __repr__ 可能包含类名信息，观察输出字符串是否包含子类名可以帮助判断。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "instance.array_form 或 instance.cyclic_form",
+    "reason": "即使类型错误，对象可能仍具有正确的排列数据。观察这些属性可以确认对象在数据层面是否正确创建，从而将问题隔离到类型/类关系上。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "子类实例化后，返回的实例类型应为该子类。",
+    "preferred_assertion_style": "isinstance",
+    "avoid": "避免断言完整的 repr 字符串相等，因为 repr 可能不显示类名或未来会改变。避免仅断言数据属性相等而忽略类型。",
+    "reason": "Issue 的核心是类型错误，因此使用 isinstance 能稳定地验证对象是否属于正确的类。"
+  },
+  {
+    "assertion_goal": "子类实例应能正常访问和操作从父类继承的属性和方法（如 array_form）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免对内部实现细节（如 _array_form 属性）进行断言，应使用公共接口。",
+    "reason": "在确保类型正确后，还需要验证子类实例的功能完整性，这与 Issue 中期望的“正确子类化”语义一致。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 Permutation 类。可能需要导入 Basic 类以理解继承链。测试可以在一个简单的函数或 TestCase 中运行。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "由于是测试类继承，不需要复杂的 fixture 如数据库或临时文件。可能需要使用 monkeypatch 来临时修改 _af_new 以进行深入测试，但初始复现测试可能不需要。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "Issue 中提到提交者进行了 monkeypatch 且测试通过，但不确定具体 patch 了哪些地方。",
+  "不确定除了 _af_new 外，__new__ 方法中是否还有其他路径会创建对象并导致同样问题。",
+  "不确定修改 _af_new 以支持子类化是否会破坏现有代码的某些隐式假设（尽管提交者说测试通过）。",
+  "不确定是否有其他静态方法或类方法（如 from_sequence, random 等）也存在类似的硬编码类引用问题。"
+]

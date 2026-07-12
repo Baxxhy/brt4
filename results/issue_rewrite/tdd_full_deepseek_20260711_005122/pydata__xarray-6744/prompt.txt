@@ -1,0 +1,481 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+"center" kwarg ignored when manually iterating over DataArrayRolling
+### Discussed in https://github.com/pydata/xarray/discussions/6738
+
+<div type='discussions-op-text'>
+
+<sup>Originally posted by **ckingdon95** June 29, 2022</sup>
+Hello, I am trying to manually iterate over a DataArrayRolling object, as described [here ](https://docs.xarray.dev/en/stable/user-guide/computation.html#rolling-window-operations)in the documentation. 
+
+I am confused why the following two code chunks do not produce the same sequence of values. I would like to be able to manually iterate over a DataArrayRolling object, and still be given center-justified windows. Is there a way to do this?
+
+```python
+import xarray as xr
+import numpy as np
+
+my_data = xr.DataArray(np.arange(1,10), dims="x")
+
+# Option 1: take a center-justified rolling average
+result1 = my_data.rolling(x=3, center=True).mean().values
+result1
+```
+This returns the following values, as expected:
+```
+array([nan,  2.,  3.,  4.,  5.,  6.,  7.,  8., nan])
+```
+
+Whereas when I do it manually, it is not equivalent:
+
+```python
+# Option 2: try to manually iterate, but the result is not centered
+my_data_rolling = my_data.rolling(x=3, center=True)
+result2 = [window.mean().values.item() for label, window in my_data_rolling]
+result2
+```
+This returns
+```
+[nan, nan, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
+```
+Is this an issue with the window iterator? If it is not an issue, then is there a way for me to get the center-justified windows in the manual iteration? </div>
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：xarray/core/rolling.py
+对象名称：DataArrayRolling
+节点类型：class
+父节点：rolling
+行号范围：225-584
+代码：
+class DataArrayRolling(Rolling["DataArray"]):
+    __slots__ = ("window_labels",)
+    def __init__(
+        self,
+        obj: DataArray,
+        windows: Mapping[Any, int],
+        min_periods: int | None = None,
+        center: bool | Mapping[Any, bool] = False,
+    ) -> None:
+    def __iter__(self) -> Iterator[tuple[RollingKey, DataArray]]:
+    def construct(
+        self,
+        window_dim: Hashable | Mapping[Any, Hashable] | None = None,
+        stride: int | Mapping[Any, int] = 1,
+        fill_value: Any = dtypes.NA,
+        keep_attrs: bool | None = None,
+        **window_dim_kwargs: Hashable,
+    ) -> DataArray:
+    def _construct(
+        self,
+        obj: DataArray,
+        window_dim: Hashable | Mapping[Any, Hashable] | None = None,
+        stride: int | Mapping[Any, int] = 1,
+        fill_value: Any = dtypes.NA,
+        keep_attrs: bool | None = None,
+        **window_dim_kwargs: Hashable,
+    ) -> DataArray:
+    def reduce(
+        self, func: Callable, keep_attrs: bool | None = None, **kwargs: Any
+    ) -> DataArray:
+    def _counts(self, keep_attrs: bool | None) -> DataArray:
+    def _bottleneck_reduce(self, func, keep_attrs, **kwargs):
+    def _numpy_or_bottleneck_reduce(
+        self,
+        array_agg_func,
+        bottleneck_move_func,
+        rolling_agg_func,
+        keep_attrs,
+        fillna,
+        **kwargs,
+    ):
+
+
+【源码片段 2】
+文件路径：xarray/core/rolling.py
+对象名称：rolling
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 3】
+文件路径：xarray/tests/test_groupby.py
+对象名称：center
+节点类型：class_function
+父节点：TestDataArrayGroupBy
+行号范围：1172-1173
+代码：
+        def center(x):
+            return x - np.mean(x)
+
+
+【源码片段 4】
+文件路径：xarray/core/_reductions.py
+对象名称：mean
+节点类型：class_function
+父节点：DatasetReductions
+行号范围：427-516
+代码：
+    def mean(
+        self,
+        dim: None | Hashable | Sequence[Hashable] = None,
+        *,
+        skipna: bool | None = None,
+        keep_attrs: bool | None = None,
+        **kwargs: Any,
+    ) -> Dataset:
+        """
+        Reduce this Dataset's data by applying ``mean`` along some dimension(s).
+
+        Parameters
+        ----------
+        dim : hashable or iterable of hashable, default: None
+            Name of dimension[s] along which to apply ``mean``. For e.g. ``dim="x"``
+            or ``dim=["x", "y"]``. If None, will reduce over all dimensions.
+        skipna : bool or None, optional
+            If True, skip missing values (as marked by NaN). By default, only
+            skips missing values for float dtypes; other dtypes either do not
+            have a sentinel missing value (int) or ``skipna=True`` has not been
+            implemented (object, datetime64 or timedelta64).
+        keep_attrs : bool or None, optional
+            If True, ``attrs`` will be copied from the original
+            object to the new one.  If False, the new object will be
+            returned without attributes.
+        **kwargs : Any
+            Additional keyword arguments passed on to the appropriate array
+            function for calculating ``mean`` on this object's data.
+            These could include dask-specific kwargs like ``split_every``.
+
+        Returns
+        -------
+        reduced : Dataset
+            New Dataset with ``mean`` applied to its data and the
+            indicated dimension(s) removed
+
+        See Also
+        --------
+        numpy.mean
+        dask.array.mean
+        DataArray.mean
+        :ref:`agg`
+            User guide on reduction or aggregation operations.
+
+        Notes
+        -----
+        Non-numeric variables will be removed prior to reducing.
+
+        Examples
+        --------
+        >>> da = xr.DataArray(
+        ...     np.array([1, 2, 3, 1, 2, np.nan]),
+        ...     dims="time",
+        ...     coords=dict(
+        ...         time=("time", pd.date_range("01-01-2001", freq="M", periods=6)),
+        ...         labels=("time", np.array(["a", "b", "c", "c", "b", "a"])),
+        ...     ),
+        ... )
+        >>> ds = xr.Dataset(dict(da=da))
+        >>> ds
+        <xarray.Dataset>
+        Dimensions:  (time: 6)
+        Coordinates:
+          * time     (time) datetime64[ns] 2001-01-31 2001-02-28 ... 2001-06-30
+            labels   (time) <U1 'a' 'b' 'c' 'c' 'b' 'a'
+        Data variables:
+            da       (time) float64 1.0 2.0 3.0 1.0 2.0 nan
+
+        >>> ds.mean()
+        <xarray.Dataset>
+        Dimensions:  ()
+        Data variables:
+            da       float64 1.8
+
+        Use ``skipna`` to control whether NaNs are ignored.
+
+        >>> ds.mean(skipna=False)
+        <xarray.Dataset>
+        Dimensions:  ()
+        Data variables:
+            da       float64 nan
+        """
+        return self.reduce(
+            duck_array_ops.mean,
+            dim=dim,
+            skipna=skipna,
+            numeric_only=True,
+            keep_attrs=keep_attrs,
+            **kwargs,
+        )
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：xarray/tests/test_rolling.py
+测试名称：TestDataArrayRolling.test_rolling_iter
+测试代码：
+class TestDataArrayRolling:
+    @pytest.mark.parametrize("da", (1, 2), indirect=True)
+    def test_rolling_iter(self, da) -> None:
+        rolling_obj = da.rolling(time=7)
+        rolling_obj_mean = rolling_obj.mean()
+
+        assert len(rolling_obj.window_labels) == len(da["time"])
+        assert_identical(rolling_obj.window_labels, da["time"])
+
+        for i, (label, window_da) in enumerate(rolling_obj):
+            assert label == da["time"].isel(time=i)
+
+            actual = rolling_obj_mean.isel(time=i)
+            expected = window_da.mean("time")
+
+            # TODO add assert_allclose_with_nan, which compares nan position
+            # as well as the closeness of the values.
+            assert_array_equal(actual.isnull(), expected.isnull())
+            if (~actual.isnull()).sum() > 0:
+                np.allclose(
+                    actual.values[actual.values.nonzero()],
+                    expected.values[expected.values.nonzero()],
+                )
+
+【相关测试 2】
+测试文件：xarray/tests/test_rolling.py
+测试名称：TestDataArrayRolling.test_rolling_pandas_compat
+测试代码：
+class TestDataArrayRolling:
+    @pytest.mark.parametrize("center", (True, False))
+    @pytest.mark.parametrize("min_periods", (None, 1, 2, 3))
+    @pytest.mark.parametrize("window", (1, 2, 3, 4))
+    def test_rolling_pandas_compat(self, center, window, min_periods) -> None:
+        s = pd.Series(np.arange(10))
+        da = DataArray.from_series(s)
+
+        if min_periods is not None and window < min_periods:
+            min_periods = window
+
+        s_rolling = s.rolling(window, center=center, min_periods=min_periods).mean()
+        da_rolling = da.rolling(
+            index=window, center=center, min_periods=min_periods
+        ).mean()
+        da_rolling_np = da.rolling(
+            index=window, center=center, min_periods=min_periods
+        ).reduce(np.nanmean)
+
+        np.testing.assert_allclose(s_rolling.values, da_rolling.values)
+        np.testing.assert_allclose(s_rolling.index, da_rolling["index"])
+        np.testing.assert_allclose(s_rolling.values, da_rolling_np.values)
+        np.testing.assert_allclose(s_rolling.index, da_rolling_np["index"])
+
+【相关测试 3】
+测试文件：xarray/tests/test_rolling.py
+测试名称：TestDataArrayRolling.test_rolling_reduce
+测试代码：
+class TestDataArrayRolling:
+    @pytest.mark.parametrize("da", (1, 2), indirect=True)
+    @pytest.mark.parametrize("center", (True, False))
+    @pytest.mark.parametrize("min_periods", (None, 1, 2, 3))
+    @pytest.mark.parametrize("window", (1, 2, 3, 4))
+    @pytest.mark.parametrize("name", ("sum", "mean", "std", "max"))
+    def test_rolling_reduce(self, da, center, min_periods, window, name) -> None:
+        if min_periods is not None and window < min_periods:
+            min_periods = window
+
+        if da.isnull().sum() > 1 and window == 1:
+            # this causes all nan slices
+            window = 2
+
+        rolling_obj = da.rolling(time=window, center=center, min_periods=min_periods)
+
+        # add nan prefix to numpy methods to get similar # behavior as bottleneck
+        actual = rolling_obj.reduce(getattr(np, "nan%s" % name))
+        expected = getattr(rolling_obj, name)()
+        assert_allclose(actual, expected)
+        assert actual.dims == expected.dims
+
+【相关测试 4】
+测试文件：xarray/tests/test_rolling.py
+测试名称：TestDataArrayRolling.test_rolling_construct
+测试代码：
+class TestDataArrayRolling:
+    @pytest.mark.parametrize("center", (True, False))
+    @pytest.mark.parametrize("window", (1, 2, 3, 4))
+    def test_rolling_construct(self, center, window) -> None:
+        s = pd.Series(np.arange(10))
+        da = DataArray.from_series(s)
+
+        s_rolling = s.rolling(window, center=center, min_periods=1).mean()
+        da_rolling = da.rolling(index=window, center=center, min_periods=1)
+
+        da_rolling_mean = da_rolling.construct("window").mean("window")
+        np.testing.assert_allclose(s_rolling.values, da_rolling_mean.values)
+        np.testing.assert_allclose(s_rolling.index, da_rolling_mean["index"])
+
+        # with stride
+        da_rolling_mean = da_rolling.construct("window", stride=2).mean("window")
+        np.testing.assert_allclose(s_rolling.values[::2], da_rolling_mean.values)
+        np.testing.assert_allclose(s_rolling.index[::2], da_rolling_mean["index"])
+
+        # with fill_value
+        da_rolling_mean = da_rolling.construct("window", stride=2, fill_value=0.0).mean(
+            "window"
+        )
+        assert da_rolling_mean.isnull().sum() == 0
+        assert (da_rolling_mean == 0.0).sum() >= 0
+
+【相关测试 5】
+测试文件：xarray/tests/test_rolling.py
+测试名称：TestDataArrayRolling.test_rolling_wrapped_dask
+测试代码：
+class TestDataArrayRolling:
+    @requires_dask
+    @pytest.mark.parametrize("name", ("mean", "count"))
+    @pytest.mark.parametrize("center", (True, False, None))
+    @pytest.mark.parametrize("min_periods", (1, None))
+    @pytest.mark.parametrize("window", (7, 8))
+    @pytest.mark.parametrize("backend", ["dask"], indirect=True)
+    def test_rolling_wrapped_dask(self, da, name, center, min_periods, window) -> None:
+        # dask version
+        rolling_obj = da.rolling(time=window, min_periods=min_periods, center=center)
+        actual = getattr(rolling_obj, name)().load()
+        if name != "count":
+            with pytest.warns(DeprecationWarning, match="Reductions are applied"):
+                getattr(rolling_obj, name)(dim="time")
+        # numpy version
+        rolling_obj = da.load().rolling(
+            time=window, min_periods=min_periods, center=center
+        )
+        expected = getattr(rolling_obj, name)()
+
+        # using all-close because rolling over ghost cells introduces some
+        # precision errors
+        assert_allclose(actual, expected)
+
+        # with zero chunked array GH:2113
+        rolling_obj = da.chunk().rolling(
+            time=window, min_periods=min_periods, center=center
+        )
+        actual = getattr(rolling_obj, name)().load()
+        assert_allclose(actual, expected)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

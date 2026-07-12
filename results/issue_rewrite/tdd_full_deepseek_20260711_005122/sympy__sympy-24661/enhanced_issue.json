@@ -1,0 +1,287 @@
+{
+  "instance_id": "sympy__sympy-24661",
+  "issue_summary": "parse_expr 函数在处理关系表达式时忽略了 evaluate=False 参数，导致表达式被提前求值。",
+  "trigger_condition": {
+    "text": "调用 parse_expr 函数，传入一个关系表达式字符串（如 '1 < 2'）并将 evaluate 参数设置为 False。",
+    "evidence": [
+      "Issue 中的示例：parse_expr('1 < 2', evaluate=False)",
+      "相关测试 2 和 3 中 parse_expr 的调用模式"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "parse_expr 返回了求值后的布尔值 True，而不是未求值的关系表达式对象 1 < 2。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 中的输出对比：Out[14]: True 与 Out[15]: 1 < 2"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当 evaluate=False 时，parse_expr 应返回一个未求值的关系表达式对象（如 Lt(1, 2, evaluate=False)），其字符串表示应为 '1 < 2'。",
+    "evidence": [
+      "Issue 中期望的结果：Lt(1, 2, evaluate=False) 输出 1 < 2",
+      "相关测试 1 展示了关系表达式在 evaluate=False 时的字符串表示"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "parse_expr",
+      "kind": "function",
+      "source_path": "sympy/parsing/ast_parser.py",
+      "reason": "Issue 直接报告了此函数在处理 evaluate=False 参数时的缺陷。"
+    },
+    {
+      "name": "Lt",
+      "kind": "class",
+      "source_path": "sympy/core/relational.py",
+      "reason": "Issue 中展示了正确的期望行为是通过 Lt 构造函数实现的。"
+    },
+    {
+      "name": "sympify",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试 4 表明 sympify 也支持 evaluate=False 参数，可能涉及相似的解析逻辑。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/parsing/ast_parser.py",
+      "object": "parse_expr",
+      "lines": "64-79",
+      "reason": "这是 parse_expr 函数的实现，负责解析字符串表达式，但当前代码片段未显示 evaluate 参数的处理。"
+    },
+    {
+      "path": "sympy/core/relational.py",
+      "object": "relational",
+      "lines": "",
+      "reason": "关系表达式（如 Lt）的构造和求值逻辑可能在此文件中，影响 parse_expr 的最终输出。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_recursive_evaluate_false_10560",
+      "test_file": "sympy/parsing/tests/test_sympy_parser.py",
+      "why_relevant": "它直接测试 parse_expr 在 evaluate=False 时的行为，涉及算术表达式。",
+      "reusable_parts": [
+        "parse_expr 的调用模式",
+        "使用 evaluate=False 参数",
+        "assert 风格：比较 parse_expr 的结果"
+      ],
+      "possible_gap": "它测试的是算术表达式（如 '4*-3'），而非 Issue 中的关系表达式（如 '1 < 2'）。"
+    },
+    {
+      "test_name": "test_function_evaluate_false",
+      "test_file": "sympy/parsing/tests/test_sympy_parser.py",
+      "why_relevant": "它测试 parse_expr 在 evaluate=False 时对各种函数的处理。",
+      "reusable_parts": [
+        "parse_expr 的调用模式",
+        "使用 evaluate=False 参数",
+        "assert 风格：检查字符串表示和求值后的差异"
+      ],
+      "possible_gap": "它测试的是函数调用（如 'Abs(0)'），而非关系表达式。"
+    },
+    {
+      "test_name": "test_evaluate",
+      "test_file": "sympy/core/tests/test_relational.py",
+      "why_relevant": "它直接测试关系表达式（如 Lt）在 evaluate=False 时的行为。",
+      "reusable_parts": [
+        "关系表达式对象的构造（如 Lt(x, x, evaluate=False)）",
+        "assert 风格：检查字符串表示"
+      ],
+      "possible_gap": "它测试的是直接构造关系表达式对象，而非通过 parse_expr 从字符串解析。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中 parse_expr 的输入多为算术表达式（如 '4*-3'）或函数调用（如 'Abs(0)'）。",
+      "target_pattern": "将输入改为关系表达式字符串，如 '1 < 2' 或 'x > y'。",
+      "reason": "Issue 表明 bug 特定于关系表达式，改变输入类型可能触发缺陷路径。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "相似测试中 parse_expr 的 evaluate 参数已设置为 False。",
+      "target_pattern": "保持 evaluate=False，但确保它被正确传递给底层的关系表达式构造。",
+      "reason": "Issue 的核心是 evaluate=False 被忽略，需要确保该参数生效。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "parse_expr('1 < 2', evaluate=False) 的返回值类型和字符串表示。",
+      "reason": "Issue 中错误返回布尔值 True，正确应返回未求值的 Lt 对象，其 str 应为 '1 < 2'。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "type(parse_expr('1 < 2', evaluate=False))",
+      "reason": "检查返回对象是否是关系表达式类型（如 Lt），而不是布尔类型。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 parse_expr 在 evaluate=False 时返回的关系表达式对象未被求值，其字符串表示与输入关系一致。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的、可能变化的内部 repr，或依赖于具体求值结果的断言。",
+      "reason": "Issue 明确给出了期望的输出（1 < 2），应直接比较字符串表示或与手动构造的未求值对象相等。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "可能需要导入 parse_expr 和关系表达式类（如 Lt），并准备符号变量（如 x, y）。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "parse_expr 函数的具体实现是否接收 evaluate 参数（检索出的源码片段未显示该参数）。",
+    "evaluate=False 参数在 parse_expr 内部的传递路径和在哪里被忽略。",
+    "除了 Lt，其他关系运算符（如 Gt, Ge, Le, Eq, Ne）是否也存在相同问题。"
+  ],
+  "raw": {
+    "issue_summary": "parse_expr 函数在处理关系表达式时忽略了 evaluate=False 参数，导致表达式被提前求值。",
+    "trigger_condition": {
+      "text": "调用 parse_expr 函数，传入一个关系表达式字符串（如 '1 < 2'）并将 evaluate 参数设置为 False。",
+      "evidence": [
+        "Issue 中的示例：parse_expr('1 < 2', evaluate=False)",
+        "相关测试 2 和 3 中 parse_expr 的调用模式"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "parse_expr 返回了求值后的布尔值 True，而不是未求值的关系表达式对象 1 < 2。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的输出对比：Out[14]: True 与 Out[15]: 1 < 2"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 evaluate=False 时，parse_expr 应返回一个未求值的关系表达式对象（如 Lt(1, 2, evaluate=False)），其字符串表示应为 '1 < 2'。",
+      "evidence": [
+        "Issue 中期望的结果：Lt(1, 2, evaluate=False) 输出 1 < 2",
+        "相关测试 1 展示了关系表达式在 evaluate=False 时的字符串表示"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "parse_expr",
+        "kind": "function",
+        "source_path": "sympy/parsing/ast_parser.py",
+        "reason": "Issue 直接报告了此函数在处理 evaluate=False 参数时的缺陷。"
+      },
+      {
+        "name": "Lt",
+        "kind": "class",
+        "source_path": "sympy/core/relational.py",
+        "reason": "Issue 中展示了正确的期望行为是通过 Lt 构造函数实现的。"
+      },
+      {
+        "name": "sympify",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 4 表明 sympify 也支持 evaluate=False 参数，可能涉及相似的解析逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/parsing/ast_parser.py",
+        "object": "parse_expr",
+        "lines": "64-79",
+        "reason": "这是 parse_expr 函数的实现，负责解析字符串表达式，但当前代码片段未显示 evaluate 参数的处理。"
+      },
+      {
+        "path": "sympy/core/relational.py",
+        "object": "relational",
+        "lines": "",
+        "reason": "关系表达式（如 Lt）的构造和求值逻辑可能在此文件中，影响 parse_expr 的最终输出。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_recursive_evaluate_false_10560",
+        "test_file": "sympy/parsing/tests/test_sympy_parser.py",
+        "why_relevant": "它直接测试 parse_expr 在 evaluate=False 时的行为，涉及算术表达式。",
+        "reusable_parts": [
+          "parse_expr 的调用模式",
+          "使用 evaluate=False 参数",
+          "assert 风格：比较 parse_expr 的结果"
+        ],
+        "possible_gap": "它测试的是算术表达式（如 '4*-3'），而非 Issue 中的关系表达式（如 '1 < 2'）。"
+      },
+      {
+        "test_name": "test_function_evaluate_false",
+        "test_file": "sympy/parsing/tests/test_sympy_parser.py",
+        "why_relevant": "它测试 parse_expr 在 evaluate=False 时对各种函数的处理。",
+        "reusable_parts": [
+          "parse_expr 的调用模式",
+          "使用 evaluate=False 参数",
+          "assert 风格：检查字符串表示和求值后的差异"
+        ],
+        "possible_gap": "它测试的是函数调用（如 'Abs(0)'），而非关系表达式。"
+      },
+      {
+        "test_name": "test_evaluate",
+        "test_file": "sympy/core/tests/test_relational.py",
+        "why_relevant": "它直接测试关系表达式（如 Lt）在 evaluate=False 时的行为。",
+        "reusable_parts": [
+          "关系表达式对象的构造（如 Lt(x, x, evaluate=False)）",
+          "assert 风格：检查字符串表示"
+        ],
+        "possible_gap": "它测试的是直接构造关系表达式对象，而非通过 parse_expr 从字符串解析。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 parse_expr 的输入多为算术表达式（如 '4*-3'）或函数调用（如 'Abs(0)'）。",
+        "target_pattern": "将输入改为关系表达式字符串，如 '1 < 2' 或 'x > y'。",
+        "reason": "Issue 表明 bug 特定于关系表达式，改变输入类型可能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中 parse_expr 的 evaluate 参数已设置为 False。",
+        "target_pattern": "保持 evaluate=False，但确保它被正确传递给底层的关系表达式构造。",
+        "reason": "Issue 的核心是 evaluate=False 被忽略，需要确保该参数生效。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "parse_expr('1 < 2', evaluate=False) 的返回值类型和字符串表示。",
+        "reason": "Issue 中错误返回布尔值 True，正确应返回未求值的 Lt 对象，其 str 应为 '1 < 2'。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(parse_expr('1 < 2', evaluate=False))",
+        "reason": "检查返回对象是否是关系表达式类型（如 Lt），而不是布尔类型。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 parse_expr 在 evaluate=False 时返回的关系表达式对象未被求值，其字符串表示与输入关系一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、可能变化的内部 repr，或依赖于具体求值结果的断言。",
+        "reason": "Issue 明确给出了期望的输出（1 < 2），应直接比较字符串表示或与手动构造的未求值对象相等。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要导入 parse_expr 和关系表达式类（如 Lt），并准备符号变量（如 x, y）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "parse_expr 函数的具体实现是否接收 evaluate 参数（检索出的源码片段未显示该参数）。",
+      "evaluate=False 参数在 parse_expr 内部的传递路径和在哪里被忽略。",
+      "除了 Lt，其他关系运算符（如 Gt, Ge, Le, Eq, Ne）是否也存在相同问题。"
+    ]
+  }
+}

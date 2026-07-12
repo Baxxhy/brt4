@@ -1,0 +1,331 @@
+{
+  "instance_id": "django__django-13343",
+  "issue_summary": "FileField 的 storage 参数为可调用对象时，在 deconstruct 过程中错误地求值了该可调用对象，而不是保留其引用。",
+  "trigger_condition": {
+    "text": "创建一个 FileField（或 ImageField），其 storage 参数是一个可调用对象（如函数或类），然后调用该字段的 deconstruct() 方法。",
+    "evidence": [
+      "Issue 描述：'A FileField with a callable storage parameter should not actually evaluate the callable when it is being deconstructed.'",
+      "相关测试 2 和 3 展示了使用可调用 storage 参数构造 FileField。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "deconstruct() 返回的 kwargs 中，'storage' 的值是求值后的 storage 对象，而不是原始的可调用对象引用。这导致 makemigrations 时，运行时可能变化的 storage 被内联固定。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 描述：'the actual evaluated Storage is inlined into the deconstucted FileField.'",
+      "Issue 提到 upload_to 参数的行为是正确的，暗示 storage 参数的行为与之不同。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "FileField.deconstruct() 对于可调用的 storage 参数，应返回对该可调用对象的引用，而不是其求值结果。",
+    "evidence": [
+      "Issue 描述：'The correct behavior should be to return a reference to the original callable during deconstruction.'",
+      "Issue 提到：'Note that a FileField with a callable upload_to parameter already behaves this way: the deconstructed value is simply a reference to the callable.'"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "FileField.deconstruct",
+      "kind": "method",
+      "source_path": "django/db/models/fields/files.py",
+      "reason": "Issue 的核心是关于 deconstruct 方法对可调用 storage 参数的处理。"
+    },
+    {
+      "name": "ImageField.deconstruct",
+      "kind": "method",
+      "source_path": "django/db/models/fields/files.py",
+      "reason": "ImageField 继承自 FileField，可能受同一问题影响。"
+    },
+    {
+      "name": "FileField.__init__",
+      "kind": "method",
+      "source_path": "django/db/models/fields/files.py",
+      "reason": "用于构造带有可调用 storage 参数的 FileField 对象。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/fields/files.py",
+      "object": "FileField.deconstruct",
+      "lines": "",
+      "reason": "Issue 明确指出 deconstruct 方法错误地求值了可调用 storage 参数。"
+    },
+    {
+      "path": "django/db/models/fields/files.py",
+      "object": "ImageField.deconstruct",
+      "lines": "",
+      "reason": "ImageField 继承自 FileField，其 deconstruct 方法可能未正确处理 storage 参数。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "FieldDeconstructionTests.test_file_field",
+      "test_file": "tests/field_deconstruction/tests.py",
+      "why_relevant": "它直接测试 FileField.deconstruct() 的行为，是测试 deconstruction 逻辑的起点。",
+      "reusable_parts": [
+        "测试类结构",
+        "deconstruct() 调用方式",
+        "对返回的 name, path, args, kwargs 的断言风格"
+      ],
+      "possible_gap": "当前测试只使用了字符串 upload_to 和 max_length，没有测试可调用的 storage 参数。"
+    },
+    {
+      "test_name": "FieldCallableFileStorageTests.test_callable_function_storage_file_field",
+      "test_file": "tests/file_storage/tests.py",
+      "why_relevant": "它展示了如何使用可调用函数作为 storage 参数构造 FileField，并验证了构造后 storage 属性的正确性。",
+      "reusable_parts": [
+        "使用可调用对象（函数）作为 storage 参数的构造模式",
+        "对 obj.storage 的断言"
+      ],
+      "possible_gap": "它没有调用 deconstruct() 方法，因此没有测试 deconstruction 行为。"
+    },
+    {
+      "test_name": "FileSystemStorageTests.test_deconstruction",
+      "test_file": "tests/file_storage/tests.py",
+      "why_relevant": "它测试了 Storage 类本身的 deconstruct 方法，展示了 deconstruct 返回值的预期格式。",
+      "reusable_parts": [
+        "deconstruct() 调用和返回值解包",
+        "对 path, args, kwargs 的断言模式"
+      ],
+      "possible_gap": "它测试的是 Storage 实例，而不是 FileField 中作为参数的可调用 storage。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "FieldDeconstructionTests.test_file_field 中使用 upload_to='foo/bar' 等简单值。",
+      "target_pattern": "将 storage 参数设置为一个可调用对象（如函数或类），而不是 None 或 Storage 实例。",
+      "reason": "Issue 指出只有当 storage 参数为可调用对象时，deconstruct 才会错误求值。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "相关测试只构造 FileField 并检查其属性，或只调用 Storage.deconstruct()。",
+      "target_pattern": "在构造带有可调用 storage 的 FileField 后，调用其 deconstruct() 方法。",
+      "reason": "缺陷行为发生在 deconstruct 调用过程中，需要执行此操作才能触发。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "field.deconstruct() 返回的 kwargs 字典中的 'storage' 键对应的值。",
+      "reason": "Issue 的核心是 deconstruct 返回的 storage 值不正确（应是可调用对象引用，而非求值结果）。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "type(kwargs.get('storage'))",
+      "reason": "比较返回的 storage 值的类型：是 types.FunctionType/type（可调用）还是 Storage 实例。"
+    },
+    {
+      "kind": "repr",
+      "expression_hint": "repr(kwargs.get('storage'))",
+      "reason": "观察返回的 storage 值的字符串表示，看它是否指向原始可调用对象。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 deconstruct() 返回的 kwargs['storage'] 是传入的原始可调用对象（或其引用），而不是该可调用对象的求值结果（一个 Storage 实例）。",
+      "preferred_assertion_style": "is",
+      "avoid": "避免断言完整的 repr 字符串相等，因为具体表示可能变化。",
+      "reason": "'is' 操作符可以严格检查对象身份，确保返回的是同一个可调用对象引用。"
+    },
+    {
+      "assertion_goal": "验证 deconstruct() 返回的 kwargs['storage'] 是可调用的。",
+      "preferred_assertion_style": "isinstance",
+      "avoid": "避免断言具体的函数名或类名字符串。",
+      "reason": "这确保了返回值的类型符合预期，且不依赖于具体的对象表示细节。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "可能需要导入 FileField, ImageField, FileSystemStorage 等类。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能继承自 SimpleTestCase 或类似的 Django 测试基类。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要创建一个简单的可调用函数或类作为 storage 参数。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "deconstruct 方法内部处理 storage 参数的具体代码逻辑和错误位置。",
+    "ImageField 是否完全继承此问题，还是有自己的 deconstruct 实现。",
+    "当 storage 参数是类（而非实例）时，deconstruct 的预期返回值具体形式（是类本身还是字符串路径）。",
+    "makemigrations 命令如何具体使用 deconstruct 的返回值，以及错误内联 storage 的具体影响表现。"
+  ],
+  "raw": {
+    "issue_summary": "FileField 的 storage 参数为可调用对象时，在 deconstruct 过程中错误地求值了该可调用对象，而不是保留其引用。",
+    "trigger_condition": {
+      "text": "创建一个 FileField（或 ImageField），其 storage 参数是一个可调用对象（如函数或类），然后调用该字段的 deconstruct() 方法。",
+      "evidence": [
+        "Issue 描述：'A FileField with a callable storage parameter should not actually evaluate the callable when it is being deconstructed.'",
+        "相关测试 2 和 3 展示了使用可调用 storage 参数构造 FileField。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "deconstruct() 返回的 kwargs 中，'storage' 的值是求值后的 storage 对象，而不是原始的可调用对象引用。这导致 makemigrations 时，运行时可能变化的 storage 被内联固定。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'the actual evaluated Storage is inlined into the deconstucted FileField.'",
+        "Issue 提到 upload_to 参数的行为是正确的，暗示 storage 参数的行为与之不同。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "FileField.deconstruct() 对于可调用的 storage 参数，应返回对该可调用对象的引用，而不是其求值结果。",
+      "evidence": [
+        "Issue 描述：'The correct behavior should be to return a reference to the original callable during deconstruction.'",
+        "Issue 提到：'Note that a FileField with a callable upload_to parameter already behaves this way: the deconstructed value is simply a reference to the callable.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "FileField.deconstruct",
+        "kind": "method",
+        "source_path": "django/db/models/fields/files.py",
+        "reason": "Issue 的核心是关于 deconstruct 方法对可调用 storage 参数的处理。"
+      },
+      {
+        "name": "ImageField.deconstruct",
+        "kind": "method",
+        "source_path": "django/db/models/fields/files.py",
+        "reason": "ImageField 继承自 FileField，可能受同一问题影响。"
+      },
+      {
+        "name": "FileField.__init__",
+        "kind": "method",
+        "source_path": "django/db/models/fields/files.py",
+        "reason": "用于构造带有可调用 storage 参数的 FileField 对象。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/files.py",
+        "object": "FileField.deconstruct",
+        "lines": "",
+        "reason": "Issue 明确指出 deconstruct 方法错误地求值了可调用 storage 参数。"
+      },
+      {
+        "path": "django/db/models/fields/files.py",
+        "object": "ImageField.deconstruct",
+        "lines": "",
+        "reason": "ImageField 继承自 FileField，其 deconstruct 方法可能未正确处理 storage 参数。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FieldDeconstructionTests.test_file_field",
+        "test_file": "tests/field_deconstruction/tests.py",
+        "why_relevant": "它直接测试 FileField.deconstruct() 的行为，是测试 deconstruction 逻辑的起点。",
+        "reusable_parts": [
+          "测试类结构",
+          "deconstruct() 调用方式",
+          "对返回的 name, path, args, kwargs 的断言风格"
+        ],
+        "possible_gap": "当前测试只使用了字符串 upload_to 和 max_length，没有测试可调用的 storage 参数。"
+      },
+      {
+        "test_name": "FieldCallableFileStorageTests.test_callable_function_storage_file_field",
+        "test_file": "tests/file_storage/tests.py",
+        "why_relevant": "它展示了如何使用可调用函数作为 storage 参数构造 FileField，并验证了构造后 storage 属性的正确性。",
+        "reusable_parts": [
+          "使用可调用对象（函数）作为 storage 参数的构造模式",
+          "对 obj.storage 的断言"
+        ],
+        "possible_gap": "它没有调用 deconstruct() 方法，因此没有测试 deconstruction 行为。"
+      },
+      {
+        "test_name": "FileSystemStorageTests.test_deconstruction",
+        "test_file": "tests/file_storage/tests.py",
+        "why_relevant": "它测试了 Storage 类本身的 deconstruct 方法，展示了 deconstruct 返回值的预期格式。",
+        "reusable_parts": [
+          "deconstruct() 调用和返回值解包",
+          "对 path, args, kwargs 的断言模式"
+        ],
+        "possible_gap": "它测试的是 Storage 实例，而不是 FileField 中作为参数的可调用 storage。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "FieldDeconstructionTests.test_file_field 中使用 upload_to='foo/bar' 等简单值。",
+        "target_pattern": "将 storage 参数设置为一个可调用对象（如函数或类），而不是 None 或 Storage 实例。",
+        "reason": "Issue 指出只有当 storage 参数为可调用对象时，deconstruct 才会错误求值。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试只构造 FileField 并检查其属性，或只调用 Storage.deconstruct()。",
+        "target_pattern": "在构造带有可调用 storage 的 FileField 后，调用其 deconstruct() 方法。",
+        "reason": "缺陷行为发生在 deconstruct 调用过程中，需要执行此操作才能触发。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "field.deconstruct() 返回的 kwargs 字典中的 'storage' 键对应的值。",
+        "reason": "Issue 的核心是 deconstruct 返回的 storage 值不正确（应是可调用对象引用，而非求值结果）。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(kwargs.get('storage'))",
+        "reason": "比较返回的 storage 值的类型：是 types.FunctionType/type（可调用）还是 Storage 实例。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "repr(kwargs.get('storage'))",
+        "reason": "观察返回的 storage 值的字符串表示，看它是否指向原始可调用对象。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 deconstruct() 返回的 kwargs['storage'] 是传入的原始可调用对象（或其引用），而不是该可调用对象的求值结果（一个 Storage 实例）。",
+        "preferred_assertion_style": "is",
+        "avoid": "避免断言完整的 repr 字符串相等，因为具体表示可能变化。",
+        "reason": "'is' 操作符可以严格检查对象身份，确保返回的是同一个可调用对象引用。"
+      },
+      {
+        "assertion_goal": "验证 deconstruct() 返回的 kwargs['storage'] 是可调用的。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言具体的函数名或类名字符串。",
+        "reason": "这确保了返回值的类型符合预期，且不依赖于具体的对象表示细节。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要导入 FileField, ImageField, FileSystemStorage 等类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能继承自 SimpleTestCase 或类似的 Django 测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建一个简单的可调用函数或类作为 storage 参数。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "deconstruct 方法内部处理 storage 参数的具体代码逻辑和错误位置。",
+      "ImageField 是否完全继承此问题，还是有自己的 deconstruct 实现。",
+      "当 storage 参数是类（而非实例）时，deconstruct 的预期返回值具体形式（是类本身还是字符串路径）。",
+      "makemigrations 命令如何具体使用 deconstruct 的返回值，以及错误内联 storage 的具体影响表现。"
+    ]
+  }
+}

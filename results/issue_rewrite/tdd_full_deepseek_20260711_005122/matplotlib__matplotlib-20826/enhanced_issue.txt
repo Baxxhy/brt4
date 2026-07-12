@@ -1,0 +1,136 @@
+instance_id: matplotlib__matplotlib-20826
+
+issue_summary: 在共享坐标轴的子图中调用 ax.clear() 后，本应隐藏的刻度标签和额外刻度线错误地显示出来。
+
+trigger_condition:
+{
+  "text": "使用 plt.subplots 创建共享坐标轴（sharex=True, sharey=True）的子图，然后对每个子图调用 ax.clear() 方法。",
+  "evidence": [
+    "Issue 中代码示例：fig, axes = plt.subplots(2, 2, sharex=True, sharey=True); for ax in axes.flatten(): ax.clear()",
+    "源码片段 1 显示 subplots 函数支持 sharex 和 sharey 参数"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "共享坐标轴下，本应隐藏的刻度标签（tick labels）被显示出来，并且额外的刻度线（ticks）出现在子图的顶部和右侧。",
+  "symptom_type": "state_not_updated",
+  "evidence": [
+    "Issue 描述：'calling ax.clear() causes ticks and tick labels to be shown that should be hidden.'",
+    "Issue 描述：'there are also ticks that appear along the top and right side of each subplot'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "在共享坐标轴的子图中调用 ax.clear() 后，刻度标签的可见性应保持与创建时一致（即共享轴上的标签应被隐藏），且不应出现额外的非默认刻度线。",
+  "evidence": [
+    "Issue 中预期结果描述：'This is the plot produced with matplotlib 3.4.1'，表明 3.4.1 版本行为正确",
+    "相关测试 2 (test_shared) 和 3 (test_subplots_hide_ticklabels) 验证了共享轴下刻度标签的可见性规则"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "plt.subplots",
+    "kind": "function",
+    "source_path": "lib/matplotlib/pyplot.py",
+    "reason": "用于创建具有共享坐标轴的子图，是触发条件的关键 API。"
+  },
+  {
+    "name": "Axes.clear",
+    "kind": "method",
+    "source_path": "",
+    "reason": "Issue 中触发 bug 的直接操作是调用 ax.clear()。"
+  },
+  {
+    "name": "Axes.tick_params",
+    "kind": "method",
+    "source_path": "",
+    "reason": "源码片段 1 的文档提到，在共享轴创建后，可以使用此方法控制刻度标签的显示。"
+  },
+  {
+    "name": "Axes.label_outer",
+    "kind": "method",
+    "source_path": "",
+    "reason": "相关测试 2 中使用了此方法，用于在共享轴时隐藏内部子图的标签。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "call_chain",
+    "current_pattern": "相关测试创建子图后，直接检查属性或进行其他操作。",
+    "target_pattern": "在创建共享轴子图后，对每个子图插入 ax.clear() 调用，然后再检查属性。",
+    "reason": "Issue 明确指出 bug 在调用 ax.clear() 后出现，这是从正常测试走向缺陷路径的关键变异。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "测试通常在子图创建后立即检查状态。",
+    "target_pattern": "在调用 ax.clear() 后，子图可能被重新绘制（如调用 ax.plot），然后再检查状态。",
+    "reason": "Issue 的复现代码在 clear 后调用了 ax.plot，这可能影响了某些内部状态或触发绘制。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "state",
+    "expression_hint": "ax.xaxis.get_ticklabels() 的可见性，例如 [label.get_visible() for label in ax.xaxis.get_ticklabels()]",
+    "reason": "错误现象的核心是本应隐藏的刻度标签变得可见。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "ax.xaxis.majorTicks 或 ax.yaxis.majorTicks 中 Tick 对象的 get_visible() 状态",
+    "reason": "Issue 提到出现了额外的刻度线（ticks），这可能通过检查刻度本身的可见性来观测。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "ax.xaxis._major_tick_kw 字典中 'label1On' 和 'label2On' 的值",
+    "reason": "相关测试 3 使用此内部属性来断言标签可见性，可作为观测点。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "在共享 x 轴的子图中，非底部行的子图的 x 轴刻度标签应保持不可见（或 label1On/label2On 为 False）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的刻度标签文本内容或精确的刻度位置，这些可能因绘图范围而变化。",
+    "reason": "Issue 的核心是可见性状态错误，而非标签内容或位置错误。"
+  },
+  {
+    "assertion_goal": "在共享 y 轴的子图中，非最左侧列的子图的 y 轴刻度标签应保持不可见。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言刻度标签对象为 None 或不存在，因为标签对象可能始终存在，只是不可见。",
+    "reason": "共享轴的规则是隐藏内部子图的标签，而非删除标签对象。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 plt.subplots 创建具有共享轴的子图，可能涉及 2x2 网格。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要调用 plt.draw() 或 fig.canvas.draw() 以确保所有状态更新，因为可见性可能在绘制时确定。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "ax.clear() 内部是调用了 cla() 还是其他方法，以及它们对共享轴状态的处理差异。",
+  "额外的顶部和右侧刻度线是哪个具体属性控制的，以及它们是否与共享轴问题属于同一个根本原因。",
+  "在 clear() 之后是否需要立即进行绘图操作（如 ax.plot）才能触发 bug，还是 clear() 本身足以导致状态错误。"
+]

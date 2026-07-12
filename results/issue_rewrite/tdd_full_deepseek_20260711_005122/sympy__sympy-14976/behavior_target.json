@@ -1,0 +1,325 @@
+{
+  "instance_id": "sympy__sympy-14976",
+  "issue_summary": "当使用 modules='mpmath' 参数调用 lambdify 时，有理数表达式（如 232/3）没有被正确包装为高精度 mpmath 数值，导致后续 nsolve 计算精度降低。",
+  "trigger_condition": {
+    "text": "使用 modules='mpmath' 参数调用 lambdify 函数，且输入表达式包含有理数（如 S(1)/3 或 232/3）。",
+    "evidence": [
+      "Issue 中展示了 lambdify(x, eqn.lhs - eqn.rhs, 'mpmath') 的调用，其中 eqn.rhs 包含 77 + S(1)/3，生成的函数返回 RisingFactorial(18, x) - 232/3。",
+      "Issue 说明这导致 nsolve 精度降低，因为 232/3 没有被高精度求值。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "生成的 lambdify 函数代码中，有理数（如 232/3）以 Python 浮点数形式存在，而不是被包装为 mpmath 高精度数值，导致 nsolve 计算精度降低。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 中 inspect.getsource(f) 显示返回语句为 RisingFactorial(18, x) - 232/3，其中 232/3 是普通 Python 有理数除法。",
+      "Issue 中 nsolve 计算结果与高精度期望值存在偏差，rf(18, x0).evalf(64) 显示精度损失。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当使用 modules='mpmath' 时，lambdify 生成的所有数值常量（包括有理数）都应被转换为 mpmath 高精度数值类型，以确保后续数值计算（如 nsolve）保持指定精度。",
+    "evidence": [
+      "Issue 标题和描述指出 lambdify(modules='mpmath') 应该包装有理数。",
+      "相关测试 test_mpmath_precision 和 test_mpmath_lambda 表明 mpmath 模块应支持高精度计算。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "lambdify",
+      "kind": "function",
+      "source_path": "sympy/utilities/lambdify.py",
+      "reason": "Issue 直接关于 lambdify 函数在 modules='mpmath' 时的行为。"
+    },
+    {
+      "name": "nsolve",
+      "kind": "function",
+      "source_path": "sympy/solvers/solvers.py",
+      "reason": "Issue 展示了因 lambdify 问题导致 nsolve 精度降低。"
+    },
+    {
+      "name": "RisingFactorial",
+      "kind": "class",
+      "source_path": "sympy/functions/combinatorial/factorials.py",
+      "reason": "Issue 示例中使用了 rf (RisingFactorial)。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/utilities/lambdify.py",
+      "object": "lambdify",
+      "lines": "",
+      "reason": "lambdify 是生成代码的函数，负责将 SymPy 表达式转换为指定模块（如 mpmath）的可调用函数。Issue 表明其在处理有理数并指定 modules='mpmath' 时可能未正确转换数值常量。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_rf_lambdify_mpmath",
+      "test_file": "sympy/functions/combinatorial/tests/test_comb_factorials.py",
+      "why_relevant": "该测试直接测试了使用 'mpmath' 模块对 rf (RisingFactorial) 进行 lambdify，并断言精度。",
+      "reusable_parts": [
+        "from sympy import lambdify",
+        "使用 lambdify 并指定 'mpmath' 模块",
+        "使用 Float 进行高精度比较",
+        "assert abs(us - maple)/us < 1e-15 的精度断言风格"
+      ],
+      "possible_gap": "该测试使用浮点数参数 (4.4, 2.2) 调用生成的函数，但没有测试表达式本身包含有理数常量（如 S(1)/3）时，这些常量是否被正确转换为 mpmath 类型。"
+    },
+    {
+      "test_name": "test_mpmath_precision",
+      "test_file": "sympy/utilities/tests/test_lambdify.py",
+      "why_relevant": "该测试专门测试 lambdify 与 mpmath 模块配合时的精度保持。",
+      "reusable_parts": [
+        "@conserve_mpmath_dps 装饰器",
+        "设置 mpmath.mp.dps",
+        "使用 lambdify((), pi.evalf(100), 'mpmath')",
+        "通过字符串比较断言精度"
+      ],
+      "possible_gap": "该测试针对的是常量 pi.evalf(100)（一个 Float），而不是 Issue 中的有理数表达式（如 232/3）。"
+    },
+    {
+      "test_name": "test_mpmath_lambda",
+      "test_file": "sympy/utilities/tests/test_lambdify.py",
+      "why_relevant": "测试 lambdify 使用 'mpmath' 模块对 sin(x) 进行转换，并验证其数值结果精度。",
+      "reusable_parts": [
+        "使用 lambdify(x, sin(x), \"mpmath\")",
+        "使用 mpmath.mpf 创建高精度输入",
+        "使用差值范围断言 (-prec < ... < prec)"
+      ],
+      "possible_gap": "该测试关注的是函数 sin(x) 的数值计算，而不是表达式中的数值常量（如有理数）的转换问题。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中 lambdify 的输入表达式通常是函数（如 sin(x)）或已求值的浮点数（如 pi.evalf(100)）。",
+      "target_pattern": "lambdify 的输入表达式应包含有理数运算，例如 Eq(rf(18,x), 77 + S(1)/3).lhs - Eq(rf(18,x), 77 + S(1)/3).rhs 或直接是 232/3。",
+      "reason": "Issue 表明问题出现在表达式包含有理数（如 S(1)/3）时，这些有理数在生成的代码中没有被转换为 mpmath 类型。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "相似测试中 lambdify 调用通常使用 modules='mpmath'。",
+      "target_pattern": "保持 modules='mpmath'，这是触发缺陷的必要条件。",
+      "reason": "Issue 明确指出是 lambdify(modules='mpmath') 的行为问题。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "生成的函数源代码，例如通过 inspect.getsource(f) 获取。观察其中数值常量（如 232/3）的表示形式。",
+      "reason": "Issue 通过检查源代码发现 232/3 是普通 Python 有理数，而不是 mpmath 包装。这是直接证据。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "调用生成的函数并计算其返回值，与高精度预期值（如使用 mpmath.mpf('232/3')）进行比较。",
+      "reason": "可以量化精度损失，验证 Issue 中描述的 nsolve 精度降低问题。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "检查生成的函数中数值常量（如 232/3）在运行时的类型，是否为 mpmath.mpf。",
+      "reason": "核心问题是数值常量是否被正确转换为 mpmath 高精度类型。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "生成的 lambdify 函数中的数值常量（如 232/3）应被表示为 mpmath 高精度类型（如 mpmath.mpf），或者生成的函数在计算时应能保持高精度。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免断言完整的、可能变化的函数源代码字符串。避免断言与问题无关的 RisingFactorial 部分。",
+      "reason": "Issue 的关键在于数值常量的表示，而不是函数整体结构。检查源代码片段或运行时类型/精度更稳定。"
+    },
+    {
+      "assertion_goal": "使用生成的函数进行数值计算（或直接由 nsolve 使用）的结果，应达到指定的高精度（例如 prec=64）。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "避免断言与特定平台或 mpmath 版本相关的绝对位模式。",
+      "reason": "Issue 的根本影响是精度降低。比较计算结果与高精度参考值的相对误差是稳定且与 Issue 对齐的断言方式。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "可能需要导入 inspect 模块以获取生成函数的源代码。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要设置 mpmath 的精度（mpmath.mp.dps）以进行高精度计算和比较。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试中可能需要构造包含有理数的 SymPy 表达式，例如使用 S(1)/3 或 Rational。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "lambdify 内部处理 'mpmath' 模块时，转换数值常量的具体逻辑和代码位置。",
+    "除了有理数（如 232/3），其他类型的数值常量（如 Float, Integer）在 modules='mpmath' 时是否也存在类似问题。",
+    "nsolve 内部调用 lambdify 的确切流程，以及精度损失是如何具体传递的。"
+  ],
+  "raw": {
+    "issue_summary": "当使用 modules='mpmath' 参数调用 lambdify 时，有理数表达式（如 232/3）没有被正确包装为高精度 mpmath 数值，导致后续 nsolve 计算精度降低。",
+    "trigger_condition": {
+      "text": "使用 modules='mpmath' 参数调用 lambdify 函数，且输入表达式包含有理数（如 S(1)/3 或 232/3）。",
+      "evidence": [
+        "Issue 中展示了 lambdify(x, eqn.lhs - eqn.rhs, 'mpmath') 的调用，其中 eqn.rhs 包含 77 + S(1)/3，生成的函数返回 RisingFactorial(18, x) - 232/3。",
+        "Issue 说明这导致 nsolve 精度降低，因为 232/3 没有被高精度求值。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 lambdify 函数代码中，有理数（如 232/3）以 Python 浮点数形式存在，而不是被包装为 mpmath 高精度数值，导致 nsolve 计算精度降低。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中 inspect.getsource(f) 显示返回语句为 RisingFactorial(18, x) - 232/3，其中 232/3 是普通 Python 有理数除法。",
+        "Issue 中 nsolve 计算结果与高精度期望值存在偏差，rf(18, x0).evalf(64) 显示精度损失。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当使用 modules='mpmath' 时，lambdify 生成的所有数值常量（包括有理数）都应被转换为 mpmath 高精度数值类型，以确保后续数值计算（如 nsolve）保持指定精度。",
+      "evidence": [
+        "Issue 标题和描述指出 lambdify(modules='mpmath') 应该包装有理数。",
+        "相关测试 test_mpmath_precision 和 test_mpmath_lambda 表明 mpmath 模块应支持高精度计算。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "lambdify",
+        "kind": "function",
+        "source_path": "sympy/utilities/lambdify.py",
+        "reason": "Issue 直接关于 lambdify 函数在 modules='mpmath' 时的行为。"
+      },
+      {
+        "name": "nsolve",
+        "kind": "function",
+        "source_path": "sympy/solvers/solvers.py",
+        "reason": "Issue 展示了因 lambdify 问题导致 nsolve 精度降低。"
+      },
+      {
+        "name": "RisingFactorial",
+        "kind": "class",
+        "source_path": "sympy/functions/combinatorial/factorials.py",
+        "reason": "Issue 示例中使用了 rf (RisingFactorial)。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/utilities/lambdify.py",
+        "object": "lambdify",
+        "lines": "",
+        "reason": "lambdify 是生成代码的函数，负责将 SymPy 表达式转换为指定模块（如 mpmath）的可调用函数。Issue 表明其在处理有理数并指定 modules='mpmath' 时可能未正确转换数值常量。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_rf_lambdify_mpmath",
+        "test_file": "sympy/functions/combinatorial/tests/test_comb_factorials.py",
+        "why_relevant": "该测试直接测试了使用 'mpmath' 模块对 rf (RisingFactorial) 进行 lambdify，并断言精度。",
+        "reusable_parts": [
+          "from sympy import lambdify",
+          "使用 lambdify 并指定 'mpmath' 模块",
+          "使用 Float 进行高精度比较",
+          "assert abs(us - maple)/us < 1e-15 的精度断言风格"
+        ],
+        "possible_gap": "该测试使用浮点数参数 (4.4, 2.2) 调用生成的函数，但没有测试表达式本身包含有理数常量（如 S(1)/3）时，这些常量是否被正确转换为 mpmath 类型。"
+      },
+      {
+        "test_name": "test_mpmath_precision",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "该测试专门测试 lambdify 与 mpmath 模块配合时的精度保持。",
+        "reusable_parts": [
+          "@conserve_mpmath_dps 装饰器",
+          "设置 mpmath.mp.dps",
+          "使用 lambdify((), pi.evalf(100), 'mpmath')",
+          "通过字符串比较断言精度"
+        ],
+        "possible_gap": "该测试针对的是常量 pi.evalf(100)（一个 Float），而不是 Issue 中的有理数表达式（如 232/3）。"
+      },
+      {
+        "test_name": "test_mpmath_lambda",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "测试 lambdify 使用 'mpmath' 模块对 sin(x) 进行转换，并验证其数值结果精度。",
+        "reusable_parts": [
+          "使用 lambdify(x, sin(x), \"mpmath\")",
+          "使用 mpmath.mpf 创建高精度输入",
+          "使用差值范围断言 (-prec < ... < prec)"
+        ],
+        "possible_gap": "该测试关注的是函数 sin(x) 的数值计算，而不是表达式中的数值常量（如有理数）的转换问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 lambdify 的输入表达式通常是函数（如 sin(x)）或已求值的浮点数（如 pi.evalf(100)）。",
+        "target_pattern": "lambdify 的输入表达式应包含有理数运算，例如 Eq(rf(18,x), 77 + S(1)/3).lhs - Eq(rf(18,x), 77 + S(1)/3).rhs 或直接是 232/3。",
+        "reason": "Issue 表明问题出现在表达式包含有理数（如 S(1)/3）时，这些有理数在生成的代码中没有被转换为 mpmath 类型。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中 lambdify 调用通常使用 modules='mpmath'。",
+        "target_pattern": "保持 modules='mpmath'，这是触发缺陷的必要条件。",
+        "reason": "Issue 明确指出是 lambdify(modules='mpmath') 的行为问题。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "生成的函数源代码，例如通过 inspect.getsource(f) 获取。观察其中数值常量（如 232/3）的表示形式。",
+        "reason": "Issue 通过检查源代码发现 232/3 是普通 Python 有理数，而不是 mpmath 包装。这是直接证据。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "调用生成的函数并计算其返回值，与高精度预期值（如使用 mpmath.mpf('232/3')）进行比较。",
+        "reason": "可以量化精度损失，验证 Issue 中描述的 nsolve 精度降低问题。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "检查生成的函数中数值常量（如 232/3）在运行时的类型，是否为 mpmath.mpf。",
+        "reason": "核心问题是数值常量是否被正确转换为 mpmath 高精度类型。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的 lambdify 函数中的数值常量（如 232/3）应被表示为 mpmath 高精度类型（如 mpmath.mpf），或者生成的函数在计算时应能保持高精度。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、可能变化的函数源代码字符串。避免断言与问题无关的 RisingFactorial 部分。",
+        "reason": "Issue 的关键在于数值常量的表示，而不是函数整体结构。检查源代码片段或运行时类型/精度更稳定。"
+      },
+      {
+        "assertion_goal": "使用生成的函数进行数值计算（或直接由 nsolve 使用）的结果，应达到指定的高精度（例如 prec=64）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言与特定平台或 mpmath 版本相关的绝对位模式。",
+        "reason": "Issue 的根本影响是精度降低。比较计算结果与高精度参考值的相对误差是稳定且与 Issue 对齐的断言方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要导入 inspect 模块以获取生成函数的源代码。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要设置 mpmath 的精度（mpmath.mp.dps）以进行高精度计算和比较。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试中可能需要构造包含有理数的 SymPy 表达式，例如使用 S(1)/3 或 Rational。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "lambdify 内部处理 'mpmath' 模块时，转换数值常量的具体逻辑和代码位置。",
+      "除了有理数（如 232/3），其他类型的数值常量（如 Float, Integer）在 modules='mpmath' 时是否也存在类似问题。",
+      "nsolve 内部调用 lambdify 的确切流程，以及精度损失是如何具体传递的。"
+    ]
+  }
+}

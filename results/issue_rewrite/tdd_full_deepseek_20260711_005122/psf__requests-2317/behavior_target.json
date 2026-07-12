@@ -1,0 +1,307 @@
+{
+  "instance_id": "psf__requests-2317",
+  "issue_summary": "当 method 参数为二进制字符串时，builtin_str 转换导致其变为字面字符串表示，引发 HTTP 404 错误。",
+  "trigger_condition": {
+    "text": "使用二进制字符串（如 b'GET'）作为 HTTP 请求的 method 参数。",
+    "evidence": [
+      "Issue 描述：'neutronclient is broken because it uses this \"args = utils.safe_encode_list(args)\" command which converts all the values to binary string, including method.'",
+      "Issue 描述：'Seems if requests handled the method value being a binary string, we wouldn't have any problem.'"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "请求收到 404 Not Found 响应，因为 method 被转换为字面字符串 \"b'GET'\" 而非二进制字符串 \"GET\"。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 描述：'When requests tries to use the method \"b'GET'\", it gets a 404 Not Found response.'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当 method 参数为二进制字符串时，应能正确识别并发送对应的 HTTP 方法（如 GET），而非其字面表示。",
+    "evidence": [
+      "Issue 描述：'Seems if requests handled the method value being a binary string, we wouldn't have any problem.'",
+      "相关测试 2 显示对 bytestring URL 的处理是将其转换为普通字符串，暗示对二进制输入应有类似处理。"
+    ],
+    "confidence": "medium"
+  },
+  "target_apis": [
+    {
+      "name": "requests.request",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 中提及的触发场景涉及使用 requests.request 或类似 API 发起请求。"
+    },
+    {
+      "name": "requests.Session.prepare_request",
+      "kind": "method",
+      "source_path": "",
+      "reason": "相关测试 2 使用了此方法，且 Issue 可能涉及请求准备阶段对 method 的处理。"
+    },
+    {
+      "name": "builtin_str",
+      "kind": "function",
+      "source_path": "requests/sessions.py",
+      "reason": "Issue 明确指出问题出现在 'method = builtin_str(method)' 这一行。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "requests/sessions.py",
+      "object": "builtin_str(method)",
+      "lines": "",
+      "reason": "Issue 直接指出此转换将二进制字符串 b'GET' 转换为字面字符串 \"b'GET'\"。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "RequestsTestCase.test_prepare_request_with_bytestring_url",
+      "test_file": "test_requests.py",
+      "why_relevant": "该测试处理了二进制字符串（bytestring）作为 URL 输入的情况，与 Issue 中二进制字符串作为 method 输入的场景类似。",
+      "reusable_parts": [
+        "imports",
+        "requests.Request 和 requests.Session 的构造",
+        "assert 风格"
+      ],
+      "possible_gap": "该测试关注 URL 的二进制字符串处理，而非 method 参数。"
+    },
+    {
+      "test_name": "RequestsTestCase.test_unicode_method_name",
+      "test_file": "test_requests.py",
+      "why_relevant": "该测试处理了 Unicode 字符串作为 method 参数的情况，涉及 method 参数的类型处理。",
+      "reusable_parts": [
+        "requests.request 的调用方式",
+        "assert r.status_code == 200"
+      ],
+      "possible_gap": "该测试使用 Unicode 字符串，而非二进制字符串。"
+    },
+    {
+      "test_name": "RequestsTestCase.test_unicode_multipart_post_fieldnames",
+      "test_file": "test_requests.py",
+      "why_relevant": "该测试涉及二进制字符串（encode('utf-8')）作为数据字段名，并检查其表示是否正确。",
+      "reusable_parts": [
+        "二进制字符串的构造",
+        "检查 prep.body 中是否包含或排除特定模式"
+      ],
+      "possible_gap": "该测试关注 multipart 数据体，而非 method 参数。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "method='POST' 或 method=u('POST')（字符串或 Unicode 字符串）",
+      "target_pattern": "method=b'GET'（二进制字符串）",
+      "reason": "Issue 明确指出二进制字符串作为 method 参数会触发问题。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "直接调用 requests.request 或构造 Request 对象。",
+      "target_pattern": "通过类似 neutronclient 的 utils.safe_encode_list 将参数（包括 method）转换为二进制字符串后再调用。",
+      "reason": "Issue 描述了 neutronclient 的调用链导致 method 变为二进制字符串。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "type",
+      "expression_hint": "type(prepared_request.method) 或 type(request.method)",
+      "reason": "观察 method 参数在准备请求后的类型变化，以确认是否从二进制字符串变为字面字符串。"
+    },
+    {
+      "kind": "repr",
+      "expression_hint": "repr(prepared_request.method)",
+      "reason": "观察 method 的表示，以确认是否包含额外的引号或 'b' 前缀字面。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "response.status_code",
+      "reason": "Issue 中观察到的直接错误现象是 404 响应。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "当使用二进制字符串 method（如 b'GET'）时，最终发出的 HTTP 方法应为 'GET'，而非 'b\\'GET\\''。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的、可能包含内部实现细节的字符串表示。",
+      "reason": "Issue 的核心是二进制字符串被错误地当作其字面表示发送。"
+    },
+    {
+      "assertion_goal": "使用二进制字符串 method 发起的请求应成功（例如返回 2xx 状态码），而非 404。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言特定的、可能变化的响应体内容。",
+      "reason": "Issue 明确指出错误结果是 404 Not Found。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "可能需要使用类似 httpbin 的服务来测试实际的 HTTP 请求和响应。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试类可能继承自 unittest.TestCase。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "builtin_str 函数在 requests/sessions.py 中的具体实现和上下文未提供。",
+    "Python 2.6 和 3.4 之间导致此行为差异的具体原因未明确。",
+    "neutronclient 的 utils.safe_encode_list 具体如何转换参数未详细说明。",
+    "修复后，二进制字符串 method 是否应被解码为字符串，还是保持为二进制字符串但被正确识别，未明确。"
+  ],
+  "raw": {
+    "issue_summary": "当 method 参数为二进制字符串时，builtin_str 转换导致其变为字面字符串表示，引发 HTTP 404 错误。",
+    "trigger_condition": {
+      "text": "使用二进制字符串（如 b'GET'）作为 HTTP 请求的 method 参数。",
+      "evidence": [
+        "Issue 描述：'neutronclient is broken because it uses this \"args = utils.safe_encode_list(args)\" command which converts all the values to binary string, including method.'",
+        "Issue 描述：'Seems if requests handled the method value being a binary string, we wouldn't have any problem.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "请求收到 404 Not Found 响应，因为 method 被转换为字面字符串 \"b'GET'\" 而非二进制字符串 \"GET\"。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'When requests tries to use the method \"b'GET'\", it gets a 404 Not Found response.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 method 参数为二进制字符串时，应能正确识别并发送对应的 HTTP 方法（如 GET），而非其字面表示。",
+      "evidence": [
+        "Issue 描述：'Seems if requests handled the method value being a binary string, we wouldn't have any problem.'",
+        "相关测试 2 显示对 bytestring URL 的处理是将其转换为普通字符串，暗示对二进制输入应有类似处理。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "requests.request",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中提及的触发场景涉及使用 requests.request 或类似 API 发起请求。"
+      },
+      {
+        "name": "requests.Session.prepare_request",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 2 使用了此方法，且 Issue 可能涉及请求准备阶段对 method 的处理。"
+      },
+      {
+        "name": "builtin_str",
+        "kind": "function",
+        "source_path": "requests/sessions.py",
+        "reason": "Issue 明确指出问题出现在 'method = builtin_str(method)' 这一行。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "requests/sessions.py",
+        "object": "builtin_str(method)",
+        "lines": "",
+        "reason": "Issue 直接指出此转换将二进制字符串 b'GET' 转换为字面字符串 \"b'GET'\"。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "RequestsTestCase.test_prepare_request_with_bytestring_url",
+        "test_file": "test_requests.py",
+        "why_relevant": "该测试处理了二进制字符串（bytestring）作为 URL 输入的情况，与 Issue 中二进制字符串作为 method 输入的场景类似。",
+        "reusable_parts": [
+          "imports",
+          "requests.Request 和 requests.Session 的构造",
+          "assert 风格"
+        ],
+        "possible_gap": "该测试关注 URL 的二进制字符串处理，而非 method 参数。"
+      },
+      {
+        "test_name": "RequestsTestCase.test_unicode_method_name",
+        "test_file": "test_requests.py",
+        "why_relevant": "该测试处理了 Unicode 字符串作为 method 参数的情况，涉及 method 参数的类型处理。",
+        "reusable_parts": [
+          "requests.request 的调用方式",
+          "assert r.status_code == 200"
+        ],
+        "possible_gap": "该测试使用 Unicode 字符串，而非二进制字符串。"
+      },
+      {
+        "test_name": "RequestsTestCase.test_unicode_multipart_post_fieldnames",
+        "test_file": "test_requests.py",
+        "why_relevant": "该测试涉及二进制字符串（encode('utf-8')）作为数据字段名，并检查其表示是否正确。",
+        "reusable_parts": [
+          "二进制字符串的构造",
+          "检查 prep.body 中是否包含或排除特定模式"
+        ],
+        "possible_gap": "该测试关注 multipart 数据体，而非 method 参数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "method='POST' 或 method=u('POST')（字符串或 Unicode 字符串）",
+        "target_pattern": "method=b'GET'（二进制字符串）",
+        "reason": "Issue 明确指出二进制字符串作为 method 参数会触发问题。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "直接调用 requests.request 或构造 Request 对象。",
+        "target_pattern": "通过类似 neutronclient 的 utils.safe_encode_list 将参数（包括 method）转换为二进制字符串后再调用。",
+        "reason": "Issue 描述了 neutronclient 的调用链导致 method 变为二进制字符串。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "type(prepared_request.method) 或 type(request.method)",
+        "reason": "观察 method 参数在准备请求后的类型变化，以确认是否从二进制字符串变为字面字符串。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "repr(prepared_request.method)",
+        "reason": "观察 method 的表示，以确认是否包含额外的引号或 'b' 前缀字面。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "response.status_code",
+        "reason": "Issue 中观察到的直接错误现象是 404 响应。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当使用二进制字符串 method（如 b'GET'）时，最终发出的 HTTP 方法应为 'GET'，而非 'b\\'GET\\''。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的、可能包含内部实现细节的字符串表示。",
+        "reason": "Issue 的核心是二进制字符串被错误地当作其字面表示发送。"
+      },
+      {
+        "assertion_goal": "使用二进制字符串 method 发起的请求应成功（例如返回 2xx 状态码），而非 404。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言特定的、可能变化的响应体内容。",
+        "reason": "Issue 明确指出错误结果是 404 Not Found。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要使用类似 httpbin 的服务来测试实际的 HTTP 请求和响应。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类可能继承自 unittest.TestCase。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "builtin_str 函数在 requests/sessions.py 中的具体实现和上下文未提供。",
+      "Python 2.6 和 3.4 之间导致此行为差异的具体原因未明确。",
+      "neutronclient 的 utils.safe_encode_list 具体如何转换参数未详细说明。",
+      "修复后，二进制字符串 method 是否应被解码为字符串，还是保持为二进制字符串但被正确识别，未明确。"
+    ]
+  }
+}

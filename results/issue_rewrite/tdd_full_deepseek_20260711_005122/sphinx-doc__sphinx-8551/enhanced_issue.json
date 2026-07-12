@@ -1,0 +1,333 @@
+{
+  "instance_id": "sphinx-doc__sphinx-8551",
+  "issue_summary": "在 Sphinx 的 Python 域中，使用 :type: 和 :rtype: 信息字段创建的隐式交叉引用，对于非限定名称的查找方式与显式 xref 角色不同，导致错误的模糊类查找警告和错误的链接目标。",
+  "trigger_condition": {
+    "text": "在 reStructuredText 文档中，当使用 .. py:currentmodule:: 指令将当前模块设置为包含同名类的子模块（例如 mod.submod）时，在该模块内使用非限定类名（例如 A）作为 :param: 或 :rtype: 信息字段的类型。",
+    "evidence": [
+      "Issue 中提供的 reStructuredText 示例代码，特别是标记为 BUG 的行：':param A a: BUG: links to mod.A instead of mod.submod.A' 和相应的 ':rtype: A'。",
+      "Issue 描述指出，对于非限定名称，隐式 xref 似乎在每个（子）模块中搜索名称，而不是在当前模块和父模块中搜索。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "Sphinx 构建时产生 'more than one target found for cross-reference' 警告，并且非限定类型名称被错误地解析到父模块中的类（例如 mod.A），而不是当前模块中的类（例如 mod.submod.A）。",
+    "symptom_type": "warning",
+    "evidence": [
+      "Issue 中给出的警告输出示例：'index.rst:28: WARNING: more than one target found for cross-reference 'A': mod.A, mod.submod.A'。",
+      "Issue 中明确说明：'The ``:param:`` annotated with ``BUG`` as well as the corresponding ``rtype`` gets resolved to ``mod.A``.'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "在给定 .. py:currentmodule:: mod.submod 的上下文中，非限定类型名称 'A' 应正确解析到 mod.submod.A，并且不应产生模糊查找警告。",
+    "evidence": [
+      "Issue 的 'Expected behavior' 部分：'No warnings, and the two mentioned types should resolve to ``mod.submod.A``.'"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "sphinx.domains.python.PythonDomain.find_obj",
+      "kind": "method",
+      "source_path": "",
+      "reason": "相关测试 test_domain_py_find_obj 直接调用了此方法进行对象查找，这与 Issue 中描述的交叉引用查找问题直接相关。"
+    },
+    {
+      "name": "sphinx.domains.python.PythonDomain.resolve_xref",
+      "kind": "method",
+      "source_path": "",
+      "reason": "Issue 涉及交叉引用解析，这是处理 :type: 和 :rtype: 隐式 xref 的核心方法。"
+    },
+    {
+      "name": "sphinx.domains.python.PythonDomain",
+      "kind": "class",
+      "source_path": "",
+      "reason": "Issue 发生在 Python 域的交叉引用处理中，所有相关测试都围绕此域展开。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sphinx/domains/python.py",
+      "object": "PythonDomain",
+      "lines": "",
+      "reason": "Issue 明确指出问题在于 Python 域中 :type: 和 :rtype: 信息字段创建的隐式交叉引用的查找逻辑。所有相关测试都针对此域。"
+    },
+    {
+      "path": "sphinx/ext/autodoc/__init__.py",
+      "object": "",
+      "lines": "",
+      "reason": "相关测试 test_autodoc 表明 autodoc 扩展与文档生成相关，但 Issue 核心是域内的查找逻辑，因此此路径相关性较低。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_domain_py_xrefs",
+      "test_file": "tests/test_domain_py.py",
+      "why_relevant": "该测试直接验证 Python 域中交叉引用的前缀和解析是否正确，与 Issue 主题高度相关。它使用了类似的测试装置（app, status, warning）和文档树遍历来检查 pending_xref 节点。",
+      "reusable_parts": [
+        "@pytest.mark.sphinx('dummy', testroot='domain-py') fixture 使用模式。",
+        "app.builder.build_all() 调用。",
+        "使用 app.env.get_doctree 获取文档树并遍历 pending_xref 节点。",
+        "assert_refnode 辅助函数用于验证引用节点属性。",
+        "对模块、类和目标名称的断言模式。"
+      ],
+      "possible_gap": "该测试主要检查显式 xref 角色（如 :py:class:）的解析，而 Issue 涉及的是 :type: 和 :rtype: 信息字段创建的隐式 xref。测试用例没有设置 .. py:currentmodule:: 上下文或使用非限定名称在嵌套模块中触发模糊查找。"
+    },
+    {
+      "test_name": "test_warn_missing_reference",
+      "test_file": "tests/test_domain_py.py",
+      "why_relevant": "该测试检查交叉引用缺失或失败时是否产生正确的警告，与 Issue 中观察到的警告现象相关。",
+      "reusable_parts": [
+        "@pytest.mark.sphinx('dummy', testroot='domain-py-xref-warning') 配置模式。",
+        "使用 app.build() 和 warning.getvalue() 来捕获和断言警告信息。"
+      ],
+      "possible_gap": "该测试关注的是引用目标不存在的情况，而 Issue 是引用目标存在但查找逻辑错误导致模糊警告和错误链接。"
+    },
+    {
+      "test_name": "test_domain_py_find_obj",
+      "test_file": "tests/test_domain_py.py",
+      "why_relevant": "该测试直接调用 Python 域的 find_obj 方法，这是交叉引用查找的核心逻辑。Issue 的根本原因很可能在此方法或相关调用链中。",
+      "reusable_parts": [
+        "app.env.domains['py'].find_obj 的调用模式。",
+        "对查找结果列表的断言方式。"
+      ],
+      "possible_gap": "该测试使用预定义的、不涉及 .. py:currentmodule:: 或信息字段的查找场景。它没有模拟 :type:/:rtype: 隐式 xref 的特定查找路径或当前模块上下文。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试中使用显式限定名称（如 'mod.A', 'mod.submod.A'）或在不涉及当前模块上下文的简单结构中查找对象。",
+      "target_pattern": "在设置了 .. py:currentmodule:: mod.submod 的文档部分，使用非限定名称 'A' 作为 :param: 或 :rtype: 信息字段的类型。",
+      "reason": "Issue 表明，隐式 xref 对非限定名称的查找逻辑在存在当前模块上下文时存在缺陷，会错误地搜索所有子模块。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "测试使用现有的 testroot（如 'domain-py'）配置，其中可能没有定义具有同名类的嵌套模块结构。",
+      "target_pattern": "创建一个新的 testroot 或修改现有配置，使其包含 Issue 中描述的模块结构（mod.A 和 mod.submod.A），并在文档中使用 .. py:currentmodule:: 和 :type:/:rtype:。",
+      "reason": "为了复现 Issue，测试环境需要包含触发模糊查找的特定模块层次结构和文档指令。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "warning",
+      "expression_hint": "warning.getvalue() 的输出内容，特别是是否包含 'more than one target found for cross-reference' 以及涉及的名称。",
+      "reason": "Issue 的主要症状是产生错误的模糊查找警告。观测警告内容可以确认缺陷是否被触发。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "pending_xref 节点的属性，特别是 'reftarget'，用于检查非限定名称 'A' 最终被解析到哪个目标（mod.A 还是 mod.submod.A）。",
+      "reason": "Issue 的预期行为是链接到 mod.submod.A，观测实际解析的目标可以验证行为是否正确。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "app.env.domains['py'].data['objects'] 中注册的对象，以及当前模块的上下文状态。",
+      "reason": "查找逻辑依赖于域中注册的对象和当前模块设置，观测这些状态有助于理解查找过程。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "在 .. py:currentmodule:: mod.submod 上下文中，对非限定名称 'A' 的隐式交叉引用不应产生模糊查找警告，并且应解析到目标 'mod.submod.A'。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "断言完整的警告字符串完全相等，因为行号可能变化。避免断言与问题无关的其他引用。",
+      "reason": "Issue 的期望是'No warnings'，并且链接正确。断言警告输出中不包含特定的模糊查找警告片段，并验证引用目标，是稳定且对齐的。"
+    },
+    {
+      "assertion_goal": "pending_xref 节点的 'reftarget' 属性对于非限定名称 'A' 应等于 'mod.submod.A'。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言整个文档树或所有节点的完整结构。",
+      "reason": "直接验证核心错误：错误链接到了父模块的类。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 @pytest.mark.sphinx fixture 并创建一个新的 testroot，其中包含定义 mod.A 和 mod.submod.A 类的 Python 模块，以及包含 Issue 中 reStructuredText 示例的 .rst 文件。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "使用 app.builder.build_all() 构建文档，然后使用 app.env.get_doctree 获取特定文件的文档树进行分析。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "使用 warning.getvalue() 捕获构建过程中的警告输出。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "隐式 xref（:type:, :rtype:）和显式 xref 角色（:py:class:）在代码中的具体查找逻辑分叉点在哪里。",
+    "PythonDomain.find_obj 方法在处理不同 searchmode 或前缀（prefix）时的具体行为，尤其是在有当前模块上下文时。",
+    "除了 :param: 和 :rtype:，其他信息字段（如 :vartype:, :returns:）是否受同一问题影响。",
+    "导致在所有子模块中搜索而非遵循正常作用域查找的确切代码位置。"
+  ],
+  "raw": {
+    "issue_summary": "在 Sphinx 的 Python 域中，使用 :type: 和 :rtype: 信息字段创建的隐式交叉引用，对于非限定名称的查找方式与显式 xref 角色不同，导致错误的模糊类查找警告和错误的链接目标。",
+    "trigger_condition": {
+      "text": "在 reStructuredText 文档中，当使用 .. py:currentmodule:: 指令将当前模块设置为包含同名类的子模块（例如 mod.submod）时，在该模块内使用非限定类名（例如 A）作为 :param: 或 :rtype: 信息字段的类型。",
+      "evidence": [
+        "Issue 中提供的 reStructuredText 示例代码，特别是标记为 BUG 的行：':param A a: BUG: links to mod.A instead of mod.submod.A' 和相应的 ':rtype: A'。",
+        "Issue 描述指出，对于非限定名称，隐式 xref 似乎在每个（子）模块中搜索名称，而不是在当前模块和父模块中搜索。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Sphinx 构建时产生 'more than one target found for cross-reference' 警告，并且非限定类型名称被错误地解析到父模块中的类（例如 mod.A），而不是当前模块中的类（例如 mod.submod.A）。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 中给出的警告输出示例：'index.rst:28: WARNING: more than one target found for cross-reference 'A': mod.A, mod.submod.A'。",
+        "Issue 中明确说明：'The ``:param:`` annotated with ``BUG`` as well as the corresponding ``rtype`` gets resolved to ``mod.A``.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在给定 .. py:currentmodule:: mod.submod 的上下文中，非限定类型名称 'A' 应正确解析到 mod.submod.A，并且不应产生模糊查找警告。",
+      "evidence": [
+        "Issue 的 'Expected behavior' 部分：'No warnings, and the two mentioned types should resolve to ``mod.submod.A``.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sphinx.domains.python.PythonDomain.find_obj",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 test_domain_py_find_obj 直接调用了此方法进行对象查找，这与 Issue 中描述的交叉引用查找问题直接相关。"
+      },
+      {
+        "name": "sphinx.domains.python.PythonDomain.resolve_xref",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 涉及交叉引用解析，这是处理 :type: 和 :rtype: 隐式 xref 的核心方法。"
+      },
+      {
+        "name": "sphinx.domains.python.PythonDomain",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 发生在 Python 域的交叉引用处理中，所有相关测试都围绕此域展开。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sphinx/domains/python.py",
+        "object": "PythonDomain",
+        "lines": "",
+        "reason": "Issue 明确指出问题在于 Python 域中 :type: 和 :rtype: 信息字段创建的隐式交叉引用的查找逻辑。所有相关测试都针对此域。"
+      },
+      {
+        "path": "sphinx/ext/autodoc/__init__.py",
+        "object": "",
+        "lines": "",
+        "reason": "相关测试 test_autodoc 表明 autodoc 扩展与文档生成相关，但 Issue 核心是域内的查找逻辑，因此此路径相关性较低。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_domain_py_xrefs",
+        "test_file": "tests/test_domain_py.py",
+        "why_relevant": "该测试直接验证 Python 域中交叉引用的前缀和解析是否正确，与 Issue 主题高度相关。它使用了类似的测试装置（app, status, warning）和文档树遍历来检查 pending_xref 节点。",
+        "reusable_parts": [
+          "@pytest.mark.sphinx('dummy', testroot='domain-py') fixture 使用模式。",
+          "app.builder.build_all() 调用。",
+          "使用 app.env.get_doctree 获取文档树并遍历 pending_xref 节点。",
+          "assert_refnode 辅助函数用于验证引用节点属性。",
+          "对模块、类和目标名称的断言模式。"
+        ],
+        "possible_gap": "该测试主要检查显式 xref 角色（如 :py:class:）的解析，而 Issue 涉及的是 :type: 和 :rtype: 信息字段创建的隐式 xref。测试用例没有设置 .. py:currentmodule:: 上下文或使用非限定名称在嵌套模块中触发模糊查找。"
+      },
+      {
+        "test_name": "test_warn_missing_reference",
+        "test_file": "tests/test_domain_py.py",
+        "why_relevant": "该测试检查交叉引用缺失或失败时是否产生正确的警告，与 Issue 中观察到的警告现象相关。",
+        "reusable_parts": [
+          "@pytest.mark.sphinx('dummy', testroot='domain-py-xref-warning') 配置模式。",
+          "使用 app.build() 和 warning.getvalue() 来捕获和断言警告信息。"
+        ],
+        "possible_gap": "该测试关注的是引用目标不存在的情况，而 Issue 是引用目标存在但查找逻辑错误导致模糊警告和错误链接。"
+      },
+      {
+        "test_name": "test_domain_py_find_obj",
+        "test_file": "tests/test_domain_py.py",
+        "why_relevant": "该测试直接调用 Python 域的 find_obj 方法，这是交叉引用查找的核心逻辑。Issue 的根本原因很可能在此方法或相关调用链中。",
+        "reusable_parts": [
+          "app.env.domains['py'].find_obj 的调用模式。",
+          "对查找结果列表的断言方式。"
+        ],
+        "possible_gap": "该测试使用预定义的、不涉及 .. py:currentmodule:: 或信息字段的查找场景。它没有模拟 :type:/:rtype: 隐式 xref 的特定查找路径或当前模块上下文。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用显式限定名称（如 'mod.A', 'mod.submod.A'）或在不涉及当前模块上下文的简单结构中查找对象。",
+        "target_pattern": "在设置了 .. py:currentmodule:: mod.submod 的文档部分，使用非限定名称 'A' 作为 :param: 或 :rtype: 信息字段的类型。",
+        "reason": "Issue 表明，隐式 xref 对非限定名称的查找逻辑在存在当前模块上下文时存在缺陷，会错误地搜索所有子模块。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试使用现有的 testroot（如 'domain-py'）配置，其中可能没有定义具有同名类的嵌套模块结构。",
+        "target_pattern": "创建一个新的 testroot 或修改现有配置，使其包含 Issue 中描述的模块结构（mod.A 和 mod.submod.A），并在文档中使用 .. py:currentmodule:: 和 :type:/:rtype:。",
+        "reason": "为了复现 Issue，测试环境需要包含触发模糊查找的特定模块层次结构和文档指令。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "warning.getvalue() 的输出内容，特别是是否包含 'more than one target found for cross-reference' 以及涉及的名称。",
+        "reason": "Issue 的主要症状是产生错误的模糊查找警告。观测警告内容可以确认缺陷是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "pending_xref 节点的属性，特别是 'reftarget'，用于检查非限定名称 'A' 最终被解析到哪个目标（mod.A 还是 mod.submod.A）。",
+        "reason": "Issue 的预期行为是链接到 mod.submod.A，观测实际解析的目标可以验证行为是否正确。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "app.env.domains['py'].data['objects'] 中注册的对象，以及当前模块的上下文状态。",
+        "reason": "查找逻辑依赖于域中注册的对象和当前模块设置，观测这些状态有助于理解查找过程。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在 .. py:currentmodule:: mod.submod 上下文中，对非限定名称 'A' 的隐式交叉引用不应产生模糊查找警告，并且应解析到目标 'mod.submod.A'。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的警告字符串完全相等，因为行号可能变化。避免断言与问题无关的其他引用。",
+        "reason": "Issue 的期望是'No warnings'，并且链接正确。断言警告输出中不包含特定的模糊查找警告片段，并验证引用目标，是稳定且对齐的。"
+      },
+      {
+        "assertion_goal": "pending_xref 节点的 'reftarget' 属性对于非限定名称 'A' 应等于 'mod.submod.A'。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言整个文档树或所有节点的完整结构。",
+        "reason": "直接验证核心错误：错误链接到了父模块的类。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 @pytest.mark.sphinx fixture 并创建一个新的 testroot，其中包含定义 mod.A 和 mod.submod.A 类的 Python 模块，以及包含 Issue 中 reStructuredText 示例的 .rst 文件。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 app.builder.build_all() 构建文档，然后使用 app.env.get_doctree 获取特定文件的文档树进行分析。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 warning.getvalue() 捕获构建过程中的警告输出。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "隐式 xref（:type:, :rtype:）和显式 xref 角色（:py:class:）在代码中的具体查找逻辑分叉点在哪里。",
+      "PythonDomain.find_obj 方法在处理不同 searchmode 或前缀（prefix）时的具体行为，尤其是在有当前模块上下文时。",
+      "除了 :param: 和 :rtype:，其他信息字段（如 :vartype:, :returns:）是否受同一问题影响。",
+      "导致在所有子模块中搜索而非遵循正常作用域查找的确切代码位置。"
+    ]
+  }
+}

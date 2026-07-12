@@ -1,0 +1,153 @@
+{
+  "issue_summary": "在 PostgreSQL 上，无法删除对已具有 unique=True 约束的单个字段的 unique_together 约束。",
+  "trigger_condition": {
+    "text": "对一个模型字段（例如主键字段 id）同时设置 primary_key=True（或 unique=True）和 unique_together 约束，然后尝试通过迁移删除该 unique_together 约束。",
+    "evidence": ["Issue 描述：'I have an erroneous unique_together constraint on a model's primary key (unique_together = (('id',),)) that cannot be dropped by a migration.'", "Issue 描述：'the migration tries to find all unique constraints on the column and expects there to be only one, but I've got two — the primary key and the unique_together constraint'"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "迁移失败，可能抛出异常或无法删除约束，导致数据库中存在两个重复的约束（主键约束和 unique_together 约束）。",
+    "symptom_type": "unknown",
+    "evidence": ["Issue 描述：'that cannot be dropped by a migration.'", "Issue 描述：'I've got two — the primary key and the unique_together constraint'"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "迁移应能成功删除 unique_together 约束，即使目标字段上已存在另一个唯一约束（如主键约束）。",
+    "evidence": ["Issue 描述暗示了期望行为：能够删除错误的 unique_together 约束。", "相关测试 SchemaTests.test_unique_together 展示了成功添加和删除 unique_together 约束的正常流程。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "connection.schema_editor",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试中用于执行模式变更（如 alter_unique_together）的入口。"
+    },
+    {
+      "name": "editor.alter_unique_together",
+      "kind": "method",
+      "source_path": "",
+      "reason": "Issue 的核心操作是删除 unique_together 约束，此方法直接相关。"
+    },
+    {
+      "name": "Field.unique",
+      "kind": "method",
+      "source_path": "django/db/models/fields/__init__.py",
+      "reason": "源码片段显示该方法返回 self._unique 或 self.primary_key，可能与约束检测逻辑有关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/migrations/migration.py",
+      "object": "migration",
+      "lines": "",
+      "reason": "Issue 提到 'the migration tries to find all unique constraints on the column and expects there to be only one'，表明迁移逻辑可能存在缺陷。"
+    },
+    {
+      "path": "django/db/models/fields/__init__.py",
+      "object": "Field.unique",
+      "lines": "839-840",
+      "reason": "该方法定义了字段的唯一性判断，可能影响迁移时对约束的识别。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "SchemaTests.test_unique_together",
+      "test_file": "tests/schema/tests.py",
+      "why_relevant": "它测试了添加和删除 unique_together 约束的基本流程，是生成缺陷复现测试的良好起点。",
+      "reusable_parts": ["imports", "TransactionTestCase 类", "使用 connection.schema_editor() 的上下文管理器", "editor.alter_unique_together 的调用模式", "使用 assertRaises(IntegrityError) 验证约束"],
+      "possible_gap": "该测试的 unique_together 涉及两个字段，且这些字段没有单独的 unique=True 约束。而 Issue 涉及单个字段且该字段已有唯一约束。"
+    },
+    {
+      "test_name": "SchemaTests.test_unique",
+      "test_file": "tests/schema/tests.py",
+      "why_relevant": "它测试了单个字段上 unique 约束的添加和删除，与 Issue 中单个字段的约束场景部分相关。",
+      "reusable_parts": ["使用 editor.alter_field 修改字段属性", "通过 IntegrityError 断言验证约束效果", "字段对象创建和属性设置模式"],
+      "possible_gap": "它测试的是字段的 unique 属性，而不是 unique_together 约束。"
+    },
+    {
+      "test_name": "SchemaTests.test_alter_not_unique_field_to_primary_key",
+      "test_file": "tests/schema/tests.py",
+      "why_relevant": "它涉及主键约束和唯一约束的交互，并检查冗余唯一约束的数量，与 Issue 中“两个约束”的问题相关。",
+      "reusable_parts": ["检查约束数量的方法 get_constraints_count", "关于冗余唯一约束的断言逻辑"],
+      "possible_gap": "它测试的是将字段改为 primary key，而不是删除 unique_together 约束。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中 unique_together 通常作用于多个字段或没有其他唯一约束的字段。",
+      "target_pattern": "unique_together 应作用于单个字段，且该字段已具有 primary_key=True 或 unique=True 约束。",
+      "reason": "Issue 明确指出问题发生在对已有唯一约束的单个字段设置 unique_together 时。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "测试通常使用默认数据库配置。",
+      "target_pattern": "明确使用 PostgreSQL 数据库后端。",
+      "reason": "Issue 提到 'Database is PostgreSQL, if that makes any difference.'，表明数据库类型可能相关。",
+      "confidence": "medium"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "测试通常先创建模型，然后直接添加/删除约束。",
+      "target_pattern": "可能需要先创建带有错误约束的模型（通过迁移或直接定义），然后执行删除该约束的迁移操作。",
+      "reason": "Issue 描述的是一个迁移过程无法删除已存在的错误约束。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "sql",
+      "expression_hint": "迁移执行期间生成的 SQL 语句，特别是删除约束的语句。",
+      "reason": "可以观察迁移是否成功发出了正确的 DROP CONSTRAINT 命令。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "迁移前后，数据库表上关于目标字段的约束列表（例如通过查询 information_schema）。",
+      "reason": "可以确认迁移后错误的 unique_together 约束是否仍然存在。"
+    },
+    {
+      "kind": "exception",
+      "expression_hint": "执行 editor.alter_unique_together 时是否抛出任何异常。",
+      "reason": "Issue 暗示迁移失败，可能伴随异常。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "成功执行删除 unique_together 约束的迁移后，数据库表上对目标字段的唯一约束数量应不超过 1（即只有主键或原有的 unique 约束）。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "断言完整的 SQL 字符串或异常消息文本。",
+      "reason": "这与 Issue 的核心问题（存在两个约束）直接对应，且不依赖于具体的 SQL 实现细节。"
+    },
+    {
+      "assertion_goal": "迁移操作不应引发异常（在修复后的预期行为下）。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言特定的异常类型或消息，除非 Issue 明确给出。",
+      "reason": "当前行为是迁移失败，修复后应成功完成。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 TransactionTestCase 或类似的测试基类来支持数据库事务和模式操作。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要配置 Django 使用 PostgreSQL 数据库进行测试。",
+      "source": "issue",
+      "confidence": "medium"
+    },
+    {
+      "hint": "需要定义或使用一个测试模型，其包含一个具有 primary_key=True 或 unique=True 的字段，并为其设置 unique_together 约束。",
+      "source": "inference",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "触发缺陷的确切异常类型和消息是什么？",
+    "缺陷是否只发生在 PostgreSQL 上，还是也影响其他数据库后端？",
+    "迁移失败是发生在生成迁移文件阶段，还是执行迁移阶段？",
+    "源码中具体哪一部分的‘查找所有唯一约束并期望只有一个’的逻辑导致了问题？"
+  ]
+}

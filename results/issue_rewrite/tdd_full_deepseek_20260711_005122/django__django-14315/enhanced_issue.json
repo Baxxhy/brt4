@@ -1,0 +1,271 @@
+{
+  "instance_id": "django__django-14315",
+  "issue_summary": "PostgreSQL 数据库客户端 runshell 方法在某些情况下未能正确使用 os.environ 的环境变量值。",
+  "trigger_condition": {
+    "text": "调用 PostgreSQL 数据库客户端的 runshell 方法时，环境变量字典可能为空。",
+    "evidence": [
+      "Issue 描述指出 'postgresql client returns empty dict instead of None for env'，导致 'os.environ is not used and empty env passed to subprocess'。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "传递给子进程的环境变量字典为空，而不是继承或合并 os.environ 的值。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 描述指出 'postgresql client returns empty dict instead of None for env' 和 'empty env passed to subprocess'。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "runshell 方法应确保传递给子进程的环境变量字典正确包含或继承 os.environ 的值。",
+    "evidence": [
+      "Issue 描述暗示 env 不应为空字典，而应使用 os.environ。相关测试 4 中有一行 'env = {**os.environ, **env}'，表明环境变量应合并。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "DatabaseClient.runshell",
+      "kind": "method",
+      "source_path": "django/db/backends/postgresql/client.py",
+      "reason": "Issue 直接针对此方法，指出其不尊重 os.environ 值。"
+    },
+    {
+      "name": "subprocess.run",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 提到 'empty env passed to subprocess'，且相关测试 4 使用了 subprocess.run。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/backends/postgresql/client.py",
+      "object": "DatabaseClient.runshell",
+      "lines": "56-64",
+      "reason": "Issue 引用的提交链接和检索出的源码片段指向此方法。Issue 描述表明 env 处理逻辑可能在此方法或其父类中出错。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "PostgreSqlDbshellCommandTestCase.test_basic",
+      "test_file": "tests/dbshell/test_postgresql.py",
+      "why_relevant": "测试了 settings_to_cmd_args_env 方法，该方法可能负责构建 runshell 使用的命令和环境变量。",
+      "reusable_parts": [
+        "测试类结构",
+        "settings_to_cmd_args_env 调用方式",
+        "assertEqual 断言风格"
+      ],
+      "possible_gap": "该测试主要验证命令参数和环境变量的构建结果，可能未直接测试 runshell 方法在 env 为空字典时的行为，或未模拟 os.environ 的交互。"
+    },
+    {
+      "test_name": "PostgreSqlDbshellCommandTestCase.test_crash_password_does_not_leak",
+      "test_file": "tests/dbshell/test_postgresql.py",
+      "why_relevant": "直接操作了环境变量字典 env 并与 os.environ 合并，与 Issue 中 env 处理问题高度相关。",
+      "reusable_parts": [
+        "os.environ 和 env 的合并逻辑",
+        "subprocess.run 的调用",
+        "assertRaises 和 assertNotIn 的断言风格"
+      ],
+      "possible_gap": "该测试主要关注密码泄露，其 env 合并逻辑可能是一个正确示例，但未测试当 env 为空字典时 runshell 内部是否错误地未进行合并。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "测试用例中 settings_to_cmd_args_env 接收的配置字典包含或不包含 PASSWORD 等键，返回的 env 字典可能为空或包含 PGPASSWORD。",
+      "target_pattern": "配置应使得 settings_to_cmd_args_env 返回的 env 字典为空（例如，不提供 PASSWORD），但 runshell 调用时，子进程应仍能获得 os.environ 中的其他环境变量。",
+      "reason": "Issue 指出 env 为空字典时 os.environ 未被使用。需要构造一个场景，其中 env 为空，但子进程的环境不应为空。",
+      "confidence": "medium"
+    },
+    {
+      "slot": "mock",
+      "current_pattern": "相关测试 5 使用 mock.patch 模拟 subprocess.run 抛出 FileNotFoundError。",
+      "target_pattern": "模拟 subprocess.run 以检查其 env 参数的值，验证其是否为空字典而非包含 os.environ。",
+      "reason": "可以直接观测传递给 subprocess.run 的 env 参数，这是判断 Issue 是否触发的关键点。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "传递给 subprocess.run 的 env 参数的值（类型和内容）。",
+      "reason": "Issue 的核心是 env 参数错误地是空字典。观测此值可直接判断缺陷是否发生。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "在调用 runshell 前后，os.environ 的内容。",
+      "reason": "需要确认 os.environ 中原本存在哪些变量，以判断它们是否应被传递给子进程。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "传递给 subprocess.run 的 env 参数不应是空字典，且应包含 os.environ 中的某些键值对。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "断言 env 等于一个完整的特定字典，因为 os.environ 在不同环境中可能不同。",
+      "reason": "Issue 的期望是 env 应使用 os.environ，因此断言 env 不为空且包含 os.environ 的某些内容更稳定。"
+    },
+    {
+      "assertion_goal": "当 env 字典为空时，传递给子进程的环境不应为空。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "断言 env 参数为 None。",
+      "reason": "Issue 提到返回空字典而不是 None，因此重点在于 env 字典的内容，而非是否为 None。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 SimpleTestCase 或类似的测试基类。可能需要设置数据库连接配置（NAME, USER, HOST, PORT 等），但不设置 PASSWORD 以使 env 为空。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要 mock subprocess.run 来捕获其调用参数，而不是实际执行子进程。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要预先在 os.environ 中设置一些已知的测试环境变量。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "settings_to_cmd_args_env 方法的具体实现和返回值逻辑，以及它如何被 runshell 使用。",
+    "缺陷的确切位置是在 runshell 方法内部，还是在它调用的父类方法中。",
+    "修复后的预期行为是 env 字典应始终是 os.environ 的副本，还是仅在传入 env 为空时回退到 os.environ，或是两者的合并。"
+  ],
+  "raw": {
+    "issue_summary": "PostgreSQL 数据库客户端 runshell 方法在某些情况下未能正确使用 os.environ 的环境变量值。",
+    "trigger_condition": {
+      "text": "调用 PostgreSQL 数据库客户端的 runshell 方法时，环境变量字典可能为空。",
+      "evidence": [
+        "Issue 描述指出 'postgresql client returns empty dict instead of None for env'，导致 'os.environ is not used and empty env passed to subprocess'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "传递给子进程的环境变量字典为空，而不是继承或合并 os.environ 的值。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述指出 'postgresql client returns empty dict instead of None for env' 和 'empty env passed to subprocess'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "runshell 方法应确保传递给子进程的环境变量字典正确包含或继承 os.environ 的值。",
+      "evidence": [
+        "Issue 描述暗示 env 不应为空字典，而应使用 os.environ。相关测试 4 中有一行 'env = {**os.environ, **env}'，表明环境变量应合并。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "DatabaseClient.runshell",
+        "kind": "method",
+        "source_path": "django/db/backends/postgresql/client.py",
+        "reason": "Issue 直接针对此方法，指出其不尊重 os.environ 值。"
+      },
+      {
+        "name": "subprocess.run",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 提到 'empty env passed to subprocess'，且相关测试 4 使用了 subprocess.run。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/postgresql/client.py",
+        "object": "DatabaseClient.runshell",
+        "lines": "56-64",
+        "reason": "Issue 引用的提交链接和检索出的源码片段指向此方法。Issue 描述表明 env 处理逻辑可能在此方法或其父类中出错。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "PostgreSqlDbshellCommandTestCase.test_basic",
+        "test_file": "tests/dbshell/test_postgresql.py",
+        "why_relevant": "测试了 settings_to_cmd_args_env 方法，该方法可能负责构建 runshell 使用的命令和环境变量。",
+        "reusable_parts": [
+          "测试类结构",
+          "settings_to_cmd_args_env 调用方式",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试主要验证命令参数和环境变量的构建结果，可能未直接测试 runshell 方法在 env 为空字典时的行为，或未模拟 os.environ 的交互。"
+      },
+      {
+        "test_name": "PostgreSqlDbshellCommandTestCase.test_crash_password_does_not_leak",
+        "test_file": "tests/dbshell/test_postgresql.py",
+        "why_relevant": "直接操作了环境变量字典 env 并与 os.environ 合并，与 Issue 中 env 处理问题高度相关。",
+        "reusable_parts": [
+          "os.environ 和 env 的合并逻辑",
+          "subprocess.run 的调用",
+          "assertRaises 和 assertNotIn 的断言风格"
+        ],
+        "possible_gap": "该测试主要关注密码泄露，其 env 合并逻辑可能是一个正确示例，但未测试当 env 为空字典时 runshell 内部是否错误地未进行合并。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试用例中 settings_to_cmd_args_env 接收的配置字典包含或不包含 PASSWORD 等键，返回的 env 字典可能为空或包含 PGPASSWORD。",
+        "target_pattern": "配置应使得 settings_to_cmd_args_env 返回的 env 字典为空（例如，不提供 PASSWORD），但 runshell 调用时，子进程应仍能获得 os.environ 中的其他环境变量。",
+        "reason": "Issue 指出 env 为空字典时 os.environ 未被使用。需要构造一个场景，其中 env 为空，但子进程的环境不应为空。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "mock",
+        "current_pattern": "相关测试 5 使用 mock.patch 模拟 subprocess.run 抛出 FileNotFoundError。",
+        "target_pattern": "模拟 subprocess.run 以检查其 env 参数的值，验证其是否为空字典而非包含 os.environ。",
+        "reason": "可以直接观测传递给 subprocess.run 的 env 参数，这是判断 Issue 是否触发的关键点。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "传递给 subprocess.run 的 env 参数的值（类型和内容）。",
+        "reason": "Issue 的核心是 env 参数错误地是空字典。观测此值可直接判断缺陷是否发生。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在调用 runshell 前后，os.environ 的内容。",
+        "reason": "需要确认 os.environ 中原本存在哪些变量，以判断它们是否应被传递给子进程。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "传递给 subprocess.run 的 env 参数不应是空字典，且应包含 os.environ 中的某些键值对。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言 env 等于一个完整的特定字典，因为 os.environ 在不同环境中可能不同。",
+        "reason": "Issue 的期望是 env 应使用 os.environ，因此断言 env 不为空且包含 os.environ 的某些内容更稳定。"
+      },
+      {
+        "assertion_goal": "当 env 字典为空时，传递给子进程的环境不应为空。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言 env 参数为 None。",
+        "reason": "Issue 提到返回空字典而不是 None，因此重点在于 env 字典的内容，而非是否为 None。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的测试基类。可能需要设置数据库连接配置（NAME, USER, HOST, PORT 等），但不设置 PASSWORD 以使 env 为空。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要 mock subprocess.run 来捕获其调用参数，而不是实际执行子进程。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要预先在 os.environ 中设置一些已知的测试环境变量。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "settings_to_cmd_args_env 方法的具体实现和返回值逻辑，以及它如何被 runshell 使用。",
+      "缺陷的确切位置是在 runshell 方法内部，还是在它调用的父类方法中。",
+      "修复后的预期行为是 env 字典应始终是 os.environ 的副本，还是仅在传入 env 为空时回退到 os.environ，或是两者的合并。"
+    ]
+  }
+}

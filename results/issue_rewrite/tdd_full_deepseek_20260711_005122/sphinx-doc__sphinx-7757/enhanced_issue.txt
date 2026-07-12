@@ -1,0 +1,129 @@
+instance_id: sphinx-doc__sphinx-7757
+
+issue_summary: Sphinx 在解析包含位置限定参数和默认值的 Python 函数签名时，未能正确显示位置限定参数的默认值。
+
+trigger_condition:
+{
+  "text": "使用 reStructuredText 指令 `.. py:function:: foo(a, b=0, /, c=1)` 构建文档。",
+  "evidence": [
+    "Issue 的 'To Reproduce' 部分提供了确切的输入文本。",
+    "Issue 截图显示了错误的输出结果。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "生成的文档中，位置限定参数 `b` 的默认值 `0` 没有显示出来。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 截图显示参数列表为 `(a, b, /, c=1)`，缺少 `b=0`。",
+    "Issue 描述 'The default value for positional only argument has vanished'。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "生成的文档应正确显示位置限定参数 `b` 的默认值 `0`，即签名应包含 `b=0`。",
+  "evidence": [
+    "Issue 的 'Expected behavior' 部分明确说明 'The default value is shown.'。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "restructuredtext.parse",
+    "kind": "function",
+    "source_path": "",
+    "reason": "相关测试代码中用于解析 reStructuredText 文本并生成文档树（doctree）的核心函数。"
+  },
+  {
+    "name": "desc_parameterlist",
+    "kind": "class",
+    "source_path": "",
+    "reason": "测试代码中用于断言文档树中参数列表结构的节点类型，是验证签名生成结果的关键。"
+  },
+  {
+    "name": "desc_parameter",
+    "kind": "class",
+    "source_path": "",
+    "reason": "测试代码中用于断言参数节点的类型，包含参数名、默认值等子节点。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试 `test_pyfunction_signature_full_py38` 中的输入模式，如 `\"hello(a, /, b, *, c)\"`，只包含分隔符，不包含默认值。",
+    "target_pattern": "根据 Issue，输入应变为包含位置限定参数和默认值的组合，如 `\"foo(a, b=0, /, c=1)\"`。",
+    "reason": "当前测试未覆盖“位置限定参数 + 默认值”的组合。添加默认值可能触发解析或渲染逻辑中处理该组合的缺陷路径。",
+    "confidence": "high"
+  },
+  {
+    "slot": "argument",
+    "current_pattern": "相似测试 `test_pyfunction_signature_full` 中的参数模式，如 `\"b = 1\"`，是关键字参数（无 `/` 限定）的默认值。",
+    "target_pattern": "将默认值参数 `b=0` 放置在位置限定参数分隔符 `/` 之前，使其成为位置限定参数。",
+    "reason": "缺陷可能源于当默认值参数被 `/` 标记为位置限定时，其默认值信息在后续处理中丢失。变异此模式可测试此边界情况。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "解析后文档树（doctree）中对应参数 `b` 的 `desc_parameter` 节点的子结构，特别是是否存在 `desc_sig_operator` \"=\" 和表示默认值的子节点。",
+    "reason": "Issue 的核心是默认值缺失。观察参数节点的内部结构可以直接判断默认值是否被正确生成。"
+  },
+  {
+    "kind": "repr",
+    "expression_hint": "生成的文档输出（如 HTML 或文本表示）中函数签名的字符串形式，检查是否包含 \"b=0\"。",
+    "reason": "Issue 截图显示的是最终渲染输出。观测最终输出可以确认缺陷是否在渲染阶段发生。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "断言在解析 `foo(a, b=0, /, c=1)` 后，参数 `b` 对应的节点包含表示默认值的子结构（操作符 '=' 和值 '0'）。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "避免断言完整的、硬编码的文档树结构，因为其他无关的格式细节可能变化。",
+    "reason": "缺陷是特定元素（默认值）的缺失。断言该元素的存在性更稳定，且与期望行为（显示默认值）直接对齐。"
+  },
+  {
+    "assertion_goal": "断言参数 `c` 的默认值 `1` 被正确显示（作为对照，确保非位置限定参数的默认值逻辑正常）。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "避免仅断言参数列表字符串完全相等，因为空格、标点格式可能无关。",
+    "reason": "这有助于隔离问题：如果 `c=1` 正确而 `b=0` 缺失，则问题很可能特定于位置限定参数前的默认值处理。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 `pytest` 和 `sphinx.testing.fixtures` 提供的 `app` fixture 来创建 Sphinx 应用实例。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要标记为仅在 Python 3.8+ 下运行，因为位置限定参数语法 `/` 在 Python 3.8 引入。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要导入 `sphinx.testing.util` 中的 `restructuredtext` 模块和 `assert_node` 函数。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "缺陷具体发生在签名解析、中间表示转换还是最终渲染的哪个阶段。",
+  "是否所有位于 `/` 之前的带有默认值的参数都会丢失默认值，还是仅在某些组合下。",
+  "检索到的源码片段不相关，具体涉及缺陷的源码文件路径和函数名未知。"
+]

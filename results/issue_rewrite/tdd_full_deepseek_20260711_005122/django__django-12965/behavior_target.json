@@ -1,0 +1,319 @@
+{
+  "instance_id": "django__django-12965",
+  "issue_summary": "Django 3.1 中 Model.objects.all().delete() 生成的 SQL 从简单的 DELETE FROM 变成了包含子查询的 DELETE FROM WHERE id IN (SELECT ...)，导致性能下降且与 LOCK TABLES 不兼容。",
+  "trigger_condition": {
+    "text": "在 Django 3.1 中，对没有过滤条件的 QuerySet 调用 delete() 方法，例如 Model.objects.all().delete()。",
+    "evidence": [
+      "Issue 描述：'The tests run Model.objects.all().delete()'",
+      "Issue 中对比的 SQL 语句：'DELETE FROM `testapp_alphabet` WHERE `testapp_alphabet`.`id` IN (SELECT `testapp_alphabet`.`id` FROM `testapp_alphabet`)'"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "生成的 SQL 语句包含一个不必要的子查询，导致删除操作性能显著下降，并且在使用 LOCK TABLES 时会导致错误，因为子查询中的表没有别名，无法被单独锁定。",
+    "symptom_type": "performance",
+    "evidence": [
+      "Issue 描述：'Additionally this change is a performance regression.'",
+      "Issue 中的性能对比数据：旧方式 0.2 秒，新方式 7.5 秒",
+      "Issue 引用 MySQL 文档说明 LOCK TABLES 与子查询的兼容性问题"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "Model.objects.all().delete() 应生成简单的 DELETE FROM table 语句，不包含 WHERE 子句和子查询，以保持高性能并与 LOCK TABLES 兼容。",
+    "evidence": [
+      "Issue 中描述的 Django 3.0 行为：'Django 3.0 generates this SQL: DELETE FROM `testapp_alphabet`'",
+      "Issue 作者的观点：'I think we shouldn't change the SQL here.'"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "Model.objects.all().delete",
+      "kind": "method",
+      "source_path": "",
+      "reason": "Issue 的核心是调用此 API 时生成的 SQL 发生了变化。"
+    },
+    {
+      "name": "QuerySet.delete",
+      "kind": "method",
+      "source_path": "",
+      "reason": "Model.objects.all() 返回一个 QuerySet，其 delete() 方法是实际执行删除操作的地方。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "",
+      "object": "",
+      "lines": "",
+      "reason": "iCoRe 未检索到相关源代码片段，无法定位。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "DeletionTests.test_large_delete",
+      "test_file": "tests/delete/tests.py",
+      "why_relevant": "该测试直接调用了 Avatar.objects.all().delete()，与 Issue 触发条件完全一致。",
+      "reusable_parts": [
+        "TestCase 类",
+        "Avatar 模型对象构造",
+        "Avatar.objects.all().delete() 调用",
+        "assertNumQueries 断言风格"
+      ],
+      "possible_gap": "该测试主要关注查询数量，不检查生成的 SQL 语句内容或性能，也没有涉及 LOCK TABLES 的场景。"
+    },
+    {
+      "test_name": "FastDeleteTests.test_fast_delete_large_batch",
+      "test_file": "tests/delete/tests.py",
+      "why_relevant": "该测试也调用了 User.objects.all().delete()，并断言只产生 1 次查询，这与 Issue 中期望的简单 DELETE 语句行为相符。",
+      "reusable_parts": [
+        "TestCase 类",
+        "User 模型对象构造",
+        "User.objects.all().delete() 调用",
+        "assertNumQueries 断言风格"
+      ],
+      "possible_gap": "该测试同样不检查 SQL 语句的具体内容，且其断言查询数为 1 在 Issue 描述的 bug 场景下可能仍然成立（子查询仍算一次查询），因此无法直接检测出问题。"
+    },
+    {
+      "test_name": "DeleteLockingTest.test_concurrent_delete",
+      "test_file": "tests/delete_regress/tests.py",
+      "why_relevant": "该测试涉及并发删除和数据库锁，与 Issue 中提到的 LOCK TABLES 问题相关。",
+      "reusable_parts": [
+        "TransactionTestCase 类",
+        "Book 模型对象构造",
+        "使用多个数据库连接",
+        "在事务中执行删除操作"
+      ],
+      "possible_gap": "该测试关注的是并发删除时的数据一致性问题，而非生成的 SQL 语句格式或 LOCK TABLES 的显式使用。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "call_chain",
+      "current_pattern": "相关测试中直接调用 Model.objects.all().delete()。",
+      "target_pattern": "调用 Model.objects.all().delete()，但需要确保测试在 Django 3.1 环境下运行，并且可能需要在启用 LOCK TABLES 或监控生成 SQL 的上下文中执行。",
+      "reason": "Issue 表明问题在 Django 3.1 中才出现，且与特定 SQL 生成和锁机制相关。",
+      "confidence": "medium"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "测试通常在默认数据库配置下运行。",
+      "target_pattern": "可能需要配置测试以使用 MySQL/MariaDB 数据库，并可能模拟或启用 LOCK TABLES 场景。",
+      "reason": "Issue 中提到的性能数据和 LOCK TABLES 问题特定于 MySQL/MariaDB。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "sql",
+      "expression_hint": "在执行 delete() 时捕获生成的 SQL 查询字符串。",
+      "reason": "Issue 的核心是生成的 SQL 语句格式错误（包含了不必要的子查询）。"
+    },
+    {
+      "kind": "performance",
+      "expression_hint": "测量 delete() 操作的执行时间。",
+      "reason": "Issue 报告了显著的性能下降（从 0.2 秒到 7.5 秒）。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 Model.objects.all().delete() 生成的 SQL 语句不包含 'WHERE ... IN (SELECT ...)' 这样的子查询模式。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "断言完整的 SQL 字符串等于某个特定值，因为表名和具体格式可能因数据库后端而异。",
+      "reason": "Issue 的期望行为是生成简单的 DELETE FROM table 语句。断言不包含子查询片段更稳定，且直接对应问题核心。"
+    },
+    {
+      "assertion_goal": "验证删除操作在合理的时间内完成（例如，对于一定数据量，时间不应异常增长）。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "断言一个精确的执行时间，因为时间会受测试环境硬件影响。",
+      "reason": "Issue 强调了性能回归。可以比较不同 Django 版本下或不同 SQL 模式下的相对执行时间。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要一个 Django 项目配置，包含一个简单的模型（如 Issue 中的 Alphabet 或测试中的 Avatar/User）。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能需要继承自 TestCase 或 TransactionTestCase。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "为了观察 SQL，可能需要使用 Django 的 connection.queries 或类似机制。",
+      "source": "inference",
+      "confidence": "medium"
+    },
+    {
+      "hint": "为了复现 LOCK TABLES 问题，可能需要使用支持该功能的数据库后端（如 MySQL）并进行相应配置。",
+      "source": "issue",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "导致 SQL 生成变化的精确代码位置未知。",
+    "除了 Model.objects.all().delete()，是否还有其他 QuerySet 操作（如 filter().delete() 在某些条件下）也会触发此问题？",
+    "修复后的确切 SQL 语句格式（除了不包含子查询外）是否有其他细微变化？",
+    "在何种数据库后端（MySQL, PostgreSQL, SQLite）上此问题会显现？Issue 主要关注 MySQL。"
+  ],
+  "raw": {
+    "issue_summary": "Django 3.1 中 Model.objects.all().delete() 生成的 SQL 从简单的 DELETE FROM 变成了包含子查询的 DELETE FROM WHERE id IN (SELECT ...)，导致性能下降且与 LOCK TABLES 不兼容。",
+    "trigger_condition": {
+      "text": "在 Django 3.1 中，对没有过滤条件的 QuerySet 调用 delete() 方法，例如 Model.objects.all().delete()。",
+      "evidence": [
+        "Issue 描述：'The tests run Model.objects.all().delete()'",
+        "Issue 中对比的 SQL 语句：'DELETE FROM `testapp_alphabet` WHERE `testapp_alphabet`.`id` IN (SELECT `testapp_alphabet`.`id` FROM `testapp_alphabet`)'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 语句包含一个不必要的子查询，导致删除操作性能显著下降，并且在使用 LOCK TABLES 时会导致错误，因为子查询中的表没有别名，无法被单独锁定。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue 描述：'Additionally this change is a performance regression.'",
+        "Issue 中的性能对比数据：旧方式 0.2 秒，新方式 7.5 秒",
+        "Issue 引用 MySQL 文档说明 LOCK TABLES 与子查询的兼容性问题"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Model.objects.all().delete() 应生成简单的 DELETE FROM table 语句，不包含 WHERE 子句和子查询，以保持高性能并与 LOCK TABLES 兼容。",
+      "evidence": [
+        "Issue 中描述的 Django 3.0 行为：'Django 3.0 generates this SQL: DELETE FROM `testapp_alphabet`'",
+        "Issue 作者的观点：'I think we shouldn't change the SQL here.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Model.objects.all().delete",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 的核心是调用此 API 时生成的 SQL 发生了变化。"
+      },
+      {
+        "name": "QuerySet.delete",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Model.objects.all() 返回一个 QuerySet，其 delete() 方法是实际执行删除操作的地方。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "",
+        "lines": "",
+        "reason": "iCoRe 未检索到相关源代码片段，无法定位。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "DeletionTests.test_large_delete",
+        "test_file": "tests/delete/tests.py",
+        "why_relevant": "该测试直接调用了 Avatar.objects.all().delete()，与 Issue 触发条件完全一致。",
+        "reusable_parts": [
+          "TestCase 类",
+          "Avatar 模型对象构造",
+          "Avatar.objects.all().delete() 调用",
+          "assertNumQueries 断言风格"
+        ],
+        "possible_gap": "该测试主要关注查询数量，不检查生成的 SQL 语句内容或性能，也没有涉及 LOCK TABLES 的场景。"
+      },
+      {
+        "test_name": "FastDeleteTests.test_fast_delete_large_batch",
+        "test_file": "tests/delete/tests.py",
+        "why_relevant": "该测试也调用了 User.objects.all().delete()，并断言只产生 1 次查询，这与 Issue 中期望的简单 DELETE 语句行为相符。",
+        "reusable_parts": [
+          "TestCase 类",
+          "User 模型对象构造",
+          "User.objects.all().delete() 调用",
+          "assertNumQueries 断言风格"
+        ],
+        "possible_gap": "该测试同样不检查 SQL 语句的具体内容，且其断言查询数为 1 在 Issue 描述的 bug 场景下可能仍然成立（子查询仍算一次查询），因此无法直接检测出问题。"
+      },
+      {
+        "test_name": "DeleteLockingTest.test_concurrent_delete",
+        "test_file": "tests/delete_regress/tests.py",
+        "why_relevant": "该测试涉及并发删除和数据库锁，与 Issue 中提到的 LOCK TABLES 问题相关。",
+        "reusable_parts": [
+          "TransactionTestCase 类",
+          "Book 模型对象构造",
+          "使用多个数据库连接",
+          "在事务中执行删除操作"
+        ],
+        "possible_gap": "该测试关注的是并发删除时的数据一致性问题，而非生成的 SQL 语句格式或 LOCK TABLES 的显式使用。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试中直接调用 Model.objects.all().delete()。",
+        "target_pattern": "调用 Model.objects.all().delete()，但需要确保测试在 Django 3.1 环境下运行，并且可能需要在启用 LOCK TABLES 或监控生成 SQL 的上下文中执行。",
+        "reason": "Issue 表明问题在 Django 3.1 中才出现，且与特定 SQL 生成和锁机制相关。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试通常在默认数据库配置下运行。",
+        "target_pattern": "可能需要配置测试以使用 MySQL/MariaDB 数据库，并可能模拟或启用 LOCK TABLES 场景。",
+        "reason": "Issue 中提到的性能数据和 LOCK TABLES 问题特定于 MySQL/MariaDB。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "在执行 delete() 时捕获生成的 SQL 查询字符串。",
+        "reason": "Issue 的核心是生成的 SQL 语句格式错误（包含了不必要的子查询）。"
+      },
+      {
+        "kind": "performance",
+        "expression_hint": "测量 delete() 操作的执行时间。",
+        "reason": "Issue 报告了显著的性能下降（从 0.2 秒到 7.5 秒）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 Model.objects.all().delete() 生成的 SQL 语句不包含 'WHERE ... IN (SELECT ...)' 这样的子查询模式。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的 SQL 字符串等于某个特定值，因为表名和具体格式可能因数据库后端而异。",
+        "reason": "Issue 的期望行为是生成简单的 DELETE FROM table 语句。断言不包含子查询片段更稳定，且直接对应问题核心。"
+      },
+      {
+        "assertion_goal": "验证删除操作在合理的时间内完成（例如，对于一定数据量，时间不应异常增长）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言一个精确的执行时间，因为时间会受测试环境硬件影响。",
+        "reason": "Issue 强调了性能回归。可以比较不同 Django 版本下或不同 SQL 模式下的相对执行时间。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django 项目配置，包含一个简单的模型（如 Issue 中的 Alphabet 或测试中的 Avatar/User）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 TestCase 或 TransactionTestCase。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "为了观察 SQL，可能需要使用 Django 的 connection.queries 或类似机制。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "为了复现 LOCK TABLES 问题，可能需要使用支持该功能的数据库后端（如 MySQL）并进行相应配置。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "导致 SQL 生成变化的精确代码位置未知。",
+      "除了 Model.objects.all().delete()，是否还有其他 QuerySet 操作（如 filter().delete() 在某些条件下）也会触发此问题？",
+      "修复后的确切 SQL 语句格式（除了不包含子查询外）是否有其他细微变化？",
+      "在何种数据库后端（MySQL, PostgreSQL, SQLite）上此问题会显现？Issue 主要关注 MySQL。"
+    ]
+  }
+}

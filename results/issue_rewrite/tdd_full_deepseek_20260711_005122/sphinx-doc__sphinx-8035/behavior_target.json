@@ -1,0 +1,303 @@
+{
+  "instance_id": "sphinx-doc__sphinx-8035",
+  "issue_summary": "autodoc 的 `:private-members:` 选项无法指定要包含哪些私有成员，只能全部包含或全部排除。",
+  "trigger_condition": {
+    "text": "在 Sphinx 文档中使用 autodoc 指令（如 `.. automodule::`、`.. autoclass::`）并设置 `:private-members:` 选项，尝试为其提供参数（例如 `:private-members: _private1, _private2`）以选择性地包含特定私有成员。",
+    "evidence": [
+      "Issue 描述：'Currently, if I'm using autodoc, the `:private-members:` option does not allow specification of which private members to document.'",
+      "Issue 期望的解决方案：'For `:private-members:` to take arguments, similarly to how `:members:` currently works'",
+      "相关测试 3 展示了 `:members:` 选项可以接受参数：'options = {\"members\": \"inheritedmeth,inheritedstaticmeth\"}'"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "当尝试为 `:private-members:` 选项提供参数以选择性地包含私有成员时，该参数被忽略。根据 Issue 描述，当前行为是包含所有私有成员，而不是指定的成员。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 描述：'The current behavior is to document all private members, but what if I would only like to document 1 or 2?'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "`:private-members:` 选项应该能够接受参数，其行为应与 `:members:` 选项类似，即可以指定一个私有成员名称列表，只有列表中指定的私有成员才会被包含在生成的文档中。",
+    "evidence": [
+      "Issue 期望的解决方案：'For `:private-members:` to take arguments, similarly to how `:members:` currently works'"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "Documenter.filter_members",
+      "kind": "method",
+      "source_path": "sphinx/ext/autodoc/__init__.py",
+      "reason": "该方法负责根据选项（如 `private_members`）过滤成员列表，是决定哪些私有成员被包含的关键逻辑。"
+    },
+    {
+      "name": "Documenter.get_object_members",
+      "kind": "method",
+      "source_path": "sphinx/ext/autodoc/__init__.py",
+      "reason": "该方法根据 `want_all` 和 `self.options.members` 返回成员列表，展示了 `:members:` 选项处理特定成员列表的模式。"
+    },
+    {
+      "name": "do_autodoc",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试中用于执行 autodoc 并获取输出的辅助函数，是触发 autodoc 行为的主要入口。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sphinx/ext/autodoc/__init__.py",
+      "object": "Documenter.filter_members",
+      "lines": "559-687",
+      "reason": "该方法处理 `self.options.private_members` 选项。Issue 表明 `private_members` 选项当前无法像 `members` 选项那样接受参数列表进行过滤。源码中 `self.options.private_members` 被用作布尔标志（第 627、634 行），而不是一个成员名称列表。"
+    },
+    {
+      "path": "sphinx/ext/autodoc/__init__.py",
+      "object": "Documenter",
+      "lines": "216-845",
+      "reason": "`Documenter` 类的 `option_spec` 属性定义了指令选项的解析方式。需要检查 `private_members` 选项的解析逻辑是否支持参数。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_autodoc_members",
+      "test_file": "tests/test_ext_autodoc.py",
+      "why_relevant": "该测试展示了 `:members:` 选项如何接受参数列表（如 `\"inheritedmeth,inheritedstaticmeth\"`）来选择性包含成员，这正是 Issue 希望 `:private-members:` 具备的行为。",
+      "reusable_parts": [
+        "使用 `do_autodoc` 函数触发 autodoc 行为",
+        "通过 `options` 字典传递指令选项",
+        "断言输出中是否包含特定成员（`::` 行）"
+      ],
+      "possible_gap": "该测试只验证了 `:members:` 选项，没有涉及 `:private-members:` 选项。需要变异以测试 `:private-members:` 是否也能接受参数列表。"
+    },
+    {
+      "test_name": "test_private_field_and_private_members",
+      "test_file": "tests/test_ext_autodoc_private_members.py",
+      "why_relevant": "该测试专门针对 `:private-members:` 选项，展示了当 `\"private-members\": None` 时，所有私有成员（如 `private_function`）都被包含。",
+      "reusable_parts": [
+        "测试模块 `target.private`",
+        "使用 `do_autodoc` 函数",
+        "设置 `\"private-members\": None` 的选项模式",
+        "断言输出中包含私有成员"
+      ],
+      "possible_gap": "该测试只验证了 `:private-members:` 为 `None`（即包含所有）的情况，没有测试为其提供参数列表的情况。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "在相关测试中，`:private-members:` 选项的值被设置为 `None`（表示包含所有私有成员）。",
+      "target_pattern": "将 `:private-members:` 选项的值设置为一个字符串，如 `\"_private1, _private2\"` 或一个列表，以尝试选择性地包含特定私有成员。",
+      "reason": "Issue 的核心是 `:private-members:` 应该像 `:members:` 一样接受参数。当前测试模式（`None`）无法触发对参数处理逻辑的测试。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "相关测试通过 `options` 字典直接传递给 `do_autodoc`。",
+      "target_pattern": "保持通过 `options` 字典传递，但将 `\"private-members\"` 键的值从 `None` 改为一个成员名称字符串。",
+      "reason": "需要模拟用户在 Sphinx 源文件中编写 `:private-members: name1, name2` 指令的行为。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "`do_autodoc` 返回的文档字符串列表（`actual`），特别是其中是否包含了通过 `:private-members:` 参数指定的私有成员，以及是否包含了未指定的私有成员。",
+      "reason": "Issue 的症状是输出不符合预期（包含所有私有成员而非指定的）。观察输出内容是判断行为是否正确的最直接方式。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "在 `Documenter.filter_members` 方法中，`self.options.private_members` 的值和类型，以及它如何影响 `keep` 变量的决策逻辑。",
+      "reason": "需要确认 `private_members` 选项是否被正确解析为列表，以及过滤逻辑是否据此进行选择性保留。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "当 `:private-members:` 选项被赋予一个私有成员名称列表时，生成的文档应只包含列表中指定的私有成员，而不包含其他私有成员。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免断言完整的、顺序固定的输出字符串，因为文档生成可能受其他因素影响。",
+      "reason": "Issue 的核心是选择性包含。断言输出中包含指定的成员片段，并且（可选地）不包含其他私有成员片段，能稳定地验证功能是否按预期工作。"
+    },
+    {
+      "assertion_goal": "`:private-members:` 选项的行为应与 `:members:` 选项在接收参数列表时保持一致。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "避免直接比较 `:private-members:` 和 `:members:` 的完整输出，因为它们作用的对象不同。",
+      "reason": "Issue 明确要求相似的行为。可以通过类比测试来建立期望。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 `pytest.mark.sphinx` 装饰器和 `testroot='ext-autodoc'` 来设置 Sphinx 应用和测试数据。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "使用 `do_autodoc` 辅助函数来执行 autodoc 并获取输出。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要一个包含私有成员的测试模块（如 `target.private`）作为文档生成的目标。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "`:private-members:` 选项的预期参数格式是逗号分隔的字符串，还是其他格式（如列表）？",
+    "当 `:private-members:` 被赋予参数时，它是否应该与 `:members:` 选项交互？例如，如果 `:members:` 也设置了，逻辑顺序是什么？",
+    "除了 `Documenter.filter_members`，是否还有其他地方（如选项解析、`get_object_members`）需要修改以支持此功能？",
+    "当前 `self.options.private_members` 在代码中是被当作布尔值处理的。将其改为支持列表后，现有依赖于其布尔值的代码路径会如何？"
+  ],
+  "raw": {
+    "issue_summary": "autodoc 的 `:private-members:` 选项无法指定要包含哪些私有成员，只能全部包含或全部排除。",
+    "trigger_condition": {
+      "text": "在 Sphinx 文档中使用 autodoc 指令（如 `.. automodule::`、`.. autoclass::`）并设置 `:private-members:` 选项，尝试为其提供参数（例如 `:private-members: _private1, _private2`）以选择性地包含特定私有成员。",
+      "evidence": [
+        "Issue 描述：'Currently, if I'm using autodoc, the `:private-members:` option does not allow specification of which private members to document.'",
+        "Issue 期望的解决方案：'For `:private-members:` to take arguments, similarly to how `:members:` currently works'",
+        "相关测试 3 展示了 `:members:` 选项可以接受参数：'options = {\"members\": \"inheritedmeth,inheritedstaticmeth\"}'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当尝试为 `:private-members:` 选项提供参数以选择性地包含私有成员时，该参数被忽略。根据 Issue 描述，当前行为是包含所有私有成员，而不是指定的成员。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'The current behavior is to document all private members, but what if I would only like to document 1 or 2?'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "`:private-members:` 选项应该能够接受参数，其行为应与 `:members:` 选项类似，即可以指定一个私有成员名称列表，只有列表中指定的私有成员才会被包含在生成的文档中。",
+      "evidence": [
+        "Issue 期望的解决方案：'For `:private-members:` to take arguments, similarly to how `:members:` currently works'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Documenter.filter_members",
+        "kind": "method",
+        "source_path": "sphinx/ext/autodoc/__init__.py",
+        "reason": "该方法负责根据选项（如 `private_members`）过滤成员列表，是决定哪些私有成员被包含的关键逻辑。"
+      },
+      {
+        "name": "Documenter.get_object_members",
+        "kind": "method",
+        "source_path": "sphinx/ext/autodoc/__init__.py",
+        "reason": "该方法根据 `want_all` 和 `self.options.members` 返回成员列表，展示了 `:members:` 选项处理特定成员列表的模式。"
+      },
+      {
+        "name": "do_autodoc",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试中用于执行 autodoc 并获取输出的辅助函数，是触发 autodoc 行为的主要入口。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sphinx/ext/autodoc/__init__.py",
+        "object": "Documenter.filter_members",
+        "lines": "559-687",
+        "reason": "该方法处理 `self.options.private_members` 选项。Issue 表明 `private_members` 选项当前无法像 `members` 选项那样接受参数列表进行过滤。源码中 `self.options.private_members` 被用作布尔标志（第 627、634 行），而不是一个成员名称列表。"
+      },
+      {
+        "path": "sphinx/ext/autodoc/__init__.py",
+        "object": "Documenter",
+        "lines": "216-845",
+        "reason": "`Documenter` 类的 `option_spec` 属性定义了指令选项的解析方式。需要检查 `private_members` 选项的解析逻辑是否支持参数。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_autodoc_members",
+        "test_file": "tests/test_ext_autodoc.py",
+        "why_relevant": "该测试展示了 `:members:` 选项如何接受参数列表（如 `\"inheritedmeth,inheritedstaticmeth\"`）来选择性包含成员，这正是 Issue 希望 `:private-members:` 具备的行为。",
+        "reusable_parts": [
+          "使用 `do_autodoc` 函数触发 autodoc 行为",
+          "通过 `options` 字典传递指令选项",
+          "断言输出中是否包含特定成员（`::` 行）"
+        ],
+        "possible_gap": "该测试只验证了 `:members:` 选项，没有涉及 `:private-members:` 选项。需要变异以测试 `:private-members:` 是否也能接受参数列表。"
+      },
+      {
+        "test_name": "test_private_field_and_private_members",
+        "test_file": "tests/test_ext_autodoc_private_members.py",
+        "why_relevant": "该测试专门针对 `:private-members:` 选项，展示了当 `\"private-members\": None` 时，所有私有成员（如 `private_function`）都被包含。",
+        "reusable_parts": [
+          "测试模块 `target.private`",
+          "使用 `do_autodoc` 函数",
+          "设置 `\"private-members\": None` 的选项模式",
+          "断言输出中包含私有成员"
+        ],
+        "possible_gap": "该测试只验证了 `:private-members:` 为 `None`（即包含所有）的情况，没有测试为其提供参数列表的情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "在相关测试中，`:private-members:` 选项的值被设置为 `None`（表示包含所有私有成员）。",
+        "target_pattern": "将 `:private-members:` 选项的值设置为一个字符串，如 `\"_private1, _private2\"` 或一个列表，以尝试选择性地包含特定私有成员。",
+        "reason": "Issue 的核心是 `:private-members:` 应该像 `:members:` 一样接受参数。当前测试模式（`None`）无法触发对参数处理逻辑的测试。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试通过 `options` 字典直接传递给 `do_autodoc`。",
+        "target_pattern": "保持通过 `options` 字典传递，但将 `\"private-members\"` 键的值从 `None` 改为一个成员名称字符串。",
+        "reason": "需要模拟用户在 Sphinx 源文件中编写 `:private-members: name1, name2` 指令的行为。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "`do_autodoc` 返回的文档字符串列表（`actual`），特别是其中是否包含了通过 `:private-members:` 参数指定的私有成员，以及是否包含了未指定的私有成员。",
+        "reason": "Issue 的症状是输出不符合预期（包含所有私有成员而非指定的）。观察输出内容是判断行为是否正确的最直接方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 `Documenter.filter_members` 方法中，`self.options.private_members` 的值和类型，以及它如何影响 `keep` 变量的决策逻辑。",
+        "reason": "需要确认 `private_members` 选项是否被正确解析为列表，以及过滤逻辑是否据此进行选择性保留。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 `:private-members:` 选项被赋予一个私有成员名称列表时，生成的文档应只包含列表中指定的私有成员，而不包含其他私有成员。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、顺序固定的输出字符串，因为文档生成可能受其他因素影响。",
+        "reason": "Issue 的核心是选择性包含。断言输出中包含指定的成员片段，并且（可选地）不包含其他私有成员片段，能稳定地验证功能是否按预期工作。"
+      },
+      {
+        "assertion_goal": "`:private-members:` 选项的行为应与 `:members:` 选项在接收参数列表时保持一致。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免直接比较 `:private-members:` 和 `:members:` 的完整输出，因为它们作用的对象不同。",
+        "reason": "Issue 明确要求相似的行为。可以通过类比测试来建立期望。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 `pytest.mark.sphinx` 装饰器和 `testroot='ext-autodoc'` 来设置 Sphinx 应用和测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 `do_autodoc` 辅助函数来执行 autodoc 并获取输出。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要一个包含私有成员的测试模块（如 `target.private`）作为文档生成的目标。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "`:private-members:` 选项的预期参数格式是逗号分隔的字符串，还是其他格式（如列表）？",
+      "当 `:private-members:` 被赋予参数时，它是否应该与 `:members:` 选项交互？例如，如果 `:members:` 也设置了，逻辑顺序是什么？",
+      "除了 `Documenter.filter_members`，是否还有其他地方（如选项解析、`get_object_members`）需要修改以支持此功能？",
+      "当前 `self.options.private_members` 在代码中是被当作布尔值处理的。将其改为支持列表后，现有依赖于其布尔值的代码路径会如何？"
+    ]
+  }
+}

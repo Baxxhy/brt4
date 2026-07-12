@@ -1,0 +1,445 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+MultiValueField ignores a required value of a sub field
+Description
+	 
+		(last modified by Takayuki Hirai)
+	 
+A field and a form definition:
+from django.forms import (
+	Form,
+	CharField,
+	MultiValueField,
+	MultiWidget,
+)
+class MF(MultiValueField):
+	widget = MultiWidget
+	def __init__(self):
+		fields = [
+			CharField(required=False),
+			CharField(required=True),
+		]
+		widget = self.widget(widgets=[
+			f.widget
+			for f in fields
+		], attrs={})
+		super(MF, self).__init__(
+			fields=fields,
+			widget=widget,
+			require_all_fields=False,
+			required=False,
+		)
+	def compress(self, value):
+		return []
+class F(Form):
+	mf = MF()
+When the form is passed empty values for both sub fields, form.is_valid() == True.
+But I expected is_valid() returns False, because one of the sub fields is set as required.
+f = F({
+	'mf_0': '',
+	'mf_1': '',
+})
+assert f.is_valid() == True # I expect this should return False
+On the other hand, When one of its sub field is passed a non-empty value, form.is_valid() == False
+f = F({
+	'mf_0': 'xxx',
+	'mf_1': '',
+})
+assert f.is_valid() == Flase
+If above behavior is not expected, please fix this problem.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/forms/fields.py
+对象名称：MultiValueField
+节点类型：class
+父节点：fields
+行号范围：966-1091
+代码：
+class MultiValueField(Field):
+    """
+    Aggregate the logic of multiple Fields.
+
+    Its clean() method takes a "decompressed" list of values, which are then
+    cleaned into a single value according to self.fields. Each value in
+    this list is cleaned by the corresponding field -- the first value is
+    cleaned by the first field, the second value is cleaned by the second
+    field, etc. Once all fields are cleaned, the list of clean values is
+    "compressed" into a single value.
+
+    Subclasses should not have to implement clean(). Instead, they must
+    implement compress(), which takes a list of valid values and returns a
+    "compressed" version of those values -- a single value.
+
+    You'll probably want to use this with MultiWidget.
+    """
+    default_error_messages = {
+        'invalid': _('Enter a list of values.'),
+        'incomplete': _('Enter a complete value.'),
+    }
+    def __init__(self, fields, *, require_all_fields=True, **kwargs):
+    def __deepcopy__(self, memo):
+    def validate(self, value):
+    def clean(self, value):
+    def compress(self, data_list):
+    def has_changed(self, initial, data):
+
+
+【源码片段 2】
+文件路径：django/forms/widgets.py
+对象名称：MultiWidget
+节点类型：class
+父节点：widgets
+行号范围：793-894
+代码：
+class MultiWidget(Widget):
+    """
+    A widget that is composed of multiple widgets.
+
+    In addition to the values added by Widget.get_context(), this widget
+    adds a list of subwidgets to the context as widget['subwidgets'].
+    These can be looped over and rendered like normal widgets.
+
+    You'll probably want to use this class with MultiValueField.
+    """
+    template_name = 'django/forms/widgets/multiwidget.html'
+    def __init__(self, widgets, attrs=None):
+    @property
+    def is_hidden(self):
+    def get_context(self, name, value, attrs):
+    def id_for_label(self, id_):
+    def value_from_datadict(self, data, files, name):
+    def value_omitted_from_data(self, data, files, name):
+    def decompress(self, value):
+    def _get_media(self):
+    media = property(_get_media)
+    def __deepcopy__(self, memo):
+    @property
+    def needs_multipart_form(self):
+
+
+【源码片段 3】
+文件路径：django/forms/forms.py
+对象名称：Form
+节点类型：class
+父节点：forms
+行号范围：487-488
+代码：
+class Form(BaseForm, metaclass=DeclarativeFieldsMetaclass):
+    "A collection of Fields, plus their associated data."
+
+
+【源码片段 4】
+文件路径：django/forms/fields.py
+对象名称：CharField
+节点类型：class
+父节点：fields
+行号范围：210-241
+代码：
+class CharField(Field):
+    def __init__(self, *, max_length=None, min_length=None, strip=True, empty_value='', **kwargs):
+    def to_python(self, value):
+    def widget_attrs(self, widget):
+
+
+【源码片段 5】
+文件路径：django/db/models/expressions.py
+对象名称：F
+节点类型：class
+父节点：expressions
+行号范围：582-609
+代码：
+class F(Combinable):
+    """An object capable of resolving references to existing query objects."""
+    def __init__(self, name):
+    def __repr__(self):
+    def resolve_expression(self, query=None, allow_joins=True, reuse=None,
+                           summarize=False, for_save=False):
+    def asc(self, **kwargs):
+    def desc(self, **kwargs):
+    def __eq__(self, other):
+    def __hash__(self):
+
+
+【源码片段 6】
+文件路径：django/forms/fields.py
+对象名称：__init__
+节点类型：class_function
+父节点：MultiValueField
+行号范围：988-1001
+代码：
+    def __init__(self, fields, *, require_all_fields=True, **kwargs):
+        self.require_all_fields = require_all_fields
+        super().__init__(**kwargs)
+        for f in fields:
+            f.error_messages.setdefault('incomplete',
+                                        self.error_messages['incomplete'])
+            if self.disabled:
+                f.disabled = True
+            if self.require_all_fields:
+                # Set 'required' to False on the individual fields, because the
+                # required validation will be handled by MultiValueField, not
+                # by those individual fields.
+                f.required = False
+        self.fields = fields
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/forms_tests/tests/test_forms.py
+测试名称：test_multivalue_optional_subfields
+测试代码：
+class FormsTestCase(SimpleTestCase):
+    def test_multivalue_optional_subfields(self):
+        class PhoneField(MultiValueField):
+            def __init__(self, *args, **kwargs):
+                fields = (
+                    CharField(label='Country Code', validators=[
+                        RegexValidator(r'^\+[0-9]{1,2}$', message='Enter a valid country code.')]),
+                    CharField(label='Phone Number'),
+                    CharField(label='Extension', error_messages={'incomplete': 'Enter an extension.'}),
+                    CharField(label='Label', required=False, help_text='E.g. home, work.'),
+                )
+                super().__init__(fields, *args, **kwargs)
+
+            def compress(self, data_list):
+                if data_list:
+                    return '%s.%s ext. %s (label: %s)' % tuple(data_list)
+                return None
+
+        # An empty value for any field will raise a `required` error on a
+        # required `MultiValueField`.
+        f = PhoneField()
+        with self.assertRaisesMessage(ValidationError, "'This field is required.'"):
+            f.clean('')
+        with self.assertRaisesMessage(ValidationError, "'This field is required.'"):
+            f.clean(None)
+        with self.assertRaisesMessage(ValidationError, "'This field is required.'"):
+            f.clean([])
+        with self.assertRaisesMessage(ValidationError, "'This field is required.'"):
+            f.clean(['+61'])
+        with self.assertRaisesMessage(ValidationError, "'This field is required.'"):
+            f.clean(['+61', '287654321', '123'])
+        self.assertEqual('+61.287654321 ext. 123 (label: Home)', f.clean(['+61', '287654321', '123', 'Home']))
+        with self.assertRaisesMessage(ValidationError, "'Enter a valid country code.'"):
+            f.clean(['61', '287654321', '123', 'Home'])
+
+        # Empty values for fields will NOT raise a `required` error on an
+        # optional `MultiValueField`
+        f = PhoneField(required=False)
+        self.assertIsNone(f.clean(''))
+        self.assertIsNone(f.clean(None))
+        self.assertIsNone(f.clean([]))
+        self.assertEqual('+61. ext.  (label: )', f.clean(['+61']))
+        self.assertEqual('+61.287654321 ext. 123 (label: )', f.clean(['+61', '287654321', '123']))
+        self.assertEqual('+61.287654321 ext. 123 (label: Home)', f.clean(['+61', '287654321', '123', 'Home']))
+        with self.assertRaisesMessage(ValidationError, "'Enter a valid country code.'"):
+            f.clean(['61', '287654321', '123', 'Home'])
+
+        # For a required `MultiValueField` with `require_all_fields=False`, a
+        # `required` error will only be raised if all fields are empty. Fields
+        # can individually be required or optional. An empty value for any
+        # required field will raise an `incomplete` error.
+        f = PhoneField(require_all_fields=False)
+        with self.assertRaisesMessage(ValidationError, "'This field is required.'"):
+            f.clean('')
+        with self.assertRaisesMessage(ValidationError, "'This field is required.'"):
+            f.clean(None)
+        with self.assertRaisesMessage(ValidationError, "'This field is required.'"):
+            f.clean([])
+        with self.assertRaisesMessage(ValidationError, "'Enter a complete value.'"):
+            f.clean(['+61'])
+        self.assertEqual('+61.287654321 ext. 123 (label: )', f.clean(['+61', '287654321', '123']))
+        with self.assertRaisesMessage(ValidationError, "'Enter a complete value.', 'Enter an extension.'"):
+            f.clean(['', '', '', 'Home'])
+        with self.assertRaisesMessage(ValidationError, "'Enter a valid country code.'"):
+            f.clean(['61', '287654321', '123', 'Home'])
+
+        # For an optional `MultiValueField` with `require_all_fields=False`, we
+        # don't get any `required` error but we still get `incomplete` errors.
+        f = PhoneField(required=False, require_all_fields=False)
+        self.assertIsNone(f.clean(''))
+        self.assertIsNone(f.clean(None))
+        self.assertIsNone(f.clean([]))
+        with self.assertRaisesMessage(ValidationError, "'Enter a complete value.'"):
+            f.clean(['+61'])
+        self.assertEqual('+61.287654321 ext. 123 (label: )', f.clean(['+61', '287654321', '123']))
+        with self.assertRaisesMessage(ValidationError, "'Enter a complete value.', 'Enter an extension.'"):
+            f.clean(['', '', '', 'Home'])
+        with self.assertRaisesMessage(ValidationError, "'Enter a valid country code.'"):
+            f.clean(['61', '287654321', '123', 'Home'])
+
+【相关测试 2】
+测试文件：tests/forms_tests/field_tests/test_multivaluefield.py
+测试名称：test_clean
+测试代码：
+class MultiValueFieldTest(SimpleTestCase):
+    def test_clean(self):
+        self.assertEqual(
+            self.field.clean(['some text', ['J', 'P'], ['2007-04-25', '6:24:00']]),
+            'some text,JP,2007-04-25 06:24:00',
+        )
+
+【相关测试 3】
+测试文件：tests/forms_tests/field_tests/test_multivaluefield.py
+测试名称：test_no_value
+测试代码：
+class MultiValueFieldTest(SimpleTestCase):
+    def test_no_value(self):
+        """
+        If insufficient data is provided, None is substituted.
+        """
+        msg = "'This field is required.'"
+        with self.assertRaisesMessage(ValidationError, msg):
+            self.field.clean(['some text', ['JP']])
+
+【相关测试 4】
+测试文件：tests/postgres_tests/test_array.py
+测试名称：TestSplitFormField.test_required_field
+测试代码：
+class TestSplitFormField(PostgreSQLSimpleTestCase):
+    def test_required_field(self):
+        class SplitForm(forms.Form):
+            array = SplitArrayField(forms.CharField(), size=3)
+
+        data = {'array_0': 'a', 'array_1': 'b', 'array_2': ''}
+        form = SplitForm(data)
+        self.assertFalse(form.is_valid())
+        self.assertEqual(form.errors, {'array': ['Item 3 in the array did not validate: This field is required.']})
+
+【相关测试 5】
+测试文件：tests/postgres_tests/test_array.py
+测试名称：TestSplitFormField.test_required
+测试代码：
+class TestSplitFormField(PostgreSQLSimpleTestCase):
+    def test_required(self):
+        class SplitForm(forms.Form):
+            array = SplitArrayField(forms.CharField(), required=True, size=3)
+
+        data = {'array_0': '', 'array_1': '', 'array_2': ''}
+        form = SplitForm(data)
+        self.assertFalse(form.is_valid())
+        self.assertEqual(form.errors, {'array': ['This field is required.']})
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

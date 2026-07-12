@@ -1,0 +1,105 @@
+instance_id: astropy__astropy-14096
+
+issue_summary: 子类化 SkyCoord 并添加自定义属性时，当自定义属性访问不存在的属性时，错误消息会错误地声称自定义属性不存在，而不是指出实际不存在的属性。
+
+trigger_condition:
+{
+  "text": "创建一个继承自 SkyCoord 的子类，在该子类中定义一个 property，该 property 的方法体尝试访问一个不存在的属性（例如 self.random_attr），然后实例化该子类并访问该 property。",
+  "evidence": [
+    "Issue 中的代码示例：定义 custom_coord(coord.SkyCoord) 类，其 prop 属性返回 self.random_attr，然后创建实例 c 并调用 c.prop。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "抛出 AttributeError，错误消息为 \"'custom_coord' object has no attribute 'prop'\"，但实际上 prop 属性是存在的，问题在于 prop 内部访问的 random_attr 不存在。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中的错误输出：AttributeError: 'custom_coord' object has no attribute 'prop'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当子类的自定义属性访问一个不存在的属性时，抛出的 AttributeError 应该明确指出实际不存在的属性名（例如 'random_attr'），而不是错误地声称自定义属性本身不存在。",
+  "evidence": [
+    "Issue 描述：\"the error message is misleading because it says `prop` doesn't exist, where it should say `random_attr` doesn't exist.\""
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "SkyCoord",
+    "kind": "class",
+    "source_path": "astropy/coordinates/sky_coordinate.py",
+    "reason": "Issue 是关于子类化 SkyCoord 时的问题。"
+  },
+  {
+    "name": "SkyCoord.__getattr__",
+    "kind": "method",
+    "source_path": "astropy/coordinates/sky_coordinate.py",
+    "reason": "Issue 中的错误追踪指向 __getattr__ 方法（第600行），该方法是处理属性访问的核心，可能负责生成错误的错误消息。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "相关测试通常直接使用 SkyCoord 类，或测试其标准属性（如 equinox, obstime）。",
+    "target_pattern": "创建一个继承自 SkyCoord 的自定义子类，并在其中定义一个 property，该 property 的方法体尝试访问一个不存在的属性。",
+    "reason": "Issue 明确指出问题发生在子类化 SkyCoord 并添加自定义 property 的场景。将测试对象从 SkyCoord 实例变异为自定义子类实例是触发缺陷的关键。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "测试直接访问 SkyCoord 实例的属性（如 sc.equinox），属性访问在 __getattr__ 中处理并成功返回或抛出关于该属性名的 AttributeError。",
+    "target_pattern": "访问子类实例的自定义 property（如 c.prop），该 property 的 getter 方法内部又尝试访问另一个不存在的属性（如 self.random_attr）。",
+    "reason": "缺陷在于属性访问链（c.prop -> prop.getter -> self.random_attr）中，当 random_attr 不存在时，最终抛出的错误消息错误地指向了链中的第一个属性（prop）而非实际缺失的属性（random_attr）。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "捕获到的 AttributeError 实例及其 .args[0] 或 str(exception)。",
+    "reason": "Issue 的核心是错误消息的内容。需要观察抛出的 AttributeError 的消息字符串，以确认它是指向 'prop' 还是 'random_attr'。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证当访问子类实例的自定义 property（其内部访问不存在的属性）时，抛出的 AttributeError 消息应包含实际不存在的属性名（如 'random_attr'），而不应错误地声称自定义 property 本身不存在。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "避免断言完整的、可能因 Python 版本或路径而变化的错误消息字符串。避免断言异常类型以外的无关细节。",
+    "reason": "Issue 关注的是错误消息的语义内容（指出正确的缺失属性）。使用 contains_fragment 可以稳定地检查错误消息是否包含了关键信息（如 'random_attr'），而不受消息格式微小变化的影响。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 astropy.coordinates 模块以使用 SkyCoord。可能需要使用 pytest 的异常捕获机制（pytest.raises）。",
+    "source": "issue|retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试需要构造一个 SkyCoord 子类并定义 property，这可以在测试函数内部直接完成，无需复杂 fixture。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "SkyCoord.__getattr__ 方法内部的具体逻辑，以及为何在子类 property 访问失败时会生成关于 property 本身的错误消息。需要插桩或分析源码来确认执行路径。",
+  "错误消息的精确生成位置（是 __getattr__ 的第600行，还是 property getter 内部，或是 Python 默认机制）。Issue 中的行号（600）与检索到的 __getattr__ 片段行号（869-900）不匹配，表明代码版本可能不同。",
+  "修复后的预期错误消息的完整格式和措辞。Issue 只说明了应该指出 'random_attr'，但没有给出修复后的完整示例输出。"
+]

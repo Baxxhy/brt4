@@ -1,0 +1,129 @@
+instance_id: sphinx-doc__sphinx-9591
+
+issue_summary: 在属性的类型注解中，已记录的类型无法被交叉引用。
+
+trigger_condition:
+{
+  "text": "使用 Sphinx 的 autodoc 扩展为带有类型注解（指向已记录类型）的 property 生成文档。",
+  "evidence": [
+    "Issue 描述：'A documented type in property's type annotation does not get cross-referenced:'",
+    "Issue 中的示例代码包含带有 `-> Point` 类型注解的 property `end`。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "生成的 HTML 文档中，property 类型注解里的类型（如 `Point`）没有被渲染为可点击的交叉引用链接。",
+  "symptom_type": "unknown",
+  "evidence": [
+    "Issue 描述：'A documented type in property's type annotation does not get cross-referenced:'",
+    "Issue 链接的生成文档截图显示类型未被交叉引用。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "property 类型注解中已记录的类型应被正确渲染为交叉引用链接。",
+  "evidence": [
+    "Issue 的 'Expected behavior' 部分：'I expected the documented type in property's type annotation to be cross-referenced.'"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "sphinx.ext.autodoc",
+    "kind": "module",
+    "source_path": "",
+    "reason": "Issue 中使用了 `sphinx.ext.autodoc` 扩展来生成文档，这是触发问题的上下文。"
+  },
+  {
+    "name": "sphinx.domains.python.PythonDomain",
+    "kind": "class",
+    "source_path": "",
+    "reason": "相关测试 `test_resolve_xref_for_properties` 和 `test_pyproperty` 涉及 Python 域的交叉引用解析，与 Issue 的核心问题相关。"
+  },
+  {
+    "name": "_parse_annotation",
+    "kind": "function",
+    "source_path": "",
+    "reason": "相关测试 `test_parse_annotation` 展示了类型注解的解析和交叉引用生成，直接关联到 property 类型注解的处理。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相关测试 `test_parse_annotation` 中解析简单的类型字符串如 `'int'`。",
+    "target_pattern": "解析一个 property 的类型注解字符串，该字符串指向一个已记录的类（如 `'Point'`）。",
+    "reason": "Issue 表明 property 的类型注解（如 `-> Point`）在解析时可能未生成正确的交叉引用节点。",
+    "confidence": "medium"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "相关测试 `test_properties` (来自 `test_ext_autodoc_autoclass.py`) 使用 `do_autodoc` 生成类的文档，并检查输出格式。",
+    "target_pattern": "使用 `do_autodoc` 生成一个包含带有类型注解的 property 的类的文档，并检查输出中该类型的交叉引用。",
+    "reason": "Issue 的触发条件是通过 autodoc 生成包含带类型注解 property 的类的文档。需要变异测试以关注 property 类型注解的输出。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "file_output",
+    "expression_hint": "生成的 HTML 文档中，对应 property 类型注解位置的文本或 HTML 片段。",
+    "reason": "Issue 的症状体现在最终生成的 HTML 输出中，类型未被渲染为链接。"
+  },
+  {
+    "kind": "type",
+    "expression_hint": "在文档生成过程中，解析 property 类型注解后生成的文档树节点（如是否为 `pending_xref` 节点）。",
+    "reason": "交叉引用的生成依赖于在文档树中创建正确的 `pending_xref` 节点。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "生成的文档中，property 类型注解处的文本应包含指向目标类型（如 `Point`）的交叉引用链接的 HTML 片段。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "避免对整个 HTML 文档进行完整的字符串相等断言，因为输出可能因 Sphinx 版本或配置而变化。",
+    "reason": "Issue 关注的是特定位置是否存在交叉引用链接，而非整个文档的精确格式。"
+  },
+  {
+    "assertion_goal": "解析 property 类型注解后，应生成一个 `pending_xref` 节点，其 `reftarget` 属性指向正确的类型。",
+    "preferred_assertion_style": "isinstance",
+    "avoid": "避免对节点树进行过于复杂和脆弱的完整结构断言。",
+    "reason": "这直接验证了文档生成流程中交叉引用信息的正确创建。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 `sphinx.testing.fixtures.app` fixture 来创建 Sphinx 应用。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要创建一个临时的 Python 模块文件，包含 Issue 中描述的类结构（如 `Point`, `Square`）。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试配置需要启用 `sphinx.ext.autodoc` 扩展。",
+    "source": "issue",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "缺陷的确切位置是在 autodoc 提取信息时，在 Python 域处理对象时，还是在文档写入阶段。",
+  "是否所有类型的 property（实例 property、classmethod property 等）都受影响。",
+  "除了 `-> Point` 这种简单类型，更复杂的泛型注解（如 `List[Point]`）是否也受影响。"
+]

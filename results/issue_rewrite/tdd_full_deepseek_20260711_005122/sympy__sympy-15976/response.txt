@@ -1,0 +1,124 @@
+```json
+{
+    "issue_summary": "以数字结尾的符号在使用 MathML 的 presentation 模式打印时会变得不可见。",
+    "trigger_condition": {
+        "text": "使用 sympy.mathml 函数，以 'presentation' 模式打印一个包含以数字结尾的符号（例如 x2）的表达式。",
+        "evidence": ["Issue 中的代码示例：`sympy.mathml(y, printer='presentation')`，其中 y 包含符号 x2。", "Issue 描述：'A variable with a number, such as x1, is made invisible when printing in a MathML format.'"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "符号在渲染的 MathML 输出中不可见（例如，在 Safari 浏览器中显示为空白）。",
+        "symptom_type": "serialization_error",
+        "evidence": ["Issue 中的截图显示符号 x2 在输出中缺失。", "Issue 描述：'is made invisible'。"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "以数字结尾的符号在使用 MathML presentation 模式打印时应正确显示其名称（例如 'x2'）。",
+        "evidence": ["Issue 中提到使用 'x' 代替 'x2' 时工作正常，表明符号名称应被正确渲染。", "相关测试代码 test_presentation_symbol 和 test_content_symbol 表明符号名称（如 'x'）应出现在 nodeValue 中。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "sympy.mathml",
+            "kind": "function",
+            "source_path": "sympy/printing/mathml.py",
+            "reason": "Issue 中直接调用的函数，用于生成 MathML 输出。"
+        },
+        {
+            "name": "sympy.printing.mathml.MathMLPresentationPrinter._print",
+            "kind": "method",
+            "source_path": "sympy/printing/mathml.py",
+            "reason": "相关测试中用于打印符号的核心方法，负责生成 presentation MathML。"
+        },
+        {
+            "name": "sympy.symbols",
+            "kind": "function",
+            "source_path": "",
+            "reason": "Issue 中用于创建符号的 API。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "sympy/printing/mathml.py",
+            "object": "MathMLPresentationPrinter._print_Symbol 或相关方法",
+            "lines": "",
+            "reason": "Issue 与 MathML 打印相关，且问题特定于 presentation 模式和以数字结尾的符号。相关测试也位于此模块。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_presentation_symbol",
+            "test_file": "sympy/printing/tests/test_mathml.py",
+            "why_relevant": "该测试直接测试使用 MathMLPresentationPrinter 打印各种符号（包括带下标和上标的符号），与 Issue 场景高度相关。",
+            "reusable_parts": ["导入：from sympy.printing.mathml import MathMLPresentationPrinter (mpp)", "测试结构：调用 mpp._print(Symbol(...)) 并断言生成的 MathML 节点结构。", "断言风格：检查 nodeName 和 nodeValue。"],
+            "possible_gap": "该测试没有覆盖以数字结尾的普通符号（如 'x2'），它主要测试带特殊标记（如 '_', '^'）的符号。它可能使用了正确的打印路径，因此没有触发缺陷。"
+        },
+        {
+            "test_name": "test_content_symbol",
+            "test_file": "sympy/printing/tests/test_mathml.py",
+            "why_relevant": "测试 MathMLContentPrinter 打印符号，属于同一模块的测试，API 调用模式相似。",
+            "reusable_parts": ["导入：from sympy.printing.mathml import MathMLContentPrinter (mp)", "测试结构：调用 mp._print(Symbol(...))。", "断言风格：检查 nodeName 和 nodeValue。"],
+            "possible_gap": "测试的是 content 模式而非 presentation 模式，且同样没有测试以数字结尾的普通符号。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "input",
+            "current_pattern": "相似测试中 Symbol 的输入模式如 \"x\", \"x_2\", \"x^2\"。",
+            "target_pattern": "Symbol 的名称以数字结尾，如 \"x2\"。",
+            "reason": "Issue 表明问题仅出现在符号名称以数字结尾时，而现有测试未覆盖此模式。",
+            "confidence": "high"
+        },
+        {
+            "slot": "config",
+            "current_pattern": "相似测试默认使用 MathMLPresentationPrinter 或 MathMLContentPrinter 的实例。",
+            "target_pattern": "确保使用 printer='presentation' 模式（对应 MathMLPresentationPrinter）。",
+            "reason": "Issue 明确指出问题发生在 presentation 模式，且使用 'x' 时正常，表明模式是关键。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "return_value",
+            "expression_hint": "生成的 MathML 节点的结构，特别是表示符号名称的节点的 nodeValue。",
+            "reason": "Issue 的症状是符号名称在输出中缺失，因此需要检查最终生成的 MathML 中是否包含正确的符号文本。"
+        },
+        {
+            "kind": "file_output",
+            "expression_hint": "写入文件的完整 MathML 字符串。",
+            "reason": "Issue 通过将 MathML 写入 HTML 文件并在浏览器中查看来观察问题，检查原始输出字符串有助于定位问题。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "生成的 MathML 中应包含表示符号名称 'x2' 的文本节点。",
+            "preferred_assertion_style": "contains_fragment",
+            "avoid": "断言完整的、格式化的 MathML 字符串相等，因为具体标签结构可能变化。",
+            "reason": "Issue 的核心是符号名称 'x2' 是否出现在输出中，而不是精确的 XML 结构。"
+        },
+        {
+            "assertion_goal": "表示符号的 MathML 元素（如 'mi'）应包含一个子文本节点，其值为符号名称。",
+            "preferred_assertion_style": "equals",
+            "avoid": "仅断言节点类型正确但忽略内容。",
+            "reason": "相关测试通过检查 nodeValue 来验证符号名称，这是稳定且直接的断言方式。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要导入 sympy 和 sympy.printing.mathml 中的相关类（如 MathMLPresentationPrinter）。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "可能需要创建一个临时文件来写入 MathML 输出以模拟 Issue 中的场景。",
+            "source": "issue",
+            "confidence": "medium"
+        }
+    ],
+    "uncertainties": [
+        "缺陷的确切位置是在符号名称解析、MathML 标签生成还是转义过程中。",
+        "是否所有以数字结尾的符号（如 'a1', 'var123'）都会受到影响，还是仅特定模式。",
+        "问题是否也存在于 content 模式，或者仅存在于 presentation 模式。"
+    ]
+}
+```

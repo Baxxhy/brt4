@@ -1,0 +1,457 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Database converters (from_db_value) not called for returning_fields on insert
+Description
+	
+Making a subclass of BigAutoField, I've found that, unlike all other query pathways, on insert the returned integer is not passed through any database converters defined for the field - including the from_db_value hook.
+This means that a field which would normally use a wrapper class has instead a plain integer.
+Take this field:
+class MyAutoField(models.BigAutoField):
+	def from_db_value(self, value, expression, connection):
+		if value is None:
+			return None
+		return MyIntWrapper(value)
+	def get_prep_value(self, value):
+		if value is None:
+			return None
+		return int(value)
+And a model that uses it:
+class AutoModel(models.Model):
+	id = MyAutoField(primary_key=True)
+Queried instances have the wrapper class for id:
+>>> am = AutoModel.objects.first()
+>>> am.id
+<MyIntWrapper: 1>
+But on creation, the returned integer is directly set as an attribute on the class:
+>>> am2 = AutoModel.objects.create()
+>>> am2.id
+2
+This also affects bulk_create on backends that support fetching the primary key value:
+>>> ams = [AutoModel()]
+>>> AutoModel.objects.bulk_create(ams)
+[<AutoModel: AutoModel object (2)>]
+>>> ams[0].id
+2
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/db/models/fields/__init__.py
+对象名称：BigAutoField
+节点类型：class
+父节点：__init__
+行号范围：2539-2545
+代码：
+class BigAutoField(AutoFieldMixin, BigIntegerField):
+
+    def get_internal_type(self):
+    def rel_db_type(self, connection):
+
+
+【源码片段 2】
+文件路径：django/contrib/gis/db/models/sql/conversion.py
+对象名称：from_db_value
+节点类型：class_function
+父节点：AreaField
+行号范围：28-37
+代码：
+    def from_db_value(self, value, expression, connection):
+        if value is None:
+            return
+        # If the database returns a Decimal, convert it to a float as expected
+        # by the Python geometric objects.
+        if isinstance(value, Decimal):
+            value = float(value)
+        # If the units are known, convert value into area measure.
+        area_att = connection.ops.get_area_att_for_field(self.geo_field)
+        return Area(**{area_att: value}) if area_att else value
+
+
+【源码片段 3】
+文件路径：django/db/models/fields/__init__.py
+对象名称：get_prep_value
+节点类型：class_function
+父节点：Field
+行号范围：824-828
+代码：
+    def get_prep_value(self, value):
+        """Perform preliminary non-db specific value checks and conversions."""
+        if isinstance(value, Promise):
+            value = value._proxy____cast()
+        return value
+
+
+【源码片段 4】
+文件路径：django/db/models/base.py
+对象名称：Model
+节点类型：class
+父节点：base
+行号范围：404-2120
+代码：
+class Model(metaclass=ModelBase):
+
+    def __init__(self, *args, **kwargs):
+    @classmethod
+    def from_db(cls, db, field_names, values):
+    def __repr__(self):
+    def __str__(self):
+    def __eq__(self, other):
+    def __hash__(self):
+    def __reduce__(self):
+    def __getstate__(self):
+    def __setstate__(self, state):
+    def _get_pk_val(self, meta=None):
+    def _set_pk_val(self, value):
+    pk = property(_get_pk_val, _set_pk_val)
+    def get_deferred_fields(self):
+    def refresh_from_db(self, using=None, fields=None):
+    def serializable_value(self, field_name):
+    def save(self, force_insert=False, force_update=False, using=None,
+             update_fields=None):
+    save.alters_data = True
+    def save_base(self, raw=False, force_insert=False,
+                  force_update=False, using=None, update_fields=None):
+    save_base.alters_data = True
+    def _save_parents(self, cls, using, update_fields):
+    def _save_table(self, raw=False, cls=None, force_insert=False,
+                    force_update=False, using=None, update_fields=None):
+    def _do_update(self, base_qs, using, pk_val, values, update_fields, forced_update):
+    def _do_insert(self, manager, using, fields, returning_fields, raw):
+    def _prepare_related_fields_for_save(self, operation_name):
+    def delete(self, using=None, keep_parents=False):
+    delete.alters_data = True
+    def _get_FIELD_display(self, field):
+    def _get_next_or_previous_by_FIELD(self, field, is_next, **kwargs):
+    def _get_next_or_previous_in_order(self, is_next):
+    def prepare_database_save(self, field):
+    def clean(self):
+    def validate_unique(self, exclude=None):
+    def _get_unique_checks(self, exclude=None):
+    def _perform_unique_checks(self, unique_checks):
+    def _perform_date_checks(self, date_checks):
+    def date_error_message(self, lookup_type, field_name, unique_for):
+    def unique_error_message(self, model_class, unique_check):
+    def full_clean(self, exclude=None, validate_unique=True):
+    def clean_fields(self, exclude=None):
+    @classmethod
+    def check(cls, **kwargs):
+    @classmethod
+    def _check_default_pk(cls):
+    @classmethod
+    def _check_swappable(cls):
+    @classmethod
+    def _check_model(cls):
+    @classmethod
+    def _check_managers(cls, **kwargs):
+    @classmethod
+    def _check_fields(cls, **kwargs):
+    @classmethod
+    def _check_m2m_through_same_relationship(cls):
+    @classmethod
+    def _check_id_field(cls):
+    @classmethod
+    def _check_field_name_clashes(cls):
+    @classmethod
+    def _check_column_name_clashes(cls):
+    @classmethod
+    def _check_model_name_db_lookup_clashes(cls):
+    @classmethod
+    def _check_property_name_related_field_accessor_clashes(cls):
+    @classmethod
+    def _check_single_primary_key(cls):
+    @classmethod
+    def _check_index_together(cls):
+    @classmethod
+    def _check_unique_together(cls):
+    @classmethod
+    def _check_indexes(cls, databases):
+    @classmethod
+    def _check_local_fields(cls, fields, option):
+    @classmethod
+    def _check_ordering(cls):
+    @classmethod
+    def _check_long_column_names(cls, databases):
+    @classmethod
+    def _get_expr_references(cls, expr):
+    @classmethod
+    def _check_constraints(cls, databases):
+
+
+【源码片段 5】
+文件路径：django/db/models/query.py
+对象名称：create
+节点类型：class_function
+父节点：QuerySet
+行号范围：446-454
+代码：
+    def create(self, **kwargs):
+        """
+        Create a new object with the given kwargs, saving it to the database
+        and returning the created object.
+        """
+        obj = self.model(**kwargs)
+        self._for_write = True
+        obj.save(force_insert=True, using=self.db)
+        return obj
+
+
+【源码片段 6】
+文件路径：django/db/models/query.py
+对象名称：bulk_create
+节点类型：class_function
+父节点：QuerySet
+行号范围：463-525
+代码：
+    def bulk_create(self, objs, batch_size=None, ignore_conflicts=False):
+        """
+        Insert each of the instances into the database. Do *not* call
+        save() on each of the instances, do not send any pre/post_save
+        signals, and do not set the primary key attribute if it is an
+        autoincrement field (except if features.can_return_rows_from_bulk_insert=True).
+        Multi-table models are not supported.
+        """
+        # When you bulk insert you don't get the primary keys back (if it's an
+        # autoincrement, except if can_return_rows_from_bulk_insert=True), so
+        # you can't insert into the child tables which references this. There
+        # are two workarounds:
+        # 1) This could be implemented if you didn't have an autoincrement pk
+        # 2) You could do it by doing O(n) normal inserts into the parent
+        #    tables to get the primary keys back and then doing a single bulk
+        #    insert into the childmost table.
+        # We currently set the primary keys on the objects when using
+        # PostgreSQL via the RETURNING ID clause. It should be possible for
+        # Oracle as well, but the semantics for extracting the primary keys is
+        # trickier so it's not done yet.
+        assert batch_size is None or batch_size > 0
+        # Check that the parents share the same concrete model with the our
+        # model to detect the inheritance pattern ConcreteGrandParent ->
+        # MultiTableParent -> ProxyChild. Simply checking self.model._meta.proxy
+        # would not identify that case as involving multiple tables.
+        for parent in self.model._meta.get_parent_list():
+            if parent._meta.concrete_model is not self.model._meta.concrete_model:
+                raise ValueError("Can't bulk create a multi-table inherited model")
+        if not objs:
+            return objs
+        self._for_write = True
+        connection = connections[self.db]
+        opts = self.model._meta
+        fields = opts.concrete_fields
+        objs = list(objs)
+        self._prepare_for_bulk_create(objs)
+        with transaction.atomic(using=self.db, savepoint=False):
+            objs_with_pk, objs_without_pk = partition(lambda o: o.pk is None, objs)
+            if objs_with_pk:
+                returned_columns = self._batched_insert(
+                    objs_with_pk, fields, batch_size, ignore_conflicts=ignore_conflicts,
+                )
+                for obj_with_pk, results in zip(objs_with_pk, returned_columns):
+                    for result, field in zip(results, opts.db_returning_fields):
+                        if field != opts.pk:
+                            setattr(obj_with_pk, field.attname, result)
+                for obj_with_pk in objs_with_pk:
+                    obj_with_pk._state.adding = False
+                    obj_with_pk._state.db = self.db
+            if objs_without_pk:
+                fields = [f for f in fields if not isinstance(f, AutoField)]
+                returned_columns = self._batched_insert(
+                    objs_without_pk, fields, batch_size, ignore_conflicts=ignore_conflicts,
+                )
+                if connection.features.can_return_rows_from_bulk_insert and not ignore_conflicts:
+                    assert len(returned_columns) == len(objs_without_pk)
+                for obj_without_pk, results in zip(objs_without_pk, returned_columns):
+                    for result, field in zip(results, opts.db_returning_fields):
+                        setattr(obj_without_pk, field.attname, result)
+                    obj_without_pk._state.adding = False
+                    obj_without_pk._state.db = self.db
+
+        return objs
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/queries/test_db_returning.py
+测试名称：ReturningValuesTests.test_bulk_insert
+测试代码：
+@skipUnlessDBFeature('can_return_columns_from_insert')
+class ReturningValuesTests(TestCase):
+    @skipUnlessDBFeature('can_return_rows_from_bulk_insert')
+    def test_bulk_insert(self):
+        objs = [ReturningModel(), ReturningModel(pk=2 ** 11), ReturningModel()]
+        ReturningModel.objects.bulk_create(objs)
+        for obj in objs:
+            with self.subTest(obj=obj):
+                self.assertTrue(obj.pk)
+                self.assertIsInstance(obj.created, datetime.datetime)
+
+【相关测试 2】
+测试文件：tests/from_db_value/tests.py
+测试名称：FromDBValueTest.test_simple_load
+测试代码：
+class FromDBValueTest(TestCase):
+    def test_simple_load(self):
+        instance = CashModel.objects.get()
+        self.assertIsInstance(instance.cash, Cash)
+
+【相关测试 3】
+测试文件：tests/bulk_create/tests.py
+测试名称：BulkCreateTests.test_bulk_insert_nullable_fields
+测试代码：
+class BulkCreateTests(TestCase):
+    @skipUnlessDBFeature('has_bulk_insert')
+    def test_bulk_insert_nullable_fields(self):
+        fk_to_auto_fields = {
+            'auto_field': NoFields.objects.create(),
+            'small_auto_field': SmallAutoFieldModel.objects.create(),
+            'big_auto_field': BigAutoFieldModel.objects.create(),
+        }
+        # NULL can be mixed with other values in nullable fields
+        nullable_fields = [field for field in NullableFields._meta.get_fields() if field.name != 'id']
+        NullableFields.objects.bulk_create([
+            NullableFields(**{**fk_to_auto_fields, field.name: None})
+            for field in nullable_fields
+        ])
+        self.assertEqual(NullableFields.objects.count(), len(nullable_fields))
+        for field in nullable_fields:
+            with self.subTest(field=field):
+                field_value = '' if isinstance(field, FileField) else None
+                self.assertEqual(NullableFields.objects.filter(**{field.name: field_value}).count(), 1)
+
+【相关测试 4】
+测试文件：tests/from_db_value/tests.py
+测试名称：FromDBValueTest.test_values
+测试代码：
+class FromDBValueTest(TestCase):
+    def test_values(self):
+        values = CashModel.objects.values('cash')
+        self.assertIsInstance(values[0]['cash'], Cash)
+
+【相关测试 5】
+测试文件：tests/from_db_value/tests.py
+测试名称：FromDBValueTest.test_values_list
+测试代码：
+class FromDBValueTest(TestCase):
+    def test_values_list(self):
+        values_list = CashModel.objects.values_list('cash', flat=True)
+        self.assertIsInstance(values_list[0], Cash)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

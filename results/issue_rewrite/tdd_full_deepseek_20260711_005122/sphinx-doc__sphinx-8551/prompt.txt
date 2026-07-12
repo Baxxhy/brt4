@@ -1,0 +1,378 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+:type: and :rtype: gives false ambiguous class lookup warnings
+**Describe the bug**
+The implicit xrefs created by the info fields ``:type:`` and ``:rtype:`` seems to do lookup differently than explicit xref roles. For unqualified names it seems like they search for the name in every (sub)module instead of in the current module and then parent modules.
+
+**To Reproduce**
+```rst
+.. py:class:: mod.A
+.. py:class:: mod.submod.A
+
+.. py:function:: f()
+
+	- :py:class:`mod.A`
+	- :py:class:`mod.submod.A`
+
+	:param mod.A a:
+	:param mod.submod.A b:
+	:rtype: mod.A
+	:rtype: mod.submod.A
+
+.. py:currentmodule:: mod
+
+.. py:function:: f()
+
+	- :py:class:`A`
+	- :py:class:`mod.A`
+	- :py:class:`mod.submod.A`
+
+	:param A a:
+	:param mod.A b:
+	:param mod.submod.A c:
+	:rtype: A
+	:rtype: mod.A
+	:rtype: mod.submod.A
+
+.. py:currentmodule:: mod.submod
+
+.. py:function:: f()
+
+	- :py:class:`A`
+	- :py:class:`mod.A`
+	- :py:class:`mod.submod.A`
+
+	:param A a: BUG: links to mod.A instead of mod.submod.A
+	:param mod.A b:
+	:param mod.submod.A c:
+	:rtype: A
+	:rtype: mod.A
+	:rtype: mod.submod.A
+```
+gives the warnings
+```
+index.rst:28: WARNING: more than one target found for cross-reference 'A': mod.A, mod.submod.A
+index.rst:28: WARNING: more than one target found for cross-reference 'A': mod.A, mod.submod.A
+index.rst:43: WARNING: more than one target found for cross-reference 'A': mod.A, mod.submod.A
+index.rst:43: WARNING: more than one target found for cross-reference 'A': mod.A, mod.submod.A
+```
+which refer to the 4 unqualified type names ``A``.
+The ``:param:`` annotated with ``BUG`` as well as the corresponding ``rtype`` gets resolved to ``mod.A``.
+
+**Expected behavior**
+No warnings, and the two mentioned types should resolve to ``mod.submod.A``.
+
+**Environment info**
+- Sphinx version: tested both with v3.3 and with master
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sphinx/domains/c.py
+对象名称：c
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/test_domain_py.py
+测试名称：test_domain_py_xrefs
+测试代码：
+@pytest.mark.sphinx('dummy', testroot='domain-py')
+def test_domain_py_xrefs(app, status, warning):
+    """Domain objects have correct prefixes when looking up xrefs"""
+    app.builder.build_all()
+
+    def assert_refnode(node, module_name, class_name, target, reftype=None,
+                       domain='py'):
+        attributes = {
+            'refdomain': domain,
+            'reftarget': target,
+        }
+        if reftype is not None:
+            attributes['reftype'] = reftype
+        if module_name is not False:
+            attributes['py:module'] = module_name
+        if class_name is not False:
+            attributes['py:class'] = class_name
+        assert_node(node, **attributes)
+
+    doctree = app.env.get_doctree('roles')
+    refnodes = list(doctree.traverse(pending_xref))
+    assert_refnode(refnodes[0], None, None, 'TopLevel', 'class')
+    assert_refnode(refnodes[1], None, None, 'top_level', 'meth')
+    assert_refnode(refnodes[2], None, 'NestedParentA', 'child_1', 'meth')
+    assert_refnode(refnodes[3], None, 'NestedParentA', 'NestedChildA.subchild_2', 'meth')
+    assert_refnode(refnodes[4], None, 'NestedParentA', 'child_2', 'meth')
+    assert_refnode(refnodes[5], False, 'NestedParentA', 'any_child', domain='')
+    assert_refnode(refnodes[6], None, 'NestedParentA', 'NestedChildA', 'class')
+    assert_refnode(refnodes[7], None, 'NestedParentA.NestedChildA', 'subchild_2', 'meth')
+    assert_refnode(refnodes[8], None, 'NestedParentA.NestedChildA',
+                   'NestedParentA.child_1', 'meth')
+    assert_refnode(refnodes[9], None, 'NestedParentA', 'NestedChildA.subchild_1', 'meth')
+    assert_refnode(refnodes[10], None, 'NestedParentB', 'child_1', 'meth')
+    assert_refnode(refnodes[11], None, 'NestedParentB', 'NestedParentB', 'class')
+    assert_refnode(refnodes[12], None, None, 'NestedParentA.NestedChildA', 'class')
+    assert len(refnodes) == 13
+
+    doctree = app.env.get_doctree('module')
+    refnodes = list(doctree.traverse(pending_xref))
+    assert_refnode(refnodes[0], 'module_a.submodule', None,
+                   'ModTopLevel', 'class')
+    assert_refnode(refnodes[1], 'module_a.submodule', 'ModTopLevel',
+                   'mod_child_1', 'meth')
+    assert_refnode(refnodes[2], 'module_a.submodule', 'ModTopLevel',
+                   'ModTopLevel.mod_child_1', 'meth')
+    assert_refnode(refnodes[3], 'module_a.submodule', 'ModTopLevel',
+                   'mod_child_2', 'meth')
+    assert_refnode(refnodes[4], 'module_a.submodule', 'ModTopLevel',
+                   'module_a.submodule.ModTopLevel.mod_child_1', 'meth')
+    assert_refnode(refnodes[5], 'module_a.submodule', 'ModTopLevel',
+                   'prop', 'attr')
+    assert_refnode(refnodes[6], 'module_a.submodule', 'ModTopLevel',
+                   'prop', 'meth')
+    assert_refnode(refnodes[7], 'module_b.submodule', None,
+                   'ModTopLevel', 'class')
+    assert_refnode(refnodes[8], 'module_b.submodule', 'ModTopLevel',
+                   'ModNoModule', 'class')
+    assert_refnode(refnodes[9], False, False, 'int', 'class')
+    assert_refnode(refnodes[10], False, False, 'tuple', 'class')
+    assert_refnode(refnodes[11], False, False, 'str', 'class')
+    assert_refnode(refnodes[12], False, False, 'float', 'class')
+    assert_refnode(refnodes[13], False, False, 'list', 'class')
+    assert_refnode(refnodes[14], False, False, 'ModTopLevel', 'class')
+    assert_refnode(refnodes[15], False, False, 'index', 'doc', domain='std')
+    assert len(refnodes) == 16
+
+    doctree = app.env.get_doctree('module_option')
+    refnodes = list(doctree.traverse(pending_xref))
+    print(refnodes)
+    print(refnodes[0])
+    print(refnodes[1])
+    assert_refnode(refnodes[0], 'test.extra', 'B', 'foo', 'meth')
+    assert_refnode(refnodes[1], 'test.extra', 'B', 'foo', 'meth')
+    assert len(refnodes) == 2
+
+【相关测试 2】
+测试文件：tests/test_domain_py.py
+测试名称：test_warn_missing_reference
+测试代码：
+@pytest.mark.sphinx('dummy', testroot='domain-py-xref-warning')
+def test_warn_missing_reference(app, status, warning):
+    app.build()
+    assert 'index.rst:6: WARNING: undefined label: no-label' in warning.getvalue()
+    assert ('index.rst:6: WARNING: Failed to create a cross reference. A title or caption not found: existing-label'
+            in warning.getvalue())
+
+【相关测试 3】
+测试文件：tests/test_domain_py.py
+测试名称：test_domain_py_find_obj
+测试代码：
+@pytest.mark.sphinx('dummy', testroot='domain-py')
+def test_domain_py_find_obj(app, status, warning):
+
+    def find_obj(modname, prefix, obj_name, obj_type, searchmode=0):
+        return app.env.domains['py'].find_obj(
+            app.env, modname, prefix, obj_name, obj_type, searchmode)
+
+    app.builder.build_all()
+
+    assert (find_obj(None, None, 'NONEXISTANT', 'class') == [])
+    assert (find_obj(None, None, 'NestedParentA', 'class') ==
+            [('NestedParentA', ('roles', 'NestedParentA', 'class'))])
+    assert (find_obj(None, None, 'NestedParentA.NestedChildA', 'class') ==
+            [('NestedParentA.NestedChildA', ('roles', 'NestedParentA.NestedChildA', 'class'))])
+    assert (find_obj(None, 'NestedParentA', 'NestedChildA', 'class') ==
+            [('NestedParentA.NestedChildA', ('roles', 'NestedParentA.NestedChildA', 'class'))])
+    assert (find_obj(None, None, 'NestedParentA.NestedChildA.subchild_1', 'meth') ==
+            [('NestedParentA.NestedChildA.subchild_1',
+              ('roles', 'NestedParentA.NestedChildA.subchild_1', 'method'))])
+    assert (find_obj(None, 'NestedParentA', 'NestedChildA.subchild_1', 'meth') ==
+            [('NestedParentA.NestedChildA.subchild_1',
+              ('roles', 'NestedParentA.NestedChildA.subchild_1', 'method'))])
+    assert (find_obj(None, 'NestedParentA.NestedChildA', 'subchild_1', 'meth') ==
+            [('NestedParentA.NestedChildA.subchild_1',
+              ('roles', 'NestedParentA.NestedChildA.subchild_1', 'method'))])
+
+【相关测试 4】
+测试文件：tests/test_domain_py.py
+测试名称：test_domain_py_objects
+测试代码：
+@pytest.mark.sphinx('dummy', testroot='domain-py')
+def test_domain_py_objects(app, status, warning):
+    app.builder.build_all()
+
+    modules = app.env.domains['py'].data['modules']
+    objects = app.env.domains['py'].data['objects']
+
+    assert 'module_a.submodule' in modules
+    assert 'module_a.submodule' in objects
+    assert 'module_b.submodule' in modules
+    assert 'module_b.submodule' in objects
+
+    assert objects['module_a.submodule.ModTopLevel'][2] == 'class'
+    assert objects['module_a.submodule.ModTopLevel.mod_child_1'][2] == 'method'
+    assert objects['module_a.submodule.ModTopLevel.mod_child_2'][2] == 'method'
+    assert 'ModTopLevel.ModNoModule' not in objects
+    assert objects['ModNoModule'][2] == 'class'
+    assert objects['module_b.submodule.ModTopLevel'][2] == 'class'
+
+    assert objects['TopLevel'][2] == 'class'
+    assert objects['top_level'][2] == 'method'
+    assert objects['NestedParentA'][2] == 'class'
+    assert objects['NestedParentA.child_1'][2] == 'method'
+    assert objects['NestedParentA.any_child'][2] == 'method'
+    assert objects['NestedParentA.NestedChildA'][2] == 'class'
+    assert objects['NestedParentA.NestedChildA.subchild_1'][2] == 'method'
+    assert objects['NestedParentA.NestedChildA.subchild_2'][2] == 'method'
+    assert objects['NestedParentA.child_2'][2] == 'method'
+    assert objects['NestedParentB'][2] == 'class'
+    assert objects['NestedParentB.child_1'][2] == 'method'
+
+【相关测试 5】
+测试文件：tests/test_ext_autodoc.py
+测试名称：test_autodoc
+测试代码：
+@pytest.mark.sphinx('dummy', testroot='ext-autodoc')
+def test_autodoc(app, status, warning):
+    app.builder.build_all()
+
+    content = app.env.get_doctree('index')
+    assert isinstance(content[3], addnodes.desc)
+    assert content[3][0].astext() == 'autodoc_dummy_module.test()'
+    assert content[3][1].astext() == 'Dummy function using dummy.*'
+
+    # issue sphinx-doc/sphinx#2437
+    assert content[11][-1].astext() == """Dummy class Bar with alias.
+
+
+
+my_name
+
+alias of bug2437.autodoc_dummy_foo.Foo"""
+    assert warning.getvalue() == ''
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

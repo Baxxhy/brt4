@@ -1,0 +1,125 @@
+instance_id: sphinx-doc__sphinx-10435
+
+issue_summary: LaTeX输出中，使用语法高亮的inline code role会在代码块前后插入多余空格。
+
+trigger_condition:
+{
+  "text": "在reStructuredText文档中使用带语言和class的code role（如:python:`def foo(1 + 2 + None + \"abc\"): pass`），然后构建LaTeX输出。",
+  "evidence": [
+    "Issue中How to Reproduce部分提供了具体示例",
+    "相关测试1中使用了reST-code-role测试根目录"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "生成的LaTeX文件中，\\sphinxcode{\\sphinxupquote{...}}宏包裹的代码块前后有空格字符，导致PDF输出中出现多余空白。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue描述中展示了LaTeX输出片段，显示空格插入",
+    "Issue截图对比了有空格和无空格的效果"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "LaTeX输出中inline code role生成的代码块前后不应有多余空格，应与普通文本紧密连接。",
+  "evidence": [
+    "Issue中提供了\"a priori, mark-up should be\"的期望LaTeX格式，使用%防止空格",
+    "Issue截图展示了移除空格后的正确效果"
+  ],
+  "confidence": "medium"
+}
+
+target_apis:
+[
+  {
+    "name": "sphinx.writers.latex.LaTeXTranslator",
+    "kind": "class",
+    "source_path": "sphinx/writers/latex.py",
+    "reason": "负责生成LaTeX输出的核心类，可能包含处理code role的方法"
+  },
+  {
+    "name": "sphinx.transforms.post_transforms.code",
+    "kind": "module",
+    "source_path": "sphinx/transforms/post_transforms/code.py",
+    "reason": "Issue提到与#10251相关，该PR引入了语法高亮，可能在此模块中处理"
+  },
+  {
+    "name": "CustomReSTDispatcher.role",
+    "kind": "method",
+    "source_path": "sphinx/util/docutils.py",
+    "reason": "处理role分发的机制，可能与code role的处理相关"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "相关测试1中只验证代码内容存在",
+    "target_pattern": "需要验证生成的LaTeX代码块前后没有多余空格或换行",
+    "reason": "Issue的核心是空格插入问题，需要从存在性检查变为精确格式检查",
+    "confidence": "high"
+  },
+  {
+    "slot": "assert_style",
+    "current_pattern": "使用in content检查内容片段是否存在",
+    "target_pattern": "需要检查\\sphinxcode{\\sphinxupquote{和后续内容之间没有空格/换行",
+    "reason": "当前测试无法检测空格问题，需要更精确的字符串匹配或正则检查",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "file_output",
+    "expression_hint": "生成的.tex文件内容中\\sphinxcode{\\sphinxupquote{和代码开始之间的字符",
+    "reason": "Issue显示问题出现在LaTeX源文件中，直接检查文件内容最能发现问题"
+  },
+  {
+    "kind": "file_output",
+    "expression_hint": "代码结束和}}之间的字符",
+    "reason": "Issue显示代码块结尾也有空格插入问题"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证LaTeX输出中inline code role生成的代码块前后没有多余空格或换行",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "避免完整的字符串相等断言，因为LaTeX输出可能包含其他动态内容",
+    "reason": "Issue关注的是空格插入问题，检查不应包含特定空格模式更稳定"
+  },
+  {
+    "assertion_goal": "验证代码块与周围文本紧密连接",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "避免依赖具体的Pygments高亮标记，这些可能变化",
+    "reason": "应该检查代码块边界是否正确，而不是内部高亮细节"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用@pytest.mark.sphinx('latex')装饰器和reST-code-role测试根目录",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要构建应用并读取生成的.tex文件",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "空格插入的具体位置是在LaTeX生成阶段还是Pygments高亮阶段",
+  "是否所有带语法高亮的code role都有此问题，还是特定语言",
+  "修复后确切的LaTeX输出格式是什么，除了移除空格是否还需要其他调整"
+]

@@ -1,0 +1,526 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+lambdify(modules='mpmath') doesn't wrap rationals
+```py
+>>> eqn = Eq(rf(18,x), 77 + S(1)/3)
+>>> f = lambdify(x, eqn.lhs - eqn.rhs, 'mpmath')
+>>> print(inspect.getsource(f))
+def _lambdifygenerated(x):
+    return (  # Not supported in Python:
+  # RisingFactorial
+RisingFactorial(18, x) - 232/3)
+```
+
+This results in reduced precision results from `nsolve`, because the 232/3 isn't evaluated at full precision. 
+
+```py
+>>> eqn = Eq(rf(18,x), 77 + S(1)/3)
+>>> x0 = nsolve(eqn, Float('1.5', 64), prec=64)
+>>> rf(18, x0).evalf(64)
+77.33333333333332859638176159933209419250488281250000000000000000
+```
+
+Originally reported at https://github.com/sympy/sympy/pull/14971
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/utilities/lambdify.py
+对象名称：lambdify
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 2】
+文件路径：sympy/functions/combinatorial/factorials.py
+对象名称：RisingFactorial
+节点类型：class
+父节点：factorials
+行号范围：476-603
+代码：
+class RisingFactorial(CombinatorialFunction):
+    """
+    Rising factorial (also called Pochhammer symbol) is a double valued
+    function arising in concrete mathematics, hypergeometric functions
+    and series expansions. It is defined by:
+
+                rf(x, k) = x * (x + 1) * ... * (x + k - 1)
+
+    where 'x' can be arbitrary expression and 'k' is an integer. For
+    more information check "Concrete mathematics" by Graham, pp. 66
+    or visit http://mathworld.wolfram.com/RisingFactorial.html page.
+
+    When x is a Poly instance of degree >= 1 with a single variable,
+    rf(x,k) = x(y) * x(y+1) * ... * x(y+k-1), where y is the variable of x.
+    This is as described in Peter Paule, "Greatest Factorial Factorization and
+    Symbolic Summation", Journal of Symbolic Computation, vol. 20, pp.
+    235-268, 1995.
+
+    Examples
+    ========
+
+    >>> from sympy import rf, symbols, factorial, ff, binomial, Poly
+    >>> from sympy.abc import x
+    >>> n, k = symbols('n k', integer=True)
+    >>> rf(x, 0)
+    1
+    >>> rf(1, 5)
+    120
+    >>> rf(x, 5) == x*(1 + x)*(2 + x)*(3 + x)*(4 + x)
+    True
+    >>> rf(Poly(x**3, x), 2)
+    Poly(x**6 + 3*x**5 + 3*x**4 + x**3, x, domain='ZZ')
+
+    Rewrite
+
+    >>> rf(x, k).rewrite(ff)
+    FallingFactorial(k + x - 1, k)
+    >>> rf(x, k).rewrite(binomial)
+    binomial(k + x - 1, k)*factorial(k)
+    >>> rf(n, k).rewrite(factorial)
+    factorial(k + n - 1)/factorial(n - 1)
+
+    See Also
+    ========
+
+    factorial, factorial2, FallingFactorial
+
+    References
+    ==========
+
+    .. [1] https://en.wikipedia.org/wiki/Pochhammer_symbol
+
+    """
+    @classmethod
+    def eval(cls, x, k):
+    def _eval_rewrite_as_gamma(self, x, k):
+    def _eval_rewrite_as_FallingFactorial(self, x, k):
+    def _eval_rewrite_as_factorial(self, x, k):
+    def _eval_rewrite_as_binomial(self, x, k):
+    def _eval_is_integer(self):
+    def _sage_(self):
+
+
+【源码片段 3】
+文件路径：sympy/solvers/solvers.py
+对象名称：nsolve
+节点类型：top-level function
+父节点：solvers
+行号范围：2758-2951
+代码：
+def nsolve(*args, **kwargs):
+    r"""
+    Solve a nonlinear equation system numerically::
+
+        nsolve(f, [args,] x0, modules=['mpmath'], **kwargs)
+
+    f is a vector function of symbolic expressions representing the system.
+    args are the variables. If there is only one variable, this argument can
+    be omitted.
+    x0 is a starting vector close to a solution.
+
+    Use the modules keyword to specify which modules should be used to
+    evaluate the function and the Jacobian matrix. Make sure to use a module
+    that supports matrices. For more information on the syntax, please see the
+    docstring of lambdify.
+
+    If the keyword arguments contain 'dict'=True (default is False) nsolve
+    will return a list (perhaps empty) of solution mappings. This might be
+    especially useful if you want to use nsolve as a fallback to solve since
+    using the dict argument for both methods produces return values of
+    consistent type structure. Please note: to keep this consistency with
+    solve, the solution will be returned in a list even though nsolve
+    (currently at least) only finds one solution at a time.
+
+    Overdetermined systems are supported.
+
+    >>> from sympy import Symbol, nsolve
+    >>> import sympy
+    >>> import mpmath
+    >>> mpmath.mp.dps = 15
+    >>> x1 = Symbol('x1')
+    >>> x2 = Symbol('x2')
+    >>> f1 = 3 * x1**2 - 2 * x2**2 - 1
+    >>> f2 = x1**2 - 2 * x1 + x2**2 + 2 * x2 - 8
+    >>> print(nsolve((f1, f2), (x1, x2), (-1, 1)))
+    Matrix([[-1.19287309935246], [1.27844411169911]])
+
+    For one-dimensional functions the syntax is simplified:
+
+    >>> from sympy import sin, nsolve
+    >>> from sympy.abc import x
+    >>> nsolve(sin(x), x, 2)
+    3.14159265358979
+    >>> nsolve(sin(x), 2)
+    3.14159265358979
+
+    To solve with higher precision than the default, use the prec argument.
+
+    >>> from sympy import cos
+    >>> nsolve(cos(x) - x, 1)
+    0.739085133215161
+    >>> nsolve(cos(x) - x, 1, prec=50)
+    0.73908513321516064165531208767387340401341175890076
+    >>> cos(_)
+    0.73908513321516064165531208767387340401341175890076
+
+    To solve for complex roots of real functions, a nonreal initial point
+    must be specified:
+
+    >>> from sympy import I
+    >>> nsolve(x**2 + 2, I)
+    1.4142135623731*I
+
+    mpmath.findroot is used and you can find there more extensive
+    documentation, especially concerning keyword parameters and
+    available solvers. Note, however, that functions which are very
+    steep near the root the verification of the solution may fail. In
+    this case you should use the flag `verify=False` and
+    independently verify the solution.
+
+    >>> from sympy import cos, cosh
+    >>> from sympy.abc import i
+    >>> f = cos(x)*cosh(x) - 1
+    >>> nsolve(f, 3.14*100)
+    Traceback (most recent call last):
+    ...
+    ValueError: Could not find root within given tolerance. (1.39267e+230 > 2.1684e-19)
+    >>> ans = nsolve(f, 3.14*100, verify=False); ans
+    312.588469032184
+    >>> f.subs(x, ans).n(2)
+    2.1e+121
+    >>> (f/f.diff(x)).subs(x, ans).n(2)
+    7.4e-15
+
+    One might safely skip the verification if bounds of the root are known
+    and a bisection method is used:
+
+    >>> bounds = lambda i: (3.14*i, 3.14*(i + 1))
+    >>> nsolve(f, bounds(100), solver='bisect', verify=False)
+    315.730061685774
+
+    Alternatively, a function may be better behaved when the
+    denominator is ignored. Since this is not always the case, however,
+    the decision of what function to use is left to the discretion of
+    the user.
+
+    >>> eq = x**2/(1 - x)/(1 - 2*x)**2 - 100
+    >>> nsolve(eq, 0.46)
+    Traceback (most recent call last):
+    ...
+    ValueError: Could not find root within given tolerance. (10000 > 2.1684e-19)
+    Try another starting point or tweak arguments.
+    >>> nsolve(eq.as_numer_denom()[0], 0.46)
+    0.46792545969349058
+    """
+    # there are several other SymPy functions that use method= so
+    # guard against that here
+    if 'method' in kwargs:
+        raise ValueError(filldedent('''
+            Keyword "method" should not be used in this context.  When using
+            some mpmath solvers directly, the keyword "method" is
+            used, but when using nsolve (and findroot) the keyword to use is
+            "solver".'''))
+
+    if 'prec' in kwargs:
+        prec = kwargs.pop('prec')
+        import mpmath
+        mpmath.mp.dps = prec
+    else:
+        prec = None
+
+    # keyword argument to return result as a dictionary
+    as_dict = kwargs.pop('dict', False)
+
+    # interpret arguments
+    if len(args) == 3:
+        f = args[0]
+        fargs = args[1]
+        x0 = args[2]
+        if iterable(fargs) and iterable(x0):
+            if len(x0) != len(fargs):
+                raise TypeError('nsolve expected exactly %i guess vectors, got %i'
+                                % (len(fargs), len(x0)))
+    elif len(args) == 2:
+        f = args[0]
+        fargs = None
+        x0 = args[1]
+        if iterable(f):
+            raise TypeError('nsolve expected 3 arguments, got 2')
+    elif len(args) < 2:
+        raise TypeError('nsolve expected at least 2 arguments, got %i'
+                        % len(args))
+    else:
+        raise TypeError('nsolve expected at most 3 arguments, got %i'
+                        % len(args))
+    modules = kwargs.get('modules', ['mpmath'])
+    if iterable(f):
+        f = list(f)
+        for i, fi in enumerate(f):
+            if isinstance(fi, Equality):
+                f[i] = fi.lhs - fi.rhs
+        f = Matrix(f).T
+    if not isinstance(f, Matrix):
+        # assume it's a sympy expression
+        if isinstance(f, Equality):
+            f = f.lhs - f.rhs
+        syms = f.free_symbols
+        if fargs is None:
+            fargs = syms.copy().pop()
+        if not (len(syms) == 1 and (fargs in syms or fargs[0] in syms)):
+            raise ValueError(filldedent('''
+                expected a one-dimensional and numerical function'''))
+
+        # the function is much better behaved if there is no denominator
+        # but sending the numerator is left to the user since sometimes
+        # the function is better behaved when the denominator is present
+        # e.g., issue 11768
+
+        f = lambdify(fargs, f, modules)
+        x = sympify(findroot(f, x0, **kwargs))
+        if as_dict:
+            return [dict([(fargs, x)])]
+        return x
+
+    if len(fargs) > f.cols:
+        raise NotImplementedError(filldedent('''
+            need at least as many equations as variables'''))
+    verbose = kwargs.get('verbose', False)
+    if verbose:
+        print('f(x):')
+        print(f)
+    # derive Jacobian
+    J = f.jacobian(fargs)
+    if verbose:
+        print('J(x):')
+        print(J)
+    # create functions
+    f = lambdify(fargs, f.T, modules)
+    J = lambdify(fargs, J, modules)
+    # solve the system numerically
+    x = findroot(f, x0, J=J, **kwargs)
+    if as_dict:
+        return [dict(zip(fargs, [sympify(xi) for xi in x]))]
+    return Matrix(x)
+
+
+【源码片段 4】
+文件路径：sympy/assumptions/handlers/ntheory.py
+对象名称：Float
+节点类型：class_function
+父节点：AskPrimeHandler
+行号范围：72-73
+代码：
+    def Float(expr, assumptions):
+        return AskPrimeHandler._number(expr, assumptions)
+
+
+【源码片段 5】
+文件路径：sympy/vector/basisdependent.py
+对象名称：evalf
+节点类型：class_function
+父节点：BasisDependent
+行号范围：58-69
+代码：
+    def evalf(self, prec=None, **options):
+        """
+        Implements the SymPy evalf routine for this quantity.
+
+        evalf's documentation
+        =====================
+
+        """
+        vec = self.zero
+        for k, v in self.components.items():
+            vec += v.evalf(prec, **options) * k
+        return vec
+
+
+【源码片段 6】
+文件路径：sympy/physics/units/definitions.py
+对象名称：S
+节点类型：global_var
+父节点：definitions
+行号范围：136-136
+代码：
+siemens = S = mho = mhos = Quantity("siemens", abbrev='S')
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/functions/combinatorial/tests/test_comb_factorials.py
+测试名称：test_rf_lambdify_mpmath
+测试代码：
+def test_rf_lambdify_mpmath():
+    from sympy import lambdify
+    x, y = symbols('x,y')
+    f = lambdify((x,y), rf(x, y), 'mpmath')
+    maple = Float('34.007346127440197')
+    us = f(4.4, 2.2)
+    assert abs(us - maple)/us < 1e-15
+
+【相关测试 2】
+测试文件：sympy/utilities/tests/test_lambdify.py
+测试名称：test_mpmath_precision
+测试代码：
+@conserve_mpmath_dps
+def test_mpmath_precision():
+    mpmath.mp.dps = 100
+    assert str(lambdify((), pi.evalf(100), 'mpmath')()) == str(pi.evalf(100))
+
+【相关测试 3】
+测试文件：sympy/utilities/tests/test_lambdify.py
+测试名称：test_mpmath_lambda
+测试代码：
+@conserve_mpmath_dps
+def test_mpmath_lambda():
+    mpmath.mp.dps = 50
+    sin02 = mpmath.mpf("0.19866933079506121545941262711838975037020672954020")
+    f = lambdify(x, sin(x), "mpmath")
+    prec = 1e-49  # mpmath precision is around 50 decimal places
+    assert -prec < f(mpmath.mpf("0.2")) - sin02 < prec
+    raises(TypeError, lambda: f(x))
+
+【相关测试 4】
+测试文件：sympy/utilities/tests/test_lambdify.py
+测试名称：test_number_precision
+测试代码：
+@conserve_mpmath_dps
+def test_number_precision():
+    mpmath.mp.dps = 50
+    sin02 = mpmath.mpf("0.19866933079506121545941262711838975037020672954020")
+    f = lambdify(x, sin02, "mpmath")
+    prec = 1e-49  # mpmath precision is around 50 decimal places
+    assert -prec < f(0) - sin02 < prec
+
+【相关测试 5】
+测试文件：sympy/utilities/tests/test_lambdify.py
+测试名称：test_sinc_mpmath
+测试代码：
+def test_sinc_mpmath():
+    f = lambdify(x, sinc(x), "mpmath")
+    assert Abs(f(1) - sinc(1)).n() < 1e-15
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

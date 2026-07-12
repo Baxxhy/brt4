@@ -1,0 +1,275 @@
+{
+  "instance_id": "sphinx-doc__sphinx-8120",
+  "issue_summary": "用户自定义的 locale/<language>/LC_MESSAGES/sphinx.po 翻译文件被忽略，系统使用了内置的官方翻译。",
+  "trigger_condition": {
+    "text": "在项目源目录（与 Makefile 同目录）下创建 locale/da/LC_MESSAGES/sphinx.po 文件，并设置 conf.py 中的 language='da' 和 gettext_auto_build=True，然后执行构建（如 make html）。",
+    "evidence": [
+      "Issue 描述：'When I add locale/da/LC_MESSAGES/sphinx.po...'",
+      "Issue 描述：'language = 'da' is in conf.py'",
+      "Issue 描述：'gettext_auto_build = True'",
+      "Issue 的 To Reproduce 步骤"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "生成的 HTML 中，图标题（Fig. %s）和代码块标题（Listing %s）使用了内置的丹麦语翻译（例如 'figur' 和 'Viser'），而不是用户自定义的翻译（例如 'Foobar' 和 'Whatever'）。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 描述：'the translations are not used. The translations from the official da translation is used.'",
+      "Issue 的 Expected behavior 部分：'The caption label for the figure figur 1 should have been Foobar 1...'",
+      "Issue 的 Screenshot 显示 'figur 1' 和 'Viser 1'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "构建系统应优先使用用户提供的 locale/<language>/LC_MESSAGES/sphinx.po 文件中的翻译，覆盖内置的官方翻译。",
+    "evidence": [
+      "Issue 描述引用文档 [1] 暗示应能通过添加文件来更改翻译",
+      "Issue 的 Expected behavior 部分描述了预期的自定义翻译结果"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "CatalogRepository.locale_dirs",
+      "kind": "method",
+      "source_path": "sphinx/util/i18n.py",
+      "reason": "该方法负责生成本地化目录路径，可能影响翻译文件的查找顺序。"
+    },
+    {
+      "name": "locale.init",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试 test_init 中使用了此函数来初始化翻译，与加载自定义翻译目录相关。"
+    },
+    {
+      "name": "app.add_message_catalog",
+      "kind": "method",
+      "source_path": "",
+      "reason": "相关测试 test_add_message_catalog 中使用了此方法添加消息目录，与自定义翻译相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sphinx/util/i18n.py",
+      "object": "CatalogRepository.locale_dirs",
+      "lines": "89-96",
+      "reason": "该方法是生成翻译文件查找目录的生成器，可能决定了用户自定义 locale 目录和内置目录的优先级顺序。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_additional_targets_should_be_translated",
+      "test_file": "tests/test_intl.py",
+      "why_relevant": "该测试设置了 locale_dirs 和 language，并验证了翻译是否生效，与 Issue 中配置翻译目录和语言的行为相似。",
+      "reusable_parts": [
+        "@sphinx_intl 和 @pytest.mark.sphinx fixture",
+        "confoverrides 设置（如 'locale_dirs': ['.']）",
+        "app.build() 调用",
+        "读取输出文件并断言翻译内容"
+      ],
+      "possible_gap": "该测试使用了一个虚构的语言 'xx' 和特定的测试数据，而 Issue 涉及真实语言 'da' 和用户自定义的 sphinx.po 文件覆盖内置翻译的场景。"
+    },
+    {
+      "test_name": "test_init",
+      "test_file": "tests/test_locale.py",
+      "why_relevant": "该测试直接操作 locale.init 函数，加载不同的翻译目录（locale1, locale2），并验证翻译字符串的覆盖关系，与 Issue 中自定义翻译覆盖内置翻译的核心问题高度相关。",
+      "reusable_parts": [
+        "locale.init 的调用方式",
+        "使用 locale.get_translation 获取翻译函数",
+        "断言翻译字符串是否被覆盖的断言风格"
+      ],
+      "possible_gap": "该测试是针对扩展（'myext'）的命名空间，而 Issue 是针对核心 'sphinx' 域的翻译。测试是单元测试，而 Issue 是集成构建场景。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "相似测试中 confoverrides 设置 'language': 'xx'（虚构语言）和 'locale_dirs': ['.']（当前目录）。",
+      "target_pattern": "设置 'language': 'da'（真实语言），并确保 locale_dirs 指向包含用户自定义 locale/da/LC_MESSAGES/sphinx.po 的目录。",
+      "reason": "使用真实语言 'da' 会触发加载内置的丹麦语翻译，从而测试用户自定义翻译是否能正确覆盖它。",
+      "confidence": "high"
+    },
+    {
+      "slot": "input",
+      "current_pattern": "相似测试使用预定义的测试翻译数据（如 'CODE-BLOCKS'）。",
+      "target_pattern": "提供自定义的 sphinx.po 文件，其中包含对特定键（如 'Fig. %s', 'Listing %s'）的翻译覆盖。",
+      "reason": "Issue 的核心是用户提供的翻译文件内容未被使用，需要创建这样的文件作为输入。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "在构建后，检查生成的 HTML 中特定标签（如图标题、代码块标题）的文本内容。",
+      "reason": "Issue 的错误现象直接体现在最终输出的文本内容上，观察这些内容可以判断是使用了内置翻译还是自定义翻译。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "在翻译加载过程中，观察 CatalogRepository.locale_dirs 方法生成的目录顺序，或 locale.init 加载的 catalog 来源。",
+      "reason": "这有助于确定翻译文件的查找路径和优先级，判断自定义目录是否被正确包含和优先考虑。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证生成的 HTML 中，图标题和代码块标题的文本包含了用户自定义翻译文件中的字符串片段（如 'Foobar', 'Whatever'），而不是内置翻译的字符串（如 'figur', 'Viser'）。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免断言完整的、格式化的 HTML 字符串，因为 HTML 结构可能变化。避免断言翻译出现的精确次数，除非 Issue 明确要求。",
+      "reason": "断言包含自定义翻译的片段是稳定且与 Issue 核心（翻译被使用）直接对齐的。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 @sphinx_intl 和 @pytest.mark.sphinx fixture 来设置 Sphinx 应用和测试环境。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要在临时目录（如 tmp_path）中创建源文件、conf.py 以及自定义的 locale/da/LC_MESSAGES/sphinx.po 文件结构。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "locale_dirs 配置的确切语义和优先级：用户提供的目录与 Sphinx 内置的翻译目录之间的加载顺序是否明确？",
+    "gettext_auto_build 设置是否对测试场景有影响，或者测试是否需要模拟 .mo 文件的生成过程？",
+    "除了 CatalogRepository.locale_dirs，是否还有其他模块（如具体的翻译加载器）涉及翻译覆盖的决策逻辑？"
+  ],
+  "raw": {
+    "issue_summary": "用户自定义的 locale/<language>/LC_MESSAGES/sphinx.po 翻译文件被忽略，系统使用了内置的官方翻译。",
+    "trigger_condition": {
+      "text": "在项目源目录（与 Makefile 同目录）下创建 locale/da/LC_MESSAGES/sphinx.po 文件，并设置 conf.py 中的 language='da' 和 gettext_auto_build=True，然后执行构建（如 make html）。",
+      "evidence": [
+        "Issue 描述：'When I add locale/da/LC_MESSAGES/sphinx.po...'",
+        "Issue 描述：'language = 'da' is in conf.py'",
+        "Issue 描述：'gettext_auto_build = True'",
+        "Issue 的 To Reproduce 步骤"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 HTML 中，图标题（Fig. %s）和代码块标题（Listing %s）使用了内置的丹麦语翻译（例如 'figur' 和 'Viser'），而不是用户自定义的翻译（例如 'Foobar' 和 'Whatever'）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'the translations are not used. The translations from the official da translation is used.'",
+        "Issue 的 Expected behavior 部分：'The caption label for the figure figur 1 should have been Foobar 1...'",
+        "Issue 的 Screenshot 显示 'figur 1' 和 'Viser 1'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "构建系统应优先使用用户提供的 locale/<language>/LC_MESSAGES/sphinx.po 文件中的翻译，覆盖内置的官方翻译。",
+      "evidence": [
+        "Issue 描述引用文档 [1] 暗示应能通过添加文件来更改翻译",
+        "Issue 的 Expected behavior 部分描述了预期的自定义翻译结果"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "CatalogRepository.locale_dirs",
+        "kind": "method",
+        "source_path": "sphinx/util/i18n.py",
+        "reason": "该方法负责生成本地化目录路径，可能影响翻译文件的查找顺序。"
+      },
+      {
+        "name": "locale.init",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 test_init 中使用了此函数来初始化翻译，与加载自定义翻译目录相关。"
+      },
+      {
+        "name": "app.add_message_catalog",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 test_add_message_catalog 中使用了此方法添加消息目录，与自定义翻译相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sphinx/util/i18n.py",
+        "object": "CatalogRepository.locale_dirs",
+        "lines": "89-96",
+        "reason": "该方法是生成翻译文件查找目录的生成器，可能决定了用户自定义 locale 目录和内置目录的优先级顺序。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_additional_targets_should_be_translated",
+        "test_file": "tests/test_intl.py",
+        "why_relevant": "该测试设置了 locale_dirs 和 language，并验证了翻译是否生效，与 Issue 中配置翻译目录和语言的行为相似。",
+        "reusable_parts": [
+          "@sphinx_intl 和 @pytest.mark.sphinx fixture",
+          "confoverrides 设置（如 'locale_dirs': ['.']）",
+          "app.build() 调用",
+          "读取输出文件并断言翻译内容"
+        ],
+        "possible_gap": "该测试使用了一个虚构的语言 'xx' 和特定的测试数据，而 Issue 涉及真实语言 'da' 和用户自定义的 sphinx.po 文件覆盖内置翻译的场景。"
+      },
+      {
+        "test_name": "test_init",
+        "test_file": "tests/test_locale.py",
+        "why_relevant": "该测试直接操作 locale.init 函数，加载不同的翻译目录（locale1, locale2），并验证翻译字符串的覆盖关系，与 Issue 中自定义翻译覆盖内置翻译的核心问题高度相关。",
+        "reusable_parts": [
+          "locale.init 的调用方式",
+          "使用 locale.get_translation 获取翻译函数",
+          "断言翻译字符串是否被覆盖的断言风格"
+        ],
+        "possible_gap": "该测试是针对扩展（'myext'）的命名空间，而 Issue 是针对核心 'sphinx' 域的翻译。测试是单元测试，而 Issue 是集成构建场景。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中 confoverrides 设置 'language': 'xx'（虚构语言）和 'locale_dirs': ['.']（当前目录）。",
+        "target_pattern": "设置 'language': 'da'（真实语言），并确保 locale_dirs 指向包含用户自定义 locale/da/LC_MESSAGES/sphinx.po 的目录。",
+        "reason": "使用真实语言 'da' 会触发加载内置的丹麦语翻译，从而测试用户自定义翻译是否能正确覆盖它。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试使用预定义的测试翻译数据（如 'CODE-BLOCKS'）。",
+        "target_pattern": "提供自定义的 sphinx.po 文件，其中包含对特定键（如 'Fig. %s', 'Listing %s'）的翻译覆盖。",
+        "reason": "Issue 的核心是用户提供的翻译文件内容未被使用，需要创建这样的文件作为输入。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "在构建后，检查生成的 HTML 中特定标签（如图标题、代码块标题）的文本内容。",
+        "reason": "Issue 的错误现象直接体现在最终输出的文本内容上，观察这些内容可以判断是使用了内置翻译还是自定义翻译。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在翻译加载过程中，观察 CatalogRepository.locale_dirs 方法生成的目录顺序，或 locale.init 加载的 catalog 来源。",
+        "reason": "这有助于确定翻译文件的查找路径和优先级，判断自定义目录是否被正确包含和优先考虑。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证生成的 HTML 中，图标题和代码块标题的文本包含了用户自定义翻译文件中的字符串片段（如 'Foobar', 'Whatever'），而不是内置翻译的字符串（如 'figur', 'Viser'）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、格式化的 HTML 字符串，因为 HTML 结构可能变化。避免断言翻译出现的精确次数，除非 Issue 明确要求。",
+        "reason": "断言包含自定义翻译的片段是稳定且与 Issue 核心（翻译被使用）直接对齐的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 @sphinx_intl 和 @pytest.mark.sphinx fixture 来设置 Sphinx 应用和测试环境。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要在临时目录（如 tmp_path）中创建源文件、conf.py 以及自定义的 locale/da/LC_MESSAGES/sphinx.po 文件结构。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "locale_dirs 配置的确切语义和优先级：用户提供的目录与 Sphinx 内置的翻译目录之间的加载顺序是否明确？",
+      "gettext_auto_build 设置是否对测试场景有影响，或者测试是否需要模拟 .mo 文件的生成过程？",
+      "除了 CatalogRepository.locale_dirs，是否还有其他模块（如具体的翻译加载器）涉及翻译覆盖的决策逻辑？"
+    ]
+  }
+}

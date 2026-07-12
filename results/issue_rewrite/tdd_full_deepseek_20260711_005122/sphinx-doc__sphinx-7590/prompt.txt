@@ -1,0 +1,497 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+C++ User Defined Literals not supported
+The code as below
+
+```cpp
+namespace units::si {
+
+inline constexpr auto planck_constant = 6.62607015e-34q_J * 1q_s;
+
+}
+```
+
+causes the following error:
+
+```
+WARNING: Invalid definition: Expected end of definition. [error at 58]
+[build]   constexpr auto units::si::planck_constant = 6.62607015e-34q_J * 1q_s
+[build]   ----------------------------------------------------------^
+```
+
+According to <https://github.com/sphinx-doc/sphinx/blob/3.x/sphinx/domains/cpp.py#L4770> Sphinx seems to not have features for UDLs. Could you please add those?
+
+
+====================
+【iCoRe 检索出的相关源代码】
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/test_domain_cpp.py
+测试名称：test_operators
+测试代码：
+def test_operators():
+    check('function', 'void operator new()', {1: "new-operator", 2: "nwv"})
+    check('function', 'void operator new[]()', {1: "new-array-operator", 2: "nav"})
+    check('function', 'void operator delete()', {1: "delete-operator", 2: "dlv"})
+    check('function', 'void operator delete[]()', {1: "delete-array-operator", 2: "dav"})
+    check('function', 'operator bool() const', {1: "castto-b-operatorC", 2: "NKcvbEv"})
+    check('function', 'void operator""_udl()', {2: 'li4_udlv'})
+
+    check('function', 'void operator~()', {1: "inv-operator", 2: "cov"})
+    check('function', 'void operator compl()', {2: "cov"})
+    check('function', 'void operator+()', {1: "add-operator", 2: "plv"})
+    check('function', 'void operator-()', {1: "sub-operator", 2: "miv"})
+    check('function', 'void operator*()', {1: "mul-operator", 2: "mlv"})
+    check('function', 'void operator/()', {1: "div-operator", 2: "dvv"})
+    check('function', 'void operator%()', {1: "mod-operator", 2: "rmv"})
+    check('function', 'void operator&()', {1: "and-operator", 2: "anv"})
+    check('function', 'void operator bitand()', {2: "anv"})
+    check('function', 'void operator|()', {1: "or-operator", 2: "orv"})
+    check('function', 'void operator bitor()', {2: "orv"})
+    check('function', 'void operator^()', {1: "xor-operator", 2: "eov"})
+    check('function', 'void operator xor()', {2: "eov"})
+    check('function', 'void operator=()', {1: "assign-operator", 2: "aSv"})
+    check('function', 'void operator+=()', {1: "add-assign-operator", 2: "pLv"})
+    check('function', 'void operator-=()', {1: "sub-assign-operator", 2: "mIv"})
+    check('function', 'void operator*=()', {1: "mul-assign-operator", 2: "mLv"})
+    check('function', 'void operator/=()', {1: "div-assign-operator", 2: "dVv"})
+    check('function', 'void operator%=()', {1: "mod-assign-operator", 2: "rMv"})
+    check('function', 'void operator&=()', {1: "and-assign-operator", 2: "aNv"})
+    check('function', 'void operator and_eq()', {2: "aNv"})
+    check('function', 'void operator|=()', {1: "or-assign-operator", 2: "oRv"})
+    check('function', 'void operator or_eq()', {2: "oRv"})
+    check('function', 'void operator^=()', {1: "xor-assign-operator", 2: "eOv"})
+    check('function', 'void operator xor_eq()', {2: "eOv"})
+    check('function', 'void operator<<()', {1: "lshift-operator", 2: "lsv"})
+    check('function', 'void operator>>()', {1: "rshift-operator", 2: "rsv"})
+    check('function', 'void operator<<=()', {1: "lshift-assign-operator", 2: "lSv"})
+    check('function', 'void operator>>=()', {1: "rshift-assign-operator", 2: "rSv"})
+    check('function', 'void operator==()', {1: "eq-operator", 2: "eqv"})
+    check('function', 'void operator!=()', {1: "neq-operator", 2: "nev"})
+    check('function', 'void operator not_eq()', {2: "nev"})
+    check('function', 'void operator<()', {1: "lt-operator", 2: "ltv"})
+    check('function', 'void operator>()', {1: "gt-operator", 2: "gtv"})
+    check('function', 'void operator<=()', {1: "lte-operator", 2: "lev"})
+    check('function', 'void operator>=()', {1: "gte-operator", 2: "gev"})
+    check('function', 'void operator!()', {1: "not-operator", 2: "ntv"})
+    check('function', 'void operator not()', {2: "ntv"})
+    check('function', 'void operator&&()', {1: "sand-operator", 2: "aav"})
+    check('function', 'void operator and()', {2: "aav"})
+    check('function', 'void operator||()', {1: "sor-operator", 2: "oov"})
+    check('function', 'void operator or()', {2: "oov"})
+    check('function', 'void operator++()', {1: "inc-operator", 2: "ppv"})
+    check('function', 'void operator--()', {1: "dec-operator", 2: "mmv"})
+    check('function', 'void operator,()', {1: "comma-operator", 2: "cmv"})
+    check('function', 'void operator->*()', {1: "pointer-by-pointer-operator", 2: "pmv"})
+    check('function', 'void operator->()', {1: "pointer-operator", 2: "ptv"})
+    check('function', 'void operator()()', {1: "call-operator", 2: "clv"})
+    check('function', 'void operator[]()', {1: "subscript-operator", 2: "ixv"})
+
+【相关测试 2】
+测试文件：tests/test_domain_cpp.py
+测试名称：test_expressions
+测试代码：
+def test_expressions():
+    def exprCheck(expr, id, id4=None):
+        ids = 'IE1CIA%s_1aE'
+        idDict = {2: ids % expr, 3: ids % id}
+        if id4 is not None:
+            idDict[4] = ids % id4
+        check('class', 'template<> C<a[%s]>' % expr, idDict)
+
+        class Config:
+            cpp_id_attributes = ["id_attr"]
+            cpp_paren_attributes = ["paren_attr"]
+
+        parser = DefinitionParser(expr, location=None,
+                                  config=Config())
+        parser.allowFallbackExpressionParsing = False
+        ast = parser.parse_expression()
+        res = str(ast)
+        if res != expr:
+            print("")
+            print("Input:    ", expr)
+            print("Result:   ", res)
+            raise DefinitionError("")
+    # primary
+    exprCheck('nullptr', 'LDnE')
+    exprCheck('true', 'L1E')
+    exprCheck('false', 'L0E')
+    ints = ['5', '0', '075', '0x0123456789ABCDEF', '0XF', '0b1', '0B1']
+    unsignedSuffix = ['', 'u', 'U']
+    longSuffix = ['', 'l', 'L', 'll', 'LL']
+    for i in ints:
+        for u in unsignedSuffix:
+            for l in longSuffix:
+                expr = i + u + l
+                exprCheck(expr, 'L' + expr + 'E')
+                expr = i + l + u
+                exprCheck(expr, 'L' + expr + 'E')
+    for suffix in ['', 'f', 'F', 'l', 'L']:
+        for e in [
+                '5e42', '5e+42', '5e-42',
+                '5.', '5.e42', '5.e+42', '5.e-42',
+                '.5', '.5e42', '.5e+42', '.5e-42',
+                '5.0', '5.0e42', '5.0e+42', '5.0e-42']:
+            expr = e + suffix
+            exprCheck(expr, 'L' + expr + 'E')
+        for e in [
+                'ApF', 'Ap+F', 'Ap-F',
+                'A.', 'A.pF', 'A.p+F', 'A.p-F',
+                '.A', '.ApF', '.Ap+F', '.Ap-F',
+                'A.B', 'A.BpF', 'A.Bp+F', 'A.Bp-F']:
+            expr = "0x" + e + suffix
+            exprCheck(expr, 'L' + expr + 'E')
+    exprCheck('"abc\\"cba"', 'LA8_KcE')  # string
+    exprCheck('this', 'fpT')
+    # character literals
+    for p, t in [('', 'c'), ('u8', 'c'), ('u', 'Ds'), ('U', 'Di'), ('L', 'w')]:
+        exprCheck(p + "'a'", t + "97")
+        exprCheck(p + "'\\n'", t + "10")
+        exprCheck(p + "'\\012'", t + "10")
+        exprCheck(p + "'\\0'", t + "0")
+        exprCheck(p + "'\\x0a'", t + "10")
+        exprCheck(p + "'\\x0A'", t + "10")
+        exprCheck(p + "'\\u0a42'", t + "2626")
+        exprCheck(p + "'\\u0A42'", t + "2626")
+        exprCheck(p + "'\\U0001f34c'", t + "127820")
+        exprCheck(p + "'\\U0001F34C'", t + "127820")
+
+    # TODO: user-defined lit
+    exprCheck('(... + Ns)', '(... + Ns)', id4='flpl2Ns')
+    exprCheck('(Ns + ...)', '(Ns + ...)', id4='frpl2Ns')
+    exprCheck('(Ns + ... + 0)', '(Ns + ... + 0)', id4='fLpl2NsL0E')
+    exprCheck('(5)', 'L5E')
+    exprCheck('C', '1C')
+    # postfix
+    exprCheck('A(2)', 'cl1AL2EE')
+    exprCheck('A[2]', 'ix1AL2E')
+    exprCheck('a.b.c', 'dtdt1a1b1c')
+    exprCheck('a->b->c', 'ptpt1a1b1c')
+    exprCheck('i++', 'pp1i')
+    exprCheck('i--', 'mm1i')
+    exprCheck('dynamic_cast<T&>(i)++', 'ppdcR1T1i')
+    exprCheck('static_cast<T&>(i)++', 'ppscR1T1i')
+    exprCheck('reinterpret_cast<T&>(i)++', 'pprcR1T1i')
+    exprCheck('const_cast<T&>(i)++', 'ppccR1T1i')
+    exprCheck('typeid(T).name', 'dtti1T4name')
+    exprCheck('typeid(a + b).name', 'dttepl1a1b4name')
+    # unary
+    exprCheck('++5', 'pp_L5E')
+    exprCheck('--5', 'mm_L5E')
+    exprCheck('*5', 'deL5E')
+    exprCheck('&5', 'adL5E')
+    exprCheck('+5', 'psL5E')
+    exprCheck('-5', 'ngL5E')
+    exprCheck('!5', 'ntL5E')
+    exprCheck('not 5', 'ntL5E')
+    exprCheck('~5', 'coL5E')
+    exprCheck('compl 5', 'coL5E')
+    exprCheck('sizeof...(a)', 'sZ1a')
+    exprCheck('sizeof(T)', 'st1T')
+    exprCheck('sizeof -42', 'szngL42E')
+    exprCheck('alignof(T)', 'at1T')
+    exprCheck('noexcept(-42)', 'nxngL42E')
+    # new-expression
+    exprCheck('new int', 'nw_iE')
+    exprCheck('new volatile int', 'nw_ViE')
+    exprCheck('new int[42]', 'nw_AL42E_iE')
+    exprCheck('new int()', 'nw_ipiE')
+    exprCheck('new int(5, 42)', 'nw_ipiL5EL42EE')
+    exprCheck('::new int', 'nw_iE')
+    exprCheck('new int{}', 'nw_iilE')
+    exprCheck('new int{5, 42}', 'nw_iilL5EL42EE')
+    # delete-expression
+    exprCheck('delete p', 'dl1p')
+    exprCheck('delete [] p', 'da1p')
+    exprCheck('::delete p', 'dl1p')
+    exprCheck('::delete [] p', 'da1p')
+    # cast
+    exprCheck('(int)2', 'cviL2E')
+    # binary op
+    exprCheck('5 || 42', 'ooL5EL42E')
+    exprCheck('5 or 42', 'ooL5EL42E')
+    exprCheck('5 && 42', 'aaL5EL42E')
+    exprCheck('5 and 42', 'aaL5EL42E')
+    exprCheck('5 | 42', 'orL5EL42E')
+    exprCheck('5 bitor 42', 'orL5EL42E')
+    exprCheck('5 ^ 42', 'eoL5EL42E')
+    exprCheck('5 xor 42', 'eoL5EL42E')
+    exprCheck('5 & 42', 'anL5EL42E')
+    exprCheck('5 bitand 42', 'anL5EL42E')
+    #
+...[TRUNCATED]...
+alue() const noexcept',
+          {1: "get_valueC", 2: "NK9get_valueEv"})
+    check('function', 'int get_value() const noexcept(std::is_nothrow_move_constructible<T>::value)',
+          {1: "get_valueC", 2: "NK9get_valueEv"})
+    check('function', 'int get_value() const noexcept("see below")',
+          {1: "get_valueC", 2: "NK9get_valueEv"})
+    check('function', 'int get_value() const noexcept = delete',
+          {1: "get_valueC", 2: "NK9get_valueEv"})
+    check('function', 'int get_value() volatile const',
+          {1: "get_valueVC", 2: "NVK9get_valueEv"})
+    check('function', 'MyClass::MyClass(MyClass::MyClass&&) = default',
+          {1: "MyClass::MyClass__MyClass::MyClassRR",
+           2: "N7MyClass7MyClassERRN7MyClass7MyClassE"})
+    check('function', 'virtual MyClass::a_virtual_function() const override',
+          {1: "MyClass::a_virtual_functionC", 2: "NK7MyClass18a_virtual_functionEv"})
+    check('function', 'A B() override', {1: "B", 2: "1Bv"})
+    check('function', 'A B() final', {1: "B", 2: "1Bv"})
+    check('function', 'A B() final override', {1: "B", 2: "1Bv"})
+    check('function', 'A B() override final', {1: "B", 2: "1Bv"},
+          output='A B() final override')
+    check('function', 'MyClass::a_member_function() volatile',
+          {1: "MyClass::a_member_functionV", 2: "NV7MyClass17a_member_functionEv"})
+    check('function', 'MyClass::a_member_function() volatile const',
+          {1: "MyClass::a_member_functionVC", 2: "NVK7MyClass17a_member_functionEv"})
+    check('function', 'MyClass::a_member_function() &&',
+          {1: "MyClass::a_member_functionO", 2: "NO7MyClass17a_member_functionEv"})
+    check('function', 'MyClass::a_member_function() &',
+          {1: "MyClass::a_member_functionR", 2: "NR7MyClass17a_member_functionEv"})
+    check('function', 'MyClass::a_member_function() const &',
+          {1: "MyClass::a_member_functionCR", 2: "NKR7MyClass17a_member_functionEv"})
+    check('function', 'int main(int argc, char *argv[])',
+          {1: "main__i.cPA", 2: "4mainiA_Pc"})
+    check('function', 'MyClass &MyClass::operator++()',
+          {1: "MyClass::inc-operator", 2: "N7MyClassppEv"})
+    check('function', 'MyClass::pointer MyClass::operator->()',
+          {1: "MyClass::pointer-operator", 2: "N7MyClassptEv"})
+
+    x = 'std::vector<std::pair<std::string, int>> &module::test(register int ' \
+        'foo, bar[n], std::string baz = "foobar, blah, bleh") const = 0'
+    check('function', x, {1: "module::test__i.barA.ssC",
+                          2: "NK6module4testEiAn_3barNSt6stringE",
+                          3: "NK6module4testEiA1n_3barNSt6stringE"})
+    check('function',
+          'int foo(Foo f = Foo(double(), std::make_pair(int(2), double(3.4))))',
+          {1: "foo__Foo", 2: "3foo3Foo"})
+    check('function', 'int foo(A a = x(a))', {1: "foo__A", 2: "3foo1A"})
+    with pytest.raises(DefinitionError):
+        parse('function', 'int foo(B b=x(a)')
+    with pytest.raises(DefinitionError):
+        parse('function', 'int foo)C c=x(a))')
+    with pytest.raises(DefinitionError):
+        parse('function', 'int foo(D d=x(a')
+    check('function', 'int foo(const A&... a)', {1: "foo__ACRDp", 2: "3fooDpRK1A"})
+    check('function', 'int foo(const A&...)', {1: "foo__ACRDp", 2: "3fooDpRK1A"})
+    check('function', 'int foo(const A*... a)', {1: "foo__ACPDp", 2: "3fooDpPK1A"})
+    check('function', 'int foo(const A*...)', {1: "foo__ACPDp", 2: "3fooDpPK1A"})
+    check('function', 'int foo(const int A::*... a)', {2: "3fooDpM1AKi"})
+    check('function', 'int foo(const int A::*...)', {2: "3fooDpM1AKi"})
+    #check('function', 'int foo(int (*a)(A)...)', {1: "foo__ACRDp", 2: "3fooDpPK1A"})
+    #check('function', 'int foo(int (*)(A)...)', {1: "foo__ACRDp", 2: "3fooDpPK1A"})
+    check('function', 'virtual void f()', {1: "f", 2: "1fv"})
+    # test for ::nestedName, from issue 1738
+    check("function", "result(int val, ::std::error_category const &cat)",
+          {1: "result__i.std::error_categoryCR", 2: "6resultiRKNSt14error_categoryE"})
+    check("function", "int *f()", {1: "f", 2: "1fv"})
+    # tests derived from issue #1753 (skip to keep sanity)
+    check("function", "f(int (&array)[10])", {2: "1fRA10_i", 3: "1fRAL10E_i"})
+    check("function", "void f(int (&array)[10])", {2: "1fRA10_i", 3: "1fRAL10E_i"})
+    check("function", "void f(float *q(double))", {2: "1fFPfdE"})
+    check("function", "void f(float *(*q)(double))", {2: "1fPFPfdE"})
+    check("function", "void f(float (*q)(double))", {2: "1fPFfdE"})
+    check("function", "int (*f(double d))(float)", {1: "f__double", 2: "1fd"})
+    check("function", "int (*f(bool b))[5]", {1: "f__b", 2: "1fb"})
+    check("function", "int (*A::f(double d) const)(float)",
+          {1: "A::f__doubleC", 2: "NK1A1fEd"})
+    check("function", "void f(std::shared_ptr<int(double)> ptr)",
+          {2: "1fNSt10shared_ptrIFidEEE"})
+    check("function", "void f(int *const p)", {1: "f__iPC", 2: "1fPCi"})
+    check("function", "void f(int *volatile const p)", {1: "f__iPVC", 2: "1fPVCi"})
+
+    check('function', 'extern int f()', {1: 'f', 2: '1fv'})
+
+    check('function', 'decltype(auto) f()', {1: 'f', 2: "1fv"})
+
+    # TODO: make tests for functions in a template, e.g., Test<int&&()>
+    # such that the id generation for function type types is correct.
+
+    check('function', 'friend std::ostream &f(std::ostream &s, int i)',
+          {1: 'f__osR.i', 2: '1fRNSt7ostreamEi'})
+
+    # from breathe#223
+    check('function', 'void f(struct E e)', {1: 'f__E', 2: '1f1E'})
+    check('function', 'void f(class E e)', {1: 'f__E', 2: '1f1E'})
+    check('function', 'void f(typename E e)', {1: 'f__E', 2: '1f1E'})
+    check('function', 'void f(enum E e)', {1: 'f__E', 2: '1f1E'})
+    check('function', 'void f(union E e)', {1: 'f__E', 2: '1f1E'})
+
+    # pointer to member (function)
+    check('function', 'void f(int C::*)', {2: '1fM1Ci'})
+    check('function', 'void f(int C::* p)', {2: '1fM1Ci'})
+    check('function', 'void f(int ::C::* p)', {2: '1fM1Ci'})
+    check('function', 'void f(int C::*const)', {2: '1fKM1Ci'})
+    check('function', 'void f(int C::*const&)', {2: '1fRKM1Ci'})
+    check('function', 'void f(int C::*volatile)', {2: '1fVM1Ci'})
+    check('function', 'void f(int C::*const volatile)', {2: '1fVKM1Ci'},
+          output='void f(int C::*volatile const)')
+    check('function', 'void f(int C::*volatile const)', {2: '1fVKM1Ci'})
+    check('function', 'void f(int (C::*)(float, double))', {2: '1fM1CFifdE'})
+    check('function', 'void f(int (C::* p)(float, double))', {2: '1fM1CFifdE'})
+    check('function', 'void f(int (::C::* p)(float, double))', {2: '1fM1CFifdE'})
+    check('function', 'void f(void (C::*)() const &)', {2: '1fM1CKRFvvE'})
+    check('function', 'int C::* f(int, double)', {2: '1fid'})
+    check('function', 'void f(int C::* *p)', {2: '1fPM1Ci'})
+    check('function', 'void f(int C::**)', {2: '1fPM1Ci'})
+    check('function', 'void f(int C::*const *p)', {2: '1fPKM1Ci'})
+    check('function', 'void f(int C::*const*)', {2: '1fPKM1Ci'})
+
+    # exceptions from return type mangling
+    check('function', 'template<typename T> C()', {2: 'I0E1Cv'})
+    check('function', 'template<typename T> operator int()', {1: None, 2: 'I0Ecviv'})
+
+【相关测试 5】
+测试文件：tests/test_domain_cpp.py
+测试名称：test_member_definitions
+测试代码：
+def test_member_definitions():
+    check('member', '  const  std::string  &  name = 42',
+          {1: "name__ssCR", 2: "4name"}, output='const std::string &name = 42')
+    check('member', '  const  std::string  &  name', {1: "name__ssCR", 2: "4name"},
+          output='const std::string &name')
+    check('member', '  const  std::string  &  name [ n ]',
+          {1: "name__ssCRA", 2: "4name"}, output='const std::string &name[n]')
+    check('member', 'const std::vector< unsigned int, long> &name',
+          {1: "name__std::vector:unsigned-i.l:CR", 2: "4name"},
+          output='const std::vector<unsigned int, long> &name')
+    check('member', 'module::myclass foo[n]', {1: "foo__module::myclassA", 2: "3foo"})
+    check('member', 'int *const p', {1: 'p__iPC', 2: '1p'})
+    check('member', 'extern int myInt', {1: 'myInt__i', 2: '5myInt'})
+    check('member', 'thread_local int myInt', {1: 'myInt__i', 2: '5myInt'})
+    check('member', 'extern thread_local int myInt', {1: 'myInt__i', 2: '5myInt'})
+    check('member', 'thread_local extern int myInt', {1: 'myInt__i', 2: '5myInt'},
+          'extern thread_local int myInt')
+
+    # tests based on https://en.cppreference.com/w/cpp/language/bit_field
+    check('member', 'int b : 3', {1: 'b__i', 2: '1b'})
+    check('member', 'int b : 8 = 42', {1: 'b__i', 2: '1b'})
+    check('member', 'int b : 8{42}', {1: 'b__i', 2: '1b'})
+    # TODO: enable once the ternary operator is supported
+    #check('member', 'int b : true ? 8 : a = 42', {1: 'b__i', 2: '1b'})
+    # TODO: enable once the ternary operator is supported
+    #check('member', 'int b : (true ? 8 : a) = 42', {1: 'b__i', 2: '1b'})
+    check('member', 'int b : 1 || new int{0}', {1: 'b__i', 2: '1b'})
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

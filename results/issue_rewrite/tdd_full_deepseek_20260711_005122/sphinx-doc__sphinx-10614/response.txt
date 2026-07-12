@@ -1,0 +1,118 @@
+```json
+{
+    "issue_summary": "使用 sphinx.ext.inheritance_diagram 插件生成 SVG 继承图时，如果源文件不在根目录，SVG 中的链接会指向错误的 404 页面。",
+    "trigger_condition": {
+        "text": "使用 sphinx.ext.inheritance_diagram 插件，配置 graphviz_output_format 为 'svg'，在非根目录的 .rst 文件中生成继承图，然后构建 HTML 文档。",
+        "evidence": ["Issue 描述：'If the inheritance diagram is created in a file that is not in the root directory, the links lead to a 404 page.'", "Issue 重现步骤：在 my_package/index.html 中查看链接错误。", "相关测试 1 和 5 使用了 'graphviz_output_format': 'svg' 配置。"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "SVG 文件中的超链接指向错误的 URL，导致点击时出现 404 错误。具体表现为链接路径相对于 SVG 文件位置计算，而不是相对于嵌入该 SVG 的 HTML 页面位置计算。",
+        "symptom_type": "unknown",
+        "evidence": ["Issue 描述：'the links in the SVG file are relative to the SVG file... however the rest of the link is written as if it was relative to the file the SVG is embedded on.'", "Issue 中嵌套文件的链接示例：'../my_class_1.html#my_package.MyClass1' 被错误地解析为相对于根目录，而不是 my_package 目录。"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "无论继承图源文件位于哪个目录，SVG 文件中的超链接都应正确指向目标文档，点击后能导航到正确的页面，而不是 404 页面。",
+        "evidence": ["Issue 的 'Expected behavior' 部分：'I would expect that the links would go to the correct page when clicked on and not to a 404 page.'"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "sphinx.ext.inheritance_diagram",
+            "kind": "module",
+            "source_path": "sphinx/ext/inheritance_diagram.py",
+            "reason": "Issue 直接关于此扩展插件。"
+        },
+        {
+            "name": "sphinx.ext.graphviz",
+            "kind": "module",
+            "source_path": "",
+            "reason": "继承图依赖 graphviz 扩展生成 SVG，相关测试 5 涉及 SVG 链接处理。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "sphinx/ext/inheritance_diagram.py",
+            "object": "inheritance_diagram",
+            "lines": "",
+            "reason": "Issue 直接指向此扩展，且问题与 SVG 链接生成逻辑相关。"
+        },
+        {
+            "path": "sphinx/ext/graphviz.py",
+            "object": "",
+            "lines": "",
+            "reason": "相关测试 5 检查 SVG 内容中的链接，暗示 graphviz 扩展负责生成 SVG 及其内部链接。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_inheritance_diagram_svg_html",
+            "test_file": "tests/test_ext_inheritance_diagram.py",
+            "why_relevant": "此测试专门针对 inheritance_diagram 扩展在 SVG 输出格式下的 HTML 生成进行测试，与 Issue 的触发条件（SVG 格式）高度相关。",
+            "reusable_parts": ["@pytest.mark.sphinx fixture 使用方式", "confoverrides 设置 'graphviz_output_format': 'svg'", "app.builder.build_all() 调用", "读取输出文件并检查内容的正则断言模式"],
+            "possible_gap": "此测试的 testroot ('ext-inheritance_diagram') 可能将所有源文件放在根目录，没有测试非根目录源文件生成 SVG 链接的场景。"
+        },
+        {
+            "test_name": "test_graphviz_svg_html",
+            "test_file": "tests/test_ext_graphviz.py",
+            "why_relevant": "此测试检查 graphviz 扩展生成的 SVG 文件内容，特别是其中的链接（href 属性），与 Issue 中 SVG 内部链接错误直接相关。",
+            "reusable_parts": ["SVG 输出格式的配置", "读取和解析生成的 SVG 文件内容", "检查链接路径（如 '../_static/'）的断言"],
+            "possible_gap": "此测试针对 graphviz 扩展本身，而非 inheritance_diagram。它可能没有覆盖 inheritance_diagram 特有的链接生成逻辑或嵌套目录结构。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "config",
+            "current_pattern": "测试使用固定的 testroot（如 'ext-inheritance_diagram'），源文件位置相对固定。",
+            "target_pattern": "创建一个测试项目结构，其中包含继承图的 .rst 源文件位于子目录（如 'my_package/'）下。",
+            "reason": "Issue 明确指出问题仅在源文件不在根目录时发生。改变源文件位置是触发缺陷的关键。",
+            "confidence": "high"
+        },
+        {
+            "slot": "call_chain",
+            "current_pattern": "相关测试主要断言最终 HTML 中是否包含正确的 SVG 对象标签。",
+            "target_pattern": "测试需要进一步检查生成的 SVG 文件内部的实际链接（href 属性）是否正确。",
+            "reason": "错误发生在 SVG 文件内部的链接，而非外部的 HTML 标签。需要深入观测 SVG 内容。",
+            "confidence": "medium"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "file_output",
+            "expression_hint": "生成的 SVG 文件内容，特别是其中的 <a> 或 <link> 标签的 xlink:href 或 href 属性值。",
+            "reason": "Issue 的核心是 SVG 内部的链接路径错误。直接检查 SVG 文件内容能最准确地判断问题。"
+        },
+        {
+            "kind": "return_value",
+            "expression_hint": "生成链接路径的函数或方法的返回值，可能位于 inheritance_diagram 或 graphviz 模块中。",
+            "reason": "需要定位计算相对路径的具体代码位置，观察在不同源文件目录下生成的路径有何不同。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "验证当继承图源文件位于子目录时，生成的 SVG 文件中的超链接能正确指向目标 HTML 文件（路径相对于嵌入 SVG 的 HTML 文件计算）。",
+            "preferred_assertion_style": "contains_fragment",
+            "avoid": "避免断言完整的、硬编码的绝对 URL 或与特定测试运行环境（如 localhost）相关的路径。",
+            "reason": "Issue 关注链接路径的逻辑正确性（相对路径计算），而非具体的绝对路径。使用片段匹配（如检查是否包含正确的相对路径模式 'my_package/my_class_1.html'）更稳定。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要使用 @pytest.mark.sphinx fixture 来构建一个 Sphinx 应用，并可能通过 testroot 或 srcdir 参数创建包含子目录的测试项目结构。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要 @pytest.mark.usefixtures('if_graphviz_found') 以确保测试环境已安装 graphviz。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "缺陷的确切代码位置是在 inheritance_diagram 扩展中，还是在 graphviz 扩展的通用 SVG 生成逻辑中？",
+        "链接路径是在生成 DOT 文件时决定的，还是在将 DOT 转换为 SVG 时决定的？",
+        "PNG 格式下链接正常的具体机制是什么？这可能是定位差异的关键。"
+    ]
+}
+```

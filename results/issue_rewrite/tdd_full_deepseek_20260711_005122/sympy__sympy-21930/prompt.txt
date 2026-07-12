@@ -1,0 +1,618 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Issues with Latex printing output in second quantization module
+There are Latex rendering problems within the "secondquant" module, as it does not correctly interpret double superscripts containing the "dagger" command within Jupyter Notebook.
+
+Let's see a minimal example
+
+```
+In [1]: import sympy as sp
+        from sympy.physics.secondquant import B, Bd, Commutator
+        sp.init_printing()
+
+In [2]: a = sp.Symbol('0')
+
+In [3]: Commutator(Bd(a)**2, B(a))
+Out[3]: \displaystyle - \left[b_{0},b^\dagger_{0}^{2}\right]
+```
+So, it doesn't render correctly, and that's because the double superscript `"b^\dagger_{0}^{2}"`. It should be correct by adding curly brackets `"{b^\dagger_{0}}^{2}"`
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/physics/secondquant.py
+对象名称：secondquant
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 2】
+文件路径：sympy/physics/secondquant.py
+对象名称：B
+节点类型：global_var
+父节点：secondquant
+行号范围：483-483
+代码：
+B = AnnihilateBoson
+
+
+【源码片段 3】
+文件路径：sympy/physics/secondquant.py
+对象名称：Bd
+节点类型：global_var
+父节点：secondquant
+行号范围：484-484
+代码：
+Bd = CreateBoson
+
+
+【源码片段 4】
+文件路径：sympy/physics/secondquant.py
+对象名称：Commutator
+节点类型：class
+父节点：secondquant
+行号范围：1657-1802
+代码：
+class Commutator(Function):
+    """
+    The Commutator:  [A, B] = A*B - B*A
+
+    The arguments are ordered according to .__cmp__()
+
+    Examples
+    ========
+
+    >>> from sympy import symbols
+    >>> from sympy.physics.secondquant import Commutator
+    >>> A, B = symbols('A,B', commutative=False)
+    >>> Commutator(B, A)
+    -Commutator(A, B)
+
+    Evaluate the commutator with .doit()
+
+    >>> comm = Commutator(A,B); comm
+    Commutator(A, B)
+    >>> comm.doit()
+    A*B - B*A
+
+
+    For two second quantization operators the commutator is evaluated
+    immediately:
+
+    >>> from sympy.physics.secondquant import Fd, F
+    >>> a = symbols('a', above_fermi=True)
+    >>> i = symbols('i', below_fermi=True)
+    >>> p,q = symbols('p,q')
+
+    >>> Commutator(Fd(a),Fd(i))
+    2*NO(CreateFermion(a)*CreateFermion(i))
+
+    But for more complicated expressions, the evaluation is triggered by
+    a call to .doit()
+
+    >>> comm = Commutator(Fd(p)*Fd(q),F(i)); comm
+    Commutator(CreateFermion(p)*CreateFermion(q), AnnihilateFermion(i))
+    >>> comm.doit(wicks=True)
+    -KroneckerDelta(i, p)*CreateFermion(q) +
+     KroneckerDelta(i, q)*CreateFermion(p)
+
+    """
+    is_commutative = False
+    @classmethod
+    def eval(cls, a, b):
+    def doit(self, **hints):
+    def __repr__(self):
+    def __str__(self):
+    def _latex(self, printer):
+
+
+【源码片段 5】
+文件路径：sympy/interactive/printing.py
+对象名称：init_printing
+节点类型：top-level function
+父节点：printing
+行号范围：339-573
+代码：
+def init_printing(pretty_print=True, order=None, use_unicode=None,
+                  use_latex=None, wrap_line=None, num_columns=None,
+                  no_global=False, ip=None, euler=False, forecolor=None,
+                  backcolor='Transparent', fontsize='10pt',
+                  latex_mode='plain', print_builtin=True,
+                  str_printer=None, pretty_printer=None,
+                  latex_printer=None, scale=1.0, **settings):
+    r"""
+    Initializes pretty-printer depending on the environment.
+
+    Parameters
+    ==========
+
+    pretty_print : boolean, default=True
+        If True, use pretty_print to stringify or the provided pretty
+        printer; if False, use sstrrepr to stringify or the provided string
+        printer.
+    order : string or None, default='lex'
+        There are a few different settings for this parameter:
+        lex (default), which is lexographic order;
+        grlex, which is graded lexographic order;
+        grevlex, which is reversed graded lexographic order;
+        old, which is used for compatibility reasons and for long expressions;
+        None, which sets it to lex.
+    use_unicode : boolean or None, default=None
+        If True, use unicode characters;
+        if False, do not use unicode characters;
+        if None, make a guess based on the environment.
+    use_latex : string, boolean, or None, default=None
+        If True, use default LaTeX rendering in GUI interfaces (png and
+        mathjax);
+        if False, do not use LaTeX rendering;
+        if None, make a guess based on the environment;
+        if 'png', enable latex rendering with an external latex compiler,
+        falling back to matplotlib if external compilation fails;
+        if 'matplotlib', enable LaTeX rendering with matplotlib;
+        if 'mathjax', enable LaTeX text generation, for example MathJax
+        rendering in IPython notebook or text rendering in LaTeX documents;
+        if 'svg', enable LaTeX rendering with an external latex compiler,
+        no fallback
+    wrap_line : boolean
+        If True, lines will wrap at the end; if False, they will not wrap
+        but continue as one line. This is only relevant if ``pretty_print`` is
+        True.
+    num_columns : int or None, default=None
+        If int, number of columns before wrapping is set to num_columns; if
+        None, number of columns before wrapping is set to terminal width.
+        This is only relevant if ``pretty_print`` is True.
+    no_global : boolean, default=False
+        If True, the settings become system wide;
+        if False, use just for this console/session.
+    ip : An interactive console
+        This can either be an instance of IPython,
+        or a class that derives from code.InteractiveConsole.
+    euler : boolean, optional, default=False
+        Loads the euler package in the LaTeX preamble for handwritten style
+        fonts (http://www.ctan.org/pkg/euler).
+    forecolor : string or None, optional, default=None
+        DVI setting for foreground color. None means that either 'Black',
+        'White', or 'Gray' will be selected based on a guess of the IPython
+        terminal color setting. See notes.
+    backcolor : string, optional, default='Transparent'
+        DVI setting for background color. See notes.
+    fontsize : string, optional, default='10pt'
+        A font size to pass to the LaTeX documentclass function in the
+        preamble. Note that the options are limited by the documentclass.
+        Consider using scale instead.
+    latex_mode : string, optional, default='plain'
+        The mode used in the LaTeX printer. Can be one of:
+        {'inline'|'plain'|'equation'|'equation*'}.
+    print_builtin : boolean, optional, default=True
+        If ``True`` then floats and integers will be printed. If ``False`` the
+        printer will only print SymPy types.
+    str_printer : function, optional, default=None
+        A custom string printer function. This should mimic
+        sympy.printing.sstrrepr().
+    pretty_printer : function, optional, default=None
+        A custom pretty printer. This should mimic sympy.printing.pretty().
+    latex_printer : function, optional, default=None
+        A custom LaTeX printer. This should mimic sympy.printing.latex().
+    scale : float, optional, default=1.0
+        Scale the LaTeX output when using the ``png`` or ``svg`` backends.
+        Useful for high dpi screens.
+    settings :
+        Any additional settings for the ``latex`` and ``pretty`` commands can
+        be used to fine-tune the output.
+
+    Examples
+    ========
+
+    >>> from sympy.interactive import init_printing
+    >>> from sympy import Symbol, sqrt
+    >>> from sympy.abc import x, y
+    >>> sqrt(5)
+    sqrt(5)
+    >>> init_printing(pretty_print=True) # doctest: +SKIP
+    >>> sqrt(5) # doctest: +SKIP
+      ___
+    \/ 5
+    >>> theta = Symbol('theta') # doctest: +SKIP
+    >>> init_printing(use_unicode=True) # doctest: +SKIP
+    >>> theta # doctest: +SKIP
+    \u03b8
+    >>> init_printing(use_unicode=False) # doctest: +SKIP
+    >>> theta # doctest: +SKIP
+    theta
+    >>> init_printing(order='lex') # doctest: +SKIP
+    >>> str(y + x + y**2 + x**2) # doctest: +SKIP
+    x**2 + x + y**2 + y
+    >>> init_printing(order='grlex') # doctest: +SKIP
+    >>> str(y + x + y**2 + x**2) # doctest: +SKIP
+    x**2 + x + y**2 + y
+    >>> init_printing(order='grevlex') # doctest: +SKIP
+    >>> str(y * x**2 + x * y**2) # doctest: +SKIP
+    x**2*y + x*y**2
+    >>> init_printing(order='old') # doctest: +SKIP
+    >>> str(x**2 + y**2 + x + y) # doctest: +SKIP
+    x**2 + x + y**2 + y
+    >>> init_printing(num_columns=10) # doctest: +SKIP
+    >>> x**2 + x + y**2 + y # doctest: +SKIP
+    x + y +
+    x**2 + y**2
+
+    Notes
+    =====
+
+    The foreground and background colors can be selected when using 'png' or
+    'svg' LaTeX rendering. Note that before the ``init_printing`` command is
+    executed, the LaTeX rendering is handled by the IPython console and not SymPy.
+
+    The colors can be selected among the 68 standard colors known to ``dvips``,
+    for a list see [1]_. In addition, the background color can be
+    set to  'Transparent' (which is the default value).
+
+    When using the 'Auto' foreground color, the guess is based on the
+    ``colors`` variable in the IPython console, see [2]_. Hence, if
+    that variable is set correctly in your IPython console, there is a high
+    chance that the output will be readable, although manual settings may be
+    needed.
+
+
+    References
+    ==========
+
+    .. [1] https://en.wikibooks.org/wiki/LaTeX/Colors#The_68_standard_colors_known_to_dvips
+
+    .. [2] https://ipython.readthedocs.io/en/stable/config/details.html#terminal-colors
+
+    See Also
+    ========
+
+    sympy.printing.latex
+    sympy.printing.pretty
+
+    """
+    import sys
+    from sympy.printing.printer import Printer
+
+    if pretty_print:
+        if pretty_printer is not None:
+            stringify_func = pretty_printer
+        else:
+            from sympy.printing import pretty as stringify_func
+    else:
+        if str_printer is not None:
+            stringify_func = str_printer
+        else:
+            from sympy.printing import sstrrepr as stringify_func
+
+    # Even if ip is not passed, double check that not in IPython shell
+    in_ipython = False
+    if ip is None:
+        try:
+            ip = get_ipython()
+        except NameError:
+            pass
+        else:
+            in_ipython = (ip is not None)
+
+    if ip and not in_ipython:
+        in_ipython = _is_ipython(ip)
+
+    if in_ipython and pretty_print:
+        try:
+            import IPython
+            # IPython 1.0 deprecates the frontend module, so we import directly
+            # from the terminal module to prevent a deprecation message from being
+            # shown.
+            if V(IPython.__version__) >= '1.0':
+                from IPython.terminal.interactiveshell import TerminalInteractiveShell
+            else:
+                from IPython.frontend.terminal.interactiveshell import TerminalInteractiveShell
+            from code import InteractiveConsole
+        except ImportError:
+            pass
+        else:
+            # This will be True if we are in the qtconsole or notebook
+            if not isinstance(ip, (InteractiveConsole, TerminalInteractiveShell)) \
+                    and 'ipython-console' not in ''.join(sys.argv):
+                if use_unicode is None:
+                    debug("init_printing: Setting use_unicode to True")
+                    use_unicode = True
+                if use_latex is None:
+                    debug("init_printing: Setting use_latex to True")
+                    use_latex = True
+
+    if not NO_GLOBAL and not no_global:
+        Printer.set_global_settings(order=order, use_unicode=use_unicode,
+                                    wrap_line=wrap_line, num_columns=num_columns)
+    else:
+        _stringify_func = stringify_func
+
+        if pretty_print:
+            stringify_func = lambda expr, **settings: \
+                             _stringify_func(expr, order=order,
+                                             use_unicode=use_unicode,
+                                             wrap_line=wrap_line,
+                                             num_columns=num_columns,
+                                             **settings)
+        else:
+            stringify_func = \
+                lambda expr, **settings: _stringify_func(
+                    expr, order=order, **settings)
+
+    if in_ipython:
+        mode_in_settings = settings.pop("mode", None)
+        if mode_in_settings:
+            debug("init_printing: Mode is not able to be set due to internals"
+                  "of IPython printing")
+        _init_ipython_printing(ip, stringify_func, use_latex, euler,
+                               forecolor, backcolor, fontsize, latex_mode,
+                               print_builtin, latex_printer, scale,
+                               **settings)
+    else:
+        _init_python_printing(stringify_func, **settings)
+
+
+【源码片段 6】
+文件路径：sympy/assumptions/tests/test_query.py
+对象名称：Symbol
+节点类型：class_function
+父节点：MyAskHandler
+行号范围：2085-2086
+代码：
+        def Symbol(expr, assumptions):
+            return True
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/physics/tests/test_secondquant.py
+测试名称：test_commutation
+测试代码：
+def test_commutation():
+    n, m = symbols("n,m", above_fermi=True)
+    c = Commutator(B(0), Bd(0))
+    assert c == 1
+    c = Commutator(Bd(0), B(0))
+    assert c == -1
+    c = Commutator(B(n), Bd(0))
+    assert c == KroneckerDelta(n, 0)
+    c = Commutator(B(0), B(0))
+    assert c == 0
+    c = Commutator(B(0), Bd(0))
+    e = simplify(apply_operators(c*BKet([n])))
+    assert e == BKet([n])
+    c = Commutator(B(0), B(1))
+    e = simplify(apply_operators(c*BKet([n, m])))
+    assert e == 0
+
+    c = Commutator(F(m), Fd(m))
+    assert c == +1 - 2*NO(Fd(m)*F(m))
+    c = Commutator(Fd(m), F(m))
+    assert c.expand() == -1 + 2*NO(Fd(m)*F(m))
+
+    C = Commutator
+    X, Y, Z = symbols('X,Y,Z', commutative=False)
+    assert C(C(X, Y), Z) != 0
+    assert C(C(X, Z), Y) != 0
+    assert C(Y, C(X, Z)) != 0
+
+    i, j, k, l = symbols('i,j,k,l', below_fermi=True)
+    a, b, c, d = symbols('a,b,c,d', above_fermi=True)
+    p, q, r, s = symbols('p,q,r,s')
+    D = KroneckerDelta
+
+    assert C(Fd(a), F(i)) == -2*NO(F(i)*Fd(a))
+    assert C(Fd(j), NO(Fd(a)*F(i))).doit(wicks=True) == -D(j, i)*Fd(a)
+    assert C(Fd(a)*F(i), Fd(b)*F(j)).doit(wicks=True) == 0
+
+    c1 = Commutator(F(a), Fd(a))
+    assert Commutator.eval(c1, c1) == 0
+    c = Commutator(Fd(a)*F(i),Fd(b)*F(j))
+    assert latex(c) == r'\left[a^\dagger_{a} a_{i},a^\dagger_{b} a_{j}\right]'
+    assert repr(c) == 'Commutator(CreateFermion(a)*AnnihilateFermion(i),CreateFermion(b)*AnnihilateFermion(j))'
+    assert str(c) == '[CreateFermion(a)*AnnihilateFermion(i),CreateFermion(b)*AnnihilateFermion(j)]'
+
+【相关测试 2】
+测试文件：sympy/physics/tests/test_secondquant.py
+测试名称：test_dagger
+测试代码：
+def test_dagger():
+    i, j, n, m = symbols('i,j,n,m')
+    assert Dagger(1) == 1
+    assert Dagger(1.0) == 1.0
+    assert Dagger(2*I) == -2*I
+    assert Dagger(S.Half*I/3.0) == I*Rational(-1, 2)/3.0
+    assert Dagger(BKet([n])) == BBra([n])
+    assert Dagger(B(0)) == Bd(0)
+    assert Dagger(Bd(0)) == B(0)
+    assert Dagger(B(n)) == Bd(n)
+    assert Dagger(Bd(n)) == B(n)
+    assert Dagger(B(0) + B(1)) == Bd(0) + Bd(1)
+    assert Dagger(n*m) == Dagger(n)*Dagger(m)  # n, m commute
+    assert Dagger(B(n)*B(m)) == Bd(m)*Bd(n)
+    assert Dagger(B(n)**10) == Dagger(B(n))**10
+    assert Dagger('a') == Dagger(Symbol('a'))
+    assert Dagger(Dagger('a')) == Symbol('a')
+
+【相关测试 3】
+测试文件：sympy/printing/tests/test_latex.py
+测试名称：test_Adjoint
+测试代码：
+def test_Adjoint():
+    from sympy.matrices import MatrixSymbol, Adjoint, Inverse, Transpose
+    X = MatrixSymbol('X', 2, 2)
+    Y = MatrixSymbol('Y', 2, 2)
+    assert latex(Adjoint(X)) == r'X^{\dagger}'
+    assert latex(Adjoint(X + Y)) == r'\left(X + Y\right)^{\dagger}'
+    assert latex(Adjoint(X) + Adjoint(Y)) == r'X^{\dagger} + Y^{\dagger}'
+    assert latex(Adjoint(X*Y)) == r'\left(X Y\right)^{\dagger}'
+    assert latex(Adjoint(Y)*Adjoint(X)) == r'Y^{\dagger} X^{\dagger}'
+    assert latex(Adjoint(X**2)) == r'\left(X^{2}\right)^{\dagger}'
+    assert latex(Adjoint(X)**2) == r'\left(X^{\dagger}\right)^{2}'
+    assert latex(Adjoint(Inverse(X))) == r'\left(X^{-1}\right)^{\dagger}'
+    assert latex(Inverse(Adjoint(X))) == r'\left(X^{\dagger}\right)^{-1}'
+    assert latex(Adjoint(Transpose(X))) == r'\left(X^{T}\right)^{\dagger}'
+    assert latex(Transpose(Adjoint(X))) == r'\left(X^{\dagger}\right)^{T}'
+    assert latex(Transpose(Adjoint(X) + Y)) == r'\left(X^{\dagger} + Y\right)^{T}'
+
+【相关测试 4】
+测试文件：sympy/physics/quantum/tests/test_printing.py
+测试名称：test_commutator
+测试代码：
+def test_commutator():
+    A = Operator('A')
+    B = Operator('B')
+    c = Commutator(A, B)
+    c_tall = Commutator(A**2, B)
+    assert str(c) == '[A,B]'
+    assert pretty(c) == '[A,B]'
+    assert upretty(c) == '[A,B]'
+    assert latex(c) == r'\left[A,B\right]'
+    sT(c, "Commutator(Operator(Symbol('A')),Operator(Symbol('B')))")
+    assert str(c_tall) == '[A**2,B]'
+    ascii_str = \
+"""\
+[ 2  ]\n\
+[A ,B]\
+"""
+    ucode_str = \
+"""\
+⎡ 2  ⎤\n\
+⎣A ,B⎦\
+"""
+    assert pretty(c_tall) == ascii_str
+    assert upretty(c_tall) == ucode_str
+    assert latex(c_tall) == r'\left[A^{2},B\right]'
+    sT(c_tall, "Commutator(Pow(Operator(Symbol('A')), Integer(2)),Operator(Symbol('B')))")
+
+【相关测试 5】
+测试文件：sympy/printing/tests/test_latex.py
+测试名称：test_latex_commutator
+测试代码：
+def test_latex_commutator():
+    A = Operator('A')
+    B = Operator('B')
+    comm = Commutator(B, A)
+    assert latex(comm.doit()) == r"- (A B - B A)"
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

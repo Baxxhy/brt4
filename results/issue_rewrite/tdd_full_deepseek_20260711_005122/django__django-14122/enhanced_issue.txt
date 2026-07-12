@@ -1,0 +1,126 @@
+instance_id: django__django-14122
+
+issue_summary: 当使用 Meta.ordering 时，Django 错误地将排序字段包含在 GROUP BY 子句中，导致聚合结果错误。
+
+trigger_condition:
+{
+  "text": "对具有 Meta.ordering 定义的模型进行查询，该查询涉及聚合（如 annotate 与 Count）并使用 values() 进行分组。",
+  "evidence": [
+    "Issue 描述指出，当使用 Meta.ordering 时，GROUP BY 子句错误地包含了排序字段。",
+    "相关测试 1 和 2 展示了涉及聚合、values() 和 order_by 的查询模式。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "聚合结果（例如计数）不正确，因为额外的字段被错误地包含在 GROUP BY 子句中，导致分组比预期更细。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 描述提到 'leads to wrong aggregation'。",
+    "相关测试 1 和 2 展示了正确的聚合结果，暗示错误的 GROUP BY 会导致不同的输出。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "Meta.ordering 字段不应被包含在 GROUP BY 子句中，聚合应仅基于 values() 中明确指定的字段进行正确分组。",
+  "evidence": [
+    "Issue 标题明确指出 'Meta.ordering fields must not be included in GROUP BY clause'。",
+    "相关测试 1 的文档字符串说明 'should be excluded from the group by clause'。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "django.db.models.query.QuerySet.annotate",
+    "kind": "method",
+    "source_path": "",
+    "reason": "Issue 涉及聚合注解，这是触发 GROUP BY 子句生成的关键 API。"
+  },
+  {
+    "name": "django.db.models.query.QuerySet.values",
+    "kind": "method",
+    "source_path": "",
+    "reason": "values() 方法决定 GROUP BY 子句中包含哪些字段。"
+  },
+  {
+    "name": "django.db.models.query.QuerySet.order_by",
+    "kind": "method",
+    "source_path": "",
+    "reason": "Issue 与 Meta.ordering 和可能的显式 order_by 调用相关。"
+  },
+  {
+    "name": "django.db.models.aggregates.Count",
+    "kind": "class",
+    "source_path": "",
+    "reason": "Issue 中提到了聚合，Count 是常见的聚合函数。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "相关测试中使用没有自定义 Meta.ordering 的 Book 模型。",
+    "target_pattern": "使用一个在 Meta 中定义了 ordering 字段的模型。",
+    "reason": "Issue 明确指出 Meta.ordering 是触发条件。改变模型状态（添加 ordering）可能使查询生成错误的 GROUP BY。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "测试通常以 .values('rating').annotate(count=Count(...)).order_by(...) 结束。",
+    "target_pattern": "在查询链中不显式调用 .order_by()，但依赖模型的 Meta.ordering。或者，在聚合后调用 .order_by() 但使用 Meta.ordering 中的字段。",
+    "reason": "Issue 提到之前的修复移除了 ORDER BY，但 GROUP BY 仍然错误地包含了 Meta.ordering 字段。测试需要模拟这种场景。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "sql",
+    "expression_hint": "生成的 SQL 查询字符串，特别是 GROUP BY 子句部分。",
+    "reason": "Issue 的核心是 GROUP BY 子句错误地包含了 Meta.ordering 字段。检查 SQL 是判断问题是否存在的直接方法。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "聚合查询的结果列表，特别是计数等聚合值。",
+    "reason": "错误的 GROUP BY 会导致聚合结果（如计数）与预期不符。比较实际结果与基于正确分组的预期结果是关键。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证聚合结果（例如每个分组的计数）符合基于 values() 中指定字段进行分组的预期。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的 SQL 字符串，因为 SQL 生成可能因数据库后端而异。避免断言不相关的字段顺序。",
+    "reason": "Issue 是关于语义错误（错误聚合），而不是语法错误。断言最终结果能稳定地捕捉到功能缺陷。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要一个定义了 Meta.ordering 的 Django 模型，并为其创建测试数据。可能需要继承自 TestCase 并使用数据库 fixture。",
+    "source": "inference",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要检查生成的 SQL。可以使用 django.db.connection.queries 或 str(qs.query) 进行观察。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "Meta.ordering 是定义在模型 Meta 内部类中的字符串列表，还是单个字符串？",
+  "错误是否只在特定查询链组合下发生（例如，先 annotate 再 values 再 annotate）？",
+  "是否所有聚合函数（Count, Max, Sum 等）都会受到影响？",
+  "显式调用 .order_by() 与依赖 Meta.ordering 默认行为之间是否存在差异？"
+]

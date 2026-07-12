@@ -1,0 +1,301 @@
+{
+  "instance_id": "django__django-12304",
+  "issue_summary": "Django 模板中无法直接使用枚举类型，因为模板系统会错误地尝试调用它们。",
+  "trigger_condition": {
+    "text": "在 Django 模板中，使用一个继承自 models.TextChoices 或 models.IntegerChoices 的枚举类（如 YearInSchool）的成员（如 YearInSchool.FRESHMAN）与模板变量进行比较或访问。",
+    "evidence": [
+      "Issue 描述：'Enumeration Types are not usable in templates.' 并给出了示例：'{% if student.year_in_school == YearInSchool.FRESHMAN %}'",
+      "相关源码片段 2 展示了 YearInSchool 是一个 models.TextChoices 类。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "模板渲染失败，因为模板系统尝试无参数调用枚举类（它是可调用的），导致缺少必要参数的错误。",
+    "symptom_type": "exception",
+    "evidence": [
+      "Issue 描述：'The call fails because the required value argument is missing.'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "在 Django 模板中，可以直接访问和使用枚举类型的成员（如 YearInSchool.FRESHMAN）进行比较或属性访问，而不会被模板系统错误地调用。",
+    "evidence": [
+      "Issue 描述中暗示了期望行为：'The easy solution would be to declare do_not_call_in_templates = True on the various Choices classes.' 这表明修复后枚举类应像设置了该属性的对象一样，在模板中不被调用。",
+      "相关测试 1 和 4 展示了设置 do_not_call_in_templates = True 的对象在模板中不会被调用，可以正常访问其属性。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "models.TextChoices",
+      "kind": "class",
+      "source_path": "django/db/models/enums.py",
+      "reason": "Issue 中提到的枚举类型（如 YearInSchool）继承自 models.TextChoices。"
+    },
+    {
+      "name": "models.IntegerChoices",
+      "kind": "class",
+      "source_path": "django/db/models/enums.py",
+      "reason": "相关测试 5 使用了 IntegerChoices，问题可能同样影响此类。"
+    },
+    {
+      "name": "YearInSchool",
+      "kind": "class",
+      "source_path": "tests/model_enums/tests.py",
+      "reason": "Issue 示例和检索到的源码/测试中使用的具体枚举类。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/enums.py",
+      "object": "ChoicesMeta 或 Choices 基类",
+      "lines": "",
+      "reason": "Issue 建议的解决方案是在 Choices 类上设置 do_not_call_in_templates = True，这表明缺陷可能在于这些枚举类缺少此属性，导致模板系统将其视为普通可调用对象。"
+    },
+    {
+      "path": "django/template/base.py",
+      "object": "模板变量解析或处理可调用对象的逻辑",
+      "lines": "",
+      "reason": "Issue 指出 Django 模板总是无参数调用可调用对象，这是触发错误的核心机制。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_do_not_call",
+      "test_file": "tests/template_tests/test_callables.py",
+      "why_relevant": "它直接测试了 do_not_call_in_templates 属性如何阻止模板系统调用一个可调用对象，这与 Issue 的解决方案高度相关。",
+      "reusable_parts": [
+        "测试类 CallableVariablesTests 和 TestCase 基类",
+        "使用 self.engine.from_string 和 Context 渲染模板的模式",
+        "通过 num_calls 属性验证对象是否被调用的观测方法",
+        "断言风格：self.assertEqual(t.render(c), '...') 和 self.assertEqual(my_doodad.num_calls, 0)"
+      ],
+      "possible_gap": "该测试使用自定义类 Doodad，而非 Django 的 models.Choices 枚举类。它没有测试在模板中比较枚举成员的具体场景。"
+    },
+    {
+      "test_name": "test_textchoices",
+      "test_file": "tests/model_enums/tests.py",
+      "why_relevant": "它测试了 YearInSchool 枚举类的各种属性和行为，提供了构造和使用该枚举类的示例。",
+      "reusable_parts": [
+        "YearInSchool 类的定义和导入",
+        "对枚举成员属性（如 .value, .label）的访问和断言",
+        "断言风格：self.assertEqual, self.assertIsInstance"
+      ],
+      "possible_gap": "该测试是单元测试，不涉及 Django 模板渲染，因此无法复现模板上下文中的缺陷。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "object_state",
+      "current_pattern": "相关测试 1 中的 Doodad 类显式设置了 do_not_call_in_templates = True。",
+      "target_pattern": "使用未设置 do_not_call_in_templates 属性的枚举类（如 YearInSchool）。",
+      "reason": "Issue 指出枚举类因为缺少此属性而被错误调用。使用未设置该属性的枚举类应能触发缺陷。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "相关测试 1 在模板中访问 my_doodad.value（一个属性）。",
+      "target_pattern": "在模板中访问枚举成员（如 YearInSchool.FRESHMAN）或将其与变量比较。",
+      "reason": "Issue 示例展示了在模板条件中比较枚举成员，这是触发缺陷的典型用法。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "在模板渲染过程中捕获的异常（如 TypeError 关于缺少参数）。",
+      "reason": "Issue 明确指出调用会失败并抛出异常，这是缺陷的直接表现。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "枚举类或其实例在模板渲染前后是否被调用（例如，可以模拟相关测试 1 中的 num_calls 机制来观测）。",
+      "reason": "核心问题是模板系统是否错误地调用了枚举类。观测调用状态可以确认缺陷是否触发。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "模板渲染的输出字符串。",
+      "reason": "如果缺陷被触发，渲染可能失败或输出错误内容；如果修复，应能正常输出预期值。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证在模板中使用枚举成员（如 YearInSchool.FRESHMAN）进行渲染时，不会抛出异常，并且能产生预期的输出（例如，成功比较或显示值）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的异常消息字符串（可能因版本变化），或断言枚举类被调用了特定次数（除非用于观测缺陷，但最终修复后应避免）。",
+      "reason": "修复后，模板应能正常渲染并输出正确结果。使用 equals 比较渲染输出是稳定且直接的验证方式。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 Django 的模板引擎（self.engine）和 Context。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要导入相关的枚举类（如 YearInSchool）和 models 模块。",
+      "source": "retrieved_source",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能需要继承自 django.test.TestCase 或 SimpleTestCase 以访问模板引擎。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "具体的异常类型和完整错误消息在 Issue 中没有明确给出。",
+    "除了 TextChoices，其他类型的 Choices（如 IntegerChoices）是否受完全相同的影响？",
+    "模板系统内部处理可调用对象的精确代码位置和逻辑。",
+    "修复后，枚举类是否应该自动拥有 do_not_call_in_templates = True，还是需要用户手动设置？"
+  ],
+  "raw": {
+    "issue_summary": "Django 模板中无法直接使用枚举类型，因为模板系统会错误地尝试调用它们。",
+    "trigger_condition": {
+      "text": "在 Django 模板中，使用一个继承自 models.TextChoices 或 models.IntegerChoices 的枚举类（如 YearInSchool）的成员（如 YearInSchool.FRESHMAN）与模板变量进行比较或访问。",
+      "evidence": [
+        "Issue 描述：'Enumeration Types are not usable in templates.' 并给出了示例：'{% if student.year_in_school == YearInSchool.FRESHMAN %}'",
+        "相关源码片段 2 展示了 YearInSchool 是一个 models.TextChoices 类。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "模板渲染失败，因为模板系统尝试无参数调用枚举类（它是可调用的），导致缺少必要参数的错误。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'The call fails because the required value argument is missing.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在 Django 模板中，可以直接访问和使用枚举类型的成员（如 YearInSchool.FRESHMAN）进行比较或属性访问，而不会被模板系统错误地调用。",
+      "evidence": [
+        "Issue 描述中暗示了期望行为：'The easy solution would be to declare do_not_call_in_templates = True on the various Choices classes.' 这表明修复后枚举类应像设置了该属性的对象一样，在模板中不被调用。",
+        "相关测试 1 和 4 展示了设置 do_not_call_in_templates = True 的对象在模板中不会被调用，可以正常访问其属性。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "models.TextChoices",
+        "kind": "class",
+        "source_path": "django/db/models/enums.py",
+        "reason": "Issue 中提到的枚举类型（如 YearInSchool）继承自 models.TextChoices。"
+      },
+      {
+        "name": "models.IntegerChoices",
+        "kind": "class",
+        "source_path": "django/db/models/enums.py",
+        "reason": "相关测试 5 使用了 IntegerChoices，问题可能同样影响此类。"
+      },
+      {
+        "name": "YearInSchool",
+        "kind": "class",
+        "source_path": "tests/model_enums/tests.py",
+        "reason": "Issue 示例和检索到的源码/测试中使用的具体枚举类。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/enums.py",
+        "object": "ChoicesMeta 或 Choices 基类",
+        "lines": "",
+        "reason": "Issue 建议的解决方案是在 Choices 类上设置 do_not_call_in_templates = True，这表明缺陷可能在于这些枚举类缺少此属性，导致模板系统将其视为普通可调用对象。"
+      },
+      {
+        "path": "django/template/base.py",
+        "object": "模板变量解析或处理可调用对象的逻辑",
+        "lines": "",
+        "reason": "Issue 指出 Django 模板总是无参数调用可调用对象，这是触发错误的核心机制。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_do_not_call",
+        "test_file": "tests/template_tests/test_callables.py",
+        "why_relevant": "它直接测试了 do_not_call_in_templates 属性如何阻止模板系统调用一个可调用对象，这与 Issue 的解决方案高度相关。",
+        "reusable_parts": [
+          "测试类 CallableVariablesTests 和 TestCase 基类",
+          "使用 self.engine.from_string 和 Context 渲染模板的模式",
+          "通过 num_calls 属性验证对象是否被调用的观测方法",
+          "断言风格：self.assertEqual(t.render(c), '...') 和 self.assertEqual(my_doodad.num_calls, 0)"
+        ],
+        "possible_gap": "该测试使用自定义类 Doodad，而非 Django 的 models.Choices 枚举类。它没有测试在模板中比较枚举成员的具体场景。"
+      },
+      {
+        "test_name": "test_textchoices",
+        "test_file": "tests/model_enums/tests.py",
+        "why_relevant": "它测试了 YearInSchool 枚举类的各种属性和行为，提供了构造和使用该枚举类的示例。",
+        "reusable_parts": [
+          "YearInSchool 类的定义和导入",
+          "对枚举成员属性（如 .value, .label）的访问和断言",
+          "断言风格：self.assertEqual, self.assertIsInstance"
+        ],
+        "possible_gap": "该测试是单元测试，不涉及 Django 模板渲染，因此无法复现模板上下文中的缺陷。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中的 Doodad 类显式设置了 do_not_call_in_templates = True。",
+        "target_pattern": "使用未设置 do_not_call_in_templates 属性的枚举类（如 YearInSchool）。",
+        "reason": "Issue 指出枚举类因为缺少此属性而被错误调用。使用未设置该属性的枚举类应能触发缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 在模板中访问 my_doodad.value（一个属性）。",
+        "target_pattern": "在模板中访问枚举成员（如 YearInSchool.FRESHMAN）或将其与变量比较。",
+        "reason": "Issue 示例展示了在模板条件中比较枚举成员，这是触发缺陷的典型用法。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在模板渲染过程中捕获的异常（如 TypeError 关于缺少参数）。",
+        "reason": "Issue 明确指出调用会失败并抛出异常，这是缺陷的直接表现。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "枚举类或其实例在模板渲染前后是否被调用（例如，可以模拟相关测试 1 中的 num_calls 机制来观测）。",
+        "reason": "核心问题是模板系统是否错误地调用了枚举类。观测调用状态可以确认缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "模板渲染的输出字符串。",
+        "reason": "如果缺陷被触发，渲染可能失败或输出错误内容；如果修复，应能正常输出预期值。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在模板中使用枚举成员（如 YearInSchool.FRESHMAN）进行渲染时，不会抛出异常，并且能产生预期的输出（例如，成功比较或显示值）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的异常消息字符串（可能因版本变化），或断言枚举类被调用了特定次数（除非用于观测缺陷，但最终修复后应避免）。",
+        "reason": "修复后，模板应能正常渲染并输出正确结果。使用 equals 比较渲染输出是稳定且直接的验证方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 Django 的模板引擎（self.engine）和 Context。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入相关的枚举类（如 YearInSchool）和 models 模块。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 django.test.TestCase 或 SimpleTestCase 以访问模板引擎。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "具体的异常类型和完整错误消息在 Issue 中没有明确给出。",
+      "除了 TextChoices，其他类型的 Choices（如 IntegerChoices）是否受完全相同的影响？",
+      "模板系统内部处理可调用对象的精确代码位置和逻辑。",
+      "修复后，枚举类是否应该自动拥有 do_not_call_in_templates = True，还是需要用户手动设置？"
+    ]
+  }
+}

@@ -1,0 +1,488 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+clone fails for parameters that are estimator types
+#### Description
+
+`clone` fails when one or more instance parameters are estimator types (i.e. not instances, but classes). 
+
+I know this is a somewhat unusual use case, but I'm working on a project that provides wrappers for sklearn estimators (https://github.com/phausamann/sklearn-xarray) and I'd like to store the wrapped estimators as their classes - not their instances - as a parameter inside of a wrapper that behaves like an estimator itself. 
+
+#### Steps/Code to Reproduce
+
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.base import clone
+    clone(StandardScaler(with_mean=StandardScaler))
+
+#### Expected Results
+
+No error.
+
+#### Actual Results
+```
+Traceback (most recent call last):
+...
+  File "...\lib\site-packages\sklearn\base.py", line 62, in clone
+    new_object_params[name] = clone(param, safe=False)
+  File "...\lib\site-packages\sklearn\base.py", line 60, in clone
+    new_object_params = estimator.get_params(deep=False)
+TypeError: get_params() missing 1 required positional argument: 'self'
+```
+
+#### Possible fix
+
+Change `base.py`, line 51 to: 
+
+    elif not hasattr(estimator, 'get_params') or isinstance(estimator, type):
+
+I'm not sure whether this might break stuff in other places, however. I'd happily submit a PR if this change is desired.
+
+#### Versions
+
+    sklearn: 0.20.0
+
+
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sklearn/base.py
+对象名称：clone
+节点类型：top-level function
+父节点：base
+行号范围：30-74
+代码：
+def clone(estimator, safe=True):
+    """Constructs a new estimator with the same parameters.
+
+    Clone does a deep copy of the model in an estimator
+    without actually copying attached data. It yields a new estimator
+    with the same parameters that has not been fit on any data.
+
+    Parameters
+    ----------
+    estimator : estimator object, or list, tuple or set of objects
+        The estimator or group of estimators to be cloned
+
+    safe : boolean, optional
+        If safe is false, clone will fall back to a deep copy on objects
+        that are not estimators.
+
+    """
+    estimator_type = type(estimator)
+    # XXX: not handling dictionaries
+    if estimator_type in (list, tuple, set, frozenset):
+        return estimator_type([clone(e, safe=safe) for e in estimator])
+    elif not hasattr(estimator, 'get_params'):
+        if not safe:
+            return copy.deepcopy(estimator)
+        else:
+            raise TypeError("Cannot clone object '%s' (type %s): "
+                            "it does not seem to be a scikit-learn estimator "
+                            "as it does not implement a 'get_params' methods."
+                            % (repr(estimator), type(estimator)))
+    klass = estimator.__class__
+    new_object_params = estimator.get_params(deep=False)
+    for name, param in six.iteritems(new_object_params):
+        new_object_params[name] = clone(param, safe=False)
+    new_object = klass(**new_object_params)
+    params_set = new_object.get_params(deep=False)
+
+    # quick sanity check of the parameters of the clone
+    for name in new_object_params:
+        param1 = new_object_params[name]
+        param2 = params_set[name]
+        if param1 is not param2:
+            raise RuntimeError('Cannot clone object %s, as the constructor '
+                               'either does not set or modifies parameter %s' %
+                               (estimator, name))
+    return new_object
+
+
+【源码片段 2】
+文件路径：sklearn/preprocessing/data.py
+对象名称：StandardScaler
+节点类型：class
+父节点：data
+行号范围：480-798
+代码：
+class StandardScaler(BaseEstimator, TransformerMixin):
+    """Standardize features by removing the mean and scaling to unit variance
+
+    The standard score of a sample `x` is calculated as:
+
+        z = (x - u) / s
+
+    where `u` is the mean of the training samples or zero if `with_mean=False`,
+    and `s` is the standard deviation of the training samples or one if
+    `with_std=False`.
+
+    Centering and scaling happen independently on each feature by computing
+    the relevant statistics on the samples in the training set. Mean and
+    standard deviation are then stored to be used on later data using the
+    `transform` method.
+
+    Standardization of a dataset is a common requirement for many
+    machine learning estimators: they might behave badly if the
+    individual features do not more or less look like standard normally
+    distributed data (e.g. Gaussian with 0 mean and unit variance).
+
+    For instance many elements used in the objective function of
+    a learning algorithm (such as the RBF kernel of Support Vector
+    Machines or the L1 and L2 regularizers of linear models) assume that
+    all features are centered around 0 and have variance in the same
+    order. If a feature has a variance that is orders of magnitude larger
+    that others, it might dominate the objective function and make the
+    estimator unable to learn from other features correctly as expected.
+
+    This scaler can also be applied to sparse CSR or CSC matrices by passing
+    `with_mean=False` to avoid breaking the sparsity structure of the data.
+
+    Read more in the :ref:`User Guide <preprocessing_scaler>`.
+
+    Parameters
+    ----------
+    copy : boolean, optional, default True
+        If False, try to avoid a copy and do inplace scaling instead.
+        This is not guaranteed to always work inplace; e.g. if the data is
+        not a NumPy array or scipy.sparse CSR matrix, a copy may still be
+        returned.
+
+    with_mean : boolean, True by default
+        If True, center the data before scaling.
+        This does not work (and will raise an exception) when attempted on
+        sparse matrices, because centering them entails building a dense
+        matrix which in common use cases is likely to be too large to fit in
+        memory.
+
+    with_std : boolean, True by default
+        If True, scale the data to unit variance (or equivalently,
+        unit standard deviation).
+
+    Attributes
+    ----------
+    scale_ : ndarray or None, shape (n_features,)
+        Per feature relative scaling of the data. This is calculated using
+        `np.sqrt(var_)`. Equal to ``None`` when ``with_std=False``.
+
+        .. versionadded:: 0.17
+           *scale_*
+
+    mean_ : ndarray or None, shape (n_features,)
+        The mean value for each feature in the training set.
+        Equal to ``None`` when ``with_mean=False``.
+
+    var_ : ndarray or None, shape (n_features,)
+        The variance for each feature in the training set. Used to compute
+        `scale_`. Equal to ``None`` when ``with_std=False``.
+
+    n_samples_seen_ : int or array, shape (n_features,)
+        The number of samples processed by the estimator for each feature.
+        If there are not missing samples, the ``n_samples_seen`` will be an
+        integer, otherwise it will be an array.
+        Will be reset on new calls to fit, but increments across
+        ``partial_fit`` calls.
+
+    Examples
+    --------
+    >>> from sklearn.preprocessing import StandardScaler
+    >>> data = [[0, 0], [0, 0], [1, 1], [1, 1]]
+    >>> scaler = StandardScaler()
+    >>> print(scaler.fit(data))
+    StandardScaler(copy=True, with_mean=True, with_std=True)
+    >>> print(scaler.mean_)
+    [0.5 0.5]
+    >>> print(scaler.transform(data))
+    [[-1. -1.]
+     [-1. -1.]
+     [ 1.  1.]
+     [ 1.  1.]]
+    >>> print(scaler.transform([[2, 2]]))
+    [[3. 3.]]
+
+    See also
+    --------
+    scale: Equivalent function without the estimator API.
+
+    :class:`sklearn.decomposition.PCA`
+        Further removes the linear correlation across features with 'whiten=True'.
+
+    Notes
+    -----
+    NaNs are treated as missing values: disregarded in fit, and maintained in
+    transform.
+
+    For a comparison of the different scalers, transformers, and normalizers,
+    see :ref:`examples/preprocessing/plot_all_scaling.py
+    <sphx_glr_auto_examples_preprocessing_plot_all_scaling.py>`.
+    """  # noqa
+    def __init__(self, copy=True, with_mean=True, with_std=True):
+    def _reset(self):
+    def fit(self, X, y=None):
+    def partial_fit(self, X, y=None):
+    def transform(self, X, copy=None):
+    def inverse_transform(self, X, copy=None):
+
+
+【源码片段 3】
+文件路径：sklearn/base.py
+对象名称：get_params
+节点类型：class_function
+父节点：BaseEstimator
+行号范围：166-187
+代码：
+    def get_params(self, deep=True):
+        """Get parameters for this estimator.
+
+        Parameters
+        ----------
+        deep : boolean, optional
+            If True, will return the parameters for this estimator and
+            contained subobjects that are estimators.
+
+        Returns
+        -------
+        params : mapping of string to any
+            Parameter names mapped to their values.
+        """
+        out = dict()
+        for key in self._get_param_names():
+            value = getattr(self, key, None)
+            if deep and hasattr(value, 'get_params'):
+                deep_items = value.get_params().items()
+                out.update((key + '__' + k, val) for k, val in deep_items)
+            out[key] = value
+        return out
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sklearn/tests/test_base.py
+测试名称：test_clone
+测试代码：
+def test_clone():
+    # Tests that clone creates a correct deep copy.
+    # We create an estimator, make a copy of its original state
+    # (which, in this case, is the current state of the estimator),
+    # and check that the obtained copy is a correct deep copy.
+
+    from sklearn.feature_selection import SelectFpr, f_classif
+
+    selector = SelectFpr(f_classif, alpha=0.1)
+    new_selector = clone(selector)
+    assert selector is not new_selector
+    assert_equal(selector.get_params(), new_selector.get_params())
+
+    selector = SelectFpr(f_classif, alpha=np.zeros((10, 2)))
+    new_selector = clone(selector)
+    assert selector is not new_selector
+
+【相关测试 2】
+测试文件：sklearn/tests/test_base.py
+测试名称：test_clone_buggy
+测试代码：
+def test_clone_buggy():
+    # Check that clone raises an error on buggy estimators.
+    buggy = Buggy()
+    buggy.a = 2
+    assert_raises(RuntimeError, clone, buggy)
+
+    no_estimator = NoEstimator()
+    assert_raises(TypeError, clone, no_estimator)
+
+    varg_est = VargEstimator()
+    assert_raises(RuntimeError, clone, varg_est)
+
+    est = ModifyInitParams()
+    assert_raises(RuntimeError, clone, est)
+
+【相关测试 3】
+测试文件：sklearn/tests/test_base.py
+测试名称：test_clone_2
+测试代码：
+def test_clone_2():
+    # Tests that clone doesn't copy everything.
+    # We first create an estimator, give it an own attribute, and
+    # make a copy of its original state. Then we check that the copy doesn't
+    # have the specific attribute we manually added to the initial estimator.
+
+    from sklearn.feature_selection import SelectFpr, f_classif
+
+    selector = SelectFpr(f_classif, alpha=0.1)
+    selector.own_attribute = "test"
+    new_selector = clone(selector)
+    assert_false(hasattr(new_selector, "own_attribute"))
+
+【相关测试 4】
+测试文件：sklearn/gaussian_process/tests/test_kernels.py
+测试名称：test_kernel_clone
+测试代码：
+@pytest.mark.parametrize("kernel", kernels)
+def test_kernel_clone(kernel):
+    # Test that sklearn's clone works correctly on kernels.
+    kernel_cloned = clone(kernel)
+
+    # XXX: Should this be fixed?
+    # This differs from the sklearn's estimators equality check.
+    assert_equal(kernel, kernel_cloned)
+    assert_not_equal(id(kernel), id(kernel_cloned))
+
+    # Check that all constructor parameters are equal.
+    assert_equal(kernel.get_params(), kernel_cloned.get_params())
+
+    # Check that all hyperparameters are equal.
+    check_hyperparameters_equal(kernel, kernel_cloned)
+
+【相关测试 5】
+测试文件：sklearn/gaussian_process/tests/test_kernels.py
+测试名称：test_kernel_clone_after_set_params
+测试代码：
+@pytest.mark.parametrize('kernel', kernels)
+def test_kernel_clone_after_set_params(kernel):
+    # This test is to verify that using set_params does not
+    # break clone on kernels.
+    # This used to break because in kernels such as the RBF, non-trivial
+    # logic that modified the length scale used to be in the constructor
+    # See https://github.com/scikit-learn/scikit-learn/issues/6961
+    # for more details.
+    bounds = (1e-5, 1e5)
+    kernel_cloned = clone(kernel)
+    params = kernel.get_params()
+    # RationalQuadratic kernel is isotropic.
+    isotropic_kernels = (ExpSineSquared, RationalQuadratic)
+    if 'length_scale' in params and not isinstance(kernel,
+                                                   isotropic_kernels):
+        length_scale = params['length_scale']
+        if np.iterable(length_scale):
+            params['length_scale'] = length_scale[0]
+            params['length_scale_bounds'] = bounds
+        else:
+            params['length_scale'] = [length_scale] * 2
+            params['length_scale_bounds'] = bounds * 2
+        kernel_cloned.set_params(**params)
+        kernel_cloned_clone = clone(kernel_cloned)
+        assert_equal(kernel_cloned_clone.get_params(),
+                     kernel_cloned.get_params())
+        assert_not_equal(id(kernel_cloned_clone), id(kernel_cloned))
+        check_hyperparameters_equal(kernel_cloned, kernel_cloned_clone)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

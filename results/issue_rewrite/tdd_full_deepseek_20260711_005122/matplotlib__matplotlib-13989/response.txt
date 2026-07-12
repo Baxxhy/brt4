@@ -1,0 +1,112 @@
+{
+  "issue_summary": "当 density=True 时，hist() 函数不再尊重 range 参数。",
+  "trigger_condition": {
+    "text": "调用 plt.hist 函数，传入数据、bins='auto'、range 参数（例如 (0, 1)）以及 density=True。",
+    "evidence": ["Issue 中的代码片段：plt.hist(np.random.rand(10), \"auto\", range=(0, 1), density=True)"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "返回的 bins 数组的第一个值不是 range 指定的下限（0），最后一个值也不是 range 指定的上限（1）。",
+    "symptom_type": "wrong_return",
+    "evidence": ["Issue 中的实际输出：bins = [0.00331535 0.18930174 0.37528813 0.56127453 0.74726092 0.93324731]；Issue 中的预期：数组的第一个值是 0，最后一个值是 1。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当指定 range 参数时，返回的 bins 数组的第一个值应等于 range 的下限，最后一个值应等于 range 的上限。",
+    "evidence": ["Issue 中的预期：\"Some array where the first value is 0 and the last one is 1.\"；相关测试 test_hist_auto_bins 中 assert bins[0] <= 1 和 assert bins[-1] >= 6 表明 bins 范围应覆盖数据范围。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "plt.hist",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 直接报告了此函数的 bug。"
+    },
+    {
+      "name": "ax.hist",
+      "kind": "method",
+      "source_path": "",
+      "reason": "相关测试中使用了此方法，并且 Issue 中的 plt.hist 最终调用此方法。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "",
+      "object": "",
+      "lines": "",
+      "reason": "Issue 指出问题 bisects 到 PR #8638 的特定提交，但检索出的源码片段未直接涉及 hist 实现。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_hist_auto_bins",
+      "test_file": "lib/matplotlib/tests/test_axes.py",
+      "why_relevant": "它测试了 bins='auto' 和 range 参数（虽然没有显式指定 range，但断言检查 bins 范围覆盖数据范围）。",
+      "reusable_parts": ["imports", "plt.hist 调用模式", "对 bins 数组的断言风格"],
+      "possible_gap": "该测试没有设置 density=True，而 Issue 表明 bug 只在 density=True 时出现。"
+    },
+    {
+      "test_name": "test_hist_density",
+      "test_file": "lib/matplotlib/tests/test_axes.py",
+      "why_relevant": "它测试了 density=True 参数。",
+      "reusable_parts": ["imports", "使用 np.random 生成数据", "ax.hist 调用并设置 density=True"],
+      "possible_gap": "该测试没有指定 range 参数，并且是图像比较测试，不检查 bins 数组的数值。"
+    },
+    {
+      "test_name": "test_hist_unequal_bins_density",
+      "test_file": "lib/matplotlib/tests/test_axes.py",
+      "why_relevant": "它测试了 density=True 与自定义 bins 参数，并验证了与 numpy 结果的一致性。",
+      "reusable_parts": ["imports", "density=True 的调用", "使用 assert_allclose 进行数值比较"],
+      "possible_gap": "该测试使用自定义 bins 列表，而不是 bins='auto' 和 range 参数。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "相关测试中调用 hist 时可能没有同时设置 bins='auto'、range 和 density=True。",
+      "target_pattern": "在调用 hist 时，同时设置 bins='auto'、range=(0, 1) 和 density=True。",
+      "reason": "Issue 表明只有当这三个参数组合时才会触发 bug。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "test_hist_auto_bins 中没有设置 density 参数（默认为 False）。",
+      "target_pattern": "在 test_hist_auto_bins 的调用基础上添加 density=True。",
+      "reason": "Issue 明确指出 bug 只在 density=True 时发生。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "plt.hist 返回的 bins 数组（第二个返回值）。",
+      "reason": "Issue 的核心错误是 bins 数组的范围不符合 range 参数。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 bins[0] 等于 range 的下限（例如 0），且 bins[-1] 等于 range 的上限（例如 1）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言 bins 数组的完整精确值，因为 bins='auto' 的计算可能因实现细节而变。",
+      "reason": "Issue 的预期行为是 bins 范围严格匹配指定的 range。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 matplotlib.pyplot 和 numpy。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可以使用 np.random 生成测试数据。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "当 density=False 时，range 参数是否正常工作？Issue 提到此时没有 bug，但未提供测试确认。",
+    "bins='auto' 算法在 density=True 时内部如何与 range 交互的具体细节。",
+    "除了 bins 数组边界，直方图的高度（density 归一化）是否也受到影响？"
+  ]
+}

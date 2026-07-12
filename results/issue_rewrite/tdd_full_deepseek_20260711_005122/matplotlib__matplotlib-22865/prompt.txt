@@ -1,0 +1,389 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+[Bug]: Colorbar with drawedges=True and extend='both' does not draw edges at extremities
+### Bug summary
+
+When creating a matplotlib colorbar, it is possible to set drawedges to True which separates the colors of the colorbar with black lines. However, when the colorbar is extended using extend='both', the black lines at the extremities do not show up.
+
+### Code for reproduction
+
+```python
+import matplotlib as mpl
+import numpy as np
+import matplotlib.pyplot as plt  
+from matplotlib.colors import from_levels_and_colors
+
+my_cmap = mpl.cm.viridis
+bounds = np.arange(10)
+nb_colors = len(bounds) + 1
+colors = my_cmap(np.linspace(100, 255, nb_colors).astype(int))
+my_cmap, my_norm = from_levels_and_colors(bounds, colors, extend='both')
+
+plt.figure(figsize=(5, 1))
+ax = plt.subplot(111)
+cbar = mpl.colorbar.ColorbarBase(ax, cmap=my_cmap, norm=my_norm, orientation='horizontal', drawedges=True)
+plt.subplots_adjust(left=0.05, bottom=0.4, right=0.95, top=0.9)
+plt.show()
+```
+
+
+### Actual outcome
+
+![image](https://user-images.githubusercontent.com/34058459/164254401-7516988d-1efb-4887-a631-de9a68357685.png)
+
+
+### Expected outcome
+
+![image](https://user-images.githubusercontent.com/34058459/164254881-92c167b7-aa13-4972-9955-48221b38b866.png)
+
+
+### Additional information
+
+_No response_
+
+### Operating system
+
+_No response_
+
+### Matplotlib Version
+
+3.5.1
+
+### Matplotlib Backend
+
+_No response_
+
+### Python version
+
+_No response_
+
+### Jupyter version
+
+_No response_
+
+### Installation
+
+_No response_
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：lib/matplotlib/colorbar.py
+对象名称：ColorbarBase
+节点类型：global_var
+父节点：colorbar
+行号范围：1405-1405
+代码：
+ColorbarBase = Colorbar  # Backcompat API
+
+
+【源码片段 2】
+文件路径：lib/matplotlib/colors.py
+对象名称：from_levels_and_colors
+节点类型：top-level function
+父节点：colors
+行号范围：2485-2539
+代码：
+def from_levels_and_colors(levels, colors, extend='neither'):
+    """
+    A helper routine to generate a cmap and a norm instance which
+    behave similar to contourf's levels and colors arguments.
+
+    Parameters
+    ----------
+    levels : sequence of numbers
+        The quantization levels used to construct the `BoundaryNorm`.
+        Value ``v`` is quantized to level ``i`` if ``lev[i] <= v < lev[i+1]``.
+    colors : sequence of colors
+        The fill color to use for each level. If *extend* is "neither" there
+        must be ``n_level - 1`` colors. For an *extend* of "min" or "max" add
+        one extra color, and for an *extend* of "both" add two colors.
+    extend : {'neither', 'min', 'max', 'both'}, optional
+        The behaviour when a value falls out of range of the given levels.
+        See `~.Axes.contourf` for details.
+
+    Returns
+    -------
+    cmap : `~matplotlib.colors.Normalize`
+    norm : `~matplotlib.colors.Colormap`
+    """
+    slice_map = {
+        'both': slice(1, -1),
+        'min': slice(1, None),
+        'max': slice(0, -1),
+        'neither': slice(0, None),
+    }
+    _api.check_in_list(slice_map, extend=extend)
+    color_slice = slice_map[extend]
+
+    n_data_colors = len(levels) - 1
+    n_expected = n_data_colors + color_slice.start - (color_slice.stop or 0)
+    if len(colors) != n_expected:
+        raise ValueError(
+            f'With extend == {extend!r} and {len(levels)} levels, '
+            f'expected {n_expected} colors, but got {len(colors)}')
+
+    cmap = ListedColormap(colors[color_slice], N=n_data_colors)
+
+    if extend in ['min', 'both']:
+        cmap.set_under(colors[0])
+    else:
+        cmap.set_under('none')
+
+    if extend in ['max', 'both']:
+        cmap.set_over(colors[-1])
+    else:
+        cmap.set_over('none')
+
+    cmap.colorbar_extend = extend
+
+    norm = BoundaryNorm(levels, ncolors=n_data_colors)
+    return cmap, norm
+
+
+【源码片段 3】
+文件路径：tutorials/colors/colorbar_only.py
+对象名称：cmap
+节点类型：global_var
+父节点：colorbar_only
+行号范围：35-35
+代码：
+cmap = mpl.cm.cool
+
+
+【源码片段 4】
+文件路径：tutorials/colors/colorbar_only.py
+对象名称：norm
+节点类型：global_var
+父节点：colorbar_only
+行号范围：36-36
+代码：
+norm = mpl.colors.Normalize(vmin=5, vmax=10)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：lib/matplotlib/tests/test_colorbar.py
+测试名称：test_colorbar_closed_patch
+测试代码：
+@image_comparison(['colorbar_closed_patch.png'], remove_text=True)
+def test_colorbar_closed_patch():
+    # Remove this line when this test image is regenerated.
+    plt.rcParams['pcolormesh.snap'] = False
+
+    fig = plt.figure(figsize=(8, 6))
+    ax1 = fig.add_axes([0.05, 0.85, 0.9, 0.1])
+    ax2 = fig.add_axes([0.1, 0.65, 0.75, 0.1])
+    ax3 = fig.add_axes([0.05, 0.45, 0.9, 0.1])
+    ax4 = fig.add_axes([0.05, 0.25, 0.9, 0.1])
+    ax5 = fig.add_axes([0.05, 0.05, 0.9, 0.1])
+
+    cmap = cm.get_cmap("RdBu", lut=5)
+
+    im = ax1.pcolormesh(np.linspace(0, 10, 16).reshape((4, 4)), cmap=cmap)
+
+    # The use of a "values" kwarg here is unusual.  It works only
+    # because it is matched to the data range in the image and to
+    # the number of colors in the LUT.
+    values = np.linspace(0, 10, 5)
+    cbar_kw = dict(orientation='horizontal', values=values, ticks=[])
+
+    # The wide line is to show that the closed path is being handled
+    # correctly.  See PR #4186.
+    with rc_context({'axes.linewidth': 16}):
+        plt.colorbar(im, cax=ax2, extend='both', extendfrac=0.5, **cbar_kw)
+        plt.colorbar(im, cax=ax3, extend='both', **cbar_kw)
+        plt.colorbar(im, cax=ax4, extend='both', extendrect=True, **cbar_kw)
+        plt.colorbar(im, cax=ax5, extend='neither', **cbar_kw)
+
+【相关测试 2】
+测试文件：lib/matplotlib/tests/test_colorbar.py
+测试名称：test_colorbar_extension_shape
+测试代码：
+@image_comparison(['colorbar_extensions_shape_uniform.png',
+                   'colorbar_extensions_shape_proportional.png'])
+def test_colorbar_extension_shape():
+    """Test rectangular colorbar extensions."""
+    # Remove this line when this test image is regenerated.
+    plt.rcParams['pcolormesh.snap'] = False
+
+    # Create figures for uniform and proportionally spaced colorbars.
+    _colorbar_extension_shape('uniform')
+    _colorbar_extension_shape('proportional')
+
+【相关测试 3】
+测试文件：lib/matplotlib/tests/test_colorbar.py
+测试名称：test_colorbar_extension_length
+测试代码：
+@image_comparison(['colorbar_extensions_uniform.png',
+                   'colorbar_extensions_proportional.png'],
+                  tol=1.0)
+def test_colorbar_extension_length():
+    """Test variable length colorbar extensions."""
+    # Remove this line when this test image is regenerated.
+    plt.rcParams['pcolormesh.snap'] = False
+
+    # Create figures for uniform and proportionally spaced colorbars.
+    _colorbar_extension_length('uniform')
+    _colorbar_extension_length('proportional')
+
+【相关测试 4】
+测试文件：lib/matplotlib/tests/test_colorbar.py
+测试名称：test_colorbar_extension_inverted_axis
+测试代码：
+@pytest.mark.parametrize("orientation", ["horizontal", "vertical"])
+@pytest.mark.parametrize("extend,expected", [("min", (0, 0, 0, 1)),
+                                             ("max", (1, 1, 1, 1)),
+                                             ("both", (1, 1, 1, 1))])
+def test_colorbar_extension_inverted_axis(orientation, extend, expected):
+    """Test extension color with an inverted axis"""
+    data = np.arange(12).reshape(3, 4)
+    fig, ax = plt.subplots()
+    cmap = plt.get_cmap("viridis").with_extremes(under=(0, 0, 0, 1),
+                                                 over=(1, 1, 1, 1))
+    im = ax.imshow(data, cmap=cmap)
+    cbar = fig.colorbar(im, orientation=orientation, extend=extend)
+    if orientation == "horizontal":
+        cbar.ax.invert_xaxis()
+    else:
+        cbar.ax.invert_yaxis()
+    assert cbar._extend_patches[0].get_facecolor() == expected
+    if extend == "both":
+        assert len(cbar._extend_patches) == 2
+        assert cbar._extend_patches[1].get_facecolor() == (0, 0, 0, 1)
+    else:
+        assert len(cbar._extend_patches) == 1
+
+【相关测试 5】
+测试文件：lib/matplotlib/tests/test_colorbar.py
+测试名称：test_colorbar_lognorm_extension
+测试代码：
+@pytest.mark.parametrize("extend", ['both', 'min', 'max'])
+def test_colorbar_lognorm_extension(extend):
+    # Test that colorbar with lognorm is extended correctly
+    f, ax = plt.subplots()
+    cb = Colorbar(ax, norm=LogNorm(vmin=0.1, vmax=1000.0),
+                  orientation='vertical', extend=extend)
+    assert cb._values[0] >= 0.0
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

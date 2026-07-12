@@ -1,0 +1,143 @@
+```json
+{
+    "issue_summary": "ModelAdmin 缺少 get_inlines() 钩子方法，无法根据请求或模型实例动态设置内联类。",
+    "trigger_condition": {
+        "text": "当开发者需要根据请求（request）或模型实例（obj）动态决定 ModelAdmin 的 inlines 时，尝试覆盖 get_inline_instances 方法，但发现需要复制其内部的 for 循环逻辑。",
+        "evidence": ["Issue 描述：'Currently, We can override the method get_inline_instances to do such a thing, but a for loop should be copied to my code.'"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "开发者无法通过一个简单的钩子方法（如 get_inlines）来动态返回内联类列表，而必须复制 get_inline_instances 方法中的循环和权限检查逻辑，导致代码冗余和可维护性差。",
+        "symptom_type": "unknown",
+        "evidence": ["Issue 描述：'So I wished add a hook get_inlines(request, obj=None)'"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "ModelAdmin 应提供一个 get_inlines(request, obj=None) 钩子方法，允许开发者根据请求或模型实例返回一个内联类列表，该列表将用于后续的 get_inline_instances 处理。",
+        "evidence": ["Issue 描述：'add ModelAdmin.get_inlines() hook to allow set inlines based on the request or model instance.'"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "ModelAdmin.get_inlines",
+            "kind": "method",
+            "source_path": "django/contrib/admin/options.py",
+            "reason": "Issue 明确要求添加此方法作为钩子。"
+        },
+        {
+            "name": "ModelAdmin.get_inline_instances",
+            "kind": "method",
+            "source_path": "django/contrib/admin/options.py",
+            "reason": "当前用于获取内联实例的方法，其内部循环是开发者希望避免复制的。"
+        },
+        {
+            "name": "ModelAdmin.inlines",
+            "kind": "attribute",
+            "source_path": "django/contrib/admin/options.py",
+            "reason": "当前静态定义内联类列表的属性，get_inlines 可能旨在动态替代或补充它。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/contrib/admin/options.py",
+            "object": "ModelAdmin.get_inline_instances",
+            "lines": "583-596",
+            "reason": "该方法直接使用 self.inlines 静态列表，缺少一个可覆盖的钩子来动态提供该列表。"
+        },
+        {
+            "path": "django/contrib/admin/options.py",
+            "object": "ModelAdmin",
+            "lines": "538-1957",
+            "reason": "类定义中缺少 get_inlines 方法。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_get_exclude_takes_obj",
+            "test_file": "tests/modeladmin/tests.py",
+            "why_relevant": "它测试了 ModelAdmin 子类中一个类似的钩子方法 get_exclude(request, obj=None)，展示了如何根据 obj 参数动态返回不同值。",
+            "reusable_parts": ["测试类结构 (ModelAdminTests)", "创建自定义 ModelAdmin 子类的模式", "使用 request 和 obj 参数", "调用 admin 实例的 get_form 方法", "使用 assertEqual 比较结果"],
+            "possible_gap": "它测试的是 get_exclude 钩子，而非 get_inlines。需要将测试焦点从表单字段排除转向内联类列表。"
+        },
+        {
+            "test_name": "test_get_fieldsets",
+            "test_file": "tests/modeladmin/tests.py",
+            "why_relevant": "它测试了另一个类似的钩子 get_fieldsets(request, obj=None)，并且同时测试了 ModelAdmin 和 Inline 类，这与 inlines 相关。",
+            "reusable_parts": ["在 ModelAdmin 和 Inline 子类中定义钩子方法", "根据 request 和 obj 返回结构化数据", "调用 get_form 或 get_formset 来触发钩子", "断言返回表单的字段"],
+            "possible_gap": "它测试的是 fieldsets 结构，而不是内联类列表。需要变异为测试 inlines 列表的动态生成。"
+        },
+        {
+            "test_name": "test_formset_overriding_get_exclude_with_form_exclude",
+            "test_file": "tests/modeladmin/tests.py",
+            "why_relevant": "它涉及内联 (ConcertInline) 和 ModelAdmin 的 inlines 属性，并调用了 get_formsets_with_inlines 方法，这与内联实例的生成流程相关。",
+            "reusable_parts": ["定义包含 inlines 的 ModelAdmin 子类", "使用 get_formsets_with_inlines 方法", "检查生成的表单集字段"],
+            "possible_gap": "它测试的是内联的 get_exclude 与 form exclude 的交互，而非 ModelAdmin 级别的 get_inlines 钩子。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "object_state",
+            "current_pattern": "相似测试中，钩子方法（如 get_exclude）根据 obj 是否为 None 返回不同的字段列表。",
+            "target_pattern": "创建一个 ModelAdmin 子类，其 get_inlines(request, obj=None) 方法根据 request 或 obj 返回不同的内联类列表（例如，空列表或包含特定内联的列表）。",
+            "reason": "Issue 的核心是希望钩子能基于运行时状态（request/obj）动态决定 inlines，这与现有测试中 get_exclude 的模式类似。",
+            "confidence": "high"
+        },
+        {
+            "slot": "call_chain",
+            "current_pattern": "测试通常调用 admin.get_form(request, obj) 来触发 get_exclude 等钩子。",
+            "target_pattern": "需要调用一个会触发内联实例生成的方法，如 admin.get_inline_instances(request, obj) 或 admin.get_formsets_with_inlines(request, obj)。",
+            "reason": "get_inlines 钩子（如果存在）应在生成内联实例的流程中被调用，而不是在生成表单时。",
+            "confidence": "medium"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "return_value",
+            "expression_hint": "admin.get_inline_instances(request, obj) 返回的内联实例列表，或 admin.get_formsets_with_inlines(request, obj) 返回的元组列表。",
+            "reason": "观察最终生成的内联实例是否与 get_inlines 钩子预期的动态行为一致。"
+        },
+        {
+            "kind": "type",
+            "expression_hint": "admin.get_inline_instances(request, obj) 返回列表中的元素类型（应为内联实例）。",
+            "reason": "确认返回的是内联实例对象，而不是内联类。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "当 get_inlines 钩子被定义并返回特定内联类列表时，get_inline_instances 应生成对应内联类的实例。",
+            "preferred_assertion_style": "equals",
+            "avoid": "断言完整的 repr 字符串或过于具体的实例属性。",
+            "reason": "应关注生成的内联实例类型或数量是否与钩子返回的类列表匹配。"
+        },
+        {
+            "assertion_goal": "get_inlines 钩子应能接收 request 和 obj 参数，并根据它们返回不同的结果。",
+            "preferred_assertion_style": "before_after_relation",
+            "avoid": "硬编码具体的请求或对象值。",
+            "reason": "验证钩子的动态行为，例如为 obj=None 和 obj=some_instance 返回不同的内联类列表。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要一个 Django TestCase 环境，包含至少一个模型及其对应的 ModelAdmin，可能还需要内联模型。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要模拟 HTTP 请求对象 (request) 和模型实例 (obj)。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "可能需要注册自定义的 ModelAdmin 到测试用的 AdminSite。",
+            "source": "retrieved_test",
+            "confidence": "medium"
+        }
+    ],
+    "uncertainties": [
+        "get_inlines 钩子的确切签名和返回值（应返回内联类列表还是其他格式）在 Issue 中未完全明确。",
+        "get_inlines 钩子应如何与现有的 self.inlines 属性交互（是覆盖、补充还是其他方式）。",
+        "get_inlines 钩子是否也应存在于内联类（InlineModelAdmin）本身。",
+        "get_inline_instances 方法在引入 get_inlines 后应如何修改其内部循环。"
+    ]
+}
+```

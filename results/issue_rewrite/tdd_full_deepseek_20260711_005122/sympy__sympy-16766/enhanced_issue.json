@@ -1,0 +1,325 @@
+{
+  "instance_id": "sympy__sympy-16766",
+  "issue_summary": "PythonCodePrinter 不支持 Indexed 对象的代码生成，导致 pycode 输出包含警告且代码不正确。",
+  "trigger_condition": {
+    "text": "使用 pycode 函数或 lambdify 函数处理 Indexed 对象（例如 p[0]）。",
+    "evidence": [
+      "Issue 中代码示例：pycode(p[0])",
+      "Issue 提到使用 lambdify() 生成函数并保存代码",
+      "源码片段 1 显示 PythonCodePrinter 类"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "pycode 输出包含警告注释 '# Not supported in Python: # Indexed'，且生成的代码可能不正确。",
+    "symptom_type": "warning",
+    "evidence": [
+      "Issue 中输出示例显示警告注释和原始表达式 p[0]"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "PythonCodePrinter 应能正确生成 Indexed 对象的 Python 代码，输出应为有效的 Python 索引表达式（如 'p[0]'），且不包含不支持警告。",
+    "evidence": [
+      "Issue 建议添加 _print_Indexed 方法，返回格式化的索引字符串",
+      "相关测试 2 (test_rcode_Indexed) 显示其他 printer 能正确输出索引表达式如 'A[i, j]'"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "PythonCodePrinter",
+      "kind": "class",
+      "source_path": "sympy/printing/pycode.py",
+      "reason": "Issue 明确指出 PythonCodePrinter 缺少 _print_Indexed 方法，导致问题。"
+    },
+    {
+      "name": "pycode",
+      "kind": "function",
+      "source_path": "sympy/printing/pycode.py",
+      "reason": "Issue 中触发 bug 的调用是 pycode(p[0])。"
+    },
+    {
+      "name": "lambdify",
+      "kind": "function",
+      "source_path": "sympy/utilities/lambdify.py",
+      "reason": "Issue 提到使用 lambdify() 生成函数，可能内部调用 pycode 或相关 printer。"
+    },
+    {
+      "name": "Indexed",
+      "kind": "class",
+      "source_path": "sympy/tensor/indexed.py",
+      "reason": "Issue 涉及 Indexed 对象的代码生成。"
+    },
+    {
+      "name": "IndexedBase",
+      "kind": "class",
+      "source_path": "sympy/tensor/indexed.py",
+      "reason": "Issue 示例使用 IndexedBase 创建 Indexed 对象。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/printing/pycode.py",
+      "object": "PythonCodePrinter",
+      "lines": "350-358",
+      "reason": "源码片段 1 显示 PythonCodePrinter 类定义，但未包含 _print_Indexed 方法，而其他 printer（如 JuliaCodePrinter）有该方法。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_PythonCodePrinter",
+      "test_file": "sympy/printing/tests/test_pycode.py",
+      "why_relevant": "这是针对 PythonCodePrinter 的现有测试，包含其基本功能的断言，可作为测试起点。",
+      "reusable_parts": [
+        "PythonCodePrinter 的导入和实例化",
+        "doprint 方法的调用模式",
+        "assert 风格"
+      ],
+      "possible_gap": "该测试未覆盖 Indexed 对象，因此无法复现当前 Issue。"
+    },
+    {
+      "test_name": "test_rcode_Indexed",
+      "test_file": "sympy/printing/tests/test_rcode.py",
+      "why_relevant": "该测试专门测试 RCodePrinter 对 Indexed 对象的支持，展示了如何构造 Indexed 对象并断言 printer 输出。",
+      "reusable_parts": [
+        "IndexedBase 和 Idx 的导入",
+        "Indexed 对象的构造（如 IndexedBase('x')[j]）",
+        "printer._print_Indexed 的调用和断言"
+      ],
+      "possible_gap": "它测试的是 RCodePrinter 而非 PythonCodePrinter，且输出格式（如 'A[i, j]'）可能不完全适用于 Python（但 Issue 建议的修复输出类似）。"
+    },
+    {
+      "test_name": "test_ccode_Indexed",
+      "test_file": "sympy/printing/tests/test_ccode.py",
+      "why_relevant": "展示了更复杂的 Indexed 场景（形状、步长、偏移量）和 printer 处理，有助于理解 Indexed 的变体。",
+      "reusable_parts": [
+        "复杂 IndexedBase 构造",
+        "形状、步长、偏移量参数",
+        "ccode 函数的使用"
+      ],
+      "possible_gap": "测试 CCodePrinter，输出涉及线性索引计算，与 Python 期望的简单索引格式不同。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试 test_PythonCodePrinter 中使用 x**y、Mod(x,2) 等表达式作为输入。",
+      "target_pattern": "使用 Indexed 对象作为输入，例如 IndexedBase('p')[0]。",
+      "reason": "Issue 表明 PythonCodePrinter 处理 Indexed 输入时会出现问题，改变输入类型可能触发缺陷路径。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试 test_rcode_Indexed 中 printer 对象（RCodePrinter）已定义 _print_Indexed 方法。",
+      "target_pattern": "使用 PythonCodePrinter 对象，其缺少 _print_Indexed 方法。",
+      "reason": "缺陷根源在于 PythonCodePrinter 类缺少该方法，使用该对象本身即可能触发默认或回退行为导致警告。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "warning",
+      "expression_hint": "调用 pycode 或 printer.doprint 时的 warnings 输出（特别是包含 'Not supported' 的注释）。",
+      "reason": "Issue 中错误现象是输出包含不支持警告，观测警告可判断 Issue 是否被触发。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "pycode 或 printer.doprint 返回的字符串值。",
+      "reason": "需要检查返回值是否包含警告注释以及索引表达式格式是否正确。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "生成的代码字符串不应包含 'Not supported in Python' 或 '# Indexed' 警告注释。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "避免断言完整的、可能因格式微调而变化的输出字符串。",
+      "reason": "Issue 核心问题是输出包含不应有的警告注释，修复后应消除。"
+    },
+    {
+      "assertion_goal": "生成的代码字符串应是一个有效的 Python 索引表达式（例如以 'p[0]' 或类似形式结尾）。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免断言索引表达式的精确完整字符串，因为 base 名称和索引表示可能因实现而异。",
+      "reason": "修复后应能生成可执行的索引语法，但具体格式（如空格）可能不是关键。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 sympy、IndexedBase，可能还需要 Idx 和 symbols 来构造 Indexed 对象。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能需要在 PythonCodePrinter 实例上调用 doprint 方法，或直接使用 pycode 函数。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "PythonCodePrinter 当前处理 Indexed 对象的确切回退机制是什么？是调用父类方法还是触发某个默认 _print 方法？",
+    "lambdify 函数内部在何种情况下会调用 PythonCodePrinter？是否需要为 lambdify 创建更复杂的测试场景？",
+    "修复后 _print_Indexed 的确切输出格式（如空格、逗号分隔）是否有其他约束或现有约定？"
+  ],
+  "raw": {
+    "issue_summary": "PythonCodePrinter 不支持 Indexed 对象的代码生成，导致 pycode 输出包含警告且代码不正确。",
+    "trigger_condition": {
+      "text": "使用 pycode 函数或 lambdify 函数处理 Indexed 对象（例如 p[0]）。",
+      "evidence": [
+        "Issue 中代码示例：pycode(p[0])",
+        "Issue 提到使用 lambdify() 生成函数并保存代码",
+        "源码片段 1 显示 PythonCodePrinter 类"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "pycode 输出包含警告注释 '# Not supported in Python: # Indexed'，且生成的代码可能不正确。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 中输出示例显示警告注释和原始表达式 p[0]"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "PythonCodePrinter 应能正确生成 Indexed 对象的 Python 代码，输出应为有效的 Python 索引表达式（如 'p[0]'），且不包含不支持警告。",
+      "evidence": [
+        "Issue 建议添加 _print_Indexed 方法，返回格式化的索引字符串",
+        "相关测试 2 (test_rcode_Indexed) 显示其他 printer 能正确输出索引表达式如 'A[i, j]'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "PythonCodePrinter",
+        "kind": "class",
+        "source_path": "sympy/printing/pycode.py",
+        "reason": "Issue 明确指出 PythonCodePrinter 缺少 _print_Indexed 方法，导致问题。"
+      },
+      {
+        "name": "pycode",
+        "kind": "function",
+        "source_path": "sympy/printing/pycode.py",
+        "reason": "Issue 中触发 bug 的调用是 pycode(p[0])。"
+      },
+      {
+        "name": "lambdify",
+        "kind": "function",
+        "source_path": "sympy/utilities/lambdify.py",
+        "reason": "Issue 提到使用 lambdify() 生成函数，可能内部调用 pycode 或相关 printer。"
+      },
+      {
+        "name": "Indexed",
+        "kind": "class",
+        "source_path": "sympy/tensor/indexed.py",
+        "reason": "Issue 涉及 Indexed 对象的代码生成。"
+      },
+      {
+        "name": "IndexedBase",
+        "kind": "class",
+        "source_path": "sympy/tensor/indexed.py",
+        "reason": "Issue 示例使用 IndexedBase 创建 Indexed 对象。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/printing/pycode.py",
+        "object": "PythonCodePrinter",
+        "lines": "350-358",
+        "reason": "源码片段 1 显示 PythonCodePrinter 类定义，但未包含 _print_Indexed 方法，而其他 printer（如 JuliaCodePrinter）有该方法。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_PythonCodePrinter",
+        "test_file": "sympy/printing/tests/test_pycode.py",
+        "why_relevant": "这是针对 PythonCodePrinter 的现有测试，包含其基本功能的断言，可作为测试起点。",
+        "reusable_parts": [
+          "PythonCodePrinter 的导入和实例化",
+          "doprint 方法的调用模式",
+          "assert 风格"
+        ],
+        "possible_gap": "该测试未覆盖 Indexed 对象，因此无法复现当前 Issue。"
+      },
+      {
+        "test_name": "test_rcode_Indexed",
+        "test_file": "sympy/printing/tests/test_rcode.py",
+        "why_relevant": "该测试专门测试 RCodePrinter 对 Indexed 对象的支持，展示了如何构造 Indexed 对象并断言 printer 输出。",
+        "reusable_parts": [
+          "IndexedBase 和 Idx 的导入",
+          "Indexed 对象的构造（如 IndexedBase('x')[j]）",
+          "printer._print_Indexed 的调用和断言"
+        ],
+        "possible_gap": "它测试的是 RCodePrinter 而非 PythonCodePrinter，且输出格式（如 'A[i, j]'）可能不完全适用于 Python（但 Issue 建议的修复输出类似）。"
+      },
+      {
+        "test_name": "test_ccode_Indexed",
+        "test_file": "sympy/printing/tests/test_ccode.py",
+        "why_relevant": "展示了更复杂的 Indexed 场景（形状、步长、偏移量）和 printer 处理，有助于理解 Indexed 的变体。",
+        "reusable_parts": [
+          "复杂 IndexedBase 构造",
+          "形状、步长、偏移量参数",
+          "ccode 函数的使用"
+        ],
+        "possible_gap": "测试 CCodePrinter，输出涉及线性索引计算，与 Python 期望的简单索引格式不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_PythonCodePrinter 中使用 x**y、Mod(x,2) 等表达式作为输入。",
+        "target_pattern": "使用 Indexed 对象作为输入，例如 IndexedBase('p')[0]。",
+        "reason": "Issue 表明 PythonCodePrinter 处理 Indexed 输入时会出现问题，改变输入类型可能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试 test_rcode_Indexed 中 printer 对象（RCodePrinter）已定义 _print_Indexed 方法。",
+        "target_pattern": "使用 PythonCodePrinter 对象，其缺少 _print_Indexed 方法。",
+        "reason": "缺陷根源在于 PythonCodePrinter 类缺少该方法，使用该对象本身即可能触发默认或回退行为导致警告。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "调用 pycode 或 printer.doprint 时的 warnings 输出（特别是包含 'Not supported' 的注释）。",
+        "reason": "Issue 中错误现象是输出包含不支持警告，观测警告可判断 Issue 是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "pycode 或 printer.doprint 返回的字符串值。",
+        "reason": "需要检查返回值是否包含警告注释以及索引表达式格式是否正确。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的代码字符串不应包含 'Not supported in Python' 或 '# Indexed' 警告注释。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言完整的、可能因格式微调而变化的输出字符串。",
+        "reason": "Issue 核心问题是输出包含不应有的警告注释，修复后应消除。"
+      },
+      {
+        "assertion_goal": "生成的代码字符串应是一个有效的 Python 索引表达式（例如以 'p[0]' 或类似形式结尾）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言索引表达式的精确完整字符串，因为 base 名称和索引表示可能因实现而异。",
+        "reason": "修复后应能生成可执行的索引语法，但具体格式（如空格）可能不是关键。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy、IndexedBase，可能还需要 Idx 和 symbols 来构造 Indexed 对象。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在 PythonCodePrinter 实例上调用 doprint 方法，或直接使用 pycode 函数。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "PythonCodePrinter 当前处理 Indexed 对象的确切回退机制是什么？是调用父类方法还是触发某个默认 _print 方法？",
+      "lambdify 函数内部在何种情况下会调用 PythonCodePrinter？是否需要为 lambdify 创建更复杂的测试场景？",
+      "修复后 _print_Indexed 的确切输出格式（如空格、逗号分隔）是否有其他约束或现有约定？"
+    ]
+  }
+}

@@ -1,0 +1,130 @@
+instance_id: django__django-16595
+
+issue_summary: Migration optimizer 在多个连续的 AlterField 操作中未能将它们合并优化。
+
+trigger_condition:
+{
+  "text": "当 optimizer.optimize() 接收一个操作列表，其中包含多个针对同一模型同一字段的 AlterField 操作，且这些操作前面没有 AddField 或 CreateModel 操作时。",
+  "evidence": [
+    "Issue 中给出的示例：optimizer.optimize(operations[1:], \"books\")，其中 operations[1:] 是三个连续的 AlterField。",
+    "Issue 描述：'Indeed, the AlterField.reduce does not consider the case where operation is also an AlterField.'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "优化器未能将多个连续的 AlterField 操作合并为一个，导致输出列表长度未减少。",
+  "symptom_type": "wrong_order",
+  "evidence": [
+    "Issue 中观察到的输出：[<AlterField ...>, <AlterField ...>, <AlterField ...>]，与输入长度相同。",
+    "Issue 描述：'none of the AlterField are reduced'。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "优化器应该能够将多个连续的、针对同一模型同一字段的 AlterField 操作合并为一个最终的 AlterField 操作。",
+  "evidence": [
+    "Issue 中提问者建议的修复：在 AlterField.reduce 中添加对 isinstance(operation, AlterField) 的判断。",
+    "相关测试 1 (test_add_field_alter_field) 和 2 (test_create_model_alter_field) 展示了 AlterField 与 AddField 或 CreateModel 合并的预期行为，暗示了优化合并的通用原则。"
+  ],
+  "confidence": "medium"
+}
+
+target_apis:
+[
+  {
+    "name": "MigrationOptimizer.optimize",
+    "kind": "method",
+    "source_path": "django/db/migrations/optimizer.py",
+    "reason": "这是触发优化过程的主要入口方法。"
+  },
+  {
+    "name": "AlterField.reduce",
+    "kind": "method",
+    "source_path": "django/db/migrations/operations/fields.py",
+    "reason": "Issue 明确指出缺陷在于 AlterField.reduce 方法没有处理 operation 也是 AlterField 的情况。"
+  },
+  {
+    "name": "FieldOperation.is_same_field_operation",
+    "kind": "method",
+    "source_path": "django/db/migrations/operations/fields.py",
+    "reason": "在 AlterField.reduce 中用于判断操作是否针对同一字段，是潜在修复逻辑的一部分。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中，AlterField 通常与 AddField、CreateModel 或 RenameField 组合出现。",
+    "target_pattern": "构造一个操作列表，包含多个连续的、针对同一模型同一字段的 AlterField 操作，且前面没有 AddField 或 CreateModel。",
+    "reason": "Issue 描述的场景是多个 AlterField 连续出现且未被优化，这是当前测试未覆盖的输入模式。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "测试通常调用 optimizer.optimize 并传入包含不同类型操作混合的列表。",
+    "target_pattern": "调用 optimizer.optimize 并传入仅包含多个 AlterField 操作的列表。",
+    "reason": "Issue 中通过 optimizer.optimize(operations[1:], \"books\") 演示了问题，其中 operations[1:] 只包含 AlterField。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "optimizer.optimize(operations, app_label) 返回的操作列表的长度和类型。",
+    "reason": "缺陷表现为输出列表长度未减少，观察返回列表的长度和其中 AlterField 的数量可以判断优化是否发生。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "优化前后操作列表中每个 AlterField 操作的 field 属性（如 max_length, help_text, default）。",
+    "reason": "合并后的 AlterField 应包含最终字段定义，观察 field 属性的变化可以验证合并是否正确。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "优化后的操作列表应比原始列表短（当存在多个可合并的 AlterField 时）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的、硬编码的操作列表 repr 相等。",
+    "reason": "Issue 的核心是优化未能减少列表长度，断言长度减少是直接且稳定的验证方式。"
+  },
+  {
+    "assertion_goal": "优化后的操作列表中，针对同一模型和字段的 AlterField 操作应只有一个。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言具体的、完整的字段定义字符串相等。",
+    "reason": "这直接验证了多个 AlterField 被合并为一个的预期行为，比断言完整字段定义更稳定。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 SimpleTestCase 或类似的 Django 测试基类。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要导入 django.db.migrations 中的相关操作类（AddField, AlterField）和 models 模块以构造字段。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要创建 MigrationOptimizer 实例。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "AlterField.reduce 方法中处理多个 AlterField 合并时，确定最终 field 属性的具体规则（例如，是取最后一个，还是需要某种合并逻辑）尚不明确。",
+  "除了连续的 AlterField，是否还有其他边界情况（如中间穿插了其他不可优化的操作）会影响合并，Issue 未详细说明。",
+  "Issue 中提问者建议的修复逻辑（直接返回 [operation]）是否完全正确，或者是否需要更复杂的字段属性合并。"
+]

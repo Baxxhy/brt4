@@ -1,0 +1,636 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+A symbol ending with a number is made invisible when printing with MathML
+A variable with a number, such as x1, is made invisible when printing in a MathML format.
+`import sympy
+from sympy.printing.mathml import mathml
+
+x2, y, z = sympy.symbols('x2 y z')
+y = x2*z+x2**3
+f = open('sympy_test.html', 'w')
+f.write('\n')
+f.write('\n')
+f.write('\n')
+f.write('\n')
+f.write(sympy.mathml(y, printer='presentation')+'\n')
+f.write('\n')
+f.write('\n')
+f.write('\n')
+f.close()`
+
+Viewing the output in Safari 12.0.2:
+<img width="93" alt="screen shot 2018-12-31 at 12 21 00 pm" src="https://user-images.githubusercontent.com/46286768/50567565-48d8c080-0cfb-11e9-84d2-5738f1c2e2ba.png">
+
+If 'x' is used instead of 'x2', it works as expected:
+x, y, z = sympy.symbols('x y z')
+y = x*z+x**3
+<img width="78" alt="screen shot 2018-12-31 at 12 26 24 pm" src="https://user-images.githubusercontent.com/46286768/50567570-542bec00-0cfb-11e9-986d-015e0023a2a1.png">
+
+BTW, I'm on a MacBook Pro, OS 10.14.2, Sympy 1.3, in Eclipse 2018-19, and Python 3.7.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/printing/mathml.py
+对象名称：mathml
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 2】
+文件路径：sympy/stats/rv.py
+对象名称：symbols
+节点类型：class_function
+父节点：RandomDomain
+行号范围：50-51
+代码：
+    def symbols(self):
+        return self.args[0]
+
+
+【源码片段 3】
+文件路径：sympy/combinatorics/perm_groups.py
+对象名称：presentation
+节点类型：class_function
+父节点：PermutationGroup
+行号范围：4128-4241
+代码：
+    def presentation(G, eliminate_gens=True):
+        '''
+        Return an `FpGroup` presentation of the group.
+
+        The algorithm is described in [1], Chapter 6.1.
+
+        '''
+        from sympy.combinatorics.fp_groups import (FpGroup,
+                                            simplify_presentation)
+        from sympy.combinatorics.coset_table import CosetTable
+        from sympy.combinatorics.free_groups import free_group
+        from sympy.combinatorics.homomorphisms import homomorphism
+        from itertools import product
+
+        if G._fp_presentation:
+            return G._fp_presentation
+
+        if G._fp_presentation:
+            return G._fp_presentation
+
+        def _factor_group_by_rels(G, rels):
+            if isinstance(G, FpGroup):
+                rels.extend(G.relators)
+                return FpGroup(G.free_group, list(set(rels)))
+            return FpGroup(G, rels)
+
+        gens = G.generators
+        len_g = len(gens)
+
+        if len_g == 1:
+            order = gens[0].order()
+            # handle the trivial group
+            if order == 1:
+                return free_group([])[0]
+            F, x = free_group('x')
+            return FpGroup(F, [x**order])
+
+        if G.order() > 20:
+            half_gens = G.generators[0:(len_g+1)//2]
+        else:
+            half_gens = []
+        H = PermutationGroup(half_gens)
+        H_p = H.presentation()
+
+        len_h = len(H_p.generators)
+
+        C = G.coset_table(H)
+        n = len(C) # subgroup index
+
+        gen_syms = [('x_%d'%i) for i in range(len(gens))]
+        F = free_group(', '.join(gen_syms))[0]
+
+        # mapping generators of H_p to those of F
+        images = [F.generators[i] for i in range(len_h)]
+        R = homomorphism(H_p, F, H_p.generators, images, check=False)
+
+        # rewrite relators
+        rels = R(H_p.relators)
+        G_p = FpGroup(F, rels)
+
+        # injective homomorphism from G_p into G
+        T = homomorphism(G_p, G, G_p.generators, gens)
+
+        C_p = CosetTable(G_p, [])
+
+        C_p.table = [[None]*(2*len_g) for i in range(n)]
+
+        # initiate the coset transversal
+        transversal = [None]*n
+        transversal[0] = G_p.identity
+
+        # fill in the coset table as much as possible
+        for i in range(2*len_h):
+            C_p.table[0][i] = 0
+
+        gamma = 1
+        for alpha, x in product(range(0, n), range(2*len_g)):
+            beta = C[alpha][x]
+            if beta == gamma:
+                gen = G_p.generators[x//2]**((-1)**(x % 2))
+                transversal[beta] = transversal[alpha]*gen
+                C_p.table[alpha][x] = beta
+                C_p.table[beta][x + (-1)**(x % 2)] = alpha
+                gamma += 1
+                if gamma == n:
+                    break
+
+        C_p.p = list(range(n))
+        beta = x = 0
+
+        while not C_p.is_complete():
+            # find the first undefined entry
+            while C_p.table[beta][x] == C[beta][x]:
+                x = (x + 1) % (2*len_g)
+                if x == 0:
+                    beta = (beta + 1) % n
+
+            # define a new relator
+            gen = G_p.generators[x//2]**((-1)**(x % 2))
+            new_rel = transversal[beta]*gen*transversal[C[beta][x]]**-1
+            perm = T(new_rel)
+            next = G_p.identity
+            for s in H.generator_product(perm, original=True):
+                next = next*T.invert(s)**-1
+            new_rel = new_rel*next
+
+            # continue coset enumeration
+            G_p = _factor_group_by_rels(G_p, [new_rel])
+            C_p.scan_and_fill(0, new_rel)
+            C_p = G_p.coset_enumeration([], strategy="coset_table",
+                                draft=C_p, max_cosets=n, incomplete=True)
+
+        G._fp_presentation = simplify_presentation(G_p)
+        return G._fp_presentation
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/printing/tests/test_mathml.py
+测试名称：test_presentation_symbol
+测试代码：
+def test_presentation_symbol():
+    mml = mpp._print(Symbol("x"))
+    assert mml.nodeName == 'mi'
+    assert mml.childNodes[0].nodeValue == 'x'
+    del mml
+
+    mml = mpp._print(Symbol("x^2"))
+    assert mml.nodeName == 'mi'
+    assert mml.childNodes[0].nodeName == 'msup'
+    assert mml.childNodes[0].childNodes[0].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[0].childNodes[0].nodeValue == 'x'
+    assert mml.childNodes[0].childNodes[1].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].nodeValue == '2'
+    del mml
+
+    mml = mpp._print(Symbol("x__2"))
+    assert mml.nodeName == 'mi'
+    assert mml.childNodes[0].nodeName == 'msup'
+    assert mml.childNodes[0].childNodes[0].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[0].childNodes[0].nodeValue == 'x'
+    assert mml.childNodes[0].childNodes[1].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].nodeValue == '2'
+    del mml
+
+    mml = mpp._print(Symbol("x_2"))
+    assert mml.nodeName == 'mi'
+    assert mml.childNodes[0].nodeName == 'msub'
+    assert mml.childNodes[0].childNodes[0].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[0].childNodes[0].nodeValue == 'x'
+    assert mml.childNodes[0].childNodes[1].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].nodeValue == '2'
+    del mml
+
+    mml = mpp._print(Symbol("x^3_2"))
+    assert mml.nodeName == 'mi'
+    assert mml.childNodes[0].nodeName == 'msubsup'
+    assert mml.childNodes[0].childNodes[0].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[0].childNodes[0].nodeValue == 'x'
+    assert mml.childNodes[0].childNodes[1].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].nodeValue == '2'
+    assert mml.childNodes[0].childNodes[2].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[2].childNodes[0].nodeValue == '3'
+    del mml
+
+    mml = mpp._print(Symbol("x__3_2"))
+    assert mml.nodeName == 'mi'
+    assert mml.childNodes[0].nodeName == 'msubsup'
+    assert mml.childNodes[0].childNodes[0].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[0].childNodes[0].nodeValue == 'x'
+    assert mml.childNodes[0].childNodes[1].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].nodeValue == '2'
+    assert mml.childNodes[0].childNodes[2].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[2].childNodes[0].nodeValue == '3'
+    del mml
+
+    mml = mpp._print(Symbol("x_2_a"))
+    assert mml.nodeName == 'mi'
+    assert mml.childNodes[0].nodeName == 'msub'
+    assert mml.childNodes[0].childNodes[0].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[0].childNodes[0].nodeValue == 'x'
+    assert mml.childNodes[0].childNodes[1].nodeName == 'mrow'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].childNodes[
+        0].nodeValue == '2'
+    assert mml.childNodes[0].childNodes[1].childNodes[1].nodeName == 'mo'
+    assert mml.childNodes[0].childNodes[1].childNodes[1].childNodes[
+        0].nodeValue == ' '
+    assert mml.childNodes[0].childNodes[1].childNodes[2].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[2].childNodes[
+        0].nodeValue == 'a'
+    del mml
+
+    mml = mpp._print(Symbol("x^2^a"))
+    assert mml.nodeName == 'mi'
+    assert mml.childNodes[0].nodeName == 'msup'
+    assert mml.childNodes[0].childNodes[0].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[0].childNodes[0].nodeValue == 'x'
+    assert mml.childNodes[0].childNodes[1].nodeName == 'mrow'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].childNodes[
+        0].nodeValue == '2'
+    assert mml.childNodes[0].childNodes[1].childNodes[1].nodeName == 'mo'
+    assert mml.childNodes[0].childNodes[1].childNodes[1].childNodes[
+        0].nodeValue == ' '
+    assert mml.childNodes[0].childNodes[1].childNodes[2].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[2].childNodes[
+        0].nodeValue == 'a'
+    del mml
+
+    mml = mpp._print(Symbol("x__2__a"))
+    assert mml.nodeName == 'mi'
+    assert mml.childNodes[0].nodeName == 'msup'
+    assert mml.childNodes[0].childNodes[0].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[0].childNodes[0].nodeValue == 'x'
+    assert mml.childNodes[0].childNodes[1].nodeName == 'mrow'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].childNodes[
+        0].nodeValue == '2'
+    assert mml.childNodes[0].childNodes[1].childNodes[1].nodeName == 'mo'
+    assert mml.childNodes[0].childNodes[1].childNodes[1].childNodes[
+        0].nodeValue == ' '
+    assert mml.childNodes[0].childNodes[1].childNodes[2].nodeName == 'mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[2].childNodes[
+        0].nodeValue == 'a'
+    del mml
+
+【相关测试 2】
+测试文件：sympy/printing/tests/test_mathml.py
+测试名称：test_content_symbol
+测试代码：
+def test_content_symbol():
+    mml = mp._print(Symbol("x"))
+    assert mml.nodeName == 'ci'
+    assert mml.childNodes[0].nodeValue == 'x'
+    del mml
+
+    mml = mp._print(Symbol("x^2"))
+    assert mml.nodeName == 'ci'
+    assert mml.childNodes[0].nodeName == 'mml:msup'
+    assert mml.childNodes[0].childNodes[0].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[0].childNodes[0].nodeValue == 'x'
+    assert mml.childNodes[0].childNodes[1].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].nodeValue == '2'
+    del mml
+
+    mml = mp._print(Symbol("x__2"))
+    assert mml.nodeName == 'ci'
+    assert mml.childNodes[0].nodeName == 'mml:msup'
+    assert mml.childNodes[0].childNodes[0].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[0].childNodes[0].nodeValue == 'x'
+    assert mml.childNodes[0].childNodes[1].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].nodeValue == '2'
+    del mml
+
+    mml = mp._print(Symbol("x_2"))
+    assert mml.nodeName == 'ci'
+    assert mml.childNodes[0].nodeName == 'mml:msub'
+    assert mml.childNodes[0].childNodes[0].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[0].childNodes[0].nodeValue == 'x'
+    assert mml.childNodes[0].childNodes[1].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].nodeValue == '2'
+    del mml
+
+    mml = mp._print(Symbol("x^3_2"))
+    assert mml.nodeName == 'ci'
+    assert mml.childNodes[0].nodeName == 'mml:msubsup'
+    assert mml.childNodes[0].childNodes[0].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[0].childNodes[0].nodeValue == 'x'
+    assert mml.childNodes[0].childNodes[1].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].nodeValue == '2'
+    assert mml.childNodes[0].childNodes[2].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[2].childNodes[0].nodeValue == '3'
+    del mml
+
+    mml = mp._print(Symbol("x__3_2"))
+    assert mml.nodeName == 'ci'
+    assert mml.childNodes[0].nodeName == 'mml:msubsup'
+    assert mml.childNodes[0].childNodes[0].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[0].childNodes[0].nodeValue == 'x'
+    assert mml.childNodes[0].childNodes[1].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].nodeValue == '2'
+    assert mml.childNodes[0].childNodes[2].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[2].childNodes[0].nodeValue == '3'
+    del mml
+
+    mml = mp._print(Symbol("x_2_a"))
+    assert mml.nodeName == 'ci'
+    assert mml.childNodes[0].nodeName == 'mml:msub'
+    assert mml.childNodes[0].childNodes[0].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[0].childNodes[0].nodeValue == 'x'
+    assert mml.childNodes[0].childNodes[1].nodeName == 'mml:mrow'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].childNodes[
+        0].nodeValue == '2'
+    assert mml.childNodes[0].childNodes[1].childNodes[1].nodeName == 'mml:mo'
+    assert mml.childNodes[0].childNodes[1].childNodes[1].childNodes[
+        0].nodeValue == ' '
+    assert mml.childNodes[0].childNodes[1].childNodes[2].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[2].childNodes[
+        0].nodeValue == 'a'
+    del mml
+
+    mml = mp._print(Symbol("x^2^a"))
+    assert mml.nodeName == 'ci'
+    assert mml.childNodes[0].nodeName == 'mml:msup'
+    assert mml.childNodes[0].childNodes[0].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[0].childNodes[0].nodeValue == 'x'
+    assert mml.childNodes[0].childNodes[1].nodeName == 'mml:mrow'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].childNodes[
+        0].nodeValue == '2'
+    assert mml.childNodes[0].childNodes[1].childNodes[1].nodeName == 'mml:mo'
+    assert mml.childNodes[0].childNodes[1].childNodes[1].childNodes[
+        0].nodeValue == ' '
+    assert mml.childNodes[0].childNodes[1].childNodes[2].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[2].childNodes[
+        0].nodeValue == 'a'
+    del mml
+
+    mml = mp._print(Symbol("x__2__a"))
+    assert mml.nodeName == 'ci'
+    assert mml.childNodes[0].nodeName == 'mml:msup'
+    assert mml.childNodes[0].childNodes[0].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[0].childNodes[0].nodeValue == 'x'
+    assert mml.childNodes[0].childNodes[1].nodeName == 'mml:mrow'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[0].childNodes[
+        0].nodeValue == '2'
+    assert mml.childNodes[0].childNodes[1].childNodes[1].nodeName == 'mml:mo'
+    assert mml.childNodes[0].childNodes[1].childNodes[1].childNodes[
+        0].nodeValue == ' '
+    assert mml.childNodes[0].childNodes[1].childNodes[2].nodeName == 'mml:mi'
+    assert mml.childNodes[0].childNodes[1].childNodes[2].childNodes[
+        0].nodeValue == 'a'
+    del mml
+
+【相关测试 3】
+测试文件：sympy/printing/tests/test_mathml.py
+测试名称：test_presentation_mathml_core
+测试代码：
+def test_presentation_mathml_core():
+    mml_1 = mpp._print(1 + x)
+    assert mml_1.nodeName == 'mrow'
+    nodes = mml_1.childNodes
+    assert len(nodes) == 3
+    assert nodes[0].nodeName in ['mi', 'mn']
+    assert nodes[1].nodeName == 'mo'
+    if nodes[0].nodeName == 'mn':
+        assert nodes[0].childNodes[0].nodeValue == '1'
+        assert nodes[2].childNodes[0].nodeValue == 'x'
+    else:
+        assert nodes[0].childNodes[0].nodeValue == 'x'
+        assert nodes[2].childNodes[0].nodeValue == '1'
+
+    mml_2 = mpp._print(x**2)
+    assert mml_2.nodeName == 'msup'
+    nodes = mml_2.childNodes
+    assert nodes[0].childNodes[0].nodeValue == 'x'
+    assert nodes[1].childNodes[0].nodeValue == '2'
+
+    mml_3 = mpp._print(2*x)
+    assert mml_3.nodeName == 'mrow'
+    nodes = mml_3.childNodes
+    assert nodes[0].childNodes[0].nodeValue == '2'
+    assert nodes[1].childNodes[0].nodeValue == '&InvisibleTimes;'
+    assert nodes[2].childNodes[0].nodeValue == 'x'
+
+    mml = mpp._print(Float(1.0, 2)*x)
+    assert mml.nodeName == 'mrow'
+    nodes = mml.childNodes
+    assert nodes[0].childNodes[0].nodeValue == '1.0'
+    assert nodes[1].childNodes[0].nodeValue == '&InvisibleTimes;'
+    assert nodes[2].childNodes[0].nodeValue == 'x'
+
+【相关测试 4】
+测试文件：sympy/printing/tests/test_mathml.py
+测试名称：test_content_mathml_core
+测试代码：
+def test_content_mathml_core():
+    mml_1 = mp._print(1 + x)
+    assert mml_1.nodeName == 'apply'
+    nodes = mml_1.childNodes
+    assert len(nodes) == 3
+    assert nodes[0].nodeName == 'plus'
+    assert nodes[0].hasChildNodes() is False
+    assert nodes[0].nodeValue is None
+    assert nodes[1].nodeName in ['cn', 'ci']
+    if nodes[1].nodeName == 'cn':
+        assert nodes[1].childNodes[0].nodeValue == '1'
+        assert nodes[2].childNodes[0].nodeValue == 'x'
+    else:
+        assert nodes[1].childNodes[0].nodeValue == 'x'
+        assert nodes[2].childNodes[0].nodeValue == '1'
+
+    mml_2 = mp._print(x**2)
+    assert mml_2.nodeName == 'apply'
+    nodes = mml_2.childNodes
+    assert nodes[1].childNodes[0].nodeValue == 'x'
+    assert nodes[2].childNodes[0].nodeValue == '2'
+
+    mml_3 = mp._print(2*x)
+    assert mml_3.nodeName == 'apply'
+    nodes = mml_3.childNodes
+    assert nodes[0].nodeName == 'times'
+    assert nodes[1].childNodes[0].nodeValue == '2'
+    assert nodes[2].childNodes[0].nodeValue == 'x'
+
+    mml = mp._print(Float(1.0, 2)*x)
+    assert mml.nodeName == 'apply'
+    nodes = mml.childNodes
+    assert nodes[0].nodeName == 'times'
+    assert nodes[1].childNodes[0].nodeValue == '1.0'
+    assert nodes[2].childNodes[0].nodeValue == 'x'
+
+【相关测试 5】
+测试文件：sympy/printing/tests/test_mathml.py
+测试名称：test_presentation_mathml_relational
+测试代码：
+def test_presentation_mathml_relational():
+    mml_1 = mpp._print(Eq(x, 1))
+    assert len(mml_1.childNodes) == 3
+    assert mml_1.childNodes[0].nodeName == 'mi'
+    assert mml_1.childNodes[0].childNodes[0].nodeValue == 'x'
+    assert mml_1.childNodes[1].nodeName == 'mo'
+    assert mml_1.childNodes[1].childNodes[0].nodeValue == '='
+    assert mml_1.childNodes[2].nodeName == 'mn'
+    assert mml_1.childNodes[2].childNodes[0].nodeValue == '1'
+
+    mml_2 = mpp._print(Ne(1, x))
+    assert len(mml_2.childNodes) == 3
+    assert mml_2.childNodes[0].nodeName == 'mn'
+    assert mml_2.childNodes[0].childNodes[0].nodeValue == '1'
+    assert mml_2.childNodes[1].nodeName == 'mo'
+    assert mml_2.childNodes[1].childNodes[0].nodeValue == '&#x2260;'
+    assert mml_2.childNodes[2].nodeName == 'mi'
+    assert mml_2.childNodes[2].childNodes[0].nodeValue == 'x'
+
+    mml_3 = mpp._print(Ge(1, x))
+    assert len(mml_3.childNodes) == 3
+    assert mml_3.childNodes[0].nodeName == 'mn'
+    assert mml_3.childNodes[0].childNodes[0].nodeValue == '1'
+    assert mml_3.childNodes[1].nodeName == 'mo'
+    assert mml_3.childNodes[1].childNodes[0].nodeValue == '&#x2265;'
+    assert mml_3.childNodes[2].nodeName == 'mi'
+    assert mml_3.childNodes[2].childNodes[0].nodeValue == 'x'
+
+    mml_4 = mpp._print(Lt(1, x))
+    assert len(mml_4.childNodes) == 3
+    assert mml_4.childNodes[0].nodeName == 'mn'
+    assert mml_4.childNodes[0].childNodes[0].nodeValue == '1'
+    assert mml_4.childNodes[1].nodeName == 'mo'
+    assert mml_4.childNodes[1].childNodes[0].nodeValue == '<'
+    assert mml_4.childNodes[2].nodeName == 'mi'
+    assert mml_4.childNodes[2].childNodes[0].nodeValue == 'x'
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

@@ -1,0 +1,111 @@
+instance_id: django__django-15103
+
+issue_summary: json_script 函数的 element_id 参数是必需的，但用户希望它是可选的。
+
+trigger_condition:
+{
+  "text": "调用 json_script 函数时，不提供 element_id 参数或提供空值。",
+  "evidence": [
+    "Issue 描述用户希望 element_id 参数是可选的，因为他们在 <template> 中使用时不需要 id。",
+    "源码片段 1 显示 json_script 函数定义中 element_id 是一个必需参数。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "调用 json_script 函数时，如果不提供 element_id 参数，会引发 TypeError 异常（参数缺失）。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 描述用户无法在不提供 id 的情况下使用 json_script，暗示当前行为会引发错误。",
+    "源码片段 1 显示函数签名 def json_script(value, element_id):，表明 element_id 是必需的位置参数。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "json_script 函数应能接受可选的 element_id 参数，并在未提供时生成不包含 id 属性的 <script> 标签。",
+  "evidence": [
+    "Issue 描述用户希望 element_id 参数是可选的，并且认为这不会破坏任何测试。",
+    "Issue 提到用户的使用场景是将其包含在 <template> 中，因此不需要 id。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "json_script",
+    "kind": "function",
+    "source_path": "django/utils/html.py",
+    "reason": "这是 Issue 报告的直接目标函数，需要使其 element_id 参数变为可选。"
+  },
+  {
+    "name": "format_html",
+    "kind": "function",
+    "source_path": "",
+    "reason": "json_script 函数内部使用 format_html 来生成最终的 HTML 字符串，其调用方式可能需要调整以处理可选的 id。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "在调用 json_script 时，总是提供一个字符串作为 element_id 参数（例如 'test_id'）。",
+    "target_pattern": "在调用 json_script 时，不提供 element_id 参数，或提供 None、空字符串等值。",
+    "reason": "Issue 的核心是使 element_id 参数可选，因此变异测试以省略该参数是触发当前缺陷路径的直接方式。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用 json_script(arg) 时是否引发 TypeError（缺少参数）。",
+    "reason": "当前缺陷的直接表现是调用时因缺少必需参数而引发异常。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "json_script(arg, element_id) 返回的 HTML 字符串中是否包含 id=\"...\" 属性。",
+    "reason": "修复后，当 element_id 未提供时，生成的 <script> 标签应不包含 id 属性。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当不提供 element_id 参数时，json_script 应能正常调用并返回一个不包含 id 属性的 <script> 标签。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言完整的 HTML 字符串完全相等，因为 id 属性的存在与否是主要变化。",
+    "reason": "Issue 的核心是 id 属性的可选性，因此断言输出字符串中不包含 'id=\"' 片段可以稳定地验证修复。"
+  },
+  {
+    "assertion_goal": "当提供 element_id 参数时，json_script 的行为应与之前保持一致，生成的 <script> 标签包含正确的 id 属性。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "断言完整的 HTML 字符串完全相等，因为转义细节可能变化。",
+    "reason": "需要确保可选参数的修改不会破坏现有功能，验证 id 属性存在即可。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 SimpleTestCase 作为测试基类。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要从 django.utils.html 导入 json_script 函数。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "修复后，当 element_id 为 None 或空字符串时，生成的 <script> 标签是否应完全省略 id 属性，还是生成 id=\"\"？",
+  "模板过滤器 {{ value|json_script }}（无参数）的语法在修复后是否会被支持？"
+]

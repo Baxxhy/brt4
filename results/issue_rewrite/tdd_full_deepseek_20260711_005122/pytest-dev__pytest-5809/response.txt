@@ -1,0 +1,123 @@
+```json
+{
+    "issue_summary": "pytest的--pastebin选项使用lexer=python3提交内容到bpaste.net时，某些内容会导致HTTP 400错误。",
+    "trigger_condition": {
+        "text": "使用--pastebin选项运行pytest，且pytest的输出内容（被提交到bpaste.net）包含某些特定字符或格式时。",
+        "evidence": ["Issue中描述：'For some contents, this will raise a \"HTTP Error 400: Bad Request\"'", "Issue中提供了导致错误的示例数据文件data.txt", "相关测试1显示提交的数据包含lexer=python3参数"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "向bpaste.net发送POST请求时收到HTTP 400 Bad Request错误。",
+        "symptom_type": "exception",
+        "evidence": ["Issue中明确说明：'this will raise a \"HTTP Error 400: Bad Request\"'", "Issue中提供了触发错误的代码示例"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "使用--pastebin选项时，pytest应能成功将任意文本内容（包括非Python代码的pytest控制台输出）提交到bpaste.net服务。",
+        "evidence": ["Issue中建议：'The call goes through fine if lexer is changed from python3 to text'", "Issue中说明：'the console output of a pytest run that is being uploaded is not Python code, but arbitrary text'"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "create_new_paste",
+            "kind": "method",
+            "source_path": "",
+            "reason": "相关测试1中调用的方法，用于创建新的pastebin内容。"
+        },
+        {
+            "name": "urlopen",
+            "kind": "function",
+            "source_path": "",
+            "reason": "Issue中用于演示问题的API，也是相关测试1中mock的对象。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "src/_pytest/pastebin.py",
+            "object": "",
+            "lines": "68-73",
+            "reason": "Issue中明确引用了该文件的行号范围，其中包含lexer=python3的设置。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "TestPaste.test_create_new_paste",
+            "test_file": "testing/test_pastebin.py",
+            "why_relevant": "该测试直接测试pastebin创建功能，包含对lexer参数的验证，与Issue核心问题相关。",
+            "reusable_parts": ["pastebin fixture", "mocked_urlopen fixture", "create_new_paste方法调用", "对data参数的断言检查"],
+            "possible_gap": "该测试使用固定的'full-paste-contents'作为输入，没有测试会导致HTTP 400的特殊内容。"
+        },
+        {
+            "test_name": "TestPasteCapture.test_non_ascii_paste_text",
+            "test_file": "testing/test_pastebin.py",
+            "why_relevant": "测试了包含非ASCII字符的pastebin内容，涉及特殊字符处理。",
+            "reusable_parts": ["testdir fixture", "runpytest调用", "stdout断言模式"],
+            "possible_gap": "主要关注非ASCII字符，不测试导致HTTP 400的具体内容模式。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "input",
+            "current_pattern": "相关测试1中使用固定的'full-paste-contents'字节串作为输入。",
+            "target_pattern": "使用Issue中提到的会导致HTTP 400的特殊内容（如data.txt中的内容）作为输入。",
+            "reason": "Issue表明某些特定内容会触发错误，而当前测试使用正常内容。",
+            "confidence": "high"
+        },
+        {
+            "slot": "argument",
+            "current_pattern": "相关测试1中验证data参数包含'lexer=python3'。",
+            "target_pattern": "验证data参数包含'lexer=text'或验证使用text lexer时请求成功。",
+            "reason": "Issue建议将lexer从python3改为text可以解决问题。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "exception",
+            "expression_hint": "urlopen调用时是否抛出HTTPError异常",
+            "reason": "Issue的核心错误现象是HTTP 400异常。"
+        },
+        {
+            "kind": "return_value",
+            "expression_hint": "create_new_paste方法的返回值（URL字符串）",
+            "reason": "成功时应返回有效的pastebin URL，失败时可能返回错误或抛出异常。"
+        },
+        {
+            "kind": "config",
+            "expression_hint": "POST请求data参数中的lexer值",
+            "reason": "Issue指出lexer参数是问题的关键。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "使用会导致HTTP 400的内容调用create_new_paste时，不应抛出HTTPError异常。",
+            "preferred_assertion_style": "raises",
+            "avoid": "断言完整的HTTP响应内容或具体的异常消息文本",
+            "reason": "修复后应能处理之前会失败的内容，但具体的成功响应格式可能变化。"
+        },
+        {
+            "assertion_goal": "提交到pastebin的数据应使用适当的lexer参数（如text而非python3）。",
+            "preferred_assertion_style": "contains_fragment",
+            "avoid": "断言完整的POST数据字符串",
+            "reason": "Issue建议使用text lexer，但具体的参数格式可能调整。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要pastebin和mocked_urlopen fixture来模拟网络请求",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "可能需要准备特殊的测试内容文件来触发HTTP 400错误",
+            "source": "issue",
+            "confidence": "medium"
+        }
+    ],
+    "uncertainties": [
+        "导致HTTP 400错误的具体内容特征是什么（除了data.txt示例外）",
+        "除了lexer参数外，是否还有其他因素会导致HTTP 400错误",
+        "修复后是否完全使用lexer=text，还是根据内容动态选择lexer"
+    ]
+}
+```

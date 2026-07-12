@@ -1,0 +1,585 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+[Bug]: get_backend() clears figures from Gcf.figs if they were created under rc_context
+### Bug summary
+
+calling `matplotlib.get_backend()` removes all figures from `Gcf` if the *first* figure in `Gcf.figs` was created in an `rc_context`.
+
+### Code for reproduction
+
+```python
+import matplotlib.pyplot as plt
+from matplotlib import get_backend, rc_context
+
+# fig1 = plt.figure()  # <- UNCOMMENT THIS LINE AND IT WILL WORK
+# plt.ion()            # <- ALTERNATIVELY, UNCOMMENT THIS LINE AND IT WILL ALSO WORK
+with rc_context():
+    fig2 = plt.figure()
+before = f'{id(plt._pylab_helpers.Gcf)} {plt._pylab_helpers.Gcf.figs!r}'
+get_backend()
+after = f'{id(plt._pylab_helpers.Gcf)} {plt._pylab_helpers.Gcf.figs!r}'
+
+assert before == after, '\n' + before + '\n' + after
+```
+
+
+### Actual outcome
+
+```
+---------------------------------------------------------------------------
+AssertionError                            Traceback (most recent call last)
+<ipython-input-1-fa4d099aa289> in <cell line: 11>()
+      9 after = f'{id(plt._pylab_helpers.Gcf)} {plt._pylab_helpers.Gcf.figs!r}'
+     10 
+---> 11 assert before == after, '\n' + before + '\n' + after
+     12 
+
+AssertionError: 
+94453354309744 OrderedDict([(1, <matplotlib.backends.backend_qt.FigureManagerQT object at 0x7fb33e26c220>)])
+94453354309744 OrderedDict()
+```
+
+### Expected outcome
+
+The figure should not be missing from `Gcf`.  Consequences of this are, e.g, `plt.close(fig2)` doesn't work because `Gcf.destroy_fig()` can't find it.
+
+### Additional information
+
+_No response_
+
+### Operating system
+
+Xubuntu
+
+### Matplotlib Version
+
+3.5.2
+
+### Matplotlib Backend
+
+QtAgg
+
+### Python version
+
+Python 3.10.4
+
+### Jupyter version
+
+n/a
+
+### Installation
+
+conda
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：lib/matplotlib/__init__.py
+对象名称：get_backend
+节点类型：top-level function
+父节点：__init__
+行号范围：1170-1178
+代码：
+def get_backend():
+    """
+    Return the name of the current backend.
+
+    See Also
+    --------
+    matplotlib.use
+    """
+    return rcParams['backend']
+
+
+【源码片段 2】
+文件路径：lib/matplotlib/__init__.py
+对象名称：rc_context
+节点类型：top-level function
+父节点：__init__
+行号范围：1058-1098
+代码：
+def rc_context(rc=None, fname=None):
+    """
+    Return a context manager for temporarily changing rcParams.
+
+    Parameters
+    ----------
+    rc : dict
+        The rcParams to temporarily set.
+    fname : str or path-like
+        A file with Matplotlib rc settings. If both *fname* and *rc* are given,
+        settings from *rc* take precedence.
+
+    See Also
+    --------
+    :ref:`customizing-with-matplotlibrc-files`
+
+    Examples
+    --------
+    Passing explicit values via a dict::
+
+        with mpl.rc_context({'interactive': False}):
+            fig, ax = plt.subplots()
+            ax.plot(range(3), range(3))
+            fig.savefig('example.png')
+            plt.close(fig)
+
+    Loading settings from a file::
+
+         with mpl.rc_context(fname='print.rc'):
+             plt.plot(x, y)  # uses 'print.rc'
+
+    """
+    orig = rcParams.copy()
+    try:
+        if fname:
+            rc_file(fname)
+        if rc:
+            rcParams.update(rc)
+        yield
+    finally:
+        dict.update(rcParams, orig)  # Revert to the original rcs.
+
+
+【源码片段 3】
+文件路径：lib/matplotlib/pyplot.py
+对象名称：figure
+节点类型：top-level function
+父节点：pyplot
+行号范围：697-834
+代码：
+def figure(num=None,  # autoincrement if None, else integer from 1-N
+           figsize=None,  # defaults to rc figure.figsize
+           dpi=None,  # defaults to rc figure.dpi
+           facecolor=None,  # defaults to rc figure.facecolor
+           edgecolor=None,  # defaults to rc figure.edgecolor
+           frameon=True,
+           FigureClass=Figure,
+           clear=False,
+           **kwargs
+           ):
+    """
+    Create a new figure, or activate an existing figure.
+
+    Parameters
+    ----------
+    num : int or str or `.Figure` or `.SubFigure`, optional
+        A unique identifier for the figure.
+
+        If a figure with that identifier already exists, this figure is made
+        active and returned. An integer refers to the ``Figure.number``
+        attribute, a string refers to the figure label.
+
+        If there is no figure with the identifier or *num* is not given, a new
+        figure is created, made active and returned.  If *num* is an int, it
+        will be used for the ``Figure.number`` attribute, otherwise, an
+        auto-generated integer value is used (starting at 1 and incremented
+        for each new figure). If *num* is a string, the figure label and the
+        window title is set to this value.  If num is a ``SubFigure``, its
+        parent ``Figure`` is activated.
+
+    figsize : (float, float), default: :rc:`figure.figsize`
+        Width, height in inches.
+
+    dpi : float, default: :rc:`figure.dpi`
+        The resolution of the figure in dots-per-inch.
+
+    facecolor : color, default: :rc:`figure.facecolor`
+        The background color.
+
+    edgecolor : color, default: :rc:`figure.edgecolor`
+        The border color.
+
+    frameon : bool, default: True
+        If False, suppress drawing the figure frame.
+
+    FigureClass : subclass of `~matplotlib.figure.Figure`
+        If set, an instance of this subclass will be created, rather than a
+        plain `.Figure`.
+
+    clear : bool, default: False
+        If True and the figure already exists, then it is cleared.
+
+    layout : {'constrained', 'tight', `.LayoutEngine`, None}, default: None
+        The layout mechanism for positioning of plot elements to avoid
+        overlapping Axes decorations (labels, ticks, etc). Note that layout
+        managers can measurably slow down figure display. Defaults to *None*
+        (but see the documentation of the `.Figure` constructor regarding the
+        interaction with rcParams).
+
+    **kwargs
+        Additional keyword arguments are passed to the `.Figure` constructor.
+
+    Returns
+    -------
+    `~matplotlib.figure.Figure`
+
+    Notes
+    -----
+    Newly created figures will be passed to the
+    `~.backend_template.new_figure_manager` function provided by the current
+    backend, which will install a canvas and a manager on the figure.
+
+    If you are creating many figures, make sure you explicitly call
+    `.pyplot.close` on the figures you are not using, because this will
+    enable pyplot to properly clean up the memory.
+
+    `~matplotlib.rcParams` defines the default values, which can be modified
+    in the matplotlibrc file.
+    """
+    if isinstance(num, FigureBase):
+        if num.canvas.manager is None:
+            raise ValueError("The passed figure is not managed by pyplot")
+        _pylab_helpers.Gcf.set_active(num.canvas.manager)
+        return num.figure
+
+    allnums = get_fignums()
+    next_num = max(allnums) + 1 if allnums else 1
+    fig_label = ''
+    if num is None:
+        num = next_num
+    elif isinstance(num, str):
+        fig_label = num
+        all_labels = get_figlabels()
+        if fig_label not in all_labels:
+            if fig_label == 'all':
+                _api.warn_external("close('all') closes all existing figures.")
+            num = next_num
+        else:
+            inum = all_labels.index(fig_label)
+            num = allnums[inum]
+    else:
+        num = int(num)  # crude validation of num argument
+
+    manager = _pylab_helpers.Gcf.get_fig_manager(num)
+    if manager is None:
+        max_open_warning = rcParams['figure.max_open_warning']
+        if len(allnums) == max_open_warning >= 1:
+            _api.warn_external(
+                f"More than {max_open_warning} figures have been opened. "
+                f"Figures created through the pyplot interface "
+                f"(`matplotlib.pyplot.figure`) are retained until explicitly "
+                f"closed and may consume too much memory. (To control this "
+                f"warning, see the rcParam `figure.max_open_warning`).",
+                RuntimeWarning)
+
+        manager = new_figure_manager(
+            num, figsize=figsize, dpi=dpi,
+            facecolor=facecolor, edgecolor=edgecolor, frameon=frameon,
+            FigureClass=FigureClass, **kwargs)
+        fig = manager.canvas.figure
+        if fig_label:
+            fig.set_label(fig_label)
+
+        _pylab_helpers.Gcf._set_new_active_manager(manager)
+
+        # make sure backends (inline) that we don't ship that expect this
+        # to be called in plotting commands to make the figure call show
+        # still work.  There is probably a better way to do this in the
+        # FigureManager base class.
+        draw_if_interactive()
+
+        if _REPL_DISPLAYHOOK is _ReplDisplayHook.PLAIN:
+            fig.stale_callback = _auto_draw_if_interactive
+
+    if clear:
+        manager.canvas.figure.clear()
+
+    return manager.canvas.figure
+
+
+【源码片段 4】
+文件路径：lib/matplotlib/_pylab_helpers.py
+对象名称：Gcf
+节点类型：class
+父节点：_pylab_helpers
+行号范围：10-141
+代码：
+class Gcf:
+    """
+    Singleton to maintain the relation between figures and their managers, and
+    keep track of and "active" figure and manager.
+
+    The canvas of a figure created through pyplot is associated with a figure
+    manager, which handles the interaction between the figure and the backend.
+    pyplot keeps track of figure managers using an identifier, the "figure
+    number" or "manager number" (which can actually be any hashable value);
+    this number is available as the :attr:`number` attribute of the manager.
+
+    This class is never instantiated; it consists of an `OrderedDict` mapping
+    figure/manager numbers to managers, and a set of class methods that
+    manipulate this `OrderedDict`.
+
+    Attributes
+    ----------
+    figs : OrderedDict
+        `OrderedDict` mapping numbers to managers; the active manager is at the
+        end.
+    """
+    figs = OrderedDict()
+    @classmethod
+    def get_fig_manager(cls, num):
+    @classmethod
+    def destroy(cls, num):
+    @classmethod
+    def destroy_fig(cls, fig):
+    @classmethod
+    def destroy_all(cls):
+    @classmethod
+    def has_fignum(cls, num):
+    @classmethod
+    def get_all_fig_managers(cls):
+    @classmethod
+    def get_num_fig_managers(cls):
+    @classmethod
+    def get_active(cls):
+    @classmethod
+    def _set_new_active_manager(cls, manager):
+    @classmethod
+    def set_active(cls, manager):
+    @classmethod
+    def draw_all(cls, force=False):
+
+
+【源码片段 5】
+文件路径：lib/matplotlib/_pylab_helpers.py
+对象名称：destroy_fig
+节点类型：class_function
+父节点：Gcf
+行号范围：75-80
+代码：
+    def destroy_fig(cls, fig):
+        """Destroy figure *fig*."""
+        num = next((manager.num for manager in cls.figs.values()
+                    if manager.canvas.figure == fig), None)
+        if num is not None:
+            cls.destroy(num)
+
+
+【源码片段 6】
+文件路径：lib/matplotlib/pyplot.py
+对象名称：close
+节点类型：top-level function
+父节点：pyplot
+行号范围：918-957
+代码：
+def close(fig=None):
+    """
+    Close a figure window.
+
+    Parameters
+    ----------
+    fig : None or int or str or `.Figure`
+        The figure to close. There are a number of ways to specify this:
+
+        - *None*: the current figure
+        - `.Figure`: the given `.Figure` instance
+        - ``int``: a figure number
+        - ``str``: a figure name
+        - 'all': all figures
+
+    """
+    if fig is None:
+        manager = _pylab_helpers.Gcf.get_active()
+        if manager is None:
+            return
+        else:
+            _pylab_helpers.Gcf.destroy(manager)
+    elif fig == 'all':
+        _pylab_helpers.Gcf.destroy_all()
+    elif isinstance(fig, int):
+        _pylab_helpers.Gcf.destroy(fig)
+    elif hasattr(fig, 'int'):
+        # if we are dealing with a type UUID, we
+        # can use its integer representation
+        _pylab_helpers.Gcf.destroy(fig.int)
+    elif isinstance(fig, str):
+        all_labels = get_figlabels()
+        if fig in all_labels:
+            num = get_fignums()[all_labels.index(fig)]
+            _pylab_helpers.Gcf.destroy(num)
+    elif isinstance(fig, Figure):
+        _pylab_helpers.Gcf.destroy_fig(fig)
+    else:
+        raise TypeError("close() argument must be a Figure, an int, a string, "
+                        "or None, not %s" % type(fig))
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：lib/matplotlib/tests/test_backend_qt.py
+测试名称：test_fig_close
+测试代码：
+@pytest.mark.backend('QtAgg', skip_on_importerror=True)
+def test_fig_close():
+
+    # save the state of Gcf.figs
+    init_figs = copy.copy(Gcf.figs)
+
+    # make a figure using pyplot interface
+    fig = plt.figure()
+
+    # simulate user clicking the close button by reaching in
+    # and calling close on the underlying Qt object
+    fig.canvas.manager.window.close()
+
+    # assert that we have removed the reference to the FigureManager
+    # that got added by plt.figure()
+    assert init_figs == Gcf.figs
+
+【相关测试 2】
+测试文件：lib/matplotlib/tests/test_backend_bases.py
+测试名称：test_canvas_change
+测试代码：
+def test_canvas_change():
+    fig = plt.figure()
+    # Replaces fig.canvas
+    canvas = FigureCanvasBase(fig)
+    # Should still work.
+    plt.close(fig)
+    assert not plt.fignum_exists(fig.number)
+
+【相关测试 3】
+测试文件：lib/matplotlib/tests/test_figure.py
+测试名称：test_animated_with_canvas_change
+测试代码：
+@check_figures_equal(extensions=["svg", "pdf", "eps", "png"])
+def test_animated_with_canvas_change(fig_test, fig_ref):
+    ax_ref = fig_ref.subplots()
+    ax_ref.plot(range(5))
+
+    ax_test = fig_test.subplots()
+    ax_test.plot(range(5), animated=True)
+
+【相关测试 4】
+测试文件：lib/matplotlib/tests/test_pyplot.py
+测试名称：test_close
+测试代码：
+def test_close():
+    try:
+        plt.close(1.1)
+    except TypeError as e:
+        assert str(e) == "close() argument must be a Figure, an int, " \
+                         "a string, or None, not <class 'float'>"
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

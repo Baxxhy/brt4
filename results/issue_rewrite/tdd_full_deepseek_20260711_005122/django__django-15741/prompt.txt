@@ -1,0 +1,353 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+django.utils.formats.get_format should allow lazy parameter
+Description
+	
+Commit [659d2421c7adb] (fixing #20296) triggered a regression when the date template filter (possibly others are affected too) receives a lazy string, like in some_date|date:_('Y-m-d').
+This fails with: TypeError: getattr(): attribute name must be string in django.utils.formats.get_format.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/utils/formats.py
+对象名称：get_format
+节点类型：top-level function
+父节点：formats
+行号范围：100-143
+代码：
+def get_format(format_type, lang=None, use_l10n=None):
+    """
+    For a specific format type, return the format for the current
+    language (locale). Default to the format in the settings.
+    format_type is the name of the format, e.g. 'DATE_FORMAT'.
+
+    If use_l10n is provided and is not None, it forces the value to
+    be localized (or not), overriding the value of settings.USE_L10N.
+    """
+    if use_l10n is None:
+        try:
+            use_l10n = settings._USE_L10N_INTERNAL
+        except AttributeError:
+            use_l10n = settings.USE_L10N
+    if use_l10n and lang is None:
+        lang = get_language()
+    cache_key = (format_type, lang)
+    try:
+        return _format_cache[cache_key]
+    except KeyError:
+        pass
+
+    # The requested format_type has not been cached yet. Try to find it in any
+    # of the format_modules for the given lang if l10n is enabled. If it's not
+    # there or if l10n is disabled, fall back to the project settings.
+    val = None
+    if use_l10n:
+        for module in get_format_modules(lang):
+            val = getattr(module, format_type, None)
+            if val is not None:
+                break
+    if val is None:
+        if format_type not in FORMAT_SETTINGS:
+            return format_type
+        val = getattr(settings, format_type)
+    elif format_type in ISO_INPUT_FORMATS:
+        # If a list of input formats from one of the format_modules was
+        # retrieved, make sure the ISO_INPUT_FORMATS are in this list.
+        val = list(val)
+        for iso_input in ISO_INPUT_FORMATS.get(format_type, ()):
+            if iso_input not in val:
+                val.append(iso_input)
+    _format_cache[cache_key] = val
+    return val
+
+
+【源码片段 2】
+文件路径：django/utils/datetime_safe.py
+对象名称：date
+节点类型：class
+父节点：datetime_safe
+行号范围：25-27
+代码：
+class date(real_date):
+    def strftime(self, fmt):
+
+
+【源码片段 3】
+文件路径：django/utils/translation/trans_null.py
+对象名称：_
+节点类型：global_var
+父节点：trans_null
+行号范围：12-12
+代码：
+gettext_noop = gettext_lazy = _ = gettext
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/template_tests/filter_tests/test_date.py
+测试名称：test_date02_l10n
+测试代码：
+class DateTests(TimezoneTestCase):
+    @setup({"date02_l10n": "{{ d|date }}"})
+    def test_date02_l10n(self):
+        """Without arg, the active language's DATE_FORMAT is used."""
+        with translation.override("fr"):
+            output = self.engine.render_to_string(
+                "date02_l10n", {"d": datetime(2008, 1, 1)}
+            )
+        self.assertEqual(output, "1 janvier 2008")
+
+【相关测试 2】
+测试文件：tests/template_tests/test_base.py
+测试名称：test_lazy_template_string
+测试代码：
+class TemplateTests(SimpleTestCase):
+    def test_lazy_template_string(self):
+        template_string = gettext_lazy("lazy string")
+        self.assertEqual(Template(template_string).render(Context()), template_string)
+
+【相关测试 3】
+测试文件：tests/i18n/tests.py
+测试名称：test_lazy_objects
+测试代码：
+class TranslationTests(SimpleTestCase):
+    def test_lazy_objects(self):
+        """
+        Format string interpolation should work with *_lazy objects.
+        """
+        s = gettext_lazy("Add %(name)s")
+        d = {"name": "Ringo"}
+        self.assertEqual("Add Ringo", s % d)
+        with translation.override("de", deactivate=True):
+            self.assertEqual("Ringo hinzuf\xfcgen", s % d)
+            with translation.override("pl"):
+                self.assertEqual("Dodaj Ringo", s % d)
+
+        # It should be possible to compare *_lazy objects.
+        s1 = gettext_lazy("Add %(name)s")
+        self.assertEqual(s, s1)
+        s2 = gettext_lazy("Add %(name)s")
+        s3 = gettext_lazy("Add %(name)s")
+        self.assertEqual(s2, s3)
+        self.assertEqual(s, s2)
+        s4 = gettext_lazy("Some other string")
+        self.assertNotEqual(s, s4)
+
+【相关测试 4】
+测试文件：tests/i18n/tests.py
+测试名称：test_ngettext_lazy_format_style
+测试代码：
+class TranslationTests(SimpleTestCase):
+    @override_settings(LOCALE_PATHS=extended_locale_paths)
+    def test_ngettext_lazy_format_style(self):
+        simple_with_format = ngettext_lazy("{} good result", "{} good results")
+        simple_context_with_format = npgettext_lazy(
+            "Exclamation", "{} good result", "{} good results"
+        )
+
+        with translation.override("de"):
+            self.assertEqual(simple_with_format.format(1), "1 gutes Resultat")
+            self.assertEqual(simple_with_format.format(4), "4 guten Resultate")
+            self.assertEqual(simple_context_with_format.format(1), "1 gutes Resultat!")
+            self.assertEqual(simple_context_with_format.format(4), "4 guten Resultate!")
+
+        complex_nonlazy = ngettext_lazy(
+            "Hi {name}, {num} good result", "Hi {name}, {num} good results", 4
+        )
+        complex_deferred = ngettext_lazy(
+            "Hi {name}, {num} good result", "Hi {name}, {num} good results", "num"
+        )
+        complex_context_nonlazy = npgettext_lazy(
+            "Greeting",
+            "Hi {name}, {num} good result",
+            "Hi {name}, {num} good results",
+            4,
+        )
+        complex_context_deferred = npgettext_lazy(
+            "Greeting",
+            "Hi {name}, {num} good result",
+            "Hi {name}, {num} good results",
+            "num",
+        )
+        with translation.override("de"):
+            self.assertEqual(
+                complex_nonlazy.format(num=4, name="Jim"),
+                "Hallo Jim, 4 guten Resultate",
+            )
+            self.assertEqual(
+                complex_deferred.format(name="Jim", num=1),
+                "Hallo Jim, 1 gutes Resultat",
+            )
+            self.assertEqual(
+                complex_deferred.format(name="Jim", num=5),
+                "Hallo Jim, 5 guten Resultate",
+            )
+            with self.assertRaisesMessage(KeyError, "Your dictionary lacks key"):
+                complex_deferred.format(name="Jim")
+            self.assertEqual(
+                complex_context_nonlazy.format(num=4, name="Jim"),
+                "Willkommen Jim, 4 guten Resultate",
+            )
+            self.assertEqual(
+                complex_context_deferred.format(name="Jim", num=1),
+                "Willkommen Jim, 1 gutes Resultat",
+            )
+            self.assertEqual(
+                complex_context_deferred.format(name="Jim", num=5),
+                "Willkommen Jim, 5 guten Resultate",
+            )
+            with self.assertRaisesMessage(KeyError, "Your dictionary lacks key"):
+                complex_context_deferred.format(name="Jim")
+
+【相关测试 5】
+测试文件：tests/utils_tests/test_text.py
+测试名称：test_format_lazy
+测试代码：
+class TestUtilsText(SimpleTestCase):
+    def test_format_lazy(self):
+        self.assertEqual("django/test", format_lazy("{}/{}", "django", lazystr("test")))
+        self.assertEqual("django/test", format_lazy("{0}/{1}", *("django", "test")))
+        self.assertEqual(
+            "django/test", format_lazy("{a}/{b}", **{"a": "django", "b": "test"})
+        )
+        self.assertEqual(
+            "django/test", format_lazy("{a[0]}/{a[1]}", a=("django", "test"))
+        )
+
+        t = {}
+        s = format_lazy("{0[a]}-{p[a]}", t, p=t)
+        t["a"] = lazystr("django")
+        self.assertEqual("django-django", s)
+        t["a"] = "update"
+        self.assertEqual("update-update", s)
+
+        # The format string can be lazy. (string comes from contrib.admin)
+        s = format_lazy(
+            gettext_lazy("Added {name} “{object}”."),
+            name="article",
+            object="My first try",
+        )
+        with override("fr"):
+            self.assertEqual("Ajout de article «\xa0My first try\xa0».", s)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

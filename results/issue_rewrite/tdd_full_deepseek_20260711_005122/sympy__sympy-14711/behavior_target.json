@@ -1,0 +1,311 @@
+{
+  "instance_id": "sympy__sympy-14711",
+  "issue_summary": "使用 sum() 函数对包含 Vector 和 0 * Vector 的列表求和时，会抛出 TypeError 异常，因为 0 * Vector 的结果不被识别为 Vector 类型。",
+  "trigger_condition": {
+    "text": "使用内置 sum() 函数对一个包含 Vector 对象和 0 * Vector 结果的列表进行求和。",
+    "evidence": [
+      "Issue 中的代码示例：sum([N.x, (0 * N.x)])",
+      "Issue 中的错误堆栈显示 sum() 函数调用了 Vector.__add__ 方法"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "抛出 TypeError: A Vector must be supplied 异常。",
+    "symptom_type": "exception",
+    "evidence": [
+      "Issue 中的错误堆栈显示 TypeError 来自 _check_vector 函数",
+      "源码片段 3 显示 _check_vector 在 other 不是 Vector 实例时抛出 TypeError"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "sum() 函数应该能够正确处理包含 Vector 和 0 * Vector 的列表，返回正确的 Vector 结果，而不抛出异常。",
+    "evidence": [
+      "Issue 标题和代码示例暗示期望 sum() 能正常工作",
+      "相关测试 2 中测试了 Vector.zero 与 0 的区别，暗示零向量应被正确处理"
+    ],
+    "confidence": "medium"
+  },
+  "target_apis": [
+    {
+      "name": "Vector.__add__",
+      "kind": "method",
+      "source_path": "sympy/physics/vector/vector.py",
+      "reason": "Issue 的错误堆栈显示 sum() 调用了 Vector.__add__ 方法，这是触发异常的直接入口。"
+    },
+    {
+      "name": "_check_vector",
+      "kind": "function",
+      "source_path": "sympy/physics/vector/vector.py",
+      "reason": "该函数在 Vector.__add__ 中被调用，用于检查参数类型，是抛出异常的直接原因。"
+    },
+    {
+      "name": "ReferenceFrame.x",
+      "kind": "method",
+      "source_path": "sympy/physics/vector/frame.py",
+      "reason": "Issue 示例中使用了 N.x 来获取 Vector 对象。"
+    },
+    {
+      "name": "sum",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 的触发条件是使用内置 sum() 函数。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/physics/vector/vector.py",
+      "object": "Vector.__add__",
+      "lines": "58-61",
+      "reason": "该方法在相加前调用 _check_vector 严格检查类型，可能未处理 0 * Vector 这种特殊情况。"
+    },
+    {
+      "path": "sympy/physics/vector/vector.py",
+      "object": "_check_vector",
+      "lines": "723-726",
+      "reason": "该函数仅通过 isinstance 检查，可能未识别 0 * Vector 的结果为有效的 Vector 类型。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_Vector",
+      "test_file": "sympy/physics/vector/tests/test_vector.py",
+      "why_relevant": "该测试直接测试 Vector 类的加法、减法等操作，并使用了 ReferenceFrame 和 Vector 对象。",
+      "reusable_parts": [
+        "imports (如 from sympy.physics.vector import ReferenceFrame, Vector)",
+        "ReferenceFrame 和 Vector 对象的构造",
+        "Vector 加法的断言风格"
+      ],
+      "possible_gap": "该测试没有测试使用内置 sum() 函数对 Vector 列表求和，也没有测试 0 * Vector 这种边缘情况。"
+    },
+    {
+      "test_name": "test_vector",
+      "test_file": "sympy/vector/tests/test_vector.py",
+      "why_relevant": "该测试来自另一个模块，但测试了 Vector 的加法、零向量等概念，并提到了 Vector.zero != 0，这与 Issue 中 0 * Vector 的问题相关。",
+      "reusable_parts": [
+        "Vector 加法和标量乘法的测试模式",
+        "对 Vector.zero 的断言"
+      ],
+      "possible_gap": "该测试属于不同的模块（sympy.vector 而非 sympy.physics.vector），API 和实现可能不同，不能直接复用。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中直接使用 v1 + v2 进行 Vector 加法。",
+      "target_pattern": "使用内置 sum() 函数对一个列表求和，列表中包含 Vector 和 0 * Vector。",
+      "reason": "Issue 表明 sum() 的内部迭代加法会触发 _check_vector 的类型检查，而直接使用 + 运算符可能不会暴露此问题。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "相似测试中 Vector.__add__ 的 other 参数是另一个明确的 Vector 对象。",
+      "target_pattern": "使 other 参数为 0 * Vector 的结果（其类型可能不是 Vector 实例）。",
+      "reason": "_check_vector 函数可能无法识别 0 * Vector 的结果，导致 isinstance 检查失败。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "调用 sum([vector, 0 * vector]) 时是否抛出 TypeError。",
+      "reason": "Issue 的核心错误现象是抛出 TypeError，观测此异常可直接判断缺陷是否触发。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "type(0 * vector) 的结果，以及 isinstance(0 * vector, Vector) 的返回值。",
+      "reason": "缺陷可能源于 0 * Vector 的结果类型不被识别为 Vector，观测其类型有助于理解根本原因。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "sum([vector, 0 * vector]) 成功时的返回值，应是一个 Vector。",
+      "reason": "修复后，该表达式应返回一个正确的 Vector 而不抛异常，观测返回值可验证修复。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "sum([vector, 0 * vector]) 应成功执行并返回一个 Vector 对象，而不抛出 TypeError。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言返回的 Vector 的精确数学表达式，因为这可能依赖于实现细节。",
+      "reason": "Issue 的核心是异常，因此首先断言不抛出异常是稳定且直接的目标。修复后，断言应改为不抛出异常。"
+    },
+    {
+      "assertion_goal": "0 * vector 的结果应能被识别为 Vector 类型（或至少能与 Vector 相加）。",
+      "preferred_assertion_style": "isinstance",
+      "avoid": "断言 0 * vector 的完整 repr 或内部结构。",
+      "reason": "缺陷可能源于类型识别问题，验证 isinstance 或加法兼容性是稳定的断言。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 ReferenceFrame 和 Vector 类，并创建一个 ReferenceFrame 实例。",
+      "source": "issue|retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能需要在 sympy.physics.vector 的上下文中运行，而不是 sympy.vector。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "0 * Vector 的确切返回类型是什么？是 Vector 的一个特殊子类、标量 0，还是其他对象？",
+    "sum() 函数内部是如何调用 Vector.__add__ 的？起始值默认为 0，这是否是问题的一部分？",
+    "修复的预期行为是让 _check_vector 接受 0 * Vector，还是修改 0 * Vector 的返回类型，或是修改 Vector.__add__ 的逻辑？"
+  ],
+  "raw": {
+    "issue_summary": "使用 sum() 函数对包含 Vector 和 0 * Vector 的列表求和时，会抛出 TypeError 异常，因为 0 * Vector 的结果不被识别为 Vector 类型。",
+    "trigger_condition": {
+      "text": "使用内置 sum() 函数对一个包含 Vector 对象和 0 * Vector 结果的列表进行求和。",
+      "evidence": [
+        "Issue 中的代码示例：sum([N.x, (0 * N.x)])",
+        "Issue 中的错误堆栈显示 sum() 函数调用了 Vector.__add__ 方法"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: A Vector must be supplied 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈显示 TypeError 来自 _check_vector 函数",
+        "源码片段 3 显示 _check_vector 在 other 不是 Vector 实例时抛出 TypeError"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "sum() 函数应该能够正确处理包含 Vector 和 0 * Vector 的列表，返回正确的 Vector 结果，而不抛出异常。",
+      "evidence": [
+        "Issue 标题和代码示例暗示期望 sum() 能正常工作",
+        "相关测试 2 中测试了 Vector.zero 与 0 的区别，暗示零向量应被正确处理"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "Vector.__add__",
+        "kind": "method",
+        "source_path": "sympy/physics/vector/vector.py",
+        "reason": "Issue 的错误堆栈显示 sum() 调用了 Vector.__add__ 方法，这是触发异常的直接入口。"
+      },
+      {
+        "name": "_check_vector",
+        "kind": "function",
+        "source_path": "sympy/physics/vector/vector.py",
+        "reason": "该函数在 Vector.__add__ 中被调用，用于检查参数类型，是抛出异常的直接原因。"
+      },
+      {
+        "name": "ReferenceFrame.x",
+        "kind": "method",
+        "source_path": "sympy/physics/vector/frame.py",
+        "reason": "Issue 示例中使用了 N.x 来获取 Vector 对象。"
+      },
+      {
+        "name": "sum",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 的触发条件是使用内置 sum() 函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/physics/vector/vector.py",
+        "object": "Vector.__add__",
+        "lines": "58-61",
+        "reason": "该方法在相加前调用 _check_vector 严格检查类型，可能未处理 0 * Vector 这种特殊情况。"
+      },
+      {
+        "path": "sympy/physics/vector/vector.py",
+        "object": "_check_vector",
+        "lines": "723-726",
+        "reason": "该函数仅通过 isinstance 检查，可能未识别 0 * Vector 的结果为有效的 Vector 类型。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_Vector",
+        "test_file": "sympy/physics/vector/tests/test_vector.py",
+        "why_relevant": "该测试直接测试 Vector 类的加法、减法等操作，并使用了 ReferenceFrame 和 Vector 对象。",
+        "reusable_parts": [
+          "imports (如 from sympy.physics.vector import ReferenceFrame, Vector)",
+          "ReferenceFrame 和 Vector 对象的构造",
+          "Vector 加法的断言风格"
+        ],
+        "possible_gap": "该测试没有测试使用内置 sum() 函数对 Vector 列表求和，也没有测试 0 * Vector 这种边缘情况。"
+      },
+      {
+        "test_name": "test_vector",
+        "test_file": "sympy/vector/tests/test_vector.py",
+        "why_relevant": "该测试来自另一个模块，但测试了 Vector 的加法、零向量等概念，并提到了 Vector.zero != 0，这与 Issue 中 0 * Vector 的问题相关。",
+        "reusable_parts": [
+          "Vector 加法和标量乘法的测试模式",
+          "对 Vector.zero 的断言"
+        ],
+        "possible_gap": "该测试属于不同的模块（sympy.vector 而非 sympy.physics.vector），API 和实现可能不同，不能直接复用。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中直接使用 v1 + v2 进行 Vector 加法。",
+        "target_pattern": "使用内置 sum() 函数对一个列表求和，列表中包含 Vector 和 0 * Vector。",
+        "reason": "Issue 表明 sum() 的内部迭代加法会触发 _check_vector 的类型检查，而直接使用 + 运算符可能不会暴露此问题。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中 Vector.__add__ 的 other 参数是另一个明确的 Vector 对象。",
+        "target_pattern": "使 other 参数为 0 * Vector 的结果（其类型可能不是 Vector 实例）。",
+        "reason": "_check_vector 函数可能无法识别 0 * Vector 的结果，导致 isinstance 检查失败。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 sum([vector, 0 * vector]) 时是否抛出 TypeError。",
+        "reason": "Issue 的核心错误现象是抛出 TypeError，观测此异常可直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(0 * vector) 的结果，以及 isinstance(0 * vector, Vector) 的返回值。",
+        "reason": "缺陷可能源于 0 * Vector 的结果类型不被识别为 Vector，观测其类型有助于理解根本原因。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "sum([vector, 0 * vector]) 成功时的返回值，应是一个 Vector。",
+        "reason": "修复后，该表达式应返回一个正确的 Vector 而不抛异常，观测返回值可验证修复。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "sum([vector, 0 * vector]) 应成功执行并返回一个 Vector 对象，而不抛出 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言返回的 Vector 的精确数学表达式，因为这可能依赖于实现细节。",
+        "reason": "Issue 的核心是异常，因此首先断言不抛出异常是稳定且直接的目标。修复后，断言应改为不抛出异常。"
+      },
+      {
+        "assertion_goal": "0 * vector 的结果应能被识别为 Vector 类型（或至少能与 Vector 相加）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言 0 * vector 的完整 repr 或内部结构。",
+        "reason": "缺陷可能源于类型识别问题，验证 isinstance 或加法兼容性是稳定的断言。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 ReferenceFrame 和 Vector 类，并创建一个 ReferenceFrame 实例。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在 sympy.physics.vector 的上下文中运行，而不是 sympy.vector。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "0 * Vector 的确切返回类型是什么？是 Vector 的一个特殊子类、标量 0，还是其他对象？",
+      "sum() 函数内部是如何调用 Vector.__add__ 的？起始值默认为 0，这是否是问题的一部分？",
+      "修复的预期行为是让 _check_vector 接受 0 * Vector，还是修改 0 * Vector 的返回类型，或是修改 Vector.__add__ 的逻辑？"
+    ]
+  }
+}

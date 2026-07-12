@@ -1,0 +1,119 @@
+instance_id: django__django-16661
+
+issue_summary: ModelAdmin.lookup_allowed() 在涉及外键作为主键的查询路径时，错误地抛出 DisallowedModelAdminLookup 异常。
+
+trigger_condition:
+{
+  "text": "当 ModelAdmin 的 list_filter 包含一个查询路径，该路径涉及一个 OneToOneField（作为主键）指向另一个模型，而该模型又通过 ForeignKey 关联到第三个模型时，调用 lookup_allowed 检查该查询路径。",
+  "evidence": [
+    "Issue 中提供的测试代码：list_filter = ['restaurant__place__country']，模型关系为 Waiter -> Restaurant (ForeignKey) -> Place (OneToOneField as primary key) -> Country (ForeignKey)。",
+    "Issue 描述：'admin thinking that having a foreign key field as a primary key is the same as concrete inheritance'。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "调用 ma.lookup_allowed('restaurant__place__country', 'test_value') 时，预期返回 True，但实际上可能返回 False 或引发 DisallowedModelAdminLookup 异常。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 中的断言：self.assertIs(ma.lookup_allowed('restaurant__place__country', 'test_value'), True)。",
+    "Issue 标题提到 'incorrectly raises DisallowedModelAdminLookup'。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "lookup_allowed 方法应正确识别并允许 list_filter 中定义的、涉及外键作为主键的复杂查询路径，并返回 True。",
+  "evidence": [
+    "Issue 中测试的断言目标：self.assertIs(..., True)。",
+    "相关测试 1 (test_lookup_allowed_onetoone) 展示了类似复杂查询路径（如 'employee__employeeinfo__description'）被允许并返回 True。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "ModelAdmin.lookup_allowed",
+    "kind": "method",
+    "source_path": "django/contrib/admin/options.py",
+    "reason": "Issue 直接关于此方法在处理特定查询路径时的错误行为。"
+  },
+  {
+    "name": "OneToOneField",
+    "kind": "class",
+    "source_path": "django/db/models/fields/related.py",
+    "reason": "缺陷涉及将 OneToOneField 用作主键的情况，这是模型关系定义的关键部分。"
+  },
+  {
+    "name": "isolate_apps",
+    "kind": "class",
+    "source_path": "django/test/utils.py",
+    "reason": "Issue 和检索到的测试中都使用了此装饰器来隔离模型注册，是测试设置的一部分。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "相关测试 1 中，EmployeeProfile 的 OneToOneField (employee) 不是主键。",
+    "target_pattern": "将 Restaurant 模型中的 OneToOneField (place) 设置为 primary_key=True。",
+    "reason": "Issue 明确指出缺陷发生在 OneToOneField 作为主键时，这是触发错误路径的关键变异。",
+    "confidence": "high"
+  },
+  {
+    "slot": "input",
+    "current_pattern": "相关测试 1 中，查询路径为 'employee__employeeinfo__description' 或 'employee__department__code'。",
+    "target_pattern": "查询路径改为 'restaurant__place__country'，其中 restaurant 是 ForeignKey，place 是作为主键的 OneToOneField，country 是 ForeignKey。",
+    "reason": "Issue 中失败的测试使用了此特定路径，它触发了有缺陷的查询路径解析逻辑。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "ma.lookup_allowed('restaurant__place__country', 'test_value') 的返回值。",
+    "reason": "Issue 的核心是该方法错误地返回了 False 或导致异常，而预期应为 True。直接观察返回值是关键。"
+  },
+  {
+    "kind": "exception",
+    "expression_hint": "调用 lookup_allowed 时是否引发 DisallowedModelAdminLookup 异常。",
+    "reason": "Issue 标题提到可能引发此异常，观察其是否被抛出可以确认缺陷是否被触发。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "lookup_allowed 对于给定的复杂查询路径应返回 True，表明该查询被允许。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的异常消息或内部数据结构。",
+    "reason": "Issue 的预期行为是方法返回 True。使用简单的相等断言（如 assertTrue 或 assertIs）直接验证核心语义，避免对内部实现细节的脆弱依赖。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 TestCase 和 isolate_apps 装饰器来定义临时模型，避免与项目中的真实模型冲突。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要创建测试站点 (self.site)，用于实例化 ModelAdmin。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "lookup_allowed 方法内部具体哪一行代码导致了错误的路径简化（将 'restaurant__place__country' 误判为 'restaurant__country'）。",
+  "除了 DisallowedModelAdminLookup 异常，是否还有其他错误情况（如静默返回 False）。",
+  "缺陷是否也影响其他类型的模型关系组合或查询操作。"
+]

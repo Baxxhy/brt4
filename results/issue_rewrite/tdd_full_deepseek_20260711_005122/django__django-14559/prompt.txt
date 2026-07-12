@@ -1,0 +1,288 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Include number of rows matched in bulk_update() return value
+Description
+	
+Currently, bulk_update() returns None, unlike update(), which returns ​the number of rows matched.
+It looks like it would be easy to add the same functionality to bulk_update() since bulk_update() simply calls update() repeatedly:
+​https://github.com/django/django/blob/2b4b6c8af0aae8785bc1347cf1be2e8e70fd5ff3/django/db/models/query.py#L568
+I.e. the return values could simply be added and returned.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/db/models/query.py
+对象名称：bulk_update
+节点类型：class_function
+父节点：QuerySet
+行号范围：527-568
+代码：
+    def bulk_update(self, objs, fields, batch_size=None):
+        """
+        Update the given fields in each of the given objects in the database.
+        """
+        if batch_size is not None and batch_size < 0:
+            raise ValueError('Batch size must be a positive integer.')
+        if not fields:
+            raise ValueError('Field names must be given to bulk_update().')
+        objs = tuple(objs)
+        if any(obj.pk is None for obj in objs):
+            raise ValueError('All bulk_update() objects must have a primary key set.')
+        fields = [self.model._meta.get_field(name) for name in fields]
+        if any(not f.concrete or f.many_to_many for f in fields):
+            raise ValueError('bulk_update() can only be used with concrete fields.')
+        if any(f.primary_key for f in fields):
+            raise ValueError('bulk_update() cannot be used with primary key fields.')
+        if not objs:
+            return
+        # PK is used twice in the resulting update query, once in the filter
+        # and once in the WHEN. Each field will also have one CAST.
+        max_batch_size = connections[self.db].ops.bulk_batch_size(['pk', 'pk'] + fields, objs)
+        batch_size = min(batch_size, max_batch_size) if batch_size else max_batch_size
+        requires_casting = connections[self.db].features.requires_casted_case_in_updates
+        batches = (objs[i:i + batch_size] for i in range(0, len(objs), batch_size))
+        updates = []
+        for batch_objs in batches:
+            update_kwargs = {}
+            for field in fields:
+                when_statements = []
+                for obj in batch_objs:
+                    attr = getattr(obj, field.attname)
+                    if not isinstance(attr, Expression):
+                        attr = Value(attr, output_field=field)
+                    when_statements.append(When(pk=obj.pk, then=attr))
+                case_statement = Case(*when_statements, output_field=field)
+                if requires_casting:
+                    case_statement = Cast(case_statement, output_field=field)
+                update_kwargs[field.attname] = case_statement
+            updates.append(([obj.pk for obj in batch_objs], update_kwargs))
+        with transaction.atomic(using=self.db, savepoint=False):
+            for pks, update_kwargs in updates:
+                self.filter(pk__in=pks).update(**update_kwargs)
+
+
+【源码片段 2】
+文件路径：django/db/models/query.py
+对象名称：update
+节点类型：class_function
+父节点：QuerySet
+行号范围：769-785
+代码：
+    def update(self, **kwargs):
+        """
+        Update all elements in the current QuerySet, setting all the given
+        fields to the appropriate values.
+        """
+        self._not_support_combined_queries('update')
+        if self.query.is_sliced:
+            raise TypeError('Cannot update a query once a slice has been taken.')
+        self._for_write = True
+        query = self.query.chain(sql.UpdateQuery)
+        query.add_update_values(kwargs)
+        # Clear any annotations so that they won't be present in subqueries.
+        query.annotations = {}
+        with transaction.mark_for_rollback_on_error(using=self.db):
+            rows = query.get_compiler(self.db).execute_sql(CURSOR)
+        self._result_cache = None
+        return rows
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/update/tests.py
+测试名称：SimpleTest.test_nonempty_update
+测试代码：
+class SimpleTest(TestCase):
+    def test_nonempty_update(self):
+        """
+        Update changes the right number of rows for a nonempty queryset
+        """
+        num_updated = self.a1.b_set.update(y=100)
+        self.assertEqual(num_updated, 20)
+        cnt = B.objects.filter(y=100).count()
+        self.assertEqual(cnt, 20)
+
+【相关测试 2】
+测试文件：tests/queries/test_bulk_update.py
+测试名称：BulkUpdateTests.test_falsey_pk_value
+测试代码：
+class BulkUpdateTests(TestCase):
+    def test_falsey_pk_value(self):
+        order = Order.objects.create(pk=0, name='test')
+        order.name = 'updated'
+        Order.objects.bulk_update([order], ['name'])
+        order.refresh_from_db()
+        self.assertEqual(order.name, 'updated')
+
+【相关测试 3】
+测试文件：tests/queries/test_bulk_update.py
+测试名称：BulkUpdateNoteTests.test_simple
+测试代码：
+class BulkUpdateNoteTests(TestCase):
+    def test_simple(self):
+        for note in self.notes:
+            note.note = 'test-%s' % note.id
+        with self.assertNumQueries(1):
+            Note.objects.bulk_update(self.notes, ['note'])
+        self.assertCountEqual(
+            Note.objects.values_list('note', flat=True),
+            [cat.note for cat in self.notes]
+        )
+
+【相关测试 4】
+测试文件：tests/queries/test_bulk_update.py
+测试名称：BulkUpdateNoteTests.test_multiple_fields
+测试代码：
+class BulkUpdateNoteTests(TestCase):
+    def test_multiple_fields(self):
+        for note in self.notes:
+            note.note = 'test-%s' % note.id
+            note.misc = 'misc-%s' % note.id
+        with self.assertNumQueries(1):
+            Note.objects.bulk_update(self.notes, ['note', 'misc'])
+        self.assertCountEqual(
+            Note.objects.values_list('note', flat=True),
+            [cat.note for cat in self.notes]
+        )
+        self.assertCountEqual(
+            Note.objects.values_list('misc', flat=True),
+            [cat.misc for cat in self.notes]
+        )
+
+【相关测试 5】
+测试文件：tests/update/tests.py
+测试名称：AdvancedTests.test_update
+测试代码：
+class AdvancedTests(TestCase):
+    def test_update(self):
+        """
+        Objects are updated by first filtering the candidates into a queryset
+        and then calling the update() method. It executes immediately and
+        returns nothing.
+        """
+        resp = DataPoint.objects.filter(value="apple").update(name="d1")
+        self.assertEqual(resp, 1)
+        resp = DataPoint.objects.filter(value="apple")
+        self.assertEqual(list(resp), [self.d0])
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

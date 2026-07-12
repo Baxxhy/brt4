@@ -1,0 +1,564 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+index refactor: more `_coord_names` than `_variables` on Dataset
+### What happened?
+
+`xr.core.dataset.DataVariables` assumes that everything that is in `ds._dataset._variables` and not in `self._dataset._coord_names` is a "data variable". However, since the index refactor we can end up with more `_coord_names` than `_variables` which breaks a number of stuff (e.g. the repr).
+
+### What did you expect to happen?
+
+Well it seems this assumption is now wrong.
+
+### Minimal Complete Verifiable Example
+
+```Python
+ds = xr.Dataset(coords={"a": ("x", [1, 2, 3]), "b": ("x", ['a', 'b', 'c'])})
+ds.set_index(z=['a', 'b']).reset_index("z", drop=True)
+```
+
+
+### MVCE confirmation
+
+- [ ] Minimal example — the example is as focused as reasonably possible to demonstrate the underlying issue in xarray.
+- [ ] Complete example — the example is self-contained, including all data and the text of any traceback.
+- [ ] Verifiable example — the example copy & pastes into an IPython prompt or [Binder notebook](https://mybinder.org/v2/gh/pydata/xarray/main?urlpath=lab/tree/doc/examples/blank_template.ipynb), returning the result.
+- [ ] New issue — a search of GitHub Issues suggests this is not a duplicate.
+
+### Relevant log output
+
+```Python
+ValueError: __len__() should return >= 0
+```
+
+
+### Anything else we need to know?
+
+The error comes from here
+
+https://github.com/pydata/xarray/blob/63ba862d03c8d0cd8b44d2071bc360e9fed4519d/xarray/core/dataset.py#L368
+
+Bisected to #5692 - which probably does not help too much.
+
+
+### Environment
+
+<details>
+
+
+
+</details>
+
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：xarray/core/dataset.py
+对象名称：DataVariables
+节点类型：class
+父节点：dataset
+行号范围：354-404
+代码：
+class DataVariables(Mapping[Any, "DataArray"]):
+    __slots__ = ("_dataset",)
+    def __init__(self, dataset: Dataset):
+    def __iter__(self) -> Iterator[Hashable]:
+    def __len__(self) -> int:
+    def __contains__(self, key: Hashable) -> bool:
+    def __getitem__(self, key: Hashable) -> DataArray:
+    def __repr__(self) -> str:
+    @property
+    def variables(self) -> Mapping[Hashable, Variable]:
+    @property
+    def dtypes(self) -> Frozen[Hashable, np.dtype]:
+    def _ipython_key_completions_(self):
+
+
+【源码片段 2】
+文件路径：xarray/core/dataset.py
+对象名称：set_index
+节点类型：class_function
+父节点：Dataset
+行号范围：3968-4106
+代码：
+    def set_index(
+        self,
+        indexes: Mapping[Any, Hashable | Sequence[Hashable]] | None = None,
+        append: bool = False,
+        **indexes_kwargs: Hashable | Sequence[Hashable],
+    ) -> Dataset:
+        """Set Dataset (multi-)indexes using one or more existing coordinates
+        or variables.
+
+        Parameters
+        ----------
+        indexes : {dim: index, ...}
+            Mapping from names matching dimensions and values given
+            by (lists of) the names of existing coordinates or variables to set
+            as new (multi-)index.
+        append : bool, default: False
+            If True, append the supplied index(es) to the existing index(es).
+            Otherwise replace the existing index(es) (default).
+        **indexes_kwargs : optional
+            The keyword arguments form of ``indexes``.
+            One of indexes or indexes_kwargs must be provided.
+
+        Returns
+        -------
+        obj : Dataset
+            Another dataset, with this dataset's data but replaced coordinates.
+
+        Examples
+        --------
+        >>> arr = xr.DataArray(
+        ...     data=np.ones((2, 3)),
+        ...     dims=["x", "y"],
+        ...     coords={"x": range(2), "y": range(3), "a": ("x", [3, 4])},
+        ... )
+        >>> ds = xr.Dataset({"v": arr})
+        >>> ds
+        <xarray.Dataset>
+        Dimensions:  (x: 2, y: 3)
+        Coordinates:
+          * x        (x) int64 0 1
+          * y        (y) int64 0 1 2
+            a        (x) int64 3 4
+        Data variables:
+            v        (x, y) float64 1.0 1.0 1.0 1.0 1.0 1.0
+        >>> ds.set_index(x="a")
+        <xarray.Dataset>
+        Dimensions:  (x: 2, y: 3)
+        Coordinates:
+          * x        (x) int64 3 4
+          * y        (y) int64 0 1 2
+        Data variables:
+            v        (x, y) float64 1.0 1.0 1.0 1.0 1.0 1.0
+
+        See Also
+        --------
+        Dataset.reset_index
+        Dataset.swap_dims
+        """
+        dim_coords = either_dict_or_kwargs(indexes, indexes_kwargs, "set_index")
+
+        new_indexes: dict[Hashable, Index] = {}
+        new_variables: dict[Hashable, IndexVariable] = {}
+        maybe_drop_indexes: list[Hashable] = []
+        drop_variables: list[Hashable] = []
+        replace_dims: dict[Hashable, Hashable] = {}
+
+        for dim, _var_names in dim_coords.items():
+            if isinstance(_var_names, str) or not isinstance(_var_names, Sequence):
+                var_names = [_var_names]
+            else:
+                var_names = list(_var_names)
+
+            invalid_vars = set(var_names) - set(self._variables)
+            if invalid_vars:
+                raise ValueError(
+                    ", ".join([str(v) for v in invalid_vars])
+                    + " variable(s) do not exist"
+                )
+
+            current_coord_names = self.xindexes.get_all_coords(dim, errors="ignore")
+
+            # drop any pre-existing index involved
+            maybe_drop_indexes += list(current_coord_names) + var_names
+            for k in var_names:
+                maybe_drop_indexes += list(
+                    self.xindexes.get_all_coords(k, errors="ignore")
+                )
+
+            drop_variables += var_names
+
+            if len(var_names) == 1 and (not append or dim not in self._indexes):
+                var_name = var_names[0]
+                var = self._variables[var_name]
+                if var.dims != (dim,):
+                    raise ValueError(
+                        f"dimension mismatch: try setting an index for dimension {dim!r} with "
+                        f"variable {var_name!r} that has dimensions {var.dims}"
+                    )
+                idx = PandasIndex.from_variables({dim: var})
+                idx_vars = idx.create_variables({var_name: var})
+            else:
+                if append:
+                    current_variables = {
+                        k: self._variables[k] for k in current_coord_names
+                    }
+                else:
+                    current_variables = {}
+                idx, idx_vars = PandasMultiIndex.from_variables_maybe_expand(
+                    dim,
+                    current_variables,
+                    {k: self._variables[k] for k in var_names},
+                )
+                for n in idx.index.names:
+                    replace_dims[n] = dim
+
+            new_indexes.update({k: idx for k in idx_vars})
+            new_variables.update(idx_vars)
+
+        indexes_: dict[Any, Index] = {
+            k: v for k, v in self._indexes.items() if k not in maybe_drop_indexes
+        }
+        indexes_.update(new_indexes)
+
+        variables = {
+            k: v for k, v in self._variables.items() if k not in drop_variables
+        }
+        variables.update(new_variables)
+
+        # update dimensions if necessary, GH: 3512
+        for k, v in variables.items():
+            if any(d in replace_dims for d in v.dims):
+                new_dims = [replace_dims.get(d, d) for d in v.dims]
+                variables[k] = v._replace(dims=new_dims)
+
+        coord_names = self._coord_names - set(drop_variables) | set(new_variables)
+
+        return self._replace_with_new_dims(
+            variables, coord_names=coord_names, indexes=indexes_
+        )
+
+
+【源码片段 3】
+文件路径：xarray/core/dataset.py
+对象名称：reset_index
+节点类型：class_function
+父节点：Dataset
+行号范围：4108-4182
+代码：
+    def reset_index(
+        self: T_Dataset,
+        dims_or_levels: Hashable | Sequence[Hashable],
+        drop: bool = False,
+    ) -> T_Dataset:
+        """Reset the specified index(es) or multi-index level(s).
+
+        Parameters
+        ----------
+        dims_or_levels : Hashable or Sequence of Hashable
+            Name(s) of the dimension(s) and/or multi-index level(s) that will
+            be reset.
+        drop : bool, default: False
+            If True, remove the specified indexes and/or multi-index levels
+            instead of extracting them as new coordinates (default: False).
+
+        Returns
+        -------
+        obj : Dataset
+            Another dataset, with this dataset's data but replaced coordinates.
+
+        See Also
+        --------
+        Dataset.set_index
+        """
+        if isinstance(dims_or_levels, str) or not isinstance(dims_or_levels, Sequence):
+            dims_or_levels = [dims_or_levels]
+
+        invalid_coords = set(dims_or_levels) - set(self._indexes)
+        if invalid_coords:
+            raise ValueError(
+                f"{tuple(invalid_coords)} are not coordinates with an index"
+            )
+
+        drop_indexes: list[Hashable] = []
+        drop_variables: list[Hashable] = []
+        replaced_indexes: list[PandasMultiIndex] = []
+        new_indexes: dict[Hashable, Index] = {}
+        new_variables: dict[Hashable, IndexVariable] = {}
+
+        for name in dims_or_levels:
+            index = self._indexes[name]
+            drop_indexes += list(self.xindexes.get_all_coords(name))
+
+            if isinstance(index, PandasMultiIndex) and name not in self.dims:
+                # special case for pd.MultiIndex (name is an index level):
+                # replace by a new index with dropped level(s) instead of just drop the index
+                if index not in replaced_indexes:
+                    level_names = index.index.names
+                    level_vars = {
+                        k: self._variables[k]
+                        for k in level_names
+                        if k not in dims_or_levels
+                    }
+                    if level_vars:
+                        idx = index.keep_levels(level_vars)
+                        idx_vars = idx.create_variables(level_vars)
+                        new_indexes.update({k: idx for k in idx_vars})
+                        new_variables.update(idx_vars)
+                replaced_indexes.append(index)
+
+            if drop:
+                drop_variables.append(name)
+
+        indexes = {k: v for k, v in self._indexes.items() if k not in drop_indexes}
+        indexes.update(new_indexes)
+
+        variables = {
+            k: v for k, v in self._variables.items() if k not in drop_variables
+        }
+        variables.update(new_variables)
+
+        coord_names = set(new_variables) | self._coord_names
+
+        return self._replace(variables, coord_names=coord_names, indexes=indexes)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：xarray/tests/test_dataset.py
+测试名称：TestDataset.test_set_index
+测试代码：
+class TestDataset:
+    def test_set_index(self) -> None:
+        expected = create_test_multiindex()
+        mindex = expected["x"].to_index()
+        indexes = [mindex.get_level_values(n) for n in mindex.names]
+        coords = {idx.name: ("x", idx) for idx in indexes}
+        ds = Dataset({}, coords=coords)
+
+        obj = ds.set_index(x=mindex.names)
+        assert_identical(obj, expected)
+
+        # ensure pre-existing indexes involved are removed
+        # (level_2 should be a coordinate with no index)
+        ds = create_test_multiindex()
+        coords = {"x": coords["level_1"], "level_2": coords["level_2"]}
+        expected = Dataset({}, coords=coords)
+
+        obj = ds.set_index(x="level_1")
+        assert_identical(obj, expected)
+
+        # ensure set_index with no existing index and a single data var given
+        # doesn't return multi-index
+        ds = Dataset(data_vars={"x_var": ("x", [0, 1, 2])})
+        expected = Dataset(coords={"x": [0, 1, 2]})
+        assert_identical(ds.set_index(x="x_var"), expected)
+
+        with pytest.raises(ValueError, match=r"bar variable\(s\) do not exist"):
+            ds.set_index(foo="bar")
+
+        with pytest.raises(ValueError, match=r"dimension mismatch.*"):
+            ds.set_index(y="x_var")
+
+【相关测试 2】
+测试文件：xarray/tests/test_dataset.py
+测试名称：TestDataset.test_reset_index
+测试代码：
+class TestDataset:
+    def test_reset_index(self) -> None:
+        ds = create_test_multiindex()
+        mindex = ds["x"].to_index()
+        indexes = [mindex.get_level_values(n) for n in mindex.names]
+        coords = {idx.name: ("x", idx) for idx in indexes}
+        coords["x"] = ("x", mindex.values)
+        expected = Dataset({}, coords=coords)
+
+        obj = ds.reset_index("x")
+        assert_identical(obj, expected, check_default_indexes=False)
+        assert len(obj.xindexes) == 0
+
+        ds = Dataset(coords={"y": ("x", [1, 2, 3])})
+        with pytest.raises(ValueError, match=r".*not coordinates with an index"):
+            ds.reset_index("y")
+
+【相关测试 3】
+测试文件：xarray/tests/test_dataset.py
+测试名称：TestDataset.test_reset_index_keep_attrs
+测试代码：
+class TestDataset:
+    def test_reset_index_keep_attrs(self) -> None:
+        coord_1 = DataArray([1, 2], dims=["coord_1"], attrs={"attrs": True})
+        ds = Dataset({}, {"coord_1": coord_1})
+        obj = ds.reset_index("coord_1")
+        assert_identical(obj, ds, check_default_indexes=False)
+        assert len(obj.xindexes) == 0
+
+【相关测试 4】
+测试文件：xarray/tests/test_dataarray.py
+测试名称：TestDataArray.test_reset_index
+测试代码：
+class TestDataArray:
+    def test_reset_index(self) -> None:
+        indexes = [self.mindex.get_level_values(n) for n in self.mindex.names]
+        coords = {idx.name: ("x", idx) for idx in indexes}
+        coords["x"] = ("x", self.mindex.values)
+        expected = DataArray(self.mda.values, coords=coords, dims="x")
+
+        obj = self.mda.reset_index("x")
+        assert_identical(obj, expected, check_default_indexes=False)
+        assert len(obj.xindexes) == 0
+        obj = self.mda.reset_index(self.mindex.names)
+        assert_identical(obj, expected, check_default_indexes=False)
+        assert len(obj.xindexes) == 0
+        obj = self.mda.reset_index(["x", "level_1"])
+        assert_identical(obj, expected, check_default_indexes=False)
+        assert list(obj.xindexes) == ["level_2"]
+
+        expected = DataArray(self.mda.values, coords=coords, dims="x")
+        obj = self.mda.reset_index(["level_1"])
+        assert_identical(obj, expected, check_default_indexes=False)
+        assert list(obj.xindexes) == ["level_2"]
+        assert type(obj.xindexes["level_2"]) is PandasIndex
+
+        coords = {k: v for k, v in coords.items() if k != "x"}
+        expected = DataArray(self.mda.values, coords=coords, dims="x")
+        obj = self.mda.reset_index("x", drop=True)
+        assert_identical(obj, expected, check_default_indexes=False)
+
+        array = self.mda.copy()
+        array = array.reset_index(["x"], drop=True)
+        assert_identical(array, expected, check_default_indexes=False)
+
+        # single index
+        array = DataArray([1, 2], coords={"x": ["a", "b"]}, dims="x")
+        obj = array.reset_index("x")
+        assert_identical(obj, array, check_default_indexes=False)
+        assert len(obj.xindexes) == 0
+
+【相关测试 5】
+测试文件：xarray/tests/test_dataset.py
+测试名称：TestDataset.test_constructor
+测试代码：
+class TestDataset:
+    def test_constructor(self) -> None:
+        x1 = ("x", 2 * np.arange(100))
+        x2 = ("x", np.arange(1000))
+        z = (["x", "y"], np.arange(1000).reshape(100, 10))
+
+        with pytest.raises(ValueError, match=r"conflicting sizes"):
+            Dataset({"a": x1, "b": x2})
+        with pytest.raises(ValueError, match=r"disallows such variables"):
+            Dataset({"a": x1, "x": z})
+        with pytest.raises(TypeError, match=r"tuple of form"):
+            Dataset({"x": (1, 2, 3, 4, 5, 6, 7)})
+        with pytest.raises(ValueError, match=r"already exists as a scalar"):
+            Dataset({"x": 0, "y": ("x", [1, 2, 3])})
+
+        # verify handling of DataArrays
+        expected = Dataset({"x": x1, "z": z})
+        actual = Dataset({"z": expected["z"]})
+        assert_identical(expected, actual)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

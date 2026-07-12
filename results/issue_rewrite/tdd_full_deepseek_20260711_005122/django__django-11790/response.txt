@@ -1,0 +1,135 @@
+{
+  "issue_summary": "AuthenticationForm 的 username 字段不再渲染 maxlength HTML 属性。",
+  "trigger_condition": {
+    "text": "创建 AuthenticationForm 实例并渲染其 username 字段的 HTML。",
+    "evidence": ["Issue 描述 AuthenticationForm 的 username 字段不再渲染 maxlength HTML 属性。", "源码片段 1 显示 AuthenticationForm 使用 UsernameField，其父类 CharField 的 widget_attrs 方法负责添加 maxlength 属性。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "渲染的 HTML 输入标签中缺少 maxlength 属性。",
+    "symptom_type": "unknown",
+    "evidence": ["Issue 描述 AuthenticationForm 的 username 字段不再渲染 maxlength HTML 属性。", "相关测试 4 表明当 CharField 设置了 max_length 时，渲染的 HTML 应包含 maxlength 属性。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "AuthenticationForm 的 username 字段渲染的 HTML 应包含 maxlength 属性，其值应与字段的 max_length 设置一致。",
+    "evidence": ["相关测试 4 展示了 CharField 的 max_length 应导致渲染的 HTML 包含 maxlength 属性。", "源码片段 4 中 CharField.widget_attrs 方法在 max_length 不为 None 时会将 maxlength 属性添加到 widget 属性中。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "AuthenticationForm",
+      "kind": "class",
+      "source_path": "django/contrib/auth/forms.py",
+      "reason": "Issue 直接关于 AuthenticationForm 的 username 字段。"
+    },
+    {
+      "name": "CharField.widget_attrs",
+      "kind": "method",
+      "source_path": "django/forms/fields.py",
+      "reason": "该方法负责根据字段的 max_length 向 widget 添加 maxlength HTML 属性。"
+    },
+    {
+      "name": "UsernameField",
+      "kind": "class",
+      "source_path": "",
+      "reason": "AuthenticationForm 的 username 字段是 UsernameField 类型，它继承自 CharField。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/contrib/auth/forms.py",
+      "object": "AuthenticationForm.username",
+      "lines": "163-236",
+      "reason": "Issue 指出回归发生在 AuthenticationForm 的 username 字段。源码片段 1 显示其定义，可能 max_length 未正确设置或传递。"
+    },
+    {
+      "path": "django/forms/fields.py",
+      "object": "CharField.widget_attrs",
+      "lines": "231-239",
+      "reason": "该方法负责添加 maxlength 属性。如果 username 字段的 max_length 为 None 或 widget 状态有问题，可能导致属性缺失。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "AuthenticationFormTest.test_username_field_max_length_defaults_to_254",
+      "test_file": "tests/auth_tests/test_forms.py",
+      "why_relevant": "它测试了 AuthenticationForm 的 username 字段的 max_length 属性，与 Issue 关注的字段和属性相关。",
+      "reusable_parts": ["AuthenticationForm 的导入和实例化", "使用 override_settings 设置自定义用户模型", "检查 form.fields['username'].max_length"],
+      "possible_gap": "该测试只检查了 max_length 字段值，没有检查渲染的 HTML 中是否包含 maxlength 属性。"
+    },
+    {
+      "test_name": "FormsTestCase.test_form_html_attributes",
+      "test_file": "tests/forms_tests/tests/test_forms.py",
+      "why_relevant": "它直接测试了 CharField 的 max_length 如何影响渲染的 HTML 中的 maxlength 属性，这是 Issue 的核心。",
+      "reusable_parts": ["使用 CharField 和 Form 类", "使用 assertHTMLEqual 检查渲染的 HTML 输出", "测试 maxlength 属性是否出现在 HTML 中"],
+      "possible_gap": "它测试的是通用的 Form 和 CharField，而不是特定的 AuthenticationForm 和 UsernameField。"
+    },
+    {
+      "test_name": "AuthenticationFormTest.test_html_autocomplete_attributes",
+      "test_file": "tests/auth_tests/test_forms.py",
+      "why_relevant": "它测试了 AuthenticationForm 字段的 widget 属性（autocomplete），与检查 HTML 属性的模式相似。",
+      "reusable_parts": ["AuthenticationForm 的实例化", "检查 form.fields[field_name].widget.attrs 中的属性"],
+      "possible_gap": "它检查的是 autocomplete 属性，而不是 maxlength。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "相关测试 1 和 2 使用自定义用户模型（IntegerUsernameUser, CustomEmailField）并检查 max_length 字段值。",
+      "target_pattern": "使用默认用户模型或一个 username 字段有 max_length 限制的用户模型，并检查渲染的 HTML。",
+      "reason": "Issue 是关于 AuthenticationForm 的通用行为，可能不依赖于特定用户模型。需要从检查字段值变异为检查渲染的 HTML 属性。",
+      "confidence": "medium"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "相关测试 1 和 2 创建了用户并验证表单错误。",
+      "target_pattern": "仅创建 AuthenticationForm 实例，不创建用户或验证数据，直接检查其字段的 widget 属性或渲染的 HTML。",
+      "reason": "maxlength 属性是渲染时的问题，与表单验证或数据库操作无关。简化测试以聚焦于 HTML 生成。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "repr",
+      "expression_hint": "form.fields['username'].widget.attrs",
+      "reason": "直接查看 widget 的属性字典，检查是否包含 'maxlength' 键。"
+    },
+    {
+      "kind": "file_output",
+      "expression_hint": "form.as_p() 或 form['username'].as_widget() 返回的 HTML 字符串",
+      "reason": "Issue 是关于渲染的 HTML 中缺少属性，因此需要观察最终的 HTML 输出。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "AuthenticationForm 的 username 字段渲染的 HTML 包含 maxlength 属性。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的 HTML 字符串相等，因为 HTML 格式或无关属性可能变化。",
+      "reason": "Issue 核心是 maxlength 属性的存在性，而不是具体的 HTML 结构细节。"
+    },
+    {
+      "assertion_goal": "maxlength 属性的值应与 username 字段的 max_length 设置一致。",
+      "preferred_assertion_style": "equals",
+      "avoid": "硬编码特定的 maxlength 值，除非从用户模型字段明确推导。",
+      "reason": "属性值应正确反映字段的约束。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "可能需要使用 TestCase 或 SimpleTestCase。相关测试使用了 TestCase 和 TestDataMixin，但检查 HTML 属性可能不需要数据库。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    },
+    {
+      "hint": "可能需要导入 AuthenticationForm 和相关的用户模型类。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "username 字段的 max_length 默认值是多少，以及它是否从用户模型正确继承。",
+    "导致 maxlength 属性缺失的具体代码路径是什么（是 max_length 为 None，还是 widget_attrs 未被调用，或是其他原因）。",
+    "Issue 中提到的回归提交 #27515 和 5ceaf14686ce626404afb6a5fbd3d8286410bf13 具体改变了什么。"
+  ]
+}

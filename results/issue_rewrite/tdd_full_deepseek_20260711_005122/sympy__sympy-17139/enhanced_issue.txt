@@ -1,0 +1,156 @@
+instance_id: sympy__sympy-17139
+
+issue_summary: 调用 simplify(cos(x)**I) 时，由于对复数 I 进行了无效的比较操作，导致 TypeError 异常。
+
+trigger_condition:
+{
+  "text": "对包含复数指数 I 的三角函数表达式（如 cos(x)**I）调用 simplify 函数。",
+  "evidence": [
+    "Issue 中提供了输入表达式 cos(x)**I 和调用 simplify 的代码。",
+    "源码片段 3 显示 futrig 函数会处理三角函数表达式。",
+    "源码片段 5 显示 _futrig 函数会调用 TR6 等变换规则。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "抛出 TypeError: Invalid comparison of complex I 异常。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中的完整堆栈跟踪显示异常来自 sympy/core/expr.py 的 __lt__ 方法。",
+    "堆栈跟踪指向 fu.py 中 _f 函数内的条件判断 (rv.exp < 0) == True。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "simplify 函数应能处理包含复数指数的三角函数表达式，并返回一个有效的简化结果或保持原表达式不变，而不抛出 TypeError。",
+  "evidence": [
+    "Issue 标题和描述暗示这是一个需要修复的 bug。",
+    "相关测试 5 表明 simplify 函数应能处理复数表达式（如 exp(Matrix(...))）。",
+    "SymPy 作为一个符号计算库，预期应支持复数运算。"
+  ],
+  "confidence": "medium"
+}
+
+target_apis:
+[
+  {
+    "name": "simplify",
+    "kind": "function",
+    "source_path": "sympy/simplify/simplify.py",
+    "reason": "Issue 中直接调用的入口函数。"
+  },
+  {
+    "name": "trigsimp",
+    "kind": "function",
+    "source_path": "sympy/simplify/trigsimp.py",
+    "reason": "simplify 函数内部调用了 trigsimp。"
+  },
+  {
+    "name": "futrig",
+    "kind": "function",
+    "source_path": "sympy/simplify/trigsimp.py",
+    "reason": "trigsimp 函数内部调用了 futrig 来处理三角函数。"
+  },
+  {
+    "name": "_futrig",
+    "kind": "function",
+    "source_path": "sympy/simplify/trigsimp.py",
+    "reason": "futrig 函数内部调用了 _futrig 作为辅助函数。"
+  },
+  {
+    "name": "TR6",
+    "kind": "function",
+    "source_path": "sympy/simplify/fu.py",
+    "reason": "堆栈跟踪显示异常发生在 TR6 的调用链中。"
+  },
+  {
+    "name": "_TR56",
+    "kind": "function",
+    "source_path": "sympy/simplify/fu.py",
+    "reason": "TR6 函数内部调用了 _TR56。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中使用实数指数（如 2, -2, 4）或符号指数（如 y）的三角函数表达式。",
+    "target_pattern": "将指数替换为复数 I，例如 cos(x)**I。",
+    "reason": "Issue 显示当指数为复数 I 时，在比较操作中会触发 TypeError。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "直接调用 TR6 或 trigsimp 进行测试。",
+    "target_pattern": "通过 simplify 函数调用，以触发完整的调用链（simplify -> trigsimp -> futrig -> _futrig -> TR6 -> ...）。",
+    "reason": "Issue 中的异常是通过 simplify 调用触发的，这涉及更深层的函数调用。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "是否抛出 TypeError 及其消息是否包含 'Invalid comparison of complex I'。",
+    "reason": "Issue 的核心错误现象就是这个异常。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "simplify(cos(x)**I) 的返回值（如果未抛出异常）。",
+    "reason": "观察修复后函数是返回简化结果、原表达式还是其他有效输出。"
+  },
+  {
+    "kind": "type",
+    "expression_hint": "中间表达式（如 rv.exp）的类型，特别是当涉及复数 I 时。",
+    "reason": "异常源于对复数进行 < 比较，了解类型有助于理解上下文。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "对 cos(x)**I 调用 simplify 不应抛出 TypeError。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言完整的输出字符串，因为修复后的确切简化形式未知。",
+    "reason": "Issue 的核心是异常，修复后应消除此异常。"
+  },
+  {
+    "assertion_goal": "simplify(cos(x)**I) 应返回一个有效的 SymPy 表达式（例如，保持原表达式或进行有效简化）。",
+    "preferred_assertion_style": "isinstance",
+    "avoid": "断言与某个具体表达式的严格相等，除非 Issue 明确给出了预期输出。",
+    "reason": "修复后，函数应能处理该输入并返回一个 Basic 实例，而不是崩溃。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 sympy 模块中的 Symbol, cos, I, simplify。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要在现有的测试类（如 TestFu 或 TestTrigsimp）中编写，或者作为一个独立的测试函数。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  },
+  {
+    "hint": "可能不需要特殊的 fixture 或 mock，因为这是一个纯计算函数。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "修复后的 simplify(cos(x)**I) 的确切输出应该是什么？是保持原样，还是转换为其他形式（如 exp 表示）？",
+  "除了复数 I，其他复数指数（如 2*I, 1+I）是否也会触发类似问题？",
+  "bug 的确切修复位置是在 fu.py 的 _f 函数中，还是在更底层的比较逻辑中？",
+  "是否需要对所有涉及指数比较的变换规则（如 TR5, TR111）进行类似的修复？"
+]

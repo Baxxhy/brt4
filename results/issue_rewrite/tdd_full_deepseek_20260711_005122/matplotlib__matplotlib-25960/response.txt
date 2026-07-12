@@ -1,0 +1,122 @@
+{
+  "issue_summary": "Figure.subfigures 方法的 wspace 和 hspace 参数设置无效，子图间距不随参数改变。",
+  "trigger_condition": {
+    "text": "调用 Figure.subfigures 方法并设置 wspace 和 hspace 参数（例如 wspace=0, hspace=0）。",
+    "evidence": ["Issue 中的复现代码：figs = plt.figure().subfigures(2, 2, wspace=0, hspace=0)", "源码片段 1 中 subfigures 方法的签名包含 wspace 和 hspace 参数。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "子图之间的间距不随 wspace 和 hspace 参数值的变化而改变，视觉输出保持不变。",
+    "symptom_type": "state_not_updated",
+    "evidence": ["Issue 描述：'Same figure independently of the values of hspace and wspace.'", "Issue 中的复现代码设置了 wspace=0, hspace=0，但预期间距应为 0。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "子图之间的间距应根据 wspace 和 hspace 参数的值进行相应调整。",
+    "evidence": ["Issue 中链接的源码行（1550-1554）暗示了 wspace 和 hspace 参数应影响子图间距。", "源码片段 1 中 subfigures 方法的文档字符串说明 wspace 和 hspace 是 'The amount of width/height reserved for space between subfigures'。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "Figure.subfigures",
+      "kind": "method",
+      "source_path": "lib/matplotlib/figure.py",
+      "reason": "Issue 直接报告此方法的 wspace 和 hspace 参数无效。"
+    },
+    {
+      "name": "GridSpec",
+      "kind": "class",
+      "source_path": "",
+      "reason": "源码片段 1 显示 subfigures 方法内部创建了 GridSpec 对象并传入了 wspace 和 hspace 参数。"
+    },
+    {
+      "name": "Figure.add_subfigure",
+      "kind": "method",
+      "source_path": "",
+      "reason": "源码片段 1 显示 subfigures 方法内部调用了 add_subfigure 来创建子图。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "lib/matplotlib/figure.py",
+      "object": "subfigures",
+      "lines": "1545-1600",
+      "reason": "该方法是 Issue 报告的直接目标，其内部将 wspace 和 hspace 参数传递给 GridSpec，但可能 GridSpec 的配置未正确应用到子图布局。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_subfigure_double",
+      "test_file": "lib/matplotlib/tests/test_figure.py",
+      "why_relevant": "该测试调用了 fig.subfigures(1, 2, wspace=0.07)，并设置了 wspace 参数，与 Issue 场景相似。",
+      "reusable_parts": ["import matplotlib.pyplot as plt", "fig = plt.figure(...)", "subfigs = fig.subfigures(...)", "使用 subfigs 对象进行后续操作。"],
+      "possible_gap": "该测试是图像对比测试，主要验证视觉输出，没有直接断言 wspace 参数是否生效。它可能使用了默认的布局管理器（如 constrained_layout），这可能掩盖了 wspace 参数在特定上下文下的问题。"
+    },
+    {
+      "test_name": "test_subfigure_ticks",
+      "test_file": "lib/matplotlib/tests/test_figure.py",
+      "why_relevant": "该测试调用了 fig.subfigures(1, 2, wspace=0.01, ...)，也设置了 wspace 参数。",
+      "reusable_parts": ["fig = plt.figure(...)", "subfigs = fig.subfigures(...) 并传入 wspace 参数。"],
+      "possible_gap": "该测试主要关注刻度间距，没有直接测量或断言子图之间的物理间距是否等于 wspace 的设置值。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "相关测试中调用 subfigures 时通常使用非零的 wspace/hspace 值（如 0.07, 0.01）。",
+      "target_pattern": "将 wspace 和 hspace 设置为 0 或极值，以更明显地观察间距是否变化。",
+      "reason": "Issue 表明间距不随参数变化，使用边界值（如 0）可以更容易地检测间距是否被正确应用。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "相关测试可能使用了 layout='constrained' 或 constrained_layout=True。",
+      "target_pattern": "尝试在不使用 constrained_layout 的上下文中调用 subfigures。",
+      "reason": "Issue 的复现代码没有指定 layout 参数，可能是在默认布局下 wspace/hspace 失效。不同的布局管理器可能影响参数的行为。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "state",
+      "expression_hint": "子图对象（SubFigure）的 bbox 属性或 get_position() 方法的返回值，比较不同 wspace/hspace 设置下的坐标。",
+      "reason": "子图的位置和大小应反映 wspace 和 hspace 的设置，通过比较坐标可以量化间距是否变化。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "内部 GridSpec 对象的 _wspace 和 _hspace 属性。",
+      "reason": "subfigures 方法将参数传递给了 GridSpec，检查 GridSpec 是否存储了正确的值可以定位问题是在参数传递阶段还是布局计算阶段。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证当 wspace 设置为 0 时，相邻子图之间的水平间距（通过 bbox 计算）应为 0 或接近 0。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的图像像素匹配或依赖于特定渲染后端的输出。",
+      "reason": "间距是几何属性，可以通过子图的边界框坐标进行精确计算和断言，这比图像对比更稳定且与 Issue 语义直接相关。"
+    },
+    {
+      "assertion_goal": "验证 wspace 参数的变化会导致子图间距的相应变化。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "避免断言具体的绝对间距值，除非文档明确指定了计算公式。",
+      "reason": "Issue 的核心是参数是否生效，断言间距随参数变化的关系比断言特定值更稳健。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 matplotlib.testing 模块，可能不需要 GUI 后端。使用 'Agg' 后端进行非交互式测试。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要创建 Figure 对象而不使用 pyplot 来避免全局状态干扰。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "wspace 和 hspace 参数是否在所有布局管理器（如 tight_layout, constrained_layout, 默认布局）下都失效，还是仅在特定上下文中失效。",
+    "缺陷的确切位置是在 subfigures 方法内部、GridSpec 的初始化，还是在子图（SubFigure）的布局计算过程中。",
+    "是否还有其他参数（如 width_ratios, height_ratios）也受到影响。"
+  ]
+}

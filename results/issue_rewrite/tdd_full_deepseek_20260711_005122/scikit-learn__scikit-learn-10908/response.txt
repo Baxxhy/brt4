@@ -1,0 +1,150 @@
+{
+  "issue_summary": "CountVectorizer 在初始化时提供了 vocabulary 参数，但未调用 fit 时，get_feature_names 方法错误地抛出 NotFittedError。",
+  "trigger_condition": {
+    "text": "使用 vocabulary 参数初始化 CountVectorizer，不调用 fit，直接调用 get_feature_names。",
+    "evidence": ["Issue 中代码：vectorizer = CountVectorizer(vocabulary=vocabulary); vectorizer.get_feature_names()", "源码片段 3 显示 get_feature_names 调用 _check_vocabulary。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "调用 get_feature_names 时抛出 NotFittedError 异常，提示 'Vocabulary wasn't fitted.'。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 中代码：In [7]: vectorizer.get_feature_names() 输出 NotFittedError: CountVectorizer - Vocabulary wasn't fitted.", "源码片段 5 定义了 NotFittedError 类。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当通过 vocabulary 参数初始化 CountVectorizer 后，即使未调用 fit，get_feature_names 也应能基于提供的 vocabulary 返回特征名称列表，而不应抛出 NotFittedError。",
+    "evidence": ["Issue 中作者观点：'I believe that the get_feature_names method should not raise NotFittedError if the vocabulary parameter is provided but the vectorizer has not been trained.'", "Issue 中显示 transform 方法在相同条件下能正常工作并设置 vocabulary_。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "CountVectorizer",
+      "kind": "class",
+      "source_path": "sklearn/feature_extraction/text.py",
+      "reason": "Issue 报告的核心类。"
+    },
+    {
+      "name": "CountVectorizer.get_feature_names",
+      "kind": "method",
+      "source_path": "sklearn/feature_extraction/text.py",
+      "reason": "抛出 NotFittedError 的方法。"
+    },
+    {
+      "name": "CountVectorizer.transform",
+      "kind": "method",
+      "source_path": "sklearn/feature_extraction/text.py",
+      "reason": "Issue 中显示在相同条件下能正常工作并设置 vocabulary_，与 get_feature_names 行为对比。"
+    },
+    {
+      "name": "CountVectorizer._validate_vocabulary",
+      "kind": "method",
+      "source_path": "sklearn/feature_extraction/text.py",
+      "reason": "transform 方法中调用以设置 vocabulary_ 的方法。"
+    },
+    {
+      "name": "CountVectorizer._check_vocabulary",
+      "kind": "method",
+      "source_path": "sklearn/feature_extraction/text.py",
+      "reason": "get_feature_names 和 transform 中调用的方法，可能涉及状态检查。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sklearn/feature_extraction/text.py",
+      "object": "CountVectorizer.get_feature_names",
+      "lines": "994-999",
+      "reason": "该方法直接调用 _check_vocabulary，可能在未设置 vocabulary_ 时抛出 NotFittedError，而未考虑通过 vocabulary 参数初始化的情况。"
+    },
+    {
+      "path": "sklearn/feature_extraction/text.py",
+      "object": "CountVectorizer._check_vocabulary",
+      "lines": "",
+      "reason": "该方法可能负责检查 vocabulary_ 属性是否存在，但未正确处理 fixed_vocabulary_ 或 vocabulary 参数已提供的情况。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_feature_names",
+      "test_file": "sklearn/feature_extraction/tests/test_text.py",
+      "why_relevant": "直接测试 get_feature_names 在未拟合时的行为（抛出 ValueError）。",
+      "reusable_parts": ["imports (CountVectorizer, assert_raises)", "对象构造模式", "assert_raises 的使用风格"],
+      "possible_gap": "该测试未覆盖通过 vocabulary 参数初始化但未拟合的场景，它测试的是默认初始化且未拟合的情况。"
+    },
+    {
+      "test_name": "test_countvectorizer_custom_vocabulary",
+      "test_file": "sklearn/feature_extraction/tests/test_text.py",
+      "why_relevant": "测试了使用自定义 vocabulary 初始化 CountVectorizer 并调用 fit 的场景。",
+      "reusable_parts": ["vocabulary 参数的构造（dict, list 等）", "CountVectorizer 的初始化模式", "assert_equal 等断言"],
+      "possible_gap": "该测试在调用 get_feature_names 前调用了 fit，因此不会触发未拟合时的错误路径。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试中，调用 get_feature_names 前通常先调用 fit 或 fit_transform 来设置 vocabulary_。",
+      "target_pattern": "在调用 get_feature_names 前不调用 fit，但通过 vocabulary 参数初始化 CountVectorizer。",
+      "reason": "Issue 表明，仅当 vocabulary 参数提供且未拟合时，get_feature_names 会错误地抛出异常。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "相似测试中，vocabulary 参数通常与 fit 一起使用。",
+      "target_pattern": "仅通过 vocabulary 参数初始化 CountVectorizer，不进行任何拟合操作。",
+      "reason": "这模拟了 Issue 中描述的触发条件，使对象处于未拟合但有预设 vocabulary 的状态。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "vectorizer.get_feature_names() 的调用结果（是否抛出 NotFittedError）。",
+      "reason": "Issue 的核心错误现象是抛出 NotFittedError。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "调用 get_feature_names 前后 vectorizer.vocabulary_ 和 vectorizer.fixed_vocabulary_ 的状态。",
+      "reason": "Issue 显示 transform 会设置 vocabulary_，而 get_feature_names 可能依赖这些状态。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "如果 get_feature_names 成功返回，观察其返回值（特征名称列表）是否与提供的 vocabulary 一致。",
+      "reason": "验证预期行为：基于提供的 vocabulary 返回正确的特征名。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "当 CountVectorizer 通过 vocabulary 参数初始化且未拟合时，调用 get_feature_names 不应抛出 NotFittedError。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言完整的异常消息字符串，因为消息可能变化。",
+      "reason": "Issue 的核心是异常是否被抛出。使用 raises 配合 NotFittedError 类型来断言异常缺失（即不应抛出）。注意：修复后应正常返回，所以断言极性需调整。"
+    },
+    {
+      "assertion_goal": "get_feature_names 返回的特征名列表应与提供的 vocabulary 参数（排序后）一致。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的 repr 或与内部实现细节（如索引顺序）强绑定。",
+      "reason": "验证在修复后，方法能基于预设 vocabulary 正确工作。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 CountVectorizer 和 NotFittedError。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 pytest.raises 或 assert_raises 来捕获异常。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试数据可以使用简单的字符串列表作为 corpus 和 vocabulary。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "_check_vocabulary 方法的具体实现和它检查的确切条件。",
+    "fixed_vocabulary_ 属性在初始化时的默认值及其在 _validate_vocabulary 中的设置时机。",
+    "在仅提供 vocabulary 参数而未调用 transform 或 fit 时，vocabulary_ 是否应被立即设置。"
+  ]
+}

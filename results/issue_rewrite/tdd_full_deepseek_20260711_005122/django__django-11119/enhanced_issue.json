@@ -1,0 +1,259 @@
+{
+  "instance_id": "django__django-11119",
+  "issue_summary": "Engine.render_to_string() 方法没有尊重 Engine 实例的 autoescape 属性，导致即使 autoescape=False 时渲染结果仍被转义。",
+  "trigger_condition": {
+    "text": "创建一个 autoescape=False 的 Engine 实例，然后调用其 render_to_string() 方法渲染一个包含需要转义字符（如 &）的模板。",
+    "evidence": [
+      "Issue 描述：'if you create en engine with autoescape=False and then call its render_to_string() method, the result will always be autoescaped'",
+      "源码片段 4 显示 Engine.__init__ 有 autoescape 参数",
+      "相关测试 1 展示了如何创建 autoescape=False 的引擎并渲染模板"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "渲染结果被错误地自动转义（例如 & 变成 &amp;），而期望的是原始字符。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 描述：'the result will always be autoescaped'",
+      "相关测试 1 的预期输出是未转义的 'Hello, Bob & Jim'，而相关测试 2 的预期输出是转义的 'Hello, Bob &amp; Jim'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "Engine.render_to_string() 方法渲染模板时，应使用 Engine 实例初始化时设置的 autoescape 属性值来控制自动转义行为。",
+    "evidence": [
+      "Issue 标题：'Engine.render_to_string() should honor the autoescape attribute'",
+      "源码片段 4 中 Engine.__init__ 接受 autoescape 参数，表明该属性是 Engine 的配置项"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "django.template.engine.Engine.render_to_string",
+      "kind": "method",
+      "source_path": "django/template/engine.py",
+      "reason": "这是 Issue 直接报告的存在缺陷的方法。"
+    },
+    {
+      "name": "django.template.engine.Engine.__init__",
+      "kind": "method",
+      "source_path": "django/template/engine.py",
+      "reason": "该方法用于创建 Engine 实例并设置 autoescape 属性。"
+    },
+    {
+      "name": "django.template.context.Context.__init__",
+      "kind": "method",
+      "source_path": "django/template/context.py",
+      "reason": "Context 的构造函数接受 autoescape 参数，render_to_string 内部创建 Context 时可能未传递此参数。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/template/engine.py",
+      "object": "Engine.render_to_string",
+      "lines": "149-163",
+      "reason": "该方法内部创建 Context 时，没有传递 self.autoescape 参数，而是使用了 Context 构造函数的默认值 autoescape=True。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_autoescape_off",
+      "test_file": "tests/template_backends/test_django.py",
+      "why_relevant": "该测试创建了一个 autoescape=False 的引擎，并验证了通过 engine.from_string().render() 渲染时未转义的行为。这与 Issue 场景高度相似，但使用的是 from_string 而非 render_to_string。",
+      "reusable_parts": [
+        "创建 autoescape=False 引擎的配置方式",
+        "使用包含特殊字符的模板和上下文",
+        "断言输出是否被转义的模式"
+      ],
+      "possible_gap": "该测试调用的是 engine.from_string().render()，而 Issue 针对的是 engine.render_to_string() 方法。"
+    },
+    {
+      "test_name": "test_basic_context",
+      "test_file": "tests/template_tests/test_engine.py",
+      "why_relevant": "该测试直接调用了 self.engine.render_to_string 方法，展示了该方法的基本使用方式。",
+      "reusable_parts": [
+        "测试类继承自 SimpleTestCase",
+        "直接调用 engine.render_to_string 的语法",
+        "基本的断言风格"
+      ],
+      "possible_gap": "该测试没有涉及 autoescape 属性的配置，使用的是默认引擎。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "相关测试 2 使用默认 autoescape=True 的引擎配置。",
+      "target_pattern": "将引擎配置为 autoescape=False，如相关测试 1 所示。",
+      "reason": "Issue 的核心是 autoescape=False 的配置在 render_to_string 中未生效。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "相关测试 1 使用 engine.from_string().render(context_dict)。",
+      "target_pattern": "改为直接调用 engine.render_to_string(template_name, context_dict)。",
+      "reason": "Issue 明确指出 render_to_string 方法存在缺陷，需要测试该方法。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "engine.render_to_string() 的返回值字符串。",
+      "reason": "通过观察返回值中特殊字符（如 &）是否被转义，可以直接判断 autoescape 属性是否被正确应用。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "在 render_to_string 内部创建的 Context 实例的 autoescape 属性值。",
+      "reason": "可以插桩检查传入 Context 构造函数的 autoescape 参数是否与 engine.autoescape 一致。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "当 engine.autoescape=False 时，渲染包含 & 等字符的模板，输出应保持原样，不被转义。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的、复杂的 HTML 字符串，只关注关键字符的转义情况。",
+      "reason": "Issue 的核心是转义行为，直接比较输出字符串与预期未转义字符串是最直接的验证方式。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 SimpleTestCase 或类似的 Django 测试基类。需要创建带有特定 OPTIONS（包括 autoescape: False）的 Engine 或 DjangoTemplates 后端。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "Issue 中提到的提交 [19a5f6da329d58653bcda85] 的具体内容未提供，无法确认其引入的确切变更。",
+    "除了 autoescape 属性，Context 构造函数的其他参数（use_l10n, use_tz）是否也存在同样的问题？",
+    "Engine.render_to_string 方法中处理 isinstance(context, Context) 的分支是否也需要考虑 autoescape 属性？"
+  ],
+  "raw": {
+    "issue_summary": "Engine.render_to_string() 方法没有尊重 Engine 实例的 autoescape 属性，导致即使 autoescape=False 时渲染结果仍被转义。",
+    "trigger_condition": {
+      "text": "创建一个 autoescape=False 的 Engine 实例，然后调用其 render_to_string() 方法渲染一个包含需要转义字符（如 &）的模板。",
+      "evidence": [
+        "Issue 描述：'if you create en engine with autoescape=False and then call its render_to_string() method, the result will always be autoescaped'",
+        "源码片段 4 显示 Engine.__init__ 有 autoescape 参数",
+        "相关测试 1 展示了如何创建 autoescape=False 的引擎并渲染模板"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "渲染结果被错误地自动转义（例如 & 变成 &amp;），而期望的是原始字符。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'the result will always be autoescaped'",
+        "相关测试 1 的预期输出是未转义的 'Hello, Bob & Jim'，而相关测试 2 的预期输出是转义的 'Hello, Bob &amp; Jim'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Engine.render_to_string() 方法渲染模板时，应使用 Engine 实例初始化时设置的 autoescape 属性值来控制自动转义行为。",
+      "evidence": [
+        "Issue 标题：'Engine.render_to_string() should honor the autoescape attribute'",
+        "源码片段 4 中 Engine.__init__ 接受 autoescape 参数，表明该属性是 Engine 的配置项"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.template.engine.Engine.render_to_string",
+        "kind": "method",
+        "source_path": "django/template/engine.py",
+        "reason": "这是 Issue 直接报告的存在缺陷的方法。"
+      },
+      {
+        "name": "django.template.engine.Engine.__init__",
+        "kind": "method",
+        "source_path": "django/template/engine.py",
+        "reason": "该方法用于创建 Engine 实例并设置 autoescape 属性。"
+      },
+      {
+        "name": "django.template.context.Context.__init__",
+        "kind": "method",
+        "source_path": "django/template/context.py",
+        "reason": "Context 的构造函数接受 autoescape 参数，render_to_string 内部创建 Context 时可能未传递此参数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/template/engine.py",
+        "object": "Engine.render_to_string",
+        "lines": "149-163",
+        "reason": "该方法内部创建 Context 时，没有传递 self.autoescape 参数，而是使用了 Context 构造函数的默认值 autoescape=True。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_autoescape_off",
+        "test_file": "tests/template_backends/test_django.py",
+        "why_relevant": "该测试创建了一个 autoescape=False 的引擎，并验证了通过 engine.from_string().render() 渲染时未转义的行为。这与 Issue 场景高度相似，但使用的是 from_string 而非 render_to_string。",
+        "reusable_parts": [
+          "创建 autoescape=False 引擎的配置方式",
+          "使用包含特殊字符的模板和上下文",
+          "断言输出是否被转义的模式"
+        ],
+        "possible_gap": "该测试调用的是 engine.from_string().render()，而 Issue 针对的是 engine.render_to_string() 方法。"
+      },
+      {
+        "test_name": "test_basic_context",
+        "test_file": "tests/template_tests/test_engine.py",
+        "why_relevant": "该测试直接调用了 self.engine.render_to_string 方法，展示了该方法的基本使用方式。",
+        "reusable_parts": [
+          "测试类继承自 SimpleTestCase",
+          "直接调用 engine.render_to_string 的语法",
+          "基本的断言风格"
+        ],
+        "possible_gap": "该测试没有涉及 autoescape 属性的配置，使用的是默认引擎。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 2 使用默认 autoescape=True 的引擎配置。",
+        "target_pattern": "将引擎配置为 autoescape=False，如相关测试 1 所示。",
+        "reason": "Issue 的核心是 autoescape=False 的配置在 render_to_string 中未生效。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 使用 engine.from_string().render(context_dict)。",
+        "target_pattern": "改为直接调用 engine.render_to_string(template_name, context_dict)。",
+        "reason": "Issue 明确指出 render_to_string 方法存在缺陷，需要测试该方法。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "engine.render_to_string() 的返回值字符串。",
+        "reason": "通过观察返回值中特殊字符（如 &）是否被转义，可以直接判断 autoescape 属性是否被正确应用。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 render_to_string 内部创建的 Context 实例的 autoescape 属性值。",
+        "reason": "可以插桩检查传入 Context 构造函数的 autoescape 参数是否与 engine.autoescape 一致。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 engine.autoescape=False 时，渲染包含 & 等字符的模板，输出应保持原样，不被转义。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、复杂的 HTML 字符串，只关注关键字符的转义情况。",
+        "reason": "Issue 的核心是转义行为，直接比较输出字符串与预期未转义字符串是最直接的验证方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的 Django 测试基类。需要创建带有特定 OPTIONS（包括 autoescape: False）的 Engine 或 DjangoTemplates 后端。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到的提交 [19a5f6da329d58653bcda85] 的具体内容未提供，无法确认其引入的确切变更。",
+      "除了 autoescape 属性，Context 构造函数的其他参数（use_l10n, use_tz）是否也存在同样的问题？",
+      "Engine.render_to_string 方法中处理 isinstance(context, Context) 的分支是否也需要考虑 autoescape 属性？"
+    ]
+  }
+}

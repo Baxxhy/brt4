@@ -1,0 +1,625 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Queryset raises NotSupportedError when RHS has filterable=False attribute.
+Description
+	 
+		(last modified by Nicolas Baccelli)
+	 
+I'm migrating my app to django 3.0.7 and I hit a strange behavior using a model class with a field labeled filterable
+class ProductMetaDataType(models.Model):
+	label = models.CharField(max_length=255, unique=True, blank=False, null=False)
+	filterable = models.BooleanField(default=False, verbose_name=_("filterable"))
+	class Meta:
+		app_label = "adminpricing"
+		verbose_name = _("product meta data type")
+		verbose_name_plural = _("product meta data types")
+	def __str__(self):
+		return self.label
+class ProductMetaData(models.Model):
+	id = models.BigAutoField(primary_key=True)
+	product = models.ForeignKey(
+		Produit, null=False, blank=False, on_delete=models.CASCADE
+	)
+	value = models.TextField(null=False, blank=False)
+	marketplace = models.ForeignKey(
+		Plateforme, null=False, blank=False, on_delete=models.CASCADE
+	)
+	date_created = models.DateTimeField(null=True, default=timezone.now)
+	metadata_type = models.ForeignKey(
+		ProductMetaDataType, null=False, blank=False, on_delete=models.CASCADE
+	)
+	class Meta:
+		app_label = "adminpricing"
+		verbose_name = _("product meta data")
+		verbose_name_plural = _("product meta datas")
+Error happened when filtering ProductMetaData with a metadata_type :
+ProductMetaData.objects.filter(value="Dark Vador", metadata_type=self.brand_metadata)
+Error traceback :
+Traceback (most recent call last):
+ File "/backoffice/backoffice/adminpricing/tests/test_pw.py", line 481, in test_checkpolicywarning_by_fields
+	for p in ProductMetaData.objects.filter(
+ File "/usr/local/lib/python3.8/site-packages/django/db/models/manager.py", line 82, in manager_method
+	return getattr(self.get_queryset(), name)(*args, **kwargs)
+ File "/usr/local/lib/python3.8/site-packages/django/db/models/query.py", line 904, in filter
+	return self._filter_or_exclude(False, *args, **kwargs)
+ File "/usr/local/lib/python3.8/site-packages/django/db/models/query.py", line 923, in _filter_or_exclude
+	clone.query.add_q(Q(*args, **kwargs))
+ File "/usr/local/lib/python3.8/site-packages/django/db/models/sql/query.py", line 1351, in add_q
+	clause, _ = self._add_q(q_object, self.used_aliases)
+ File "/usr/local/lib/python3.8/site-packages/django/db/models/sql/query.py", line 1378, in _add_q
+	child_clause, needed_inner = self.build_filter(
+ File "/usr/local/lib/python3.8/site-packages/django/db/models/sql/query.py", line 1264, in build_filter
+	self.check_filterable(value)
+ File "/usr/local/lib/python3.8/site-packages/django/db/models/sql/query.py", line 1131, in check_filterable
+	raise NotSupportedError(
+django.db.utils.NotSupportedError: ProductMetaDataType is disallowed in the filter clause.
+I changed label to filterable_test and it fixed this issue
+This should be documented or fix.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/utils/log.py
+对象名称：filter
+节点类型：class_function
+父节点：CallbackFilter
+行号范围：146-149
+代码：
+    def filter(self, record):
+        if self.callback(record):
+            return 1
+        return 0
+
+
+【源码片段 2】
+文件路径：django/db/models/fields/__init__.py
+对象名称：BooleanField
+节点类型：class
+父节点：__init__
+行号范围：936-979
+代码：
+class BooleanField(Field):
+    empty_strings_allowed = False
+    default_error_messages = {
+        'invalid': _('“%(value)s” value must be either True or False.'),
+        'invalid_nullable': _('“%(value)s” value must be either True, False, or None.'),
+    }
+    description = _("Boolean (Either True or False)")
+    def get_internal_type(self):
+    def to_python(self, value):
+    def get_prep_value(self, value):
+    def formfield(self, **kwargs):
+
+
+【源码片段 3】
+文件路径：django/db/utils.py
+对象名称：NotSupportedError
+节点类型：class
+父节点：utils
+行号范围：48-49
+代码：
+class NotSupportedError(DatabaseError):
+
+
+【源码片段 4】
+文件路径：django/db/models/sql/query.py
+对象名称：check_filterable
+节点类型：class_function
+父节点：Query
+行号范围：1125-1134
+代码：
+    def check_filterable(self, expression):
+        """Raise an error if expression cannot be used in a WHERE clause."""
+        if not getattr(expression, 'filterable', True):
+            raise NotSupportedError(
+                expression.__class__.__name__ + ' is disallowed in the filter '
+                'clause.'
+            )
+        if hasattr(expression, 'get_source_expressions'):
+            for expr in expression.get_source_expressions():
+                self.check_filterable(expr)
+
+
+【源码片段 5】
+文件路径：django/db/models/sql/query.py
+对象名称：Query
+节点类型：class
+父节点：query
+行号范围：136-2296
+代码：
+class Query(BaseExpression):
+    """A single SQL query."""
+    alias_prefix = 'T'
+    subq_aliases = frozenset([alias_prefix])
+    compiler = 'SQLCompiler'
+    def __init__(self, model, where=WhereNode, alias_cols=True):
+    @property
+    def output_field(self):
+    @property
+    def has_select_fields(self):
+    @cached_property
+    def base_table(self):
+    def __str__(self):
+    def sql_with_params(self):
+    def __deepcopy__(self, memo):
+    def get_compiler(self, using=None, connection=None):
+    def get_meta(self):
+    def clone(self):
+    def chain(self, klass=None):
+    def relabeled_clone(self, change_map):
+    def _get_col(self, target, field, alias):
+    def rewrite_cols(self, annotation, col_cnt):
+    def get_aggregation(self, using, added_aggregate_names):
+    def get_count(self, using):
+    def has_filters(self):
+    def has_results(self, using):
+    def explain(self, using, format=None, **options):
+    def combine(self, rhs, connector):
+    def deferred_to_data(self, target, callback):
+    def table_alias(self, table_name, create=False, filtered_relation=None):
+    def ref_alias(self, alias):
+    def unref_alias(self, alias, amount=1):
+    def promote_joins(self, aliases):
+    def demote_joins(self, aliases):
+    def reset_refcounts(self, to_counts):
+    def change_aliases(self, change_map):
+    def bump_prefix(self, outer_query):
+    def get_initial_alias(self):
+    def count_active_tables(self):
+    def join(self, join, reuse=None, reuse_with_filtered_relation=False):
+    def join_parent_model(self, opts, model, alias, seen):
+    def add_annotation(self, annotation, alias, is_summary=False):
+    def resolve_expression(self, query, *args, **kwargs):
+    def get_external_cols(self):
+    def as_sql(self, compiler, connection):
+    def resolve_lookup_value(self, value, can_reuse, allow_joins):
+    def solve_lookup_type(self, lookup):
+    def check_query_object_type(self, value, opts, field):
+    def check_related_objects(self, field, value, opts):
+    def check_filterable(self, expression):
+    def build_lookup(self, lookups, lhs, rhs):
+    def try_transform(self, lhs, name):
+    def build_filter(self, filter_expr, branch_negated=False, current_negated=False,
+                     can_reuse=None, allow_joins=True, split_subq=True,
+                     reuse_with_filtered_relation=False, check_filterable=True):
+    def add_filter(self, filter_clause):
+    def add_q(self, q_object):
+    def build_where(self, filter_expr):
+    def _add_q(self, q_object, used_aliases, branch_negated=False,
+               current_negated=False, allow_joins=True, split_subq=True,
+               check_filterable=True):
+    def build_filtered_relation_q(self, q_object, reuse, branch_negated=False, current_negated=False):
+    def add_filtered_relation(self, filtered_relation, alias):
+    def names_to_path(self, names, opts, allow_many=True, fail_on_missing=False):
+    def setup_joins(self, names, opts, alias, can_reuse=None, allow_many=True,
+                    reuse_with_filtered_relation=False):
+    def trim_joins(self, targets, joins, path):
+    @classmethod
+    def _gen_cols(cls, exprs):
+    @classmethod
+    def _gen_col_aliases(cls, exprs):
+    def resolve_ref(self, name, allow_joins=True, reuse=None, summarize=False):
+    def split_exclude(self, filter_expr, can_reuse, names_with_path):
+    def set_empty(self):
+    def is_empty(self):
+    def set_limits(self, low=None, high=None):
+    def clear_limits(self):
+    @property
+    def is_sliced(self):
+    def has_limit_one(self):
+    def can_filter(self):
+    def clear_select_clause(self):
+    def clear_select_fields(self):
+    def add_select_col(self, col):
+    def set_select(self, cols):
+    def add_distinct_fields(self, *field_names):
+    def add_fields(self, field_names, allow_m2m=True):
+    def add_ordering(self, *ordering):
+    def clear_ordering(self, force_empty):
+    def set_group_by(self, allow_aliases=True):
+    def add_select_related(self, fields):
+    def add_extra(self, select, select_params, where, params, tables, order_by):
+    def clear_deferred_loading(self):
+    def add_deferred_loading(self, field_names):
+    def add_immediate_loading(self, field_names):
+    def get_loaded_field_names(self):
+    def get_loaded_field_names_cb(self, target, model, fields):
+    def set_annotation_mask(self, names):
+    def append_annotation_mask(self, names):
+    def set_extra_mask(self, names):
+    def set_values(self, fields):
+    @property
+    def annotation_select(self):
+    @property
+    def extra_select(self):
+    def trim_start(self, names_with_path):
+    def is_nullable(self, field):
+
+
+【源码片段 6】
+文件路径：django/db/models/sql/query.py
+对象名称：build_filter
+节点类型：class_function
+父节点：Query
+行号范围：1201-1339
+代码：
+    def build_filter(self, filter_expr, branch_negated=False, current_negated=False,
+                     can_reuse=None, allow_joins=True, split_subq=True,
+                     reuse_with_filtered_relation=False, check_filterable=True):
+        """
+        Build a WhereNode for a single filter clause but don't add it
+        to this Query. Query.add_q() will then add this filter to the where
+        Node.
+
+        The 'branch_negated' tells us if the current branch contains any
+        negations. This will be used to determine if subqueries are needed.
+
+        The 'current_negated' is used to determine if the current filter is
+        negated or not and this will be used to determine if IS NULL filtering
+        is needed.
+
+        The difference between current_negated and branch_negated is that
+        branch_negated is set on first negation, but current_negated is
+        flipped for each negation.
+
+        Note that add_filter will not do any negating itself, that is done
+        upper in the code by add_q().
+
+        The 'can_reuse' is a set of reusable joins for multijoins.
+
+        If 'reuse_with_filtered_relation' is True, then only joins in can_reuse
+        will be reused.
+
+        The method will create a filter clause that can be added to the current
+        query. However, if the filter isn't added to the query then the caller
+        is responsible for unreffing the joins used.
+        """
+        if isinstance(filter_expr, dict):
+            raise FieldError("Cannot parse keyword query as dict")
+        if isinstance(filter_expr, Q):
+            return self._add_q(
+                filter_expr,
+                branch_negated=branch_negated,
+                current_negated=current_negated,
+                used_aliases=can_reuse,
+                allow_joins=allow_joins,
+                split_subq=split_subq,
+                check_filterable=check_filterable,
+            )
+        if hasattr(filter_expr, 'resolve_expression'):
+            if not getattr(filter_expr, 'conditional', False):
+                raise TypeError('Cannot filter against a non-conditional expression.')
+            condition = self.build_lookup(
+                ['exact'], filter_expr.resolve_expression(self, allow_joins=allow_joins), True
+            )
+            clause = self.where_class()
+            clause.add(condition, AND)
+            return clause, []
+        arg, value = filter_expr
+        if not arg:
+            raise FieldError("Cannot parse keyword query %r" % arg)
+        lookups, parts, reffed_expression = self.solve_lookup_type(arg)
+
+        if check_filterable:
+            self.check_filterable(reffed_expression)
+
+        if not allow_joins and len(parts) > 1:
+            raise FieldError("Joined field references are not permitted in this query")
+
+        pre_joins = self.alias_refcount.copy()
+        value = self.resolve_lookup_value(value, can_reuse, allow_joins)
+        used_joins = {k for k, v in self.alias_refcount.items() if v > pre_joins.get(k, 0)}
+
+        if check_filterable:
+            self.check_filterable(value)
+
+        clause = self.where_class()
+        if reffed_expression:
+            condition = self.build_lookup(lookups, reffed_expression, value)
+            clause.add(condition, AND)
+            return clause, []
+
+        opts = self.get_meta()
+        alias = self.get_initial_alias()
+        allow_many = not branch_negated or not split_subq
+
+        try:
+            join_info = self.setup_joins(
+                parts, opts, alias, can_reuse=can_reuse, allow_many=allow_many,
+                reuse_with_filtered_relation=reuse_with_filtered_relation,
+            )
+
+            # Prevent iterator from being consumed by check_related_objects()
+            if isinstance(value, Iterator):
+                value = list(value)
+            self.check_related_objects(join_info.final_field, value, join_info.opts)
+
+            # split_exclude() needs to know which joins were generated for the
+            # lookup parts
+            self._lookup_joins = join_info.joins
+        except MultiJoin as e:
+            return self.split_exclude(filter_expr, can_reuse, e.names_with_path)
+
+        # Update used_joins before trimming since they are reused to determine
+        # which joins could be later promoted to INNER.
+        used_joins.update(join_info.joins)
+        targets, alias, join_list = self.trim_joins(join_info.targets, join_info.joins, join_info.path)
+        if can_reuse is not None:
+            can_reuse.update(join_list)
+
+        if join_info.final_field.is_relation:
+            # No support for transforms for relational fields
+            num_lookups = len(lookups)
+            if num_lookups > 1:
+                raise FieldError('Related Field got invalid lookup: {}'.format(lookups[0]))
+            if len(targets) == 1:
+                col = self._get_col(targets[0], join_info.final_field, alias)
+            else:
+                col = MultiColSource(alias, targets, join_info.targets, join_info.final_field)
+        else:
+            col = self._get_col(targets[0], join_info.final_field, alias)
+
+        condition = self.build_lookup(lookups, col, value)
+        lookup_type = condition.lookup_name
+        clause.add(condition, AND)
+
+        require_outer = lookup_type == 'isnull' and condition.rhs is True and not current_negated
+        if current_negated and (lookup_type != 'isnull' or condition.rhs is False) and condition.rhs is not None:
+            require_outer = True
+            if (lookup_type != 'isnull' and (
+                    self.is_nullable(targets[0]) or
+                    self.alias_map[join_list[-1]].join_type == LOUTER)):
+                # The condition added here will be SQL like this:
+                # NOT (col IS NOT NULL), where the first NOT is added in
+                # upper layers of code. The reason for addition is that if col
+                # is null, then col != someval will result in SQL "unknown"
+                # which isn't the same as in Python. The Python None handling
+                # is wanted, and it can be gotten by
+                # (col IS NULL OR col != someval)
+                #   <=>
+                # NOT (col IS NOT NULL AND col = someval).
+                lookup_class = targets[0].get_lookup('isnull')
+                col = self._get_col(targets[0], join_info.targets[0], alias)
+                clause.add(lookup_class(col, False), AND)
+        return clause, used_joins if not require_outer else ()
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/queries/tests.py
+测试名称：RelatedLookupTypeTests.test_wrong_type_lookup
+测试代码：
+class RelatedLookupTypeTests(TestCase):
+    def test_wrong_type_lookup(self):
+        """
+        A ValueError is raised when the incorrect object type is passed to a
+        query lookup.
+        """
+        # Passing incorrect object type
+        with self.assertRaisesMessage(ValueError, self.error % (self.wrong_type, ObjectA._meta.object_name)):
+            ObjectB.objects.get(objecta=self.wrong_type)
+
+        with self.assertRaisesMessage(ValueError, self.error % (self.wrong_type, ObjectA._meta.object_name)):
+            ObjectB.objects.filter(objecta__in=[self.wrong_type])
+
+        with self.assertRaisesMessage(ValueError, self.error % (self.wrong_type, ObjectA._meta.object_name)):
+            ObjectB.objects.filter(objecta=self.wrong_type)
+
+        with self.assertRaisesMessage(ValueError, self.error % (self.wrong_type, ObjectB._meta.object_name)):
+            ObjectA.objects.filter(objectb__in=[self.wrong_type, self.ob])
+
+        # Passing an object of the class on which query is done.
+        with self.assertRaisesMessage(ValueError, self.error % (self.ob, ObjectA._meta.object_name)):
+            ObjectB.objects.filter(objecta__in=[self.poa, self.ob])
+
+        with self.assertRaisesMessage(ValueError, self.error % (self.ob, ChildObjectA._meta.object_name)):
+            ObjectC.objects.exclude(childobjecta__in=[self.coa, self.ob])
+
+【相关测试 2】
+测试文件：tests/queries/tests.py
+测试名称：RelatedLookupTypeTests.test_wrong_backward_lookup
+测试代码：
+class RelatedLookupTypeTests(TestCase):
+    def test_wrong_backward_lookup(self):
+        """
+        A ValueError is raised when the incorrect object type is passed to a
+        query lookup for backward relations.
+        """
+        with self.assertRaisesMessage(ValueError, self.error % (self.oa, ObjectB._meta.object_name)):
+            ObjectA.objects.filter(objectb__in=[self.oa, self.ob])
+
+        with self.assertRaisesMessage(ValueError, self.error % (self.oa, ObjectB._meta.object_name)):
+            ObjectA.objects.exclude(objectb=self.oa)
+
+        with self.assertRaisesMessage(ValueError, self.error % (self.wrong_type, ObjectB._meta.object_name)):
+            ObjectA.objects.get(objectb=self.wrong_type)
+
+【相关测试 3】
+测试文件：tests/queries/tests.py
+测试名称：RelatedLookupTypeTests.test_correct_lookup
+测试代码：
+class RelatedLookupTypeTests(TestCase):
+    def test_correct_lookup(self):
+        """
+        When passing proxy model objects, child objects, or parent objects,
+        lookups work fine.
+        """
+        out_a = ['<ObjectA: oa>']
+        out_b = ['<ObjectB: ob>', '<ObjectB: pob>']
+        out_c = ['<ObjectC: >']
+
+        # proxy model objects
+        self.assertQuerysetEqual(ObjectB.objects.filter(objecta=self.poa).order_by('name'), out_b)
+        self.assertQuerysetEqual(ObjectA.objects.filter(objectb__in=self.pob).order_by('pk'), out_a * 2)
+
+        # child objects
+        self.assertQuerysetEqual(ObjectB.objects.filter(objecta__in=[self.coa]), [])
+        self.assertQuerysetEqual(ObjectB.objects.filter(objecta__in=[self.poa, self.coa]).order_by('name'), out_b)
+        self.assertQuerysetEqual(
+            ObjectB.objects.filter(objecta__in=iter([self.poa, self.coa])).order_by('name'),
+            out_b
+        )
+
+        # parent objects
+        self.assertQuerysetEqual(ObjectC.objects.exclude(childobjecta=self.oa), out_c)
+
+        # QuerySet related object type checking shouldn't issue queries
+        # (the querysets aren't evaluated here, hence zero queries) (#23266).
+        with self.assertNumQueries(0):
+            ObjectB.objects.filter(objecta__in=ObjectA.objects.all())
+
+【相关测试 4】
+测试文件：tests/queries/tests.py
+测试名称：RelatedLookupTypeTests.test_values_queryset_lookup
+测试代码：
+class RelatedLookupTypeTests(TestCase):
+    def test_values_queryset_lookup(self):
+        """
+        #23396 - Ensure ValueQuerySets are not checked for compatibility with the lookup field
+        """
+        # Make sure the num and objecta field values match.
+        ob = ObjectB.objects.get(name='ob')
+        ob.num = ob.objecta.pk
+        ob.save()
+        pob = ObjectB.objects.get(name='pob')
+        pob.num = pob.objecta.pk
+        pob.save()
+        self.assertQuerysetEqual(ObjectB.objects.filter(
+            objecta__in=ObjectB.objects.all().values_list('num')
+        ).order_by('pk'), ['<ObjectB: ob>', '<ObjectB: pob>'])
+
+【相关测试 5】
+测试文件：tests/queries/tests.py
+测试名称：Queries1Tests.test_lookup_constraint_fielderror
+测试代码：
+class Queries1Tests(TestCase):
+    def test_lookup_constraint_fielderror(self):
+        msg = (
+            "Cannot resolve keyword 'unknown_field' into field. Choices are: "
+            "annotation, category, category_id, children, id, item, "
+            "managedmodel, name, note, parent, parent_id"
+        )
+        with self.assertRaisesMessage(FieldError, msg):
+            Tag.objects.filter(unknown_field__name='generic')
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

@@ -1,0 +1,416 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Consider MRO when obtaining marks for classes
+When using pytest markers in two baseclasses `Foo` and `Bar`, inheriting from both of those baseclasses will lose the markers of one of those classes. This behavior is present in pytest 3-6, and I think it may as well have been intended. I am still filing it as a bug because I am not sure if this edge case was ever explicitly considered.
+
+If it is widely understood that all markers are part of a single attribute, I guess you could say that this is just expected behavior as per MRO. However, I'd argue that it would be more intuitive to attempt to merge marker values into one, possibly deduplicating marker names by MRO.
+
+```python
+import itertools
+import pytest
+
+class BaseMeta(type):
+    @property
+    def pytestmark(self):
+        return (
+            getattr(self, "_pytestmark", []) +
+            list(itertools.chain.from_iterable(getattr(x, "_pytestmark", []) for x in self.__mro__))
+        )
+
+    @pytestmark.setter
+    def pytestmark(self, value):
+        self._pytestmark = value
+
+
+class Base(object):
+    # Without this metaclass, foo and bar markers override each other, and test_dings
+    # will only have one marker
+    # With the metaclass, test_dings will have both
+    __metaclass__ = BaseMeta
+
+@pytest.mark.foo
+class Foo(Base):
+    pass
+
+
+@pytest.mark.bar
+class Bar(Base):
+    pass
+
+class TestDings(Foo, Bar):
+    def test_dings(self):
+        # This test should have both markers, foo and bar.
+        # In practice markers are resolved using MRO (so foo wins), unless the
+        # metaclass is applied
+        pass
+```
+
+I'd expect `foo` and `bar` to be markers for `test_dings`, but this only actually is the case with this metaclass.
+
+Please note that the repro case is Python 2/3 compatible excluding how metaclasses are added to `Base` (this needs to be taken care of to repro this issue on pytest 6)
+Consider MRO when obtaining marks for classes
+When using pytest markers in two baseclasses `Foo` and `Bar`, inheriting from both of those baseclasses will lose the markers of one of those classes. This behavior is present in pytest 3-6, and I think it may as well have been intended. I am still filing it as a bug because I am not sure if this edge case was ever explicitly considered.
+
+If it is widely understood that all markers are part of a single attribute, I guess you could say that this is just expected behavior as per MRO. However, I'd argue that it would be more intuitive to attempt to merge marker values into one, possibly deduplicating marker names by MRO.
+
+```python
+import itertools
+import pytest
+
+class BaseMeta(type):
+    @property
+    def pytestmark(self):
+        return (
+            getattr(self, "_pytestmark", []) +
+            list(itertools.chain.from_iterable(getattr(x, "_pytestmark", []) for x in self.__mro__))
+        )
+
+    @pytestmark.setter
+    def pytestmark(self, value):
+        self._pytestmark = value
+
+
+class Base(object):
+    # Without this metaclass, foo and bar markers override each other, and test_dings
+    # will only have one marker
+    # With the metaclass, test_dings will have both
+    __metaclass__ = BaseMeta
+
+@pytest.mark.foo
+class Foo(Base):
+    pass
+
+
+@pytest.mark.bar
+class Bar(Base):
+    pass
+
+class TestDings(Foo, Bar):
+    def test_dings(self):
+        # This test should have both markers, foo and bar.
+        # In practice markers are resolved using MRO (so foo wins), unless the
+        # metaclass is applied
+        pass
+```
+
+I'd expect `foo` and `bar` to be markers for `test_dings`, but this only actually is the case with this metaclass.
+
+Please note that the repro case is Python 2/3 compatible excluding how metaclasses are added to `Base` (this needs to be taken care of to repro this issue on pytest 6)
+Fix missing marks when inheritance from multiple classes
+
+<!--
+Thanks for submitting a PR, your contribution is really appreciated!
+
+Here is a quick checklist that should be present in PRs.
+
+- [] Include documentation when adding new features.
+- [ ] Include new tests or update existing tests when applicable.
+- [X] Allow maintainers to push and squash when merging my commits. Please uncheck this if you prefer to squash the commits yourself.
+
+If this change fixes an issue, please:
+
+- [x] Add text like ``closes #XYZW`` to the PR description and/or commits (where ``XYZW`` is the issue number). See the [github docs](https://help.github.com/en/github/managing-your-work-on-github/linking-a-pull-request-to-an-issue#linking-a-pull-request-to-an-issue-using-a-keyword) for more information.
+
+Unless your change is trivial or a small documentation fix (e.g., a typo or reword of a small section) please:
+
+- [x] Create a new changelog file in the `changelog` folder, with a name like `<ISSUE NUMBER>.<TYPE>.rst`. See [changelog/README.rst](https://github.com/pytest-dev/pytest/blob/main/changelog/README.rst) for details.
+
+  Write sentences in the **past or present tense**, examples:
+
+  * *Improved verbose diff output with sequences.*
+  * *Terminal summary statistics now use multiple colors.*
+
+  Also make sure to end the sentence with a `.`.
+
+- [x] Add yourself to `AUTHORS` in alphabetical order.
+-->
+
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：testing/example_scripts/unittest/test_setup_skip.py
+对象名称：Base
+节点类型：class
+父节点：test_setup_skip
+行号范围：5-7
+代码：
+class Base(unittest.TestCase):
+    def setUp(self):
+
+
+【源码片段 2】
+文件路径：testing/test_assertrewrite.py
+对象名称：Foo
+节点类型：class
+父节点：test_assertrewrite
+行号范围：696-700
+代码：
+            class Foo:
+                a = 1
+                def __repr__(self):
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：testing/test_mark.py
+测试名称：TestFunctional.test_mark_decorator_baseclasses_merged
+测试代码：
+class TestFunctional:
+    def test_mark_decorator_baseclasses_merged(self, pytester: Pytester) -> None:
+        p = pytester.makepyfile(
+            """
+            import pytest
+
+            @pytest.mark.a
+            class Base(object): pass
+
+            @pytest.mark.b
+            class Base2(Base): pass
+
+            @pytest.mark.c
+            class Test1(Base2):
+                def test_foo(self): pass
+
+            class Test2(Base2):
+                @pytest.mark.d
+                def test_bar(self): pass
+        """
+        )
+        items, rec = pytester.inline_genitems(p)
+        self.assert_markers(items, test_foo=("a", "b", "c"), test_bar=("a", "b", "d"))
+
+【相关测试 2】
+测试文件：testing/test_mark.py
+测试名称：TestFunctional.test_mark_decorator_subclass_does_not_propagate_to_base
+测试代码：
+class TestFunctional:
+    def test_mark_decorator_subclass_does_not_propagate_to_base(
+        self, pytester: Pytester
+    ) -> None:
+        p = pytester.makepyfile(
+            """
+            import pytest
+
+            @pytest.mark.a
+            class Base(object): pass
+
+            @pytest.mark.b
+            class Test1(Base):
+                def test_foo(self): pass
+
+            class Test2(Base):
+                def test_bar(self): pass
+        """
+        )
+        items, rec = pytester.inline_genitems(p)
+        self.assert_markers(items, test_foo=("a", "b"), test_bar=("a",))
+
+【相关测试 3】
+测试文件：testing/test_mark.py
+测试名称：test_mark_expressions_no_smear
+测试代码：
+def test_mark_expressions_no_smear(pytester: Pytester) -> None:
+    pytester.makepyfile(
+        """
+        import pytest
+
+        class BaseTests(object):
+            def test_something(self):
+                pass
+
+        @pytest.mark.FOO
+        class TestFooClass(BaseTests):
+            pass
+
+        @pytest.mark.BAR
+        class TestBarClass(BaseTests):
+            pass
+    """
+    )
+
+    reprec = pytester.inline_run("-m", "FOO")
+    passed, skipped, failed = reprec.countoutcomes()
+    dlist = reprec.getcalls("pytest_deselected")
+    assert passed == 1
+    assert skipped == failed == 0
+    deselected_tests = dlist[0].items
+    assert len(deselected_tests) == 1
+
+【相关测试 4】
+测试文件：testing/test_mark.py
+测试名称：TestFunctional.test_mark_closest
+测试代码：
+class TestFunctional:
+    def test_mark_closest(self, pytester: Pytester) -> None:
+        p = pytester.makepyfile(
+            """
+            import pytest
+
+            @pytest.mark.c(location="class")
+            class Test:
+                @pytest.mark.c(location="function")
+                def test_has_own(self):
+                    pass
+
+                def test_has_inherited(self):
+                    pass
+
+        """
+        )
+        items, rec = pytester.inline_genitems(p)
+        has_own, has_inherited = items
+        has_own_marker = has_own.get_closest_marker("c")
+        has_inherited_marker = has_inherited.get_closest_marker("c")
+        assert has_own_marker is not None
+        assert has_inherited_marker is not None
+        assert has_own_marker.kwargs == {"location": "function"}
+        assert has_inherited_marker.kwargs == {"location": "class"}
+        assert has_own.get_closest_marker("missing") is None
+
+【相关测试 5】
+测试文件：testing/test_mark.py
+测试名称：TestFunctional.test_merging_markers_deep
+测试代码：
+class TestFunctional:
+    def test_merging_markers_deep(self, pytester: Pytester) -> None:
+        # issue 199 - propagate markers into nested classes
+        p = pytester.makepyfile(
+            """
+            import pytest
+            class TestA(object):
+                pytestmark = pytest.mark.a
+                def test_b(self):
+                    assert True
+                class TestC(object):
+                    # this one didn't get marked
+                    def test_d(self):
+                        assert True
+        """
+        )
+        items, rec = pytester.inline_genitems(p)
+        for item in items:
+            print(item, item.keywords)
+            assert [x for x in item.iter_markers() if x.name == "a"]
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

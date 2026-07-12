@@ -1,0 +1,122 @@
+{
+  "issue_summary": "Dataset.stack 操作将 int32 坐标的数据类型错误地转换为 int64。",
+  "trigger_condition": {
+    "text": "对一个包含 int32 ('i4') 数据类型坐标的 Dataset 调用 stack 方法。",
+    "evidence": ["Issue 中的 MVCE: ds = xr.Dataset(coords={'a': np.array([0], dtype='i4')}); ds.stack(b=('a',))"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "stack 操作后，坐标 'a' 的数据类型从 int32 ('i4') 变为 int64 ('i8')，导致 ds['a'].values.dtype == ds.stack(b=('a',))['a'].values.dtype 返回 False。",
+    "symptom_type": "wrong_type",
+    "evidence": ["Issue 描述: 'The data type of the `a` coordinate is changed from 'i4' to 'i8'.'", "MVCE 返回 False。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "stack 操作不应改变原始坐标的数据类型，即 stack 前后坐标的数据类型应保持一致。",
+    "evidence": ["Issue 期望: 'Creating a MultiIndex should not change the data type of the Indexes from which it is built.'"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "Dataset.stack",
+      "kind": "method",
+      "source_path": "xarray/core/dataset.py",
+      "reason": "Issue 直接由调用此方法触发，且源码片段 2 展示了其定义。"
+    },
+    {
+      "name": "Dataset._stack_once",
+      "kind": "method",
+      "source_path": "xarray/core/dataset.py",
+      "reason": "stack 方法内部调用了 _stack_once，可能是实际处理坐标和索引转换的地方。"
+    },
+    {
+      "name": "Index.stack",
+      "kind": "method",
+      "source_path": "xarray/core/indexes.py",
+      "reason": "源码片段 3 显示 Index 类有 stack 方法，可能与创建 MultiIndex 时的数据类型处理有关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "xarray/core/dataset.py",
+      "object": "Dataset._stack_once",
+      "lines": "",
+      "reason": "stack 方法循环调用 _stack_once 处理每个新维度，这里可能负责坐标变量的重建或索引创建，是数据类型可能被转换的关键路径。"
+    },
+    {
+      "path": "xarray/core/indexes.py",
+      "object": "Index.stack",
+      "lines": "",
+      "reason": "创建 MultiIndex 时可能调用了 Index.stack，该方法可能未保留原始坐标变量的数据类型。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "TestDataset.test_stack",
+      "test_file": "xarray/tests/test_dataset.py",
+      "why_relevant": "该测试直接调用了 Dataset.stack 方法，并验证了结果与预期 Dataset 相同，包含了坐标和索引的断言。",
+      "reusable_parts": ["Dataset 构造模式", "stack 方法调用", "assert_identical 断言风格"],
+      "possible_gap": "现有测试未检查坐标数据类型在 stack 前后是否保持不变，它们使用的坐标数据类型可能是默认的（如 int64），因此未触发此 bug。"
+    },
+    {
+      "test_name": "TestDataset.test_stack_multi_index",
+      "test_file": "xarray/tests/test_dataset.py",
+      "why_relevant": "测试了 stack 时 create_index 参数的行为，涉及坐标和索引的创建，与 Issue 中 MultiIndex 创建相关。",
+      "reusable_parts": ["create_index 参数的使用", "坐标数据构造", "assert_identical 断言"],
+      "possible_gap": "测试未使用非默认的整数数据类型（如 int32）作为坐标，因此未覆盖数据类型转换问题。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中使用默认数据类型的坐标（如 [0, 1] 可能为 int64）。",
+      "target_pattern": "使用显式指定为 int32 ('i4') 数据类型的 NumPy 数组作为坐标值。",
+      "reason": "Issue 表明 bug 在坐标数据类型为 int32 时触发，改变输入数据类型可能暴露缺陷路径。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "相似测试中 stack 的维度参数通常是多个维度（如 ['x', 'y']）。",
+      "target_pattern": "stack 单个维度坐标（如 stack(b=('a',))）。",
+      "reason": "Issue 的 MVCE 只 stack 了一个维度 'a'，这可能简化了索引创建流程，但仍触发了 bug。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "type",
+      "expression_hint": "stack 操作前后，坐标 'a' 的 values.dtype 属性。",
+      "reason": "Issue 的核心是数据类型变化，直接比较 dtype 可以判断 bug 是否触发。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "stack 返回的 Dataset 中坐标 'a' 的 Variable 对象或其底层数据。",
+      "reason": "检查 stack 后新坐标的数据结构和类型，可能涉及索引创建和变量重建。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 stack 操作后，指定坐标的数据类型与操作前保持一致。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的 repr 或整个 Dataset 相等，因为其他属性（如索引结构）可能合理变化。",
+      "reason": "直接比较数据类型是 Issue 的核心，稳定且与预期行为对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 xarray 和 numpy 来构造 Dataset 和指定数据类型的数组。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可以使用类似现有测试中的 Dataset 构造模式，但修改坐标数据类型。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "bug 具体发生在 stack 流程的哪一步：是在创建 MultiIndex 时，还是在重建坐标 Variable 时？",
+    "是否所有整数数据类型（如 int8, int16）都会受到影响，还是仅 int32？",
+    "create_index 参数的不同取值（True, False, None）是否会影响数据类型转换行为？"
+  ]
+}

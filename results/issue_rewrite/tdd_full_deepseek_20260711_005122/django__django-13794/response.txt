@@ -1,0 +1,117 @@
+```json
+{
+    "issue_summary": "Django 模板的 add 过滤器无法将字符串与 lazy string 拼接，导致结果为空字符串并引发 TypeError。",
+    "trigger_condition": {
+        "text": "在 Django 模板中使用 add 过滤器，尝试将一个普通字符串与一个 lazy string（例如来自 gettext_lazy 的字符串）进行拼接。",
+        "evidence": ["Issue 描述：'If you try to concatenate a string with a lazy string with the add template filter'"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "add 过滤器引发 TypeError: can only concatenate str (not \"__proxy__\") to str，导致模板渲染结果为空的输出字符串。",
+        "symptom_type": "exception",
+        "evidence": ["Issue 描述：'the result is always the empty string because the add filter generates an exception (TypeError: can only concatenate str (not \"__proxy__\") to str)'"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "add 过滤器应能正确处理字符串与 lazy string 的拼接操作，返回正确的拼接结果字符串，而不引发异常。",
+        "evidence": ["Issue 描述暗示了期望的拼接功能。相关测试（如 test_add04）展示了字符串与数字字符串拼接的正常行为。"],
+        "confidence": "medium"
+    },
+    "target_apis": [
+        {
+            "name": "add",
+            "kind": "function",
+            "source_path": "",
+            "reason": "Issue 直接指向 Django 模板的 add 过滤器。"
+        },
+        {
+            "name": "__proxy__",
+            "kind": "class",
+            "source_path": "django/utils/functional.py",
+            "reason": "Issue 中异常信息提到了 \"__proxy__\" 类型，这是 lazy string 的内部表示。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/utils/functional.py",
+            "object": "__proxy__",
+            "lines": "85-184",
+            "reason": "Issue 中的异常信息 TypeError: can only concatenate str (not \"__proxy__\") to str 表明 lazy string（__proxy__ 实例）与普通字符串的拼接操作存在问题。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "AddTests.test_add04",
+            "test_file": "tests/template_tests/filter_tests/test_add.py",
+            "why_relevant": "该测试展示了 add 过滤器对字符串（'not_an_int'）与字符串参数（'16'）进行拼接的正常行为，可作为测试字符串拼接的起点。",
+            "reusable_parts": ["测试类 AddTests", "使用 @setup 装饰器定义模板", "使用 self.engine.render_to_string 渲染模板", "使用 assertEqual 断言输出"],
+            "possible_gap": "该测试使用普通字符串，没有涉及 lazy string（__proxy__ 实例）。"
+        },
+        {
+            "test_name": "AddTests.test_add02",
+            "test_file": "tests/template_tests/filter_tests/test_add.py",
+            "why_relevant": "该测试展示了当 add 过滤器操作不兼容类型（整数与字符串）时，输出为空字符串的行为，这与 Issue 中观察到的空字符串结果模式相似。",
+            "reusable_parts": ["测试类 AddTests", "使用 @setup 装饰器定义模板", "使用 self.engine.render_to_string 渲染模板", "使用 assertEqual 断言输出"],
+            "possible_gap": "该测试涉及类型不兼容导致的静默失败，而 Issue 涉及的是异常导致的失败，但都导致空输出。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "input",
+            "current_pattern": "相关测试中使用普通字符串（如 'not_an_int'）或整数作为 add 过滤器的输入值。",
+            "target_pattern": "将输入值替换为一个 lazy string（例如，通过 gettext_lazy 生成的字符串）。",
+            "reason": "Issue 明确指出当输入是 lazy string 时会触发 TypeError。",
+            "confidence": "high"
+        },
+        {
+            "slot": "argument",
+            "current_pattern": "相关测试中 add 过滤器的参数是普通字符串（如 '16'）或整数。",
+            "target_pattern": "保持参数为普通字符串，以模拟字符串与 lazy string 的拼接场景。",
+            "reason": "Issue 描述是 'concatenate a string with a lazy string'，表明其中一个操作数是普通字符串。",
+            "confidence": "medium"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "exception",
+            "expression_hint": "在调用 self.engine.render_to_string 时捕获的异常，特别是 TypeError。",
+            "reason": "Issue 明确指出 add 过滤器会生成 TypeError 异常。"
+        },
+        {
+            "kind": "return_value",
+            "expression_hint": "self.engine.render_to_string 的返回值（output）。",
+            "reason": "Issue 提到异常导致结果为空的输出字符串，需要观察渲染结果是否为空。"
+        },
+        {
+            "kind": "type",
+            "expression_hint": "传递给 add 过滤器的第一个参数（变量 i）的类型，检查它是否是 __proxy__ 实例。",
+            "reason": "异常信息表明问题与操作数类型（__proxy__）有关。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "验证当使用 lazy string 与普通字符串进行 add 过滤器操作时，不会引发 TypeError 异常，并且输出是有效的拼接字符串（非空）。",
+            "preferred_assertion_style": "raises",
+            "avoid": "避免断言完整的输出字符串内容，因为 Issue 未提供精确的拼接结果。",
+            "reason": "Issue 的核心是异常导致空字符串，因此首先需要断言不会引发该异常。修复后，应能正常输出拼接结果。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要使用 SimpleTestCase 或类似的 Django 测试基类。可能需要导入 gettext_lazy 来创建 lazy string。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "测试需要设置 Django 模板引擎上下文。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "lazy string 的具体创建方式（例如，是使用 gettext_lazy 还是其他方式）。",
+        "add 过滤器内部处理 lazy string 的确切逻辑和错误位置。",
+        "修复后，lazy string 与字符串拼接的确切输出格式（例如，是强制转换为字符串再拼接，还是其他方式）。"
+    ]
+}
+```

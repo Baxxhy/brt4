@@ -1,0 +1,290 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+pprint unicode does not format subscripts on Greek letters
+Good:
+
+[ -t₀⋅w₀   -t₁⋅w₀   -t₂⋅w₀]
+
+
+Bad:
+
+[ -t₀⋅ω0   -t₁⋅ω0   -t₂⋅ω0]
+
+
+
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/printing/pretty/pretty.py
+对象名称：pprint
+节点类型：global_var
+父节点：pretty
+行号范围：2805-2805
+代码：
+pprint = pretty_print
+
+
+【源码片段 2】
+文件路径：sympy/printing/pretty/pretty_symbology.py
+对象名称：greek_unicode
+节点类型：global_var
+父节点：pretty_symbology
+行号范围：105-105
+代码：
+greek_unicode = {L: g(L) for L in greek_letters}
+
+
+【源码片段 3】
+文件路径：sympy/printing/pretty/stringpict.py
+对象名称：unicode
+节点类型：class_function
+父节点：prettyForm
+行号范围：387-392
+代码：
+    def unicode(self):
+        SymPyDeprecationWarning(
+            feature="``prettyForm.unicode`` attribute",
+            useinstead="``stringPrict.s`` attribute",
+            deprecated_since_version="1.7").warn()
+        return self._unicode
+
+
+【源码片段 4】
+文件路径：sympy/core/sympify.py
+对象名称：sympify
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 5】
+文件路径：sympy/assumptions/tests/test_query.py
+对象名称：Symbol
+节点类型：class_function
+父节点：MyAskHandler
+行号范围：2031-2032
+代码：
+        def Symbol(expr, assumptions):
+            return True
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/printing/pretty/tests/test_pretty.py
+测试名称：test_upretty_subs_missing_in_24
+测试代码：
+def test_upretty_subs_missing_in_24():
+    assert upretty( Symbol('F_beta') ) == 'Fᵦ'
+    assert upretty( Symbol('F_gamma') ) == 'Fᵧ'
+    assert upretty( Symbol('F_rho') ) == 'Fᵨ'
+    assert upretty( Symbol('F_phi') ) == 'Fᵩ'
+    assert upretty( Symbol('F_chi') ) == 'Fᵪ'
+
+    assert upretty( Symbol('F_a') ) == 'Fₐ'
+    assert upretty( Symbol('F_e') ) == 'Fₑ'
+    assert upretty( Symbol('F_i') ) == 'Fᵢ'
+    assert upretty( Symbol('F_o') ) == 'Fₒ'
+    assert upretty( Symbol('F_u') ) == 'Fᵤ'
+    assert upretty( Symbol('F_r') ) == 'Fᵣ'
+    assert upretty( Symbol('F_v') ) == 'Fᵥ'
+    assert upretty( Symbol('F_x') ) == 'Fₓ'
+
+【相关测试 2】
+测试文件：sympy/printing/pretty/tests/test_pretty.py
+测试名称：test_upretty_greek
+测试代码：
+def test_upretty_greek():
+    assert upretty( oo ) == '∞'
+    assert upretty( Symbol('alpha^+_1') ) == 'α⁺₁'
+    assert upretty( Symbol('beta') ) == 'β'
+    assert upretty(Symbol('lambda')) == 'λ'
+
+【相关测试 3】
+测试文件：sympy/printing/pretty/tests/test_pretty.py
+测试名称：test_upretty_multiindex
+测试代码：
+def test_upretty_multiindex():
+    assert upretty( Symbol('beta12') ) == 'β₁₂'
+    assert upretty( Symbol('Y00') ) == 'Y₀₀'
+    assert upretty( Symbol('Y_00') ) == 'Y₀₀'
+    assert upretty( Symbol('F^+-') ) == 'F⁺⁻'
+
+【相关测试 4】
+测试文件：sympy/printing/pretty/tests/test_pretty.py
+测试名称：test_upretty_sub_super
+测试代码：
+def test_upretty_sub_super():
+    assert upretty( Symbol('beta_1_2') ) == 'β₁ ₂'
+    assert upretty( Symbol('beta^1^2') ) == 'β¹ ²'
+    assert upretty( Symbol('beta_1^2') ) == 'β²₁'
+    assert upretty( Symbol('beta_10_20') ) == 'β₁₀ ₂₀'
+    assert upretty( Symbol('beta_ax_gamma^i') ) == 'βⁱₐₓ ᵧ'
+    assert upretty( Symbol("F^1^2_3_4") ) == 'F¹ ²₃ ₄'
+    assert upretty( Symbol("F_1_2^3^4") ) == 'F³ ⁴₁ ₂'
+    assert upretty( Symbol("F_1_2_3_4") ) == 'F₁ ₂ ₃ ₄'
+    assert upretty( Symbol("F^1^2^3^4") ) == 'F¹ ² ³ ⁴'
+
+【相关测试 5】
+测试文件：sympy/printing/pretty/tests/test_pretty.py
+测试名称：test_upretty_modifiers
+测试代码：
+def test_upretty_modifiers():
+    # Accents
+    assert upretty( Symbol('Fmathring') ) == 'F̊'
+    assert upretty( Symbol('Fddddot') ) == 'F⃜'
+    assert upretty( Symbol('Fdddot') ) == 'F⃛'
+    assert upretty( Symbol('Fddot') ) == 'F̈'
+    assert upretty( Symbol('Fdot') ) == 'Ḟ'
+    assert upretty( Symbol('Fcheck') ) == 'F̌'
+    assert upretty( Symbol('Fbreve') ) == 'F̆'
+    assert upretty( Symbol('Facute') ) == 'F́'
+    assert upretty( Symbol('Fgrave') ) == 'F̀'
+    assert upretty( Symbol('Ftilde') ) == 'F̃'
+    assert upretty( Symbol('Fhat') ) == 'F̂'
+    assert upretty( Symbol('Fbar') ) == 'F̅'
+    assert upretty( Symbol('Fvec') ) == 'F⃗'
+    assert upretty( Symbol('Fprime') ) == 'F′'
+    assert upretty( Symbol('Fprm') ) == 'F′'
+    # No faces are actually implemented, but test to make sure the modifiers are stripped
+    assert upretty( Symbol('Fbold') ) == 'Fbold'
+    assert upretty( Symbol('Fbm') ) == 'Fbm'
+    assert upretty( Symbol('Fcal') ) == 'Fcal'
+    assert upretty( Symbol('Fscr') ) == 'Fscr'
+    assert upretty( Symbol('Ffrak') ) == 'Ffrak'
+    # Brackets
+    assert upretty( Symbol('Fnorm') ) == '‖F‖'
+    assert upretty( Symbol('Favg') ) == '⟨F⟩'
+    assert upretty( Symbol('Fabs') ) == '|F|'
+    assert upretty( Symbol('Fmag') ) == '|F|'
+    # Combinations
+    assert upretty( Symbol('xvecdot') ) == 'x⃗̇'
+    assert upretty( Symbol('xDotVec') ) == 'ẋ⃗'
+    assert upretty( Symbol('xHATNorm') ) == '‖x̂‖'
+    assert upretty( Symbol('xMathring_yCheckPRM__zbreveAbs') ) == 'x̊_y̌′__|z̆|'
+    assert upretty( Symbol('alphadothat_nVECDOT__tTildePrime') ) == 'α̇̂_n⃗̇__t̃′'
+    assert upretty( Symbol('x_dot') ) == 'x_dot'
+    assert upretty( Symbol('x__dot') ) == 'x__dot'
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

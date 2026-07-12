@@ -1,0 +1,134 @@
+instance_id: matplotlib__matplotlib-20859
+
+issue_summary: 在 SubFigure 上调用 legend() 方法会抛出 TypeError 异常，因为 Legend 构造函数不接受 SubFigure 作为父对象。
+
+trigger_condition:
+{
+  "text": "创建一个 SubFigure 对象，在其子 Axes 上绘制带有 label 的图形，然后在 SubFigure 对象上调用 legend() 方法。",
+  "evidence": [
+    "Issue 中的代码片段：subfig = plt.figure().subfigures(); ax = subfig.subplots(); ax.plot([0, 1, 2], [0, 1, 2], label=\"test\"); subfig.legend()"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "抛出 TypeError: Legend needs either Axes or Figure as parent",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中的 traceback 显示错误来自 legend.py 第 441 行，在 Legend.__init__ 中抛出异常"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "SubFigure.legend() 应该成功创建一个图例并显示在 SubFigure 上。",
+  "evidence": [
+    "Issue 中用户期望：\"I'd expect this to work and produce a legend.\"",
+    "源码片段 3 显示 FigureBase.legend() 方法旨在为 Figure 和 SubFigure 添加图例"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "SubFigure.legend",
+    "kind": "method",
+    "source_path": "lib/matplotlib/figure.py",
+    "reason": "Issue 中直接调用的方法，是触发缺陷的入口点。"
+  },
+  {
+    "name": "matplotlib.legend.Legend.__init__",
+    "kind": "method",
+    "source_path": "lib/matplotlib/legend.py",
+    "reason": "抛出异常的位置，是缺陷的直接原因。"
+  },
+  {
+    "name": "FigureBase.legend",
+    "kind": "method",
+    "source_path": "lib/matplotlib/figure.py",
+    "reason": "SubFigure 继承自 FigureBase，其 legend 方法被调用。"
+  },
+  {
+    "name": "SubFigure",
+    "kind": "class",
+    "source_path": "lib/matplotlib/figure.py",
+    "reason": "缺陷涉及的核心对象，其父类关系是问题的关键。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "相关测试中，legend() 方法在 Figure 对象上调用。",
+    "target_pattern": "legend() 方法在 SubFigure 对象上调用。",
+    "reason": "Issue 表明缺陷仅在父对象为 SubFigure 时触发，因为 Legend.__init__ 的检查不包含 FigureBase。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "Figure.legend() -> Legend.__init__(parent=Figure, ...)",
+    "target_pattern": "SubFigure.legend() -> Legend.__init__(parent=SubFigure, ...)",
+    "reason": "改变调用链的起点对象类型，使其进入有缺陷的代码路径。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用 subfig.legend() 时是否抛出 TypeError 及其消息。",
+    "reason": "Issue 的核心错误现象是抛出特定异常。"
+  },
+  {
+    "kind": "type",
+    "expression_hint": "type(subfig) 和 isinstance(subfig, FigureBase) 的值。",
+    "reason": "确认测试对象是 SubFigure 实例，并且其类型关系是问题的关键。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "成功调用 legend() 后的返回值类型（应为 matplotlib.legend.Legend）。",
+    "reason": "修复后，方法应返回一个 Legend 对象，而不是抛出异常。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "在 SubFigure 上调用 legend() 不应抛出 TypeError 异常。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言异常消息的完整字符串，因为具体措辞可能变化。",
+    "reason": "当前缺陷表现为抛出异常，修复后应不再抛出。使用 raises 断言可以清晰地捕捉这一行为变化。"
+  },
+  {
+    "assertion_goal": "SubFigure.legend() 应成功返回一个 Legend 对象。",
+    "preferred_assertion_style": "isinstance",
+    "avoid": "断言返回的 Legend 对象的完整属性或内部状态。",
+    "reason": "修复后，方法应正常完成并返回预期类型的对象。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 matplotlib.pyplot 以创建 Figure 和 SubFigure。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要在非交互式后端下运行，以避免弹出图形窗口。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "Legend.__init__ 中检查 parent 类型的精确条件逻辑（第 433-442 行）在源码片段中未完全展示。",
+  "除了修改 Legend.__init__ 中的类型检查，是否还需要其他改动（例如 bbox_transform 的处理）才能使 SubFigure.legend() 完全正常工作。",
+  "修复后，SubFigure.legend() 创建的图例在布局和定位上是否与 Figure.legend() 行为一致。"
+]

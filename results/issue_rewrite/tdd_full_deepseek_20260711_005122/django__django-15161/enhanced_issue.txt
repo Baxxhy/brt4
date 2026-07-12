@@ -1,0 +1,120 @@
+instance_id: django__django-15161
+
+issue_summary: 某些表达式在 deconstruct 方法中生成的导入路径不够简化，导致迁移代码不够简洁。
+
+trigger_condition:
+{
+  "text": "调用某些表达式对象（如 F, Value, Lower 等）的 deconstruct 方法。",
+  "evidence": [
+    "Issue 提到 F() 的 deconstruct 输出路径从 django.db.models.expressions.F() 改为 django.db.models.F()，并建议其他表达式也应应用相同技术。",
+    "相关测试代码展示了调用 deconstruct 方法。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "deconstruct 方法返回的路径字符串（path）包含不必要的模块层级（如 django.db.models.expressions），而不是更简化的路径（如 django.db.models）。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 描述了 F() 之前 deconstruct 到 django.db.models.expressions.F()，而 PR #14047 将其改为 django.db.models.F()。",
+    "相关测试 2 (ValueTests.test_deconstruct_output_field) 显示 Value 的 path 为 'django.db.models.expressions.Value'，这可能是一个未简化的例子。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "表达式的 deconstruct 方法应返回简化的导入路径（例如 django.db.models.F 而不是 django.db.models.expressions.F），以便生成的迁移代码更简洁。",
+  "evidence": [
+    "Issue 明确说明 PR #14047 将 F() 的 deconstruct 输出改为 django.db.models.F()，并建议将此技术应用于其他表达式。",
+    "相关测试 1 (FTests.test_deconstruct) 展示了 F 的简化路径 'django.db.models.F' 是期望行为。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "F",
+    "kind": "class",
+    "source_path": "django/db/models/expressions.py",
+    "reason": "Issue 明确以 F 为例，其 deconstruct 路径已被简化。"
+  },
+  {
+    "name": "Value",
+    "kind": "class",
+    "source_path": "django/db/models/expressions.py",
+    "reason": "相关测试 2 涉及 Value 的 deconstruct，其路径可能未简化。"
+  },
+  {
+    "name": "Lower",
+    "kind": "class",
+    "source_path": "",
+    "reason": "相关测试 3 使用了 Lower 表达式，其 deconstruct 路径可能也需要简化。"
+  },
+  {
+    "name": "deconstruct",
+    "kind": "method",
+    "source_path": "django/db/models/fields/__init__.py",
+    "reason": "这是返回路径信息的关键方法，源码片段 2 展示了其逻辑。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object",
+    "current_pattern": "在相关测试 1 中使用 F('name')。",
+    "target_pattern": "使用其他表达式对象，如 Value('name') 或 Lower('title')。",
+    "reason": "Issue 指出问题存在于 F 之外的其他表达式上，变异测试对象可能触发这些表达式的未简化路径。",
+    "confidence": "high"
+  },
+  {
+    "slot": "assertion",
+    "current_pattern": "相关测试 1 断言 path 等于 'django.db.models.F'。",
+    "target_pattern": "断言其他表达式（如 Value）的 path 是否以 'django.db.models' 开头，而不是 'django.db.models.expressions'。",
+    "reason": "Issue 期望所有表达式都使用简化路径，因此断言应检查路径是否被简化。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "expression.deconstruct() 返回的 path 字符串。",
+    "reason": "Issue 的核心是 deconstruct 返回的路径字符串是否被简化。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证表达式对象的 deconstruct 方法返回的 path 字符串是简化形式（例如以 'django.db.models.' 开头）。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "避免断言完整的、硬编码的路径字符串，因为具体类名可能不同。",
+    "reason": "Issue 关注的是路径前缀的简化，而不是每个类的完整路径。使用 contains_fragment 检查前缀更稳定。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "可能需要从 django.db.models.expressions 导入各种表达式类（如 F, Value, Lower）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能继承自 SimpleTestCase 或 TestCase，如相关测试所示。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "哪些具体的表达式类（除了 F）目前存在路径未简化的问题？",
+  "deconstruct 方法中简化路径的逻辑具体位于哪个文件、哪个函数？是每个表达式类单独实现，还是有公共基类？",
+  "简化路径的规则是什么？是否所有位于 django.db.models.expressions 下的类都应简化为 django.db.models？"
+]

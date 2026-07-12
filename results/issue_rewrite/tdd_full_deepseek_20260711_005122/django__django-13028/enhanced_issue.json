@@ -1,0 +1,279 @@
+{
+  "instance_id": "django__django-13028",
+  "issue_summary": "当查询过滤条件的右侧表达式具有 filterable=False 属性时，QuerySet 会抛出 NotSupportedError。",
+  "trigger_condition": {
+    "text": "使用一个具有名为 'filterable' 的布尔字段的模型实例作为 filter() 查询的右侧值。",
+    "evidence": [
+      "Issue 描述：'Error happened when filtering ProductMetaData with a metadata_type : ProductMetaData.objects.filter(value=\"Dark Vador\", metadata_type=self.brand_metadata)'",
+      "Issue 描述：'I changed label to filterable_test and it fixed this issue'"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "抛出 django.db.utils.NotSupportedError，错误信息为 'ProductMetaDataType is disallowed in the filter clause.'",
+    "symptom_type": "exception",
+    "evidence": [
+      "Issue 中的错误追踪：'raise NotSupportedError(\\n django.db.utils.NotSupportedError: ProductMetaDataType is disallowed in the filter clause.'",
+      "源码片段 4 中的 check_filterable 方法会抛出 NotSupportedError。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "即使模型字段名为 'filterable'，使用该模型实例作为查询过滤条件也应能正常执行，不应抛出 NotSupportedError。",
+    "evidence": [
+      "Issue 描述：'I changed label to filterable_test and it fixed this issue' 暗示将字段名从 'filterable' 改为其他名称后查询正常，因此预期行为是查询应正常工作。",
+      "Issue 标题和描述暗示这是一个意外行为，应被修复或记录。"
+    ],
+    "confidence": "medium"
+  },
+  "target_apis": [
+    {
+      "name": "django.db.models.query.QuerySet.filter",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 中触发错误的直接 API 调用。"
+    },
+    {
+      "name": "django.db.models.sql.query.Query.check_filterable",
+      "kind": "method",
+      "source_path": "django/db/models/sql/query.py",
+      "reason": "源码显示该方法检查表达式的 'filterable' 属性并抛出 NotSupportedError。"
+    },
+    {
+      "name": "django.db.models.sql.query.Query.build_filter",
+      "kind": "method",
+      "source_path": "django/db/models/sql/query.py",
+      "reason": "源码显示 build_filter 方法在 check_filterable=True 时会调用 check_filterable。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/sql/query.py",
+      "object": "Query.check_filterable",
+      "lines": "1125-1134",
+      "reason": "该方法检查表达式的 'filterable' 属性。当模型实例的字段名为 'filterable' 时，该实例可能被误认为具有 filterable=False 属性。"
+    },
+    {
+      "path": "django/db/models/sql/query.py",
+      "object": "Query.build_filter",
+      "lines": "1201-1339",
+      "reason": "该方法在解析过滤条件时调用了 check_filterable。需要理解表达式（如模型实例）如何被解析并获取其 'filterable' 属性。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "RelatedLookupTypeTests.test_correct_lookup",
+      "test_file": "tests/queries/tests.py",
+      "why_relevant": "该测试展示了使用模型实例（如 self.poa, self.coa）作为 filter 查询的右侧值（objecta__in=[...]）的正常场景。",
+      "reusable_parts": [
+        "TestCase 继承结构",
+        "模型实例的创建和获取方式",
+        "使用 filter() 和 exclude() 进行查询的语法",
+        "assertQuerysetEqual 断言风格"
+      ],
+      "possible_gap": "该测试使用的模型字段名不是 'filterable'，因此不会触发 check_filterable 中的属性检查。需要变异为使用具有 'filterable' 字段的模型实例。"
+    },
+    {
+      "test_name": "RelatedLookupTypeTests.test_wrong_type_lookup",
+      "test_file": "tests/queries/tests.py",
+      "why_relevant": "该测试展示了在查询中使用错误类型对象时抛出 ValueError 的场景，与当前 Issue 抛出 NotSupportedError 的模式相似（都是查询参数类型/属性问题）。",
+      "reusable_parts": [
+        "使用 assertRaisesMessage 捕获特定异常和消息的模式",
+        "测试错误类型参数传递的框架"
+      ],
+      "possible_gap": "该测试关注的是对象类型不匹配（ValueError），而当前 Issue 是对象属性（filterable）导致 NotSupportedError。异常类型和触发机制不同。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中使用普通模型实例（如 self.poa）作为 filter 查询的右侧值。",
+      "target_pattern": "使用一个具有名为 'filterable' 的布尔字段的模型实例作为 filter 查询的右侧值。",
+      "reason": "Issue 表明当模型字段名为 'filterable' 时，其实例在查询中被检查了 'filterable' 属性，导致误判。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "测试模型没有名为 'filterable' 的字段。",
+      "target_pattern": "测试模型包含一个名为 'filterable' 的 BooleanField。",
+      "reason": "这是触发 bug 的必要条件，因为 check_filterable 方法会检查表达式的 'filterable' 属性。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "ProductMetaData.objects.filter(metadata_type=brand_metadata_instance)",
+      "reason": "Issue 中明确该调用会抛出 NotSupportedError。观测是否抛出异常以及异常类型和消息是关键。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "type(brand_metadata_instance) 或 hasattr(brand_metadata_instance, 'filterable')",
+      "reason": "需要确认作为查询参数的模型实例的类型和属性，以理解 check_filterable 如何检查它。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证使用具有 'filterable' 字段的模型实例进行过滤查询时，不会抛出 NotSupportedError。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言完整的 SQL 字符串或完整的异常消息文本，因为具体实现可能变化。",
+      "reason": "Issue 表明当前行为会抛出 NotSupportedError，而修复后应正常执行。因此，在修复前，测试应断言会抛出该异常；修复后，测试应断言不会抛出该异常（或正常返回查询集）。根据指令第9条，当前输出应反映修复前的测试目标（即会抛出异常），但 expected_behavior 描述修复后的状态。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要定义两个 Django 模型：一个具有名为 'filterable' 的 BooleanField 的模型（如 ProductMetaDataType），以及一个外键指向它的模型（如 ProductMetaData）。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试需要继承自 django.test.TestCase 以使用数据库和模型。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "模型实例的 'filterable' 属性是如何被 check_filterable 方法获取的？是实例本身的属性，还是其类或字段的属性？",
+    "除了字段名为 'filterable' 外，是否还有其他条件（如字段类型、模型配置）会影响 bug 触发？",
+    "修复后的确切行为是什么？是允许查询，还是需要修改 check_filterable 的逻辑来忽略模型字段名？"
+  ],
+  "raw": {
+    "issue_summary": "当查询过滤条件的右侧表达式具有 filterable=False 属性时，QuerySet 会抛出 NotSupportedError。",
+    "trigger_condition": {
+      "text": "使用一个具有名为 'filterable' 的布尔字段的模型实例作为 filter() 查询的右侧值。",
+      "evidence": [
+        "Issue 描述：'Error happened when filtering ProductMetaData with a metadata_type : ProductMetaData.objects.filter(value=\"Dark Vador\", metadata_type=self.brand_metadata)'",
+        "Issue 描述：'I changed label to filterable_test and it fixed this issue'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 django.db.utils.NotSupportedError，错误信息为 'ProductMetaDataType is disallowed in the filter clause.'",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误追踪：'raise NotSupportedError(\\n django.db.utils.NotSupportedError: ProductMetaDataType is disallowed in the filter clause.'",
+        "源码片段 4 中的 check_filterable 方法会抛出 NotSupportedError。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "即使模型字段名为 'filterable'，使用该模型实例作为查询过滤条件也应能正常执行，不应抛出 NotSupportedError。",
+      "evidence": [
+        "Issue 描述：'I changed label to filterable_test and it fixed this issue' 暗示将字段名从 'filterable' 改为其他名称后查询正常，因此预期行为是查询应正常工作。",
+        "Issue 标题和描述暗示这是一个意外行为，应被修复或记录。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.query.QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发错误的直接 API 调用。"
+      },
+      {
+        "name": "django.db.models.sql.query.Query.check_filterable",
+        "kind": "method",
+        "source_path": "django/db/models/sql/query.py",
+        "reason": "源码显示该方法检查表达式的 'filterable' 属性并抛出 NotSupportedError。"
+      },
+      {
+        "name": "django.db.models.sql.query.Query.build_filter",
+        "kind": "method",
+        "source_path": "django/db/models/sql/query.py",
+        "reason": "源码显示 build_filter 方法在 check_filterable=True 时会调用 check_filterable。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query.check_filterable",
+        "lines": "1125-1134",
+        "reason": "该方法检查表达式的 'filterable' 属性。当模型实例的字段名为 'filterable' 时，该实例可能被误认为具有 filterable=False 属性。"
+      },
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query.build_filter",
+        "lines": "1201-1339",
+        "reason": "该方法在解析过滤条件时调用了 check_filterable。需要理解表达式（如模型实例）如何被解析并获取其 'filterable' 属性。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "RelatedLookupTypeTests.test_correct_lookup",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试展示了使用模型实例（如 self.poa, self.coa）作为 filter 查询的右侧值（objecta__in=[...]）的正常场景。",
+        "reusable_parts": [
+          "TestCase 继承结构",
+          "模型实例的创建和获取方式",
+          "使用 filter() 和 exclude() 进行查询的语法",
+          "assertQuerysetEqual 断言风格"
+        ],
+        "possible_gap": "该测试使用的模型字段名不是 'filterable'，因此不会触发 check_filterable 中的属性检查。需要变异为使用具有 'filterable' 字段的模型实例。"
+      },
+      {
+        "test_name": "RelatedLookupTypeTests.test_wrong_type_lookup",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试展示了在查询中使用错误类型对象时抛出 ValueError 的场景，与当前 Issue 抛出 NotSupportedError 的模式相似（都是查询参数类型/属性问题）。",
+        "reusable_parts": [
+          "使用 assertRaisesMessage 捕获特定异常和消息的模式",
+          "测试错误类型参数传递的框架"
+        ],
+        "possible_gap": "该测试关注的是对象类型不匹配（ValueError），而当前 Issue 是对象属性（filterable）导致 NotSupportedError。异常类型和触发机制不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用普通模型实例（如 self.poa）作为 filter 查询的右侧值。",
+        "target_pattern": "使用一个具有名为 'filterable' 的布尔字段的模型实例作为 filter 查询的右侧值。",
+        "reason": "Issue 表明当模型字段名为 'filterable' 时，其实例在查询中被检查了 'filterable' 属性，导致误判。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试模型没有名为 'filterable' 的字段。",
+        "target_pattern": "测试模型包含一个名为 'filterable' 的 BooleanField。",
+        "reason": "这是触发 bug 的必要条件，因为 check_filterable 方法会检查表达式的 'filterable' 属性。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "ProductMetaData.objects.filter(metadata_type=brand_metadata_instance)",
+        "reason": "Issue 中明确该调用会抛出 NotSupportedError。观测是否抛出异常以及异常类型和消息是关键。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(brand_metadata_instance) 或 hasattr(brand_metadata_instance, 'filterable')",
+        "reason": "需要确认作为查询参数的模型实例的类型和属性，以理解 check_filterable 如何检查它。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用具有 'filterable' 字段的模型实例进行过滤查询时，不会抛出 NotSupportedError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 SQL 字符串或完整的异常消息文本，因为具体实现可能变化。",
+        "reason": "Issue 表明当前行为会抛出 NotSupportedError，而修复后应正常执行。因此，在修复前，测试应断言会抛出该异常；修复后，测试应断言不会抛出该异常（或正常返回查询集）。根据指令第9条，当前输出应反映修复前的测试目标（即会抛出异常），但 expected_behavior 描述修复后的状态。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要定义两个 Django 模型：一个具有名为 'filterable' 的 BooleanField 的模型（如 ProductMetaDataType），以及一个外键指向它的模型（如 ProductMetaData）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试需要继承自 django.test.TestCase 以使用数据库和模型。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "模型实例的 'filterable' 属性是如何被 check_filterable 方法获取的？是实例本身的属性，还是其类或字段的属性？",
+      "除了字段名为 'filterable' 外，是否还有其他条件（如字段类型、模型配置）会影响 bug 触发？",
+      "修复后的确切行为是什么？是允许查询，还是需要修改 check_filterable 的逻辑来忽略模型字段名？"
+    ]
+  }
+}

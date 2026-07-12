@@ -1,0 +1,94 @@
+```json
+{
+    "issue_summary": "Quaternion.to_rotation_matrix() 返回的旋转矩阵中，一个 sin(x) 项的符号错误，应为负号。",
+    "trigger_condition": {
+        "text": "调用 Quaternion(cos(x/2), sin(x/2), 0, 0).to_rotation_matrix() 并简化结果。",
+        "evidence": ["Issue 中用户提供的代码示例：q = Quaternion(cos(x/2), sin(x/2), 0, 0); trigsimp(q.to_rotation_matrix())", "源码片段 2 显示了 to_rotation_matrix 方法的实现。"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "旋转矩阵的 (1,2) 或 (2,1) 位置的 sin(x) 符号错误，应为负号。",
+        "symptom_type": "wrong_return",
+        "evidence": ["Issue 描述：'One of the `sin(x)` functions should be negative.'", "Issue 中输出的矩阵显示为 [[1, 0, 0], [0, cos(x), sin(x)], [0, sin(x), cos(x)]]，其中两个 sin(x) 均为正。"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "旋转矩阵应正确表示绕 x 轴的旋转，即矩阵中对应 sin(x) 的符号应为负，使得矩阵为正交矩阵且行列式为 1。",
+        "evidence": ["相关测试 1 中有一个类似的测试用例：q2 = Quaternion(cos(theta/2), 0, 0, sin(theta/2)) 生成的矩阵为 [[cos(theta), -sin(theta), 0], [sin(theta), cos(theta), 0], [0, 0, 1]]，表明绕 z 轴旋转时 sin 项有负号。", "源码片段 2 的文档字符串示例也显示了一个绕 z 轴旋转的矩阵，其中包含负的 sin(x)。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "Quaternion.to_rotation_matrix",
+            "kind": "method",
+            "source_path": "sympy/algebras/quaternion.py",
+            "reason": "Issue 直接报告此方法返回错误结果。"
+        },
+        {
+            "name": "trigsimp",
+            "kind": "function",
+            "source_path": "sympy/simplify/trigsimp.py",
+            "reason": "Issue 和现有测试中都使用它来简化矩阵表达式。"
+        },
+        {
+            "name": "Quaternion",
+            "kind": "class",
+            "source_path": "sympy/algebras/quaternion.py",
+            "reason": "需要构造四元数对象。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "sympy/algebras/quaternion.py",
+            "object": "Quaternion.to_rotation_matrix",
+            "lines": "489-551",
+            "reason": "Issue 链接指向该方法的行号范围，且该方法直接计算并返回有问题的矩阵。矩阵元素 m01, m02, m10, m11, m12, m20, m21, m22 的计算公式可能包含符号错误。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_quaternion_conversions",
+            "test_file": "sympy/algebras/tests/test_quaternion.py",
+            "why_relevant": "它直接测试 to_rotation_matrix 方法，包含使用 trigsimp 验证矩阵输出的模式。",
+            "reusable_parts": ["from sympy.algebras.quaternion import Quaternion", "from sympy import symbols, trigsimp, cos, sin", "theta = symbols('theta', real=True)", "使用 trigsimp 简化矩阵并断言其等于预期矩阵的模式。"],
+            "possible_gap": "现有测试用例是绕 z 轴旋转 (Quaternion(cos(theta/2), 0, 0, sin(theta/2)))，而 Issue 中的用例是绕 x 轴旋转 (Quaternion(cos(x/2), sin(x/2), 0, 0))。现有测试可能未覆盖触发 bug 的轴/参数组合。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "input",
+            "current_pattern": "Quaternion(cos(theta/2), 0, 0, sin(theta/2))",
+            "target_pattern": "Quaternion(cos(x/2), sin(x/2), 0, 0)",
+            "reason": "Issue 表明当四元数的 b 分量（对应 i）非零而 c、d 分量为零时（即绕 x 轴旋转），矩阵计算出现符号错误。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "return_value",
+            "expression_hint": "trigsimp(q.to_rotation_matrix()) 返回的 Matrix 对象，特别是其 [1,2] 和 [2,1] 位置的元素符号。",
+            "reason": "Issue 的核心是返回的矩阵中 sin(x) 的符号错误。直接观察简化后的矩阵元素是判断 bug 是否触发的直接方式。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "验证旋转矩阵中对应 sin(x) 的项具有正确的负号，使得矩阵表示一个有效的旋转（例如，检查特定元素是否等于 -sin(x)）。",
+            "preferred_assertion_style": "equals",
+            "avoid": "避免断言完整的未经简化的矩阵字符串相等，因为表达式形式可能因简化而不同。",
+            "reason": "Issue 明确指出符号错误。断言简化后矩阵的特定元素等于预期的 -sin(x) 或包含负号的表达式是稳定且与问题对齐的。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要导入 Quaternion, symbols, trigsimp, cos, sin。使用符号变量 x。",
+            "source": "issue|retrieved_test",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "具体是矩阵中的哪个 sin(x) 项（(1,2) 还是 (2,1)）符号错误，或者两者都错？Issue 只指出 'One of the sin(x) functions should be negative'。",
+        "to_rotation_matrix 方法中具体哪一行或哪个公式导致了符号错误。",
+        "该 bug 是否也影响其他旋转轴（如绕 y 轴）或更一般的四元数参数。"
+    ]
+}
+```

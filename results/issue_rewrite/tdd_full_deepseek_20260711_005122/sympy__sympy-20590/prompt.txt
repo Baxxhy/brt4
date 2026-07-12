@@ -1,0 +1,278 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Symbol instances have __dict__ since 1.7?
+In version 1.6.2 Symbol instances had no `__dict__` attribute
+```python
+>>> sympy.Symbol('s').__dict__
+---------------------------------------------------------------------------
+AttributeError                            Traceback (most recent call last)
+<ipython-input-3-e2060d5eec73> in <module>
+----> 1 sympy.Symbol('s').__dict__
+
+AttributeError: 'Symbol' object has no attribute '__dict__'
+>>> sympy.Symbol('s').__slots__
+('name',)
+```
+
+This changes in 1.7 where `sympy.Symbol('s').__dict__` now exists (and returns an empty dict)
+I may misinterpret this, but given the purpose of `__slots__`, I assume this is a bug, introduced because some parent class accidentally stopped defining `__slots__`.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/core/symbol.py
+对象名称：Symbol
+节点类型：class
+父节点：symbol
+行号范围：182-348
+代码：
+class Symbol(AtomicExpr, Boolean):
+    """
+    Assumptions:
+       commutative = True
+
+    You can override the default assumptions in the constructor.
+
+    Examples
+    ========
+
+    >>> from sympy import symbols
+    >>> A,B = symbols('A,B', commutative = False)
+    >>> bool(A*B != B*A)
+    True
+    >>> bool(A*B*2 == 2*A*B) == True # multiplication by scalars is commutative
+    True
+
+    """
+    is_comparable = False
+    __slots__ = ('name',)
+    is_Symbol = True
+    is_symbol = True
+    @property
+    def _diff_wrt(self):
+    @staticmethod
+    def _sanitize(assumptions, obj=None):
+    def _merge(self, assumptions):
+    def __new__(cls, name, **assumptions):
+    def __new_stage2__(cls, name, **assumptions):
+    __xnew__ = staticmethod(
+        __new_stage2__)            # never cached (e.g. dummy)
+    __xnew_cached_ = staticmethod(
+        cacheit(__new_stage2__))   # symbols are always cached
+    def __getnewargs__(self):
+    def __getstate__(self):
+    def _hashable_content(self):
+    def _eval_subs(self, old, new):
+    @property
+    def assumptions0(self):
+    @cacheit
+    def sort_key(self, order=None):
+    def as_dummy(self):
+    def as_real_imag(self, deep=True, **hints):
+    def _sage_(self):
+    def is_constant(self, *wrt, **flags):
+    @property
+    def free_symbols(self):
+    binary_symbols = free_symbols  # in this case, not always
+    def as_set(self):
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/core/tests/test_symbol.py
+测试名称：test_Symbol
+测试代码：
+def test_Symbol():
+    a = Symbol("a")
+    x1 = Symbol("x")
+    x2 = Symbol("x")
+    xdummy1 = Dummy("x")
+    xdummy2 = Dummy("x")
+
+    assert a != x1
+    assert a != x2
+    assert x1 == x2
+    assert x1 != xdummy1
+    assert xdummy1 != xdummy2
+
+    assert Symbol("x") == Symbol("x")
+    assert Dummy("x") != Dummy("x")
+    d = symbols('d', cls=Dummy)
+    assert isinstance(d, Dummy)
+    c, d = symbols('c,d', cls=Dummy)
+    assert isinstance(c, Dummy)
+    assert isinstance(d, Dummy)
+    raises(TypeError, lambda: Symbol())
+
+【相关测试 2】
+测试文件：sympy/core/tests/test_symbol.py
+测试名称：test_no_len
+测试代码：
+def test_no_len():
+    # there should be no len for numbers
+    x = Symbol('x')
+    raises(TypeError, lambda: len(x))
+
+【相关测试 3】
+测试文件：sympy/core/tests/test_singleton.py
+测试名称：test_Singleton
+测试代码：
+def test_Singleton():
+    global instantiated
+    instantiated = 0
+
+    class MySingleton(Basic, metaclass=Singleton):
+        def __new__(cls):
+            global instantiated
+            instantiated += 1
+            return Basic.__new__(cls)
+
+    assert instantiated == 0
+    MySingleton() # force instantiation
+    assert instantiated == 1
+    assert MySingleton() is not Basic()
+    assert MySingleton() is MySingleton()
+    assert S.MySingleton is MySingleton()
+    assert instantiated == 1
+
+    class MySingleton_sub(MySingleton):
+        pass
+    assert instantiated == 1
+    MySingleton_sub()
+    assert instantiated == 2
+    assert MySingleton_sub() is not MySingleton()
+    assert MySingleton_sub() is MySingleton_sub()
+
+【相关测试 4】
+测试文件：sympy/core/tests/test_assumptions.py
+测试名称：test_symbol_unset
+测试代码：
+def test_symbol_unset():
+    x = Symbol('x', real=True, integer=True)
+    assert x.is_real is True
+    assert x.is_integer is True
+    assert x.is_imaginary is False
+    assert x.is_noninteger is False
+    assert x.is_number is False
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

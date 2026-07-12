@@ -1,0 +1,233 @@
+{
+  "instance_id": "sphinx-doc__sphinx-8269",
+  "issue_summary": "当 linkcheck_anchors=True 时，linkcheck 命令在服务器返回错误状态码（如 404）时错误地报告锚点未找到，而不是报告 HTTP 错误。",
+  "trigger_condition": {
+    "text": "运行 linkcheck 命令检查一个包含锚点（#fragment）但目标 URL 返回 HTTP 错误（如 404）的链接，且配置中 linkcheck_anchors=True。",
+    "evidence": [
+      "Issue 描述：`linkcheck` command always reports that it was unable to find the anchor when `linkcheck_anchors` is `True`, even when the server replied with an error status code (e.g. 404, 500).",
+      "Issue 的 To Reproduce 步骤：使用一个返回 404 的 URL 并包含锚点（#test）。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "输出信息错误地显示为“Anchor 'test' not found”，而不是显示 HTTP 错误信息（如“404 Client Error: Not Found for url: ...”）。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 的 Actual 输出示例：`Anchor 'test' not found`",
+      "Issue 的 Expected 输出示例：`404 Client Error: Not Found for url: https://google.com/test.txt`"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当服务器返回 HTTP 错误状态码时，linkcheck 应优先报告该 HTTP 错误信息，而不是锚点未找到的信息。",
+    "evidence": [
+      "Issue 的 Expected behavior 部分：期望输出与 `linkcheck_anchors=False` 时相同，即显示 HTTP 错误信息。",
+      "相关测试 2 中，对于返回 404 的图片 URL，info 字段包含 HTTP 错误信息：`'info': '404 Client Error: Not Found for url: https://www.google.com/image2.png'`"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "sphinx.builders.linkcheck",
+      "kind": "module",
+      "source_path": "sphinx/builders/linkcheck.py",
+      "reason": "Issue 和测试都围绕 linkcheck 功能，缺陷很可能位于此模块中处理链接检查和锚点验证的逻辑。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sphinx/builders/linkcheck.py",
+      "object": "处理链接检查并生成报告的函数或方法",
+      "lines": "",
+      "reason": "Issue 直接指向 linkcheck 命令的行为，且相关源码片段指向此文件。错误可能在于处理 HTTP 响应和锚点检查的优先级逻辑。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_defaults",
+      "test_file": "tests/test_build_linkcheck.py",
+      "why_relevant": "该测试验证 linkcheck 的基本行为，包括对锚点未找到和 HTTP 404 错误的断言。",
+      "reusable_parts": [
+        "@pytest.mark.sphinx('linkcheck', testroot='linkcheck', freshenv=True) fixture 使用",
+        "app.builder.build_all() 调用",
+        "从 output.txt 读取内容并断言输出片段"
+      ],
+      "possible_gap": "该测试可能没有专门测试 `linkcheck_anchors=True` 时，对返回 HTTP 错误的 URL 包含锚点的场景。"
+    },
+    {
+      "test_name": "test_defaults_json",
+      "test_file": "tests/test_build_linkcheck.py",
+      "why_relevant": "该测试验证 JSON 格式的输出，明确检查了“Anchor 'top' not found”和 HTTP 404 错误信息（如图片 URL）的 info 字段。",
+      "reusable_parts": [
+        "JSON 输出解析",
+        "对 info 字段内容的断言模式",
+        "对不同 URI 状态（working/broken）的检查"
+      ],
+      "possible_gap": "该测试可能没有覆盖当同一个 URL 同时满足“HTTP 错误”和“锚点未找到”条件时，info 字段应优先报告 HTTP 错误。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "测试中可能默认或显式设置 `linkcheck_anchors=False` 或未设置。",
+      "target_pattern": "在测试配置中设置 `linkcheck_anchors=True`。",
+      "reason": "Issue 明确指出 bug 在 `linkcheck_anchors=True` 时触发。",
+      "confidence": "high"
+    },
+    {
+      "slot": "input",
+      "current_pattern": "相关测试中使用的链接可能是不含锚点的错误 URL（如图片）或有效的带锚点 URL。",
+      "target_pattern": "使用一个会返回 HTTP 错误（如 404）且包含锚点（#fragment）的 URL 作为输入链接。",
+      "reason": "需要同时满足“HTTP 错误”和“锚点存在”两个条件来触发错误优先级逻辑。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "file_output",
+      "expression_hint": "linkcheck 命令生成的输出文件（如 output.txt 或 output.json）的内容，特别是针对目标 URL 的 info/status 信息。",
+      "reason": "Issue 的核心是输出信息的错误。观察输出内容可以直接判断是报告了锚点错误还是 HTTP 错误。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "对于返回 HTTP 错误且包含锚点的 URL，输出信息应包含 HTTP 错误状态描述（如 '404 Client Error'），而不应仅包含 'Anchor ... not found'。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的、可能因网络或服务器而变化的错误信息字符串。避免断言输出中完全不存在锚点相关字眼（因为锚点确实可能也未找到）。",
+      "reason": "Issue 期望优先报告 HTTP 错误。断言包含 HTTP 错误代码片段（如 '404'）是稳定且与 Issue 对齐的。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 `sphinx.testing.fixtures` 中的 `app` fixture，并配置 `testroot='linkcheck'` 和 `freshenv=True`。可能需要一个能返回可控 HTTP 错误（如 404）的测试服务器或 mock。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要在 conf.py 中设置 `linkcheck_anchors=True`。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "linkcheck 内部处理 HTTP 响应和锚点检查的具体函数调用链和逻辑顺序。",
+    "当 HTTP 错误和锚点未找到同时发生时，修复后的预期行为是只报告 HTTP 错误，还是两者都报告但顺序/优先级不同。",
+    "是否所有 HTTP 错误状态码（如 500）都应触发此行为，还是仅限客户端错误（4xx）。"
+  ],
+  "raw": {
+    "issue_summary": "当 linkcheck_anchors=True 时，linkcheck 命令在服务器返回错误状态码（如 404）时错误地报告锚点未找到，而不是报告 HTTP 错误。",
+    "trigger_condition": {
+      "text": "运行 linkcheck 命令检查一个包含锚点（#fragment）但目标 URL 返回 HTTP 错误（如 404）的链接，且配置中 linkcheck_anchors=True。",
+      "evidence": [
+        "Issue 描述：`linkcheck` command always reports that it was unable to find the anchor when `linkcheck_anchors` is `True`, even when the server replied with an error status code (e.g. 404, 500).",
+        "Issue 的 To Reproduce 步骤：使用一个返回 404 的 URL 并包含锚点（#test）。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "输出信息错误地显示为“Anchor 'test' not found”，而不是显示 HTTP 错误信息（如“404 Client Error: Not Found for url: ...”）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 的 Actual 输出示例：`Anchor 'test' not found`",
+        "Issue 的 Expected 输出示例：`404 Client Error: Not Found for url: https://google.com/test.txt`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当服务器返回 HTTP 错误状态码时，linkcheck 应优先报告该 HTTP 错误信息，而不是锚点未找到的信息。",
+      "evidence": [
+        "Issue 的 Expected behavior 部分：期望输出与 `linkcheck_anchors=False` 时相同，即显示 HTTP 错误信息。",
+        "相关测试 2 中，对于返回 404 的图片 URL，info 字段包含 HTTP 错误信息：`'info': '404 Client Error: Not Found for url: https://www.google.com/image2.png'`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sphinx.builders.linkcheck",
+        "kind": "module",
+        "source_path": "sphinx/builders/linkcheck.py",
+        "reason": "Issue 和测试都围绕 linkcheck 功能，缺陷很可能位于此模块中处理链接检查和锚点验证的逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sphinx/builders/linkcheck.py",
+        "object": "处理链接检查并生成报告的函数或方法",
+        "lines": "",
+        "reason": "Issue 直接指向 linkcheck 命令的行为，且相关源码片段指向此文件。错误可能在于处理 HTTP 响应和锚点检查的优先级逻辑。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_defaults",
+        "test_file": "tests/test_build_linkcheck.py",
+        "why_relevant": "该测试验证 linkcheck 的基本行为，包括对锚点未找到和 HTTP 404 错误的断言。",
+        "reusable_parts": [
+          "@pytest.mark.sphinx('linkcheck', testroot='linkcheck', freshenv=True) fixture 使用",
+          "app.builder.build_all() 调用",
+          "从 output.txt 读取内容并断言输出片段"
+        ],
+        "possible_gap": "该测试可能没有专门测试 `linkcheck_anchors=True` 时，对返回 HTTP 错误的 URL 包含锚点的场景。"
+      },
+      {
+        "test_name": "test_defaults_json",
+        "test_file": "tests/test_build_linkcheck.py",
+        "why_relevant": "该测试验证 JSON 格式的输出，明确检查了“Anchor 'top' not found”和 HTTP 404 错误信息（如图片 URL）的 info 字段。",
+        "reusable_parts": [
+          "JSON 输出解析",
+          "对 info 字段内容的断言模式",
+          "对不同 URI 状态（working/broken）的检查"
+        ],
+        "possible_gap": "该测试可能没有覆盖当同一个 URL 同时满足“HTTP 错误”和“锚点未找到”条件时，info 字段应优先报告 HTTP 错误。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试中可能默认或显式设置 `linkcheck_anchors=False` 或未设置。",
+        "target_pattern": "在测试配置中设置 `linkcheck_anchors=True`。",
+        "reason": "Issue 明确指出 bug 在 `linkcheck_anchors=True` 时触发。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用的链接可能是不含锚点的错误 URL（如图片）或有效的带锚点 URL。",
+        "target_pattern": "使用一个会返回 HTTP 错误（如 404）且包含锚点（#fragment）的 URL 作为输入链接。",
+        "reason": "需要同时满足“HTTP 错误”和“锚点存在”两个条件来触发错误优先级逻辑。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "linkcheck 命令生成的输出文件（如 output.txt 或 output.json）的内容，特别是针对目标 URL 的 info/status 信息。",
+        "reason": "Issue 的核心是输出信息的错误。观察输出内容可以直接判断是报告了锚点错误还是 HTTP 错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于返回 HTTP 错误且包含锚点的 URL，输出信息应包含 HTTP 错误状态描述（如 '404 Client Error'），而不应仅包含 'Anchor ... not found'。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、可能因网络或服务器而变化的错误信息字符串。避免断言输出中完全不存在锚点相关字眼（因为锚点确实可能也未找到）。",
+        "reason": "Issue 期望优先报告 HTTP 错误。断言包含 HTTP 错误代码片段（如 '404'）是稳定且与 Issue 对齐的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 `sphinx.testing.fixtures` 中的 `app` fixture，并配置 `testroot='linkcheck'` 和 `freshenv=True`。可能需要一个能返回可控 HTTP 错误（如 404）的测试服务器或 mock。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要在 conf.py 中设置 `linkcheck_anchors=True`。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "linkcheck 内部处理 HTTP 响应和锚点检查的具体函数调用链和逻辑顺序。",
+      "当 HTTP 错误和锚点未找到同时发生时，修复后的预期行为是只报告 HTTP 错误，还是两者都报告但顺序/优先级不同。",
+      "是否所有 HTTP 错误状态码（如 500）都应触发此行为，还是仅限客户端错误（4xx）。"
+    ]
+  }
+}

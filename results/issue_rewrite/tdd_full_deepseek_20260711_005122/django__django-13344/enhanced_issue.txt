@@ -1,0 +1,130 @@
+instance_id: django__django-13344
+
+issue_summary: 在 ASGI 模式下，第一个中间件的 process_response 方法接收到一个协程对象而非 HttpResponse 对象。
+
+trigger_condition:
+{
+  "text": "使用 ASGI 服务器（如 uvicorn）运行 Django 3.1 项目，并将一个自定义中间件（继承自 MiddlewareMixin）设置为 MIDDLEWARE 列表中的第一个。",
+  "evidence": [
+    "Issue 描述中提供了详细的复现步骤，包括设置 MIDDLEWARE 顺序和启动 ASGI 服务器。",
+    "Issue 中观察到当中间件在列表首位时，response 参数类型为 <class 'coroutine'>。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "第一个中间件的 process_response 方法接收到的 response 参数是一个协程对象，而不是预期的 django.http.response.HttpResponse 对象。",
+  "symptom_type": "wrong_type",
+  "evidence": [
+    "Issue 中打印的 console 输出显示：<class 'django.core.handlers.asgi.ASGIRequest'> <class 'coroutine'>。",
+    "Issue 提到这导致了 django-cors-headers 包的问题。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "所有中间件的 process_response 方法，无论其在 MIDDLEWARE 列表中的顺序如何，都应该接收到一个 HttpResponse 对象（或其子类）作为 response 参数。",
+  "evidence": [
+    "Issue 中描述当中间件不在列表首位时，response 参数类型为 <class 'django.http.response.HttpResponse'>，这暗示了预期的行为。",
+    "相关源码片段 2 和 4 展示了 process_response 方法通常处理 HttpResponse 对象。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "MiddlewareMixin",
+    "kind": "class",
+    "source_path": "django/utils/deprecation.py",
+    "reason": "Issue 中复现步骤使用的自定义中间件继承自 MiddlewareMixin，且相关源码片段 1 检索到了此类。"
+  },
+  {
+    "name": "process_response",
+    "kind": "method",
+    "source_path": "django/middleware/common.py",
+    "reason": "Issue 的核心是关于中间件 process_response 方法接收到的参数类型错误。"
+  },
+  {
+    "name": "ASGIRequest",
+    "kind": "class",
+    "source_path": "django/core/handlers/asgi.py",
+    "reason": "Issue 发生在 ASGI 模式下，请求对象类型为 ASGIRequest。"
+  },
+  {
+    "name": "HttpResponse",
+    "kind": "class",
+    "source_path": "django/http/response.py",
+    "reason": "Issue 的预期是 process_response 接收到 HttpResponse 对象。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "相似测试中 MIDDLEWARE 列表可能包含特定功能的中间件。",
+    "target_pattern": "将自定义的、用于打印/检查类型的中间件（如 DummyMiddleware）设置为 MIDDLEWARE 列表的第一个元素。",
+    "reason": "Issue 表明错误仅在中间件位于列表首位时触发。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "相似测试可能使用同步测试客户端或混合同步/异步调用。",
+    "target_pattern": "使用纯 ASGI 服务器（如 uvicorn）运行，或确保测试在纯异步请求处理路径中执行。",
+    "reason": "Issue 仅在 ASGI 模式下出现，WSGI 模式可能正常。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "type",
+    "expression_hint": "在第一个中间件的 process_response 方法内部，观察 response 参数的类型，例如 type(response)。",
+    "reason": "Issue 的核心症状是 response 参数类型错误（协程 vs HttpResponse）。"
+  },
+  {
+    "kind": "order",
+    "expression_hint": "观察 MIDDLEWARE 列表中中间件的顺序，特别是目标中间件的位置。",
+    "reason": "错误行为与中间件在列表中的顺序（第一个）强相关。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证第一个中间件的 process_response 方法接收到的 response 参数是 HttpResponse（或其子类）的实例，而不是协程。",
+    "preferred_assertion_style": "isinstance",
+    "avoid": "断言完整的 repr 字符串或与特定 HttpResponse 子类的精确相等。",
+    "reason": "这直接对应 Issue 描述的类型错误，且 isinstance 检查比精确类型相等更稳定。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要创建一个继承自 MiddlewareMixin 的自定义中间件，在其 process_response 方法中检查参数类型。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要使用 @override_settings 来动态配置 MIDDLEWARE 列表的顺序。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要在一个支持 ASGI 的测试用例中运行，或者使用 async_client 来模拟异步请求。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "导致第一个中间件收到协程的确切代码位置和逻辑流程。",
+  "是否所有继承自 MiddlewareMixin 的中间件都会受影响，还是特定实现方式的问题。",
+  "在纯测试环境（不使用外部 ASGI 服务器）下是否能够稳定复现该问题。"
+]

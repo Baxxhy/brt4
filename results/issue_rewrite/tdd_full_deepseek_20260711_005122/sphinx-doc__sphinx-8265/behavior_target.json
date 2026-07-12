@@ -1,0 +1,291 @@
+{
+  "instance_id": "sphinx-doc__sphinx-8265",
+  "issue_summary": "Sphinx autodoc 在生成 HTML 文档时，错误地渲染了包含元组默认值的函数签名，移除了元组括号。",
+  "trigger_condition": {
+    "text": "使用 sphinx.ext.autodoc 为包含元组默认参数（如 `color=(1, 1, 1)`）的 Python 类方法生成文档。",
+    "evidence": [
+      "Issue 描述：`def add_lines(self, lines, color=(1, 1, 1), width=5, label=None, name=None):` 被渲染为 `add_lines(lines, color=1, 1, 1, width=5, label=None, name=None)`。",
+      "Issue 的复现步骤涉及构建 Sphinx HTML 文档。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "生成的文档签名中，元组默认值 `(1, 1, 1)` 被错误地渲染为 `1, 1, 1`，移除了括号，导致语法错误或误导性表示。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 截图和描述显示了错误的渲染输出：`color=1, 1, 1`。",
+      "预期行为部分显示了正确的签名应包含括号：`color=(1, 1, 1)`。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "Sphinx autodoc 应正确渲染包含元组默认值的函数签名，保持元组括号，例如 `color=(1, 1, 1)`。",
+    "evidence": [
+      "Issue 的 'Expected behavior' 部分明确给出了正确的渲染示例：`add_lines(lines, color=(1, 1, 1), width=5, label=None, name=None)`。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "sphinx.ext.autodoc",
+      "kind": "module",
+      "source_path": "",
+      "reason": "Issue 是关于 Sphinx autodoc 扩展渲染文档签名的问题。"
+    },
+    {
+      "name": "format_signature",
+      "kind": "method",
+      "source_path": "",
+      "reason": "相关测试 1 (test_format_signature) 直接测试了 `format_signature` 方法，该方法负责生成签名字符串。"
+    },
+    {
+      "name": "inspect.signature_from_str",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试 3 (test_signature_from_str_default_values) 测试了从字符串解析签名的功能，涉及默认值的表示。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "",
+      "object": "format_signature 方法或其依赖的签名格式化逻辑",
+      "lines": "",
+      "reason": "Issue 的核心是签名渲染错误。相关测试 1 直接测试 `format_signature` 方法，该方法很可能负责将 Python 对象签名转换为文档字符串。"
+    },
+    {
+      "path": "",
+      "object": "处理默认参数值的代码（可能在 `inspect` 模块或 autodoc 内部）",
+      "lines": "",
+      "reason": "错误具体表现为元组默认值 `(1, 1, 1)` 的括号丢失。相关测试 3 测试了从字符串解析包含各种默认值（包括列表、字典、集合）的签名，但未明确测试元组。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_format_signature",
+      "test_file": "tests/test_ext_autodoc.py",
+      "why_relevant": "该测试直接验证 `format_signature` 方法对各种对象类型（函数、类、方法）签名的格式化输出，是生成文档签名的核心功能测试。",
+      "reusable_parts": [
+        "测试 fixture `app` 的创建和使用",
+        "内部辅助函数 `formatsig` 的构造模式",
+        "对不同对象类型（function, class, method）调用 `formatsig` 的断言模式",
+        "对默认值字符串表示的断言（如 `c=1`, `d='\\n'`）"
+      ],
+      "possible_gap": "现有测试用例未包含以元组作为默认值的参数（如 `color=(1, 1, 1)`），因此可能未触发此特定 bug。"
+    },
+    {
+      "test_name": "test_signature_from_str_default_values",
+      "test_file": "tests/test_util_inspect.py",
+      "why_relevant": "该测试验证从字符串解析签名时，各种复杂默认值（列表、字典、集合、lambda 等）的表示是否正确。这涉及签名字符串的生成和解析，可能与渲染问题相关。",
+      "reusable_parts": [
+        "使用 `inspect.signature_from_str` 函数",
+        "对参数默认值字符串表示的断言模式"
+      ],
+      "possible_gap": "该测试测试的是从字符串*解析*签名，而 Issue 是关于从 Python 对象*生成*签名字符串。且测试用例中未包含元组默认值。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "相似测试中使用的默认值多为简单类型（如 `c=1`, `d='\\n'`, `b=None`）或列表/字典/集合字面量。",
+      "target_pattern": "将默认值改为元组字面量，例如 `color=(1, 1, 1)`。",
+      "reason": "Issue 明确指出元组默认值的渲染会丢失括号。将测试中的默认值变异为元组可能触发相同的格式化错误。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_type",
+      "current_pattern": "相似测试 `test_format_signature` 中测试了函数、类和方法的签名。",
+      "target_pattern": "针对一个类方法（如 Issue 中的 `add_lines`）进行测试，其参数包含元组默认值。",
+      "reason": "Issue 中的错误示例发生在类方法 (`pyvista.BasePlotter.add_lines`) 上。测试类方法可能涉及不同的代码路径。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "`formatsig` 函数或类似调用返回的签名字符串。",
+      "reason": "错误直接体现在格式化后的签名字符串中。观察返回值可以判断元组括号是否被正确保留。"
+    },
+    {
+      "kind": "repr",
+      "expression_hint": "参数对象的 `__defaults__` 或 `inspect.signature(obj).parameters[...].default` 的表示。",
+      "reason": "需要确认 Python 对象中元组默认值的内部表示是否正确，以区分是提取错误还是格式化错误。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "生成的签名字符串应包含完整的元组默认值表示，即 `color=(1, 1, 1)`，而不是 `color=1, 1, 1`。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免断言完整的、可能包含空格或格式细节的签名字符串相等。",
+      "reason": "Issue 的核心是元组括号的缺失。断言生成的字符串包含 `(1, 1, 1)` 这个片段是稳定且直接针对问题的。"
+    },
+    {
+      "assertion_goal": "对于包含元组默认值的参数，其签名表示应是一个合法的 Python 参数语法片段。",
+      "preferred_assertion_style": "unknown",
+      "avoid": "避免断言与特定渲染后端（如 HTML）相关的输出。",
+      "reason": "bug 发生在文档生成层面，但根本原因可能在签名格式化阶段。确保格式化后的字符串本身是合法的 Python 语法片段是一个稳健的检查。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要创建 Sphinx `app` 对象作为测试 fixture，并可能配置 `autodoc` 扩展。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要定义一个包含元组默认参数的方法或函数作为测试目标对象。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "缺陷的确切位置：是在 `format_signature` 方法中，还是在更底层的 `inspect` 或字符串处理函数中？",
+    "是否只有类方法受影响，还是普通函数、绑定方法等都会受影响？",
+    "除了元组，其他包含括号的默认值（如列表、字典、集合）是否也会出现类似问题？相关测试 3 显示它们在其他上下文中被测试过。",
+    "是否需要特定的 Sphinx 配置（如 `autodoc_docstring_signature`）才能触发此 bug？"
+  ],
+  "raw": {
+    "issue_summary": "Sphinx autodoc 在生成 HTML 文档时，错误地渲染了包含元组默认值的函数签名，移除了元组括号。",
+    "trigger_condition": {
+      "text": "使用 sphinx.ext.autodoc 为包含元组默认参数（如 `color=(1, 1, 1)`）的 Python 类方法生成文档。",
+      "evidence": [
+        "Issue 描述：`def add_lines(self, lines, color=(1, 1, 1), width=5, label=None, name=None):` 被渲染为 `add_lines(lines, color=1, 1, 1, width=5, label=None, name=None)`。",
+        "Issue 的复现步骤涉及构建 Sphinx HTML 文档。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的文档签名中，元组默认值 `(1, 1, 1)` 被错误地渲染为 `1, 1, 1`，移除了括号，导致语法错误或误导性表示。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 截图和描述显示了错误的渲染输出：`color=1, 1, 1`。",
+        "预期行为部分显示了正确的签名应包含括号：`color=(1, 1, 1)`。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Sphinx autodoc 应正确渲染包含元组默认值的函数签名，保持元组括号，例如 `color=(1, 1, 1)`。",
+      "evidence": [
+        "Issue 的 'Expected behavior' 部分明确给出了正确的渲染示例：`add_lines(lines, color=(1, 1, 1), width=5, label=None, name=None)`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sphinx.ext.autodoc",
+        "kind": "module",
+        "source_path": "",
+        "reason": "Issue 是关于 Sphinx autodoc 扩展渲染文档签名的问题。"
+      },
+      {
+        "name": "format_signature",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 1 (test_format_signature) 直接测试了 `format_signature` 方法，该方法负责生成签名字符串。"
+      },
+      {
+        "name": "inspect.signature_from_str",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 3 (test_signature_from_str_default_values) 测试了从字符串解析签名的功能，涉及默认值的表示。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "format_signature 方法或其依赖的签名格式化逻辑",
+        "lines": "",
+        "reason": "Issue 的核心是签名渲染错误。相关测试 1 直接测试 `format_signature` 方法，该方法很可能负责将 Python 对象签名转换为文档字符串。"
+      },
+      {
+        "path": "",
+        "object": "处理默认参数值的代码（可能在 `inspect` 模块或 autodoc 内部）",
+        "lines": "",
+        "reason": "错误具体表现为元组默认值 `(1, 1, 1)` 的括号丢失。相关测试 3 测试了从字符串解析包含各种默认值（包括列表、字典、集合）的签名，但未明确测试元组。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_format_signature",
+        "test_file": "tests/test_ext_autodoc.py",
+        "why_relevant": "该测试直接验证 `format_signature` 方法对各种对象类型（函数、类、方法）签名的格式化输出，是生成文档签名的核心功能测试。",
+        "reusable_parts": [
+          "测试 fixture `app` 的创建和使用",
+          "内部辅助函数 `formatsig` 的构造模式",
+          "对不同对象类型（function, class, method）调用 `formatsig` 的断言模式",
+          "对默认值字符串表示的断言（如 `c=1`, `d='\\n'`）"
+        ],
+        "possible_gap": "现有测试用例未包含以元组作为默认值的参数（如 `color=(1, 1, 1)`），因此可能未触发此特定 bug。"
+      },
+      {
+        "test_name": "test_signature_from_str_default_values",
+        "test_file": "tests/test_util_inspect.py",
+        "why_relevant": "该测试验证从字符串解析签名时，各种复杂默认值（列表、字典、集合、lambda 等）的表示是否正确。这涉及签名字符串的生成和解析，可能与渲染问题相关。",
+        "reusable_parts": [
+          "使用 `inspect.signature_from_str` 函数",
+          "对参数默认值字符串表示的断言模式"
+        ],
+        "possible_gap": "该测试测试的是从字符串*解析*签名，而 Issue 是关于从 Python 对象*生成*签名字符串。且测试用例中未包含元组默认值。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中使用的默认值多为简单类型（如 `c=1`, `d='\\n'`, `b=None`）或列表/字典/集合字面量。",
+        "target_pattern": "将默认值改为元组字面量，例如 `color=(1, 1, 1)`。",
+        "reason": "Issue 明确指出元组默认值的渲染会丢失括号。将测试中的默认值变异为元组可能触发相同的格式化错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_type",
+        "current_pattern": "相似测试 `test_format_signature` 中测试了函数、类和方法的签名。",
+        "target_pattern": "针对一个类方法（如 Issue 中的 `add_lines`）进行测试，其参数包含元组默认值。",
+        "reason": "Issue 中的错误示例发生在类方法 (`pyvista.BasePlotter.add_lines`) 上。测试类方法可能涉及不同的代码路径。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "`formatsig` 函数或类似调用返回的签名字符串。",
+        "reason": "错误直接体现在格式化后的签名字符串中。观察返回值可以判断元组括号是否被正确保留。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "参数对象的 `__defaults__` 或 `inspect.signature(obj).parameters[...].default` 的表示。",
+        "reason": "需要确认 Python 对象中元组默认值的内部表示是否正确，以区分是提取错误还是格式化错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的签名字符串应包含完整的元组默认值表示，即 `color=(1, 1, 1)`，而不是 `color=1, 1, 1`。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、可能包含空格或格式细节的签名字符串相等。",
+        "reason": "Issue 的核心是元组括号的缺失。断言生成的字符串包含 `(1, 1, 1)` 这个片段是稳定且直接针对问题的。"
+      },
+      {
+        "assertion_goal": "对于包含元组默认值的参数，其签名表示应是一个合法的 Python 参数语法片段。",
+        "preferred_assertion_style": "unknown",
+        "avoid": "避免断言与特定渲染后端（如 HTML）相关的输出。",
+        "reason": "bug 发生在文档生成层面，但根本原因可能在签名格式化阶段。确保格式化后的字符串本身是合法的 Python 语法片段是一个稳健的检查。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要创建 Sphinx `app` 对象作为测试 fixture，并可能配置 `autodoc` 扩展。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义一个包含元组默认参数的方法或函数作为测试目标对象。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置：是在 `format_signature` 方法中，还是在更底层的 `inspect` 或字符串处理函数中？",
+      "是否只有类方法受影响，还是普通函数、绑定方法等都会受影响？",
+      "除了元组，其他包含括号的默认值（如列表、字典、集合）是否也会出现类似问题？相关测试 3 显示它们在其他上下文中被测试过。",
+      "是否需要特定的 Sphinx 配置（如 `autodoc_docstring_signature`）才能触发此 bug？"
+    ]
+  }
+}

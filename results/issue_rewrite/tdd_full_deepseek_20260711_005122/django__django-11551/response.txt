@@ -1,0 +1,117 @@
+```json
+{
+    "issue_summary": "Django 2.2.1 中，ModelAdmin 的 list_display 包含某些仅能通过模型实例访问的字段（如第三方库的 PositionField）时，会错误地抛出 admin.E108 验证错误，阻止 Django 启动。",
+    "trigger_condition": {
+        "text": "创建一个 ModelAdmin 子类，其 list_display 属性包含一个字符串，该字符串是模型的一个字段名，但该字段的 getattr 方法在模型类（而非实例）上调用时会抛出异常（例如第三方库的 PositionField）。",
+        "evidence": ["Issue 描述：'list_display = [\\'number\\', \\'order\\']' 其中 'order' 是 PositionField。", "Issue 分析：'hasattr(model, item) is false in the case of a PositionField is its get method throws an exception if called on an instance of the PositionField class on the Thing model class, rather than a Thing instance.'"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "Django 启动时，admin 系统检查抛出 checks.Error，id 为 'admin.E108'，消息提示 list_display 项不是可调用对象、ModelAdmin 属性或模型属性/方法。",
+        "symptom_type": "exception",
+        "evidence": ["Issue 描述：'Under 2.2.1 this raises an incorrect admin.E108 message saying \\\"The value of list_display[1] refers to 'order' which is not a callable...\\\"'", "源码片段 2 显示了抛出 admin.E108 错误的代码位置。"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "对于 list_display 中引用的模型字段名，即使该字段的 getattr 在模型类上会抛出异常，只要该字段确实存在于模型元数据中（通过 _meta.get_field 可获取）且不是 ManyToManyField，就应该通过验证，不抛出 admin.E108 错误。",
+        "evidence": ["Issue 中提供的 'correct behaviour' 代码逻辑：先尝试 get_field，失败后再尝试 getattr，两者都失败才返回 E108。", "Issue 表格中 'Correct behaviour' 列对于 'False ok False False' 情况（对应 PositionField 场景）的预期结果是空列表 []，表示通过验证。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "ModelAdminChecks._check_list_display_item",
+            "kind": "method",
+            "source_path": "django/contrib/admin/checks.py",
+            "reason": "这是执行 list_display 项验证的核心函数，Issue 明确指出其逻辑缺陷导致了此 bug。"
+        },
+        {
+            "name": "ModelAdmin",
+            "kind": "class",
+            "source_path": "django/contrib/admin/options.py",
+            "reason": "包含 list_display 属性的管理类，是测试的构造目标。"
+        },
+        {
+            "name": "checks.Error",
+            "kind": "class",
+            "source_path": "django/core/checks/__init__.py",
+            "reason": "验证错误信息的封装类，用于断言是否抛出特定错误。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/contrib/admin/checks.py",
+            "object": "ModelAdminChecks._check_list_display_item",
+            "lines": "718-749",
+            "reason": "Issue 详细分析了该函数的逻辑缺陷：在 hasattr(obj.model, item) 为 False 时（例如 PositionField 场景），直接跳转到 else 分支返回 E108，而没有尝试通过 model._meta.get_field(item) 来获取字段。这与源码片段 2 的代码结构一致。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "ListDisplayTests.test_missing_field",
+            "test_file": "tests/modeladmin/test_checks.py",
+            "why_relevant": "它测试了 list_display 包含不存在的字段名时，会正确触发 admin.E108 错误。这展示了如何构造一个会触发 _check_list_display_item 并导致 E108 的测试场景，以及如何使用 assertIsInvalid 进行断言。",
+            "reusable_parts": ["测试类结构 (ListDisplayTests, CheckTestCase)", "使用 ModelAdmin 子类和 list_display 属性的模式", "assertIsInvalid 的调用方式和参数格式 (admin class, model class, expected message, expected id)"],
+            "possible_gap": "该测试使用的是完全不存在的字段名 ('non_existent_field')，而当前 Issue 的触发条件是字段名存在（可通过 _meta.get_field 获取），但 hasattr(model, item) 为 False。需要变异为使用一个特殊的字段（如模拟 PositionField 行为）。"
+        },
+        {
+            "test_name": "ListDisplayTests.test_valid_case",
+            "test_file": "tests/modeladmin/test_checks.py",
+            "why_relevant": "它展示了 list_display 包含有效字段名、方法、可调用对象时能通过验证的正常场景。可以作为构造基础测试的参考。",
+            "reusable_parts": ["ModelAdmin 子类的定义方式", "list_display 赋值为元组的模式", "assertIsValid 的断言方法"],
+            "possible_gap": "它没有覆盖 Issue 中描述的边界情况：字段存在但 hasattr 失败。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "input",
+            "current_pattern": "list_display = ('non_existent_field',) 或 list_display = ('name', ...)",
+            "target_pattern": "list_display 包含一个字符串，该字符串是模型的一个真实字段名，但该字段的 __get__ 方法在模型类上调用时会抛出 AttributeError 或类似异常。",
+            "reason": "为了触发 hasattr(obj.model, item) 为 False 但 model._meta.get_field(item) 成功的代码路径，这是 Issue 描述的核心。",
+            "confidence": "high"
+        },
+        {
+            "slot": "object_state",
+            "current_pattern": "使用 Django 内置的标准模型字段（如 CharField, IntegerField）。",
+            "target_pattern": "使用一个自定义的模型字段类，其 __get__ 方法在描述符协议中，当在类（而非实例）上访问时，有意抛出异常（如 AttributeError）。这模拟了 PositionField 的行为。",
+            "reason": "Issue 明确指出 PositionField 的 get 方法在模型类上调用会抛异常，导致 hasattr 为 False。需要模拟这种字段状态。",
+            "confidence": "medium"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "return_value",
+            "expression_hint": "ModelAdminChecks()._check_list_display_item(admin_instance, 'field_name', 'label') 的返回值，或 ModelAdminChecks()._check_list_display(admin_instance) 的返回值。",
+            "reason": "可以直接观察验证函数是否返回了错误列表（包含 admin.E108）或空列表（通过验证）。这是判断 bug 是否触发的直接依据。"
+        },
+        {
+            "kind": "exception",
+            "expression_hint": "在调用验证流程时捕获的 checks.Error 异常及其 id 和 message 属性。",
+            "reason": "admin 系统检查会在启动时汇总错误并可能抛出。观测具体的 Error 对象可以确认是否是错误的 E108。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "当 list_display 包含一个存在但 hasattr 会失败的模型字段名时，验证应该通过（返回空错误列表或 assertIsValid）。",
+            "preferred_assertion_style": "equals",
+            "avoid": "断言完整的错误信息字符串完全相等，因为信息格式可能微调。应更关注错误 id ('admin.E108') 的有无。",
+            "reason": "修复后的正确行为是验证通过，不产生 E108 错误。断言应聚焦于错误列表为空或验证结果为有效。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要定义一个 Django 模型，并为其注册一个 ModelAdmin。模型需要包含一个自定义字段，该字段的 __get__ 方法在类访问时抛出异常。可能需要使用 unittest.mock 来模拟字段行为，或创建一个简单的描述符类。",
+            "source": "inference",
+            "confidence": "medium"
+        },
+        {
+            "hint": "测试可能需要继承自现有的 CheckTestCase 或类似的 Django 测试基类，以使用 assertIsInvalid/assertIsValid 等方法。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "如何精确地模拟或创建一个在模型类上调用 __get__ 时会抛出 AttributeError 的字段描述符，以完全复现 PositionField 的行为。",
+        "除了 admin.E108，修复后的代码是否还需要正确处理相关的 admin.E109 (ManyToManyField) 错误，如 Issue 表格中 'False ok False True' 情况所示。"
+    ]
+}
+```

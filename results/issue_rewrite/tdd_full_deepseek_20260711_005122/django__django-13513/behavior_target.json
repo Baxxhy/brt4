@@ -1,0 +1,293 @@
+{
+  "instance_id": "django__django-13513",
+  "issue_summary": "Django debug error view 在处理 raise ... from None 时没有正确忽略 __context__，导致显示被抑制的异常上下文。",
+  "trigger_condition": {
+    "text": "在视图或代码中捕获一个异常，然后使用 raise ... from None 抛出新异常，并触发 Django 的 debug error view。",
+    "evidence": [
+      "Issue 中的示例代码：raise ValueError('my new error') from None",
+      "相关测试 1 中的代码模式：raise ValueError(...) from None"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "debug error view 的 traceback 中显示了被 raise ... from None 抑制的原始异常（RuntimeError），而不是像 Python 标准 traceback 那样只显示新异常。",
+    "symptom_type": "wrong_order",
+    "evidence": [
+      "Issue 描述：'the debug error view still shows the RuntimeError'",
+      "相关测试 1 的断言目标：self.assertNotIn('During handling of the above exception', html)"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当异常设置了 __suppress_context__ 为 True 时，debug error view 在生成 traceback frames 时应忽略其 __context__，只显示当前异常及其 __cause__。",
+    "evidence": [
+      "Issue 中建议的修复逻辑：return exc_value.__cause__ or (None if exc_value.__suppress_context__ else exc_value.__context__)",
+      "相关源码片段 2 中的函数 explicit_or_implicit_cause 已包含 suppress_context 判断逻辑"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "django.views.debug.ExceptionReporter",
+      "kind": "class",
+      "source_path": "django/views/debug.py",
+      "reason": "Issue 涉及的 debug error view 由 ExceptionReporter 生成。"
+    },
+    {
+      "name": "ExceptionReporter.get_traceback_frames",
+      "kind": "method",
+      "source_path": "django/views/debug.py",
+      "reason": "Issue 明确指出问题函数 explicit_or_implicit_cause 位于 get_traceback_frames 内部。"
+    },
+    {
+      "name": "ExceptionReporter.get_traceback_html",
+      "kind": "method",
+      "source_path": "django/views/debug.py",
+      "reason": "相关测试通过调用 get_traceback_html 并检查其输出来验证行为。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/views/debug.py",
+      "object": "explicit_or_implicit_cause (nested function inside get_traceback_frames)",
+      "lines": "398-402",
+      "reason": "Issue 描述和源码片段 2 显示，该函数负责决定返回 __cause__ 还是 __context__，其逻辑是缺陷的关键。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_suppressed_context",
+      "test_file": "tests/view_tests/tests/test_debug.py",
+      "why_relevant": "该测试直接针对 raise ... from None 场景，检查生成的 HTML 中是否包含被抑制的上下文信息。",
+      "reusable_parts": [
+        "测试类 ExceptionReporterTests",
+        "使用 try/except 构造异常链并捕获 sys.exc_info()",
+        "创建 ExceptionReporter 对象",
+        "调用 reporter.get_traceback_html()",
+        "使用 assertInHTML 和 assertNotIn 检查输出"
+      ],
+      "possible_gap": "该测试可能已经针对修复后的代码编写，其断言 self.assertNotIn('During handling of the above exception', html) 直接对应期望行为，因此可能无法直接复现缺陷。"
+    },
+    {
+      "test_name": "test_reporting_of_nested_exceptions",
+      "test_file": "tests/view_tests/tests/test_debug.py",
+      "why_relevant": "该测试涉及复杂的异常链（__cause__ 和 __context__），展示了如何检查 traceback 输出中的特定消息。",
+      "reusable_parts": [
+        "构造嵌套异常链的模式",
+        "检查 HTML 和文本输出中特定字符串的出现次数",
+        "使用 sys.exc_info()"
+      ],
+      "possible_gap": "该测试主要关注显式 __cause__ 和隐式 __context__ 的显示，没有专门测试 __suppress_context__ 的场景。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "object_state",
+      "current_pattern": "相关测试 2 中使用了显式的 from explicit 来设置 __cause__。",
+      "target_pattern": "使用 from None 来设置 __suppress_context__ 为 True，并期望 __context__ 被忽略。",
+      "reason": "Issue 的核心是 from None 触发的 __suppress_context__ 未被正确处理。将测试中的异常引发方式从显式原因改为 from None，可能触发缺陷路径。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "相关测试 1 直接检查最终 HTML 输出中是否包含特定字符串。",
+      "target_pattern": "在调用 get_traceback_html 之前或之后，检查 get_traceback_frames 返回的 frames 中 exc_cause 的值，或检查中间数据结构。",
+      "reason": "缺陷逻辑位于 get_traceback_frames 内部的辅助函数中。直接观测 frames 数据可能更精确地定位问题。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "state",
+      "expression_hint": "ExceptionReporter 对象初始化后，其 self.exc_value 的 __suppress_context__、__cause__、__context__ 属性值。",
+      "reason": "这些属性值是 explicit_or_implicit_cause 函数的输入，决定了其返回值。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "reporter.get_traceback_frames() 返回的 frames 列表中，每个 frame 的 'exc_cause' 字段值。",
+      "reason": "该字段由 explicit_or_implicit_cause(exc_value) 计算得出，是判断是否错误返回了被抑制的 __context__ 的关键。"
+    },
+    {
+      "kind": "file_output",
+      "expression_hint": "reporter.get_traceback_html() 或 reporter.get_traceback_text() 的输出字符串中是否包含 'During handling of the above exception' 等指示隐式上下文的短语。",
+      "reason": "Issue 和测试表明，当 __suppress_context__ 为 True 时，这些短语不应出现。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "当异常由 raise ... from None 引发时，debug error view 的输出中不应包含指示隐式异常上下文的文本（如 'During handling of the above exception'）。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "断言完整的、具体的 HTML 字符串或精确的单词计数。",
+      "reason": "输出格式可能变化，但语义上被抑制的上下文不应出现。不包含特定片段是稳定且与 Issue 对齐的断言。"
+    },
+    {
+      "assertion_goal": "对于由 raise ... from None 引发的异常，get_traceback_frames 返回的 frames 中，对应异常的 'exc_cause' 应为 None（或不是被抑制的 __context__）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言 frames 列表的完整结构或所有字段的值。",
+      "reason": "这直接测试了 explicit_or_implicit_cause 函数的逻辑，是更底层的、稳定的断言。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 SimpleTestCase 或类似的 Django 测试基类。可能需要使用 RequestFactory (self.rf) 创建请求对象，但根据测试，对于无请求数据的场景，也可以传递 None。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试中需要通过 try/except 和 sys.exc_info() 来捕获当前线程的异常信息，以构造 ExceptionReporter。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "explicit_or_implicit_cause 函数在源码片段中已经包含了 suppress_context 的判断逻辑（return explicit or (None if suppress_context else implicit)），这与 Issue 建议的修复逻辑一致。这是否意味着检索到的源码已经是修复后的版本？如果是，那么缺陷可能已修复，复现测试将无法触发旧行为。",
+    "相关测试 test_suppressed_context 的断言 self.assertNotIn('During handling of the above exception', html) 直接对应期望行为。该测试的存在是否意味着它是在修复后添加的？如果是，它本身就是一个通过测试，无法作为复现缺陷的起点。",
+    "Issue 中引用的代码行号（#392）与检索到的源码片段行号（397-471）不完全匹配，可能存在版本差异。"
+  ],
+  "raw": {
+    "issue_summary": "Django debug error view 在处理 raise ... from None 时没有正确忽略 __context__，导致显示被抑制的异常上下文。",
+    "trigger_condition": {
+      "text": "在视图或代码中捕获一个异常，然后使用 raise ... from None 抛出新异常，并触发 Django 的 debug error view。",
+      "evidence": [
+        "Issue 中的示例代码：raise ValueError('my new error') from None",
+        "相关测试 1 中的代码模式：raise ValueError(...) from None"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "debug error view 的 traceback 中显示了被 raise ... from None 抑制的原始异常（RuntimeError），而不是像 Python 标准 traceback 那样只显示新异常。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 描述：'the debug error view still shows the RuntimeError'",
+        "相关测试 1 的断言目标：self.assertNotIn('During handling of the above exception', html)"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当异常设置了 __suppress_context__ 为 True 时，debug error view 在生成 traceback frames 时应忽略其 __context__，只显示当前异常及其 __cause__。",
+      "evidence": [
+        "Issue 中建议的修复逻辑：return exc_value.__cause__ or (None if exc_value.__suppress_context__ else exc_value.__context__)",
+        "相关源码片段 2 中的函数 explicit_or_implicit_cause 已包含 suppress_context 判断逻辑"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.views.debug.ExceptionReporter",
+        "kind": "class",
+        "source_path": "django/views/debug.py",
+        "reason": "Issue 涉及的 debug error view 由 ExceptionReporter 生成。"
+      },
+      {
+        "name": "ExceptionReporter.get_traceback_frames",
+        "kind": "method",
+        "source_path": "django/views/debug.py",
+        "reason": "Issue 明确指出问题函数 explicit_or_implicit_cause 位于 get_traceback_frames 内部。"
+      },
+      {
+        "name": "ExceptionReporter.get_traceback_html",
+        "kind": "method",
+        "source_path": "django/views/debug.py",
+        "reason": "相关测试通过调用 get_traceback_html 并检查其输出来验证行为。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/views/debug.py",
+        "object": "explicit_or_implicit_cause (nested function inside get_traceback_frames)",
+        "lines": "398-402",
+        "reason": "Issue 描述和源码片段 2 显示，该函数负责决定返回 __cause__ 还是 __context__，其逻辑是缺陷的关键。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_suppressed_context",
+        "test_file": "tests/view_tests/tests/test_debug.py",
+        "why_relevant": "该测试直接针对 raise ... from None 场景，检查生成的 HTML 中是否包含被抑制的上下文信息。",
+        "reusable_parts": [
+          "测试类 ExceptionReporterTests",
+          "使用 try/except 构造异常链并捕获 sys.exc_info()",
+          "创建 ExceptionReporter 对象",
+          "调用 reporter.get_traceback_html()",
+          "使用 assertInHTML 和 assertNotIn 检查输出"
+        ],
+        "possible_gap": "该测试可能已经针对修复后的代码编写，其断言 self.assertNotIn('During handling of the above exception', html) 直接对应期望行为，因此可能无法直接复现缺陷。"
+      },
+      {
+        "test_name": "test_reporting_of_nested_exceptions",
+        "test_file": "tests/view_tests/tests/test_debug.py",
+        "why_relevant": "该测试涉及复杂的异常链（__cause__ 和 __context__），展示了如何检查 traceback 输出中的特定消息。",
+        "reusable_parts": [
+          "构造嵌套异常链的模式",
+          "检查 HTML 和文本输出中特定字符串的出现次数",
+          "使用 sys.exc_info()"
+        ],
+        "possible_gap": "该测试主要关注显式 __cause__ 和隐式 __context__ 的显示，没有专门测试 __suppress_context__ 的场景。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 2 中使用了显式的 from explicit 来设置 __cause__。",
+        "target_pattern": "使用 from None 来设置 __suppress_context__ 为 True，并期望 __context__ 被忽略。",
+        "reason": "Issue 的核心是 from None 触发的 __suppress_context__ 未被正确处理。将测试中的异常引发方式从显式原因改为 from None，可能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 直接检查最终 HTML 输出中是否包含特定字符串。",
+        "target_pattern": "在调用 get_traceback_html 之前或之后，检查 get_traceback_frames 返回的 frames 中 exc_cause 的值，或检查中间数据结构。",
+        "reason": "缺陷逻辑位于 get_traceback_frames 内部的辅助函数中。直接观测 frames 数据可能更精确地定位问题。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "ExceptionReporter 对象初始化后，其 self.exc_value 的 __suppress_context__、__cause__、__context__ 属性值。",
+        "reason": "这些属性值是 explicit_or_implicit_cause 函数的输入，决定了其返回值。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "reporter.get_traceback_frames() 返回的 frames 列表中，每个 frame 的 'exc_cause' 字段值。",
+        "reason": "该字段由 explicit_or_implicit_cause(exc_value) 计算得出，是判断是否错误返回了被抑制的 __context__ 的关键。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "reporter.get_traceback_html() 或 reporter.get_traceback_text() 的输出字符串中是否包含 'During handling of the above exception' 等指示隐式上下文的短语。",
+        "reason": "Issue 和测试表明，当 __suppress_context__ 为 True 时，这些短语不应出现。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当异常由 raise ... from None 引发时，debug error view 的输出中不应包含指示隐式异常上下文的文本（如 'During handling of the above exception'）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的、具体的 HTML 字符串或精确的单词计数。",
+        "reason": "输出格式可能变化，但语义上被抑制的上下文不应出现。不包含特定片段是稳定且与 Issue 对齐的断言。"
+      },
+      {
+        "assertion_goal": "对于由 raise ... from None 引发的异常，get_traceback_frames 返回的 frames 中，对应异常的 'exc_cause' 应为 None（或不是被抑制的 __context__）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言 frames 列表的完整结构或所有字段的值。",
+        "reason": "这直接测试了 explicit_or_implicit_cause 函数的逻辑，是更底层的、稳定的断言。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的 Django 测试基类。可能需要使用 RequestFactory (self.rf) 创建请求对象，但根据测试，对于无请求数据的场景，也可以传递 None。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试中需要通过 try/except 和 sys.exc_info() 来捕获当前线程的异常信息，以构造 ExceptionReporter。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "explicit_or_implicit_cause 函数在源码片段中已经包含了 suppress_context 的判断逻辑（return explicit or (None if suppress_context else implicit)），这与 Issue 建议的修复逻辑一致。这是否意味着检索到的源码已经是修复后的版本？如果是，那么缺陷可能已修复，复现测试将无法触发旧行为。",
+      "相关测试 test_suppressed_context 的断言 self.assertNotIn('During handling of the above exception', html) 直接对应期望行为。该测试的存在是否意味着它是在修复后添加的？如果是，它本身就是一个通过测试，无法作为复现缺陷的起点。",
+      "Issue 中引用的代码行号（#392）与检索到的源码片段行号（397-471）不完全匹配，可能存在版本差异。"
+    ]
+  }
+}

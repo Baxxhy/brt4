@@ -1,0 +1,365 @@
+{
+  "instance_id": "django__django-15563",
+  "issue_summary": "在多继承模型上执行 QuerySet.update() 时，错误地更新了父类实例而非子类实例。",
+  "trigger_condition": {
+    "text": "对一个从多个父类继承的 Django 模型子类（例如 class Child(Base, OtherBase)）的 QuerySet 调用 update() 方法，试图更新从第二个父类继承的字段。",
+    "evidence": [
+      "Issue 中描述了 Child 类继承自 Base 和 OtherBase，并调用 Child.objects.update(field_otherbase=55)。",
+      "Issue 中展示了生成的 SQL 语句：UPDATE \"appliances_otherbase\" SET \"field_otherbase\" = 55 WHERE \"appliances_otherbase\".\"otherbase_id\" IN (1, 2)。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "子类实例的目标字段未被更新，而父类实例的对应字段却被错误地更新了。SQL 查询使用了错误的表（父类表）和错误的主键条件（来自第一个父类的主键）。",
+    "symptom_type": "state_not_updated",
+    "evidence": [
+      "Issue 中显示 Child.objects.values('field_otherbase') 返回未更新的值 [{'field_otherbase': 0}, {'field_otherbase': 1}]。",
+      "Issue 中显示 OtherBase.objects.filter(otherbase_id__in=[1,2]).values('field_otherbase') 返回已更新的值 [{'field_otherbase': 55}, {'field_otherbase': 55}]。",
+      "Issue 中 SQL 日志显示 UPDATE 语句作用在 \"appliances_otherbase\" 表上，且 WHERE 子句使用了来自 Base 类的主键 (1, 2)。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "对子类 QuerySet 调用 update() 方法时，应该正确地更新子类实例中从所有父类继承的字段，并且不应该影响父类表中与子类无关的独立实例。",
+    "evidence": [
+      "Issue 标题和描述暗示了这是错误行为。",
+      "相关测试 1 (test_queryset_update_on_parent_model) 和 相关测试 4 (test_update_works_on_parent_and_child_models_at_once) 表明 update() 应该能够更新继承模型中的字段。",
+      "相关测试 2 (test_update_parent_filtering) 关注 UPDATE 查询的正确性。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "django.db.models.query.QuerySet.update",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 的核心是调用 Child.objects.update() 时出现错误行为。"
+    },
+    {
+      "name": "django.db.models.query.QuerySet.values",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 中使用 values() 来检查更新后的字段值。"
+    },
+    {
+      "name": "django.db.models.query.QuerySet.create",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 中用于创建测试数据。"
+    },
+    {
+      "name": "django.db.models.query.QuerySet.filter",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 中用于查询 OtherBase 实例以检查错误更新。"
+    },
+    {
+      "name": "django.db.models.base.Model",
+      "kind": "class",
+      "source_path": "django/db/models/base.py",
+      "reason": "Issue 涉及模型继承，Model 类是基类。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/query.py",
+      "object": "QuerySet.update",
+      "lines": "981-997",
+      "reason": "这是执行更新的核心方法。Issue 中的错误 SQL 生成可能源于此方法或其调用的查询构建逻辑在处理多继承模型时出错。"
+    },
+    {
+      "path": "django/db/models/query.py",
+      "object": "UpdateQuery (由 query.chain(sql.UpdateQuery) 创建)",
+      "lines": "",
+      "reason": "负责生成具体的 UPDATE SQL 语句。错误可能在于它未能正确识别多继承模型的表关联和主键映射。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "ModelInheritanceTest.test_queryset_update_on_parent_model",
+      "test_file": "tests/model_inheritance_regress/tests.py",
+      "why_relevant": "该测试直接验证了在继承模型上调用 update() 方法的功能，与当前 Issue 场景高度相似。",
+      "reusable_parts": [
+        "使用 TestCase 类",
+        "创建继承模型实例 (ArticleWithAuthor, DerivedM)",
+        "调用 update() 方法并断言更新行数",
+        "使用 self.assertEqual 进行断言"
+      ],
+      "possible_gap": "该测试只涉及单继承（ArticleWithAuthor 继承 Article）或自定义主键的继承（DerivedM），没有测试多继承（如 Child(Base, OtherBase)）的场景。"
+    },
+    {
+      "test_name": "ModelInheritanceDataTests.test_update_works_on_parent_and_child_models_at_once",
+      "test_file": "tests/model_inheritance/tests.py",
+      "why_relevant": "该测试验证了 update() 可以同时更新父类和子类模型的字段，涉及继承模型上的更新操作。",
+      "reusable_parts": [
+        "使用 Restaurant 继承模型",
+        "在过滤后的 QuerySet 上调用 update()",
+        "使用 self.assertEqual 断言更新行数",
+        "使用 self.assertFalse 和 self.assertEqual 断言更新后的状态"
+      ],
+      "possible_gap": "该测试使用的是单继承链（Restaurant 继承 Place），而非 Issue 中的多继承（两个非抽象基类）。"
+    },
+    {
+      "test_name": "ModelInheritanceTests.test_update_parent_filtering",
+      "test_file": "tests/model_inheritance/tests.py",
+      "why_relevant": "该测试关注 UPDATE 查询的正确性，使用了 CaptureQueriesContext 来检查生成的 SQL，这对于诊断 Issue 中的错误 SQL 很有帮助。",
+      "reusable_parts": [
+        "使用 CaptureQueriesContext 捕获 SQL",
+        "创建 Supplier（继承 Place）实例",
+        "比较 UPDATE 查询"
+      ],
+      "possible_gap": "该测试主要关注查询结构（避免不必要的子查询），而非多继承场景下更新错误表的问题。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试中使用单继承模型（如 Restaurant 继承 Place，ArticleWithAuthor 继承 Article）。",
+      "target_pattern": "使用多继承模型，即一个子类同时继承两个非抽象的 Model 基类（如 Issue 中的 Child(Base, OtherBase)）。",
+      "reason": "Issue 明确指出问题发生在“multiple inheritance”时。将测试模型从单继承改为多继承是触发缺陷路径的关键变异。",
+      "confidence": "high"
+    },
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中 update() 更新的字段通常属于直接父类或子类本身。",
+      "target_pattern": "update() 更新的字段属于第二个父类（即继承列表中非第一个的父类），如 Issue 中的 field_otherbase。",
+      "reason": "Issue 显示更新第二个父类的字段时出现问题，且 SQL 错误地使用了第一个父类的主键。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "sql",
+      "expression_hint": "在调用 update() 前后，使用类似 CaptureQueriesContext 捕获并检查生成的 SQL 语句。",
+      "reason": "Issue 的核心症状是生成的 UPDATE SQL 语句错误（更新了错误的表，使用了错误的主键条件）。观测 SQL 可以直接验证问题。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "调用 update() 后，分别检查子类 QuerySet（如 Child.objects.values('field_otherbase')）和父类 QuerySet（如 OtherBase.objects.filter(...).values('field_otherbase')）中目标字段的值。",
+      "reason": "Issue 显示子类实例未更新而父类实例被错误更新。比较两者的状态是判断缺陷是否触发的直接证据。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "观察 update() 方法的返回值（受影响的行数）。",
+      "reason": "虽然 Issue 中返回值是 2（看似正确），但结合错误的状态，可以分析返回值是否反映了实际错误的操作范围。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "子类实例中从第二个父类继承的字段值应被更新为指定值。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的、数据库相关的 SQL 字符串。避免断言与问题无关的字段值。",
+      "reason": "这与 Issue 的期望行为一致。使用 equals 断言更新后的值，稳定且直接。"
+    },
+    {
+      "assertion_goal": "与子类实例无关的独立父类实例的对应字段值应保持不变。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言父类实例的完整列表，只关注相关字段。",
+      "reason": "Issue 显示父类实例被错误更新。断言其值保持不变可以验证缺陷的副作用。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要 Django 测试环境，包括数据库设置。可能需要创建自定义的测试模型类来模拟 Issue 中的多继承结构（Base, OtherBase, Child）。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "使用 django.test.TestCase 作为基类。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试前需要创建一些测试数据：创建一些独立的 OtherBase 实例，再创建一些 Child 实例。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "缺陷的确切代码位置（除了 update 方法外，是否在查询编译器或模型元信息处理中）。",
+    "除了多继承和更新第二个父类字段外，是否还有其他边界条件（如抽象基类、代理模型、自定义主键）会触发或影响此缺陷。",
+    "修复后的正确 SQL 语句应该是什么样子（应该更新哪张表，WHERE 条件应该基于什么）。"
+  ],
+  "raw": {
+    "issue_summary": "在多继承模型上执行 QuerySet.update() 时，错误地更新了父类实例而非子类实例。",
+    "trigger_condition": {
+      "text": "对一个从多个父类继承的 Django 模型子类（例如 class Child(Base, OtherBase)）的 QuerySet 调用 update() 方法，试图更新从第二个父类继承的字段。",
+      "evidence": [
+        "Issue 中描述了 Child 类继承自 Base 和 OtherBase，并调用 Child.objects.update(field_otherbase=55)。",
+        "Issue 中展示了生成的 SQL 语句：UPDATE \"appliances_otherbase\" SET \"field_otherbase\" = 55 WHERE \"appliances_otherbase\".\"otherbase_id\" IN (1, 2)。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "子类实例的目标字段未被更新，而父类实例的对应字段却被错误地更新了。SQL 查询使用了错误的表（父类表）和错误的主键条件（来自第一个父类的主键）。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 中显示 Child.objects.values('field_otherbase') 返回未更新的值 [{'field_otherbase': 0}, {'field_otherbase': 1}]。",
+        "Issue 中显示 OtherBase.objects.filter(otherbase_id__in=[1,2]).values('field_otherbase') 返回已更新的值 [{'field_otherbase': 55}, {'field_otherbase': 55}]。",
+        "Issue 中 SQL 日志显示 UPDATE 语句作用在 \"appliances_otherbase\" 表上，且 WHERE 子句使用了来自 Base 类的主键 (1, 2)。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对子类 QuerySet 调用 update() 方法时，应该正确地更新子类实例中从所有父类继承的字段，并且不应该影响父类表中与子类无关的独立实例。",
+      "evidence": [
+        "Issue 标题和描述暗示了这是错误行为。",
+        "相关测试 1 (test_queryset_update_on_parent_model) 和 相关测试 4 (test_update_works_on_parent_and_child_models_at_once) 表明 update() 应该能够更新继承模型中的字段。",
+        "相关测试 2 (test_update_parent_filtering) 关注 UPDATE 查询的正确性。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.query.QuerySet.update",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 的核心是调用 Child.objects.update() 时出现错误行为。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.values",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中使用 values() 来检查更新后的字段值。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.create",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中用于创建测试数据。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中用于查询 OtherBase 实例以检查错误更新。"
+      },
+      {
+        "name": "django.db.models.base.Model",
+        "kind": "class",
+        "source_path": "django/db/models/base.py",
+        "reason": "Issue 涉及模型继承，Model 类是基类。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.update",
+        "lines": "981-997",
+        "reason": "这是执行更新的核心方法。Issue 中的错误 SQL 生成可能源于此方法或其调用的查询构建逻辑在处理多继承模型时出错。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "UpdateQuery (由 query.chain(sql.UpdateQuery) 创建)",
+        "lines": "",
+        "reason": "负责生成具体的 UPDATE SQL 语句。错误可能在于它未能正确识别多继承模型的表关联和主键映射。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ModelInheritanceTest.test_queryset_update_on_parent_model",
+        "test_file": "tests/model_inheritance_regress/tests.py",
+        "why_relevant": "该测试直接验证了在继承模型上调用 update() 方法的功能，与当前 Issue 场景高度相似。",
+        "reusable_parts": [
+          "使用 TestCase 类",
+          "创建继承模型实例 (ArticleWithAuthor, DerivedM)",
+          "调用 update() 方法并断言更新行数",
+          "使用 self.assertEqual 进行断言"
+        ],
+        "possible_gap": "该测试只涉及单继承（ArticleWithAuthor 继承 Article）或自定义主键的继承（DerivedM），没有测试多继承（如 Child(Base, OtherBase)）的场景。"
+      },
+      {
+        "test_name": "ModelInheritanceDataTests.test_update_works_on_parent_and_child_models_at_once",
+        "test_file": "tests/model_inheritance/tests.py",
+        "why_relevant": "该测试验证了 update() 可以同时更新父类和子类模型的字段，涉及继承模型上的更新操作。",
+        "reusable_parts": [
+          "使用 Restaurant 继承模型",
+          "在过滤后的 QuerySet 上调用 update()",
+          "使用 self.assertEqual 断言更新行数",
+          "使用 self.assertFalse 和 self.assertEqual 断言更新后的状态"
+        ],
+        "possible_gap": "该测试使用的是单继承链（Restaurant 继承 Place），而非 Issue 中的多继承（两个非抽象基类）。"
+      },
+      {
+        "test_name": "ModelInheritanceTests.test_update_parent_filtering",
+        "test_file": "tests/model_inheritance/tests.py",
+        "why_relevant": "该测试关注 UPDATE 查询的正确性，使用了 CaptureQueriesContext 来检查生成的 SQL，这对于诊断 Issue 中的错误 SQL 很有帮助。",
+        "reusable_parts": [
+          "使用 CaptureQueriesContext 捕获 SQL",
+          "创建 Supplier（继承 Place）实例",
+          "比较 UPDATE 查询"
+        ],
+        "possible_gap": "该测试主要关注查询结构（避免不必要的子查询），而非多继承场景下更新错误表的问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中使用单继承模型（如 Restaurant 继承 Place，ArticleWithAuthor 继承 Article）。",
+        "target_pattern": "使用多继承模型，即一个子类同时继承两个非抽象的 Model 基类（如 Issue 中的 Child(Base, OtherBase)）。",
+        "reason": "Issue 明确指出问题发生在“multiple inheritance”时。将测试模型从单继承改为多继承是触发缺陷路径的关键变异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 update() 更新的字段通常属于直接父类或子类本身。",
+        "target_pattern": "update() 更新的字段属于第二个父类（即继承列表中非第一个的父类），如 Issue 中的 field_otherbase。",
+        "reason": "Issue 显示更新第二个父类的字段时出现问题，且 SQL 错误地使用了第一个父类的主键。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "在调用 update() 前后，使用类似 CaptureQueriesContext 捕获并检查生成的 SQL 语句。",
+        "reason": "Issue 的核心症状是生成的 UPDATE SQL 语句错误（更新了错误的表，使用了错误的主键条件）。观测 SQL 可以直接验证问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "调用 update() 后，分别检查子类 QuerySet（如 Child.objects.values('field_otherbase')）和父类 QuerySet（如 OtherBase.objects.filter(...).values('field_otherbase')）中目标字段的值。",
+        "reason": "Issue 显示子类实例未更新而父类实例被错误更新。比较两者的状态是判断缺陷是否触发的直接证据。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "观察 update() 方法的返回值（受影响的行数）。",
+        "reason": "虽然 Issue 中返回值是 2（看似正确），但结合错误的状态，可以分析返回值是否反映了实际错误的操作范围。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "子类实例中从第二个父类继承的字段值应被更新为指定值。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、数据库相关的 SQL 字符串。避免断言与问题无关的字段值。",
+        "reason": "这与 Issue 的期望行为一致。使用 equals 断言更新后的值，稳定且直接。"
+      },
+      {
+        "assertion_goal": "与子类实例无关的独立父类实例的对应字段值应保持不变。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言父类实例的完整列表，只关注相关字段。",
+        "reason": "Issue 显示父类实例被错误更新。断言其值保持不变可以验证缺陷的副作用。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要 Django 测试环境，包括数据库设置。可能需要创建自定义的测试模型类来模拟 Issue 中的多继承结构（Base, OtherBase, Child）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 django.test.TestCase 作为基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试前需要创建一些测试数据：创建一些独立的 OtherBase 实例，再创建一些 Child 实例。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切代码位置（除了 update 方法外，是否在查询编译器或模型元信息处理中）。",
+      "除了多继承和更新第二个父类字段外，是否还有其他边界条件（如抽象基类、代理模型、自定义主键）会触发或影响此缺陷。",
+      "修复后的正确 SQL 语句应该是什么样子（应该更新哪张表，WHERE 条件应该基于什么）。"
+    ]
+  }
+}

@@ -1,0 +1,131 @@
+```json
+{
+    "issue_summary": "Sphinx 的 C++ 域不支持用户定义字面量（UDL）语法，导致包含 UDL 的代码解析失败。",
+    "trigger_condition": {
+        "text": "在 C++ 代码文档中，使用包含用户定义字面量（UDL）的表达式，例如 `6.62607015e-34q_J * 1q_s`。",
+        "evidence": ["Issue 中提供的代码片段：`constexpr auto units::si::planck_constant = 6.62607015e-34q_J * 1q_s;`", "Issue 标题：\"C++ User Defined Literals not supported\""],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "解析包含 UDL 的 C++ 定义时，Sphinx 报告 \"Invalid definition: Expected end of definition\" 错误。",
+        "symptom_type": "exception",
+        "evidence": ["Issue 中的错误信息：\"WARNING: Invalid definition: Expected end of definition. [error at 58]\"", "Issue 链接指向的源码行暗示 UDL 功能缺失。"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "Sphinx 的 C++ 域解析器应能正确解析包含用户定义字面量（UDL）的 C++ 代码定义，而不抛出错误。",
+        "evidence": ["Issue 标题和描述表明这是一个缺失的功能请求。", "相关测试 1 中已存在对 `operator\"\"_udl()` 的测试，表明解析器对 UDL 操作符有一定支持。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "DefinitionParser",
+            "kind": "class",
+            "source_path": "",
+            "reason": "相关测试 2 和 4 中使用了 DefinitionParser 来解析 C++ 表达式和定义，它是处理 C++ 代码解析的核心类。"
+        },
+        {
+            "name": "parse_expression",
+            "kind": "method",
+            "source_path": "",
+            "reason": "相关测试 2 中调用 `parser.parse_expression()` 来解析表达式，UDL 可能作为表达式的一部分被解析。"
+        },
+        {
+            "name": "check",
+            "kind": "function",
+            "source_path": "tests/test_domain_cpp.py",
+            "reason": "多个相关测试中都使用 `check` 函数来验证 C++ 域解析各种语法元素（包括操作符）的结果，是测试解析行为的关键函数。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "sphinx/domains/cpp.py",
+            "object": "C++ 域解析逻辑，可能涉及表达式解析或字面量解析部分",
+            "lines": "",
+            "reason": "Issue 中直接链接到该文件的第 4770 行附近，并指出 \"Sphinx seems to not have features for UDLs\"。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_operators",
+            "test_file": "tests/test_domain_cpp.py",
+            "why_relevant": "该测试明确检查了 `operator\"\"_udl()` 的解析，这是与用户定义字面量（UDL）最直接相关的现有测试。",
+            "reusable_parts": ["`check` 函数的调用模式", "测试文件导入和函数定义结构", "对操作符语法的测试断言方式"],
+            "possible_gap": "该测试只检查了 UDL 操作符的函数声明形式（`void operator\"\"_udl()`），而没有测试在表达式内部使用 UDL（如 `6.62607015e-34q_J`）的解析。"
+        },
+        {
+            "test_name": "test_expressions",
+            "test_file": "tests/test_domain_cpp.py",
+            "why_relevant": "该测试广泛检查了各种 C++ 表达式的解析，包括字面量（整数、浮点数、字符串、字符），并且注释中提到了 \"TODO: user-defined lit\"，表明 UDL 表达式是计划中的测试目标。",
+            "reusable_parts": ["`exprCheck` 辅助函数和 `check` 调用模式", "表达式解析的测试框架", "对 `DefinitionParser` 和 `parse_expression` 的使用"],
+            "possible_gap": "测试代码中 `exprCheck` 函数调用被注释掉的 \"TODO: user-defined lit\" 行，表明 UDL 表达式测试尚未实现。"
+        },
+        {
+            "test_name": "test_definition_parser",
+            "test_file": "tests/test_domain_cpp.py",
+            "why_relevant": "该测试检查了 `DefinitionParser` 对各种 C++ 函数和成员定义的解析，包括复杂的语法。UDL 可能被视为一种特殊的定义或表达式。",
+            "reusable_parts": ["使用 `parse` 函数和检查 `DefinitionError` 的异常模式", "测试各种 C++ 语法变体的方法"],
+            "possible_gap": "没有直接测试包含 UDL 的变量定义（如 Issue 中的 `planck_constant`）。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "input",
+            "current_pattern": "测试 `void operator\"\"_udl()`（操作符声明）或常规字面量如 `5`、`\"abc\"`。",
+            "target_pattern": "在表达式或变量定义中使用 UDL，例如 `6.62607015e-34q_J` 或 `constexpr auto x = 42_km;`。",
+            "reason": "Issue 表明错误发生在解析包含 UDL 的表达式（在变量定义中）时，而现有测试只覆盖了 UDL 操作符的函数声明形式。",
+            "confidence": "high"
+        },
+        {
+            "slot": "call_chain",
+            "current_pattern": "解析函数声明或简单表达式。",
+            "target_pattern": "解析包含 UDL 的变量定义（可能涉及 `constexpr`、命名空间、乘法运算）。",
+            "reason": "Issue 中的触发代码是一个在命名空间内的 `constexpr` 变量定义，其初始化表达式包含 UDL 和乘法运算。",
+            "confidence": "medium"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "exception",
+            "expression_hint": "调用 `parse` 或 `parse_expression` 时的 `DefinitionError` 异常及其消息。",
+            "reason": "Issue 显示错误表现为 \"Invalid definition\" 警告/异常，观测异常是否被抛出是判断缺陷是否触发的直接方式。"
+        },
+        {
+            "kind": "return_value",
+            "expression_hint": "解析后 AST 的字符串表示（`str(ast)`）或 `check` 函数内部生成的标识符。",
+            "reason": "相关测试通过比较解析结果与预期字符串或标识符来验证正确性。观测解析结果是否包含 UDL 部分或是否正确生成标识符，可以判断解析是否成功。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "包含 UDL 的 C++ 定义应被成功解析，不抛出 `DefinitionError`。",
+            "preferred_assertion_style": "not_contains_fragment",
+            "avoid": "断言完整的、具体的错误消息字符串，因为错误信息格式可能在修复中改变。",
+            "reason": "Issue 的核心是功能缺失（不支持 UDL），导致解析失败。修复后，解析应成功，因此断言不应出现解析错误。"
+        },
+        {
+            "assertion_goal": "解析包含 UDL 的表达式后得到的 AST 表示应正确反映 UDL 的存在。",
+            "preferred_assertion_style": "contains_fragment",
+            "avoid": "断言 AST 字符串表示的完整精确相等，因为内部表示细节可能变化。",
+            "reason": "可以断言解析结果中包含 UDL 字面量的部分（如 `q_J`），以验证解析器识别了它，而不依赖可能变化的完整输出格式。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "使用现有测试文件（如 `test_domain_cpp.py`）中的测试框架，包括 `check`、`parse` 函数和 `DefinitionParser` 类。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "可能需要模拟 Issue 中的代码上下文，如命名空间 `units::si`。",
+            "source": "issue",
+            "confidence": "medium"
+        }
+    ],
+    "uncertainties": [
+        "UDL 在 C++ 标准中的确切语法规则（如后缀格式、允许的字符）及其在 Sphinx C++ 域解析器中的预期表示形式。",
+        "错误发生的精确位置和条件：是所有的 UDL 都不支持，还是特定形式（如浮点数后缀 `q_J`）？是否与表达式中的其他操作（如乘法）交互导致错误？",
+        "修复后的预期输出（如生成的标识符）具体是什么，因为 Issue 没有提供。"
+    ]
+}
+```

@@ -1,0 +1,353 @@
+{
+  "instance_id": "sympy__sympy-20428",
+  "issue_summary": "Poly.clear_denoms() 在某些复杂常数多项式（实际为零）上返回一个打印为零但内部表示包含未剥离的零系数的 Poly 对象，导致 is_zero 属性错误地返回 False 并引发后续方法（如 terms_gcd）的异常。",
+  "trigger_condition": {
+    "text": "对一个域为 'EX' 的复杂常数多项式（实际为零）调用 clear_denoms() 方法。",
+    "evidence": [
+      "Issue 中给出了示例：f = Poly(sympify(\"...\"), x); coeff, bad_poly = f.clear_denoms()",
+      "相关测试 1 中测试了 Poly(x/3 + sqrt(2), x, domain='EX').clear_denoms()"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "返回的 Poly 对象打印为 Poly(0, x, domain='EX')，但其 is_zero 属性为 False，而 as_expr() 返回 0 且其 is_zero 为 True。调用 terms_gcd() 会引发 IndexError: tuple index out of range。在早期版本中，调用 primitive() 会引发 ZeroDivisionError。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 中展示了 bad_poly.is_zero 为 False，bad_poly.as_expr().is_zero 为 True",
+      "Issue 中展示了 bad_poly.terms_gcd() 的 traceback",
+      "Issue 中展示了早期版本 bad_poly.primitive() 的 traceback"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "对于实际为零的多项式，clear_denoms() 返回的 Poly 对象应具有正确的内部表示（如 DMP([], EX, None)），其 is_zero 属性应为 True，且 terms_gcd()、primitive() 等方法应能正常处理，返回与 Poly(0, x, domain='EX') 一致的结果。",
+    "evidence": [
+      "Issue 中提到了正确的表示应为 DMP([], EX, None)",
+      "相关测试 1 中测试了 clear_denoms 的正常行为，返回的 poly 具有正确的域和值"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "Poly.clear_denoms",
+      "kind": "method",
+      "source_path": "sympy/polys/polytools.py",
+      "reason": "Issue 的触发点是调用此方法。"
+    },
+    {
+      "name": "Poly.is_zero",
+      "kind": "property",
+      "source_path": "sympy/polys/polytools.py",
+      "reason": "Issue 中展示了返回的 Poly 对象的 is_zero 属性行为异常。"
+    },
+    {
+      "name": "Poly.as_expr",
+      "kind": "method",
+      "source_path": "sympy/polys/polytools.py",
+      "reason": "Issue 中展示了 as_expr() 返回 0 且其 is_zero 为 True，与 Poly.is_zero 不一致。"
+    },
+    {
+      "name": "Poly.terms_gcd",
+      "kind": "method",
+      "source_path": "sympy/polys/polytools.py",
+      "reason": "Issue 中展示了调用此方法会引发 IndexError。"
+    },
+    {
+      "name": "Poly.primitive",
+      "kind": "method",
+      "source_path": "sympy/polys/polytools.py",
+      "reason": "Issue 中展示了此方法在早期版本会引发 ZeroDivisionError，当前版本返回不一致结果。"
+    },
+    {
+      "name": "DMP",
+      "kind": "class",
+      "source_path": "sympy/polys/polyclasses.py",
+      "reason": "Issue 指出底层 DMP 表示包含未剥离的零系数（[EX(0)] 而非 []）。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/polys/polytools.py",
+      "object": "Poly.clear_denoms",
+      "lines": "2219-2256",
+      "reason": "该方法调用 f.rep.clear_denoms() 并返回 f.per(result)，可能未正确处理结果为零多项式时的表示。"
+    },
+    {
+      "path": "sympy/polys/polyclasses.py",
+      "object": "DMP.clear_denoms",
+      "lines": "",
+      "reason": "Issue 指出底层 DMP 表示包含未剥离的零系数，可能是在 clear_denoms 实现中未正确剥离零系数。"
+    },
+    {
+      "path": "sympy/polys/polyclasses.py",
+      "object": "DMP.is_zero",
+      "lines": "",
+      "reason": "Issue 中 bad_poly.is_zero 为 False，而底层 DMP 表示可能错误地判断非零。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_Poly_clear_denoms",
+      "test_file": "sympy/polys/tests/test_polytools.py",
+      "why_relevant": "该测试直接测试 clear_denoms 方法，包括在 EX 域上的用例。",
+      "reusable_parts": [
+        "imports (如 from sympy import Poly, x, sqrt)",
+        "Poly 对象构造",
+        "clear_denoms() 调用",
+        "assert 风格（比较 coeff 和 poly）"
+      ],
+      "possible_gap": "现有测试用例使用非零多项式（如 x/3 + sqrt(2)），没有测试输入为零多项式（但表达式复杂）的情况。"
+    },
+    {
+      "test_name": "test_dmp_clear_denoms",
+      "test_file": "sympy/polys/tests/test_densetools.py",
+      "why_relevant": "测试底层 dmp_clear_denoms 函数，包括 EX 域和包含零系数的用例。",
+      "reusable_parts": [
+        "dmp_clear_denoms 调用",
+        "EX 域的使用",
+        "包含零系数的输入（如 [[EX(sin(x)/x), EX(0)]]）"
+      ],
+      "possible_gap": "测试用例中零系数是作为列表中的一个元素，而非整个多项式为零。没有测试整个多项式化简为零的情况。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试 1 中使用非零多项式，如 Poly(x/3 + sqrt(2), x, domain='EX')。",
+      "target_pattern": "使用一个复杂的常数表达式，其值实际为零，如 Issue 中给出的 sympify(\"...\") 表达式。",
+      "reason": "Issue 表明当多项式实际为零但表达式复杂时，clear_denoms 可能返回内部表示错误的 Poly。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "相关测试 2 中 dmp_clear_denoms 输入如 [[EX(sin(x)/x), EX(0)]]，表示一个非零多项式包含零系数项。",
+      "target_pattern": "输入应表示一个实际为零的多项式，但其内部表示可能未正确简化（如包含未剥离的零系数）。",
+      "reason": "Issue 指出底层 DMP 表示为 DMP([EX(0)], EX, None) 而非 DMP([], EX, None)。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "bad_poly.rep",
+      "reason": "Issue 指出底层 DMP 表示应为 [] 但实际为 [EX(0)]，这是关键差异。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "bad_poly.is_zero",
+      "reason": "Issue 中显示此属性错误地为 False，而期望为 True。"
+    },
+    {
+      "kind": "exception",
+      "expression_hint": "bad_poly.terms_gcd()",
+      "reason": "Issue 中显示调用此方法会引发 IndexError，是错误行为的直接表现。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "clear_denoms 返回的 Poly 对象的 is_zero 属性应为 True。",
+      "preferred_assertion_style": "equals",
+      "avoid": "仅断言 repr 或 str 输出，因为打印可能正确但行为错误。",
+      "reason": "Issue 的核心是 is_zero 行为不一致，修复后应正确反映多项式为零。"
+    },
+    {
+      "assertion_goal": "clear_denoms 返回的 Poly 对象的 terms_gcd() 方法应正常执行而不引发异常。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言具体的返回值，因为重点是方法可调用性。",
+      "reason": "Issue 中 terms_gcd() 引发 IndexError，修复后应不再引发。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要从 sympy 导入 Poly, symbols, sympify。可能需要使用 EX 域。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能需要在独立环境中运行，以避免现有补丁的影响。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "导致 DMP 表示包含未剥离零系数的具体代码路径（是 clear_denoms 内部还是其他底层函数）。",
+    "除了 Issue 中给出的复杂表达式外，是否还有其他类型的输入会触发此问题。",
+    "当前版本的 primitive() 返回 (1, Poly(0, x, domain='EX')) 是否被视为正确行为，还是仍存在问题。"
+  ],
+  "raw": {
+    "issue_summary": "Poly.clear_denoms() 在某些复杂常数多项式（实际为零）上返回一个打印为零但内部表示包含未剥离的零系数的 Poly 对象，导致 is_zero 属性错误地返回 False 并引发后续方法（如 terms_gcd）的异常。",
+    "trigger_condition": {
+      "text": "对一个域为 'EX' 的复杂常数多项式（实际为零）调用 clear_denoms() 方法。",
+      "evidence": [
+        "Issue 中给出了示例：f = Poly(sympify(\"...\"), x); coeff, bad_poly = f.clear_denoms()",
+        "相关测试 1 中测试了 Poly(x/3 + sqrt(2), x, domain='EX').clear_denoms()"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "返回的 Poly 对象打印为 Poly(0, x, domain='EX')，但其 is_zero 属性为 False，而 as_expr() 返回 0 且其 is_zero 为 True。调用 terms_gcd() 会引发 IndexError: tuple index out of range。在早期版本中，调用 primitive() 会引发 ZeroDivisionError。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中展示了 bad_poly.is_zero 为 False，bad_poly.as_expr().is_zero 为 True",
+        "Issue 中展示了 bad_poly.terms_gcd() 的 traceback",
+        "Issue 中展示了早期版本 bad_poly.primitive() 的 traceback"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对于实际为零的多项式，clear_denoms() 返回的 Poly 对象应具有正确的内部表示（如 DMP([], EX, None)），其 is_zero 属性应为 True，且 terms_gcd()、primitive() 等方法应能正常处理，返回与 Poly(0, x, domain='EX') 一致的结果。",
+      "evidence": [
+        "Issue 中提到了正确的表示应为 DMP([], EX, None)",
+        "相关测试 1 中测试了 clear_denoms 的正常行为，返回的 poly 具有正确的域和值"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Poly.clear_denoms",
+        "kind": "method",
+        "source_path": "sympy/polys/polytools.py",
+        "reason": "Issue 的触发点是调用此方法。"
+      },
+      {
+        "name": "Poly.is_zero",
+        "kind": "property",
+        "source_path": "sympy/polys/polytools.py",
+        "reason": "Issue 中展示了返回的 Poly 对象的 is_zero 属性行为异常。"
+      },
+      {
+        "name": "Poly.as_expr",
+        "kind": "method",
+        "source_path": "sympy/polys/polytools.py",
+        "reason": "Issue 中展示了 as_expr() 返回 0 且其 is_zero 为 True，与 Poly.is_zero 不一致。"
+      },
+      {
+        "name": "Poly.terms_gcd",
+        "kind": "method",
+        "source_path": "sympy/polys/polytools.py",
+        "reason": "Issue 中展示了调用此方法会引发 IndexError。"
+      },
+      {
+        "name": "Poly.primitive",
+        "kind": "method",
+        "source_path": "sympy/polys/polytools.py",
+        "reason": "Issue 中展示了此方法在早期版本会引发 ZeroDivisionError，当前版本返回不一致结果。"
+      },
+      {
+        "name": "DMP",
+        "kind": "class",
+        "source_path": "sympy/polys/polyclasses.py",
+        "reason": "Issue 指出底层 DMP 表示包含未剥离的零系数（[EX(0)] 而非 []）。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/polys/polytools.py",
+        "object": "Poly.clear_denoms",
+        "lines": "2219-2256",
+        "reason": "该方法调用 f.rep.clear_denoms() 并返回 f.per(result)，可能未正确处理结果为零多项式时的表示。"
+      },
+      {
+        "path": "sympy/polys/polyclasses.py",
+        "object": "DMP.clear_denoms",
+        "lines": "",
+        "reason": "Issue 指出底层 DMP 表示包含未剥离的零系数，可能是在 clear_denoms 实现中未正确剥离零系数。"
+      },
+      {
+        "path": "sympy/polys/polyclasses.py",
+        "object": "DMP.is_zero",
+        "lines": "",
+        "reason": "Issue 中 bad_poly.is_zero 为 False，而底层 DMP 表示可能错误地判断非零。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_Poly_clear_denoms",
+        "test_file": "sympy/polys/tests/test_polytools.py",
+        "why_relevant": "该测试直接测试 clear_denoms 方法，包括在 EX 域上的用例。",
+        "reusable_parts": [
+          "imports (如 from sympy import Poly, x, sqrt)",
+          "Poly 对象构造",
+          "clear_denoms() 调用",
+          "assert 风格（比较 coeff 和 poly）"
+        ],
+        "possible_gap": "现有测试用例使用非零多项式（如 x/3 + sqrt(2)），没有测试输入为零多项式（但表达式复杂）的情况。"
+      },
+      {
+        "test_name": "test_dmp_clear_denoms",
+        "test_file": "sympy/polys/tests/test_densetools.py",
+        "why_relevant": "测试底层 dmp_clear_denoms 函数，包括 EX 域和包含零系数的用例。",
+        "reusable_parts": [
+          "dmp_clear_denoms 调用",
+          "EX 域的使用",
+          "包含零系数的输入（如 [[EX(sin(x)/x), EX(0)]]）"
+        ],
+        "possible_gap": "测试用例中零系数是作为列表中的一个元素，而非整个多项式为零。没有测试整个多项式化简为零的情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中使用非零多项式，如 Poly(x/3 + sqrt(2), x, domain='EX')。",
+        "target_pattern": "使用一个复杂的常数表达式，其值实际为零，如 Issue 中给出的 sympify(\"...\") 表达式。",
+        "reason": "Issue 表明当多项式实际为零但表达式复杂时，clear_denoms 可能返回内部表示错误的 Poly。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 2 中 dmp_clear_denoms 输入如 [[EX(sin(x)/x), EX(0)]]，表示一个非零多项式包含零系数项。",
+        "target_pattern": "输入应表示一个实际为零的多项式，但其内部表示可能未正确简化（如包含未剥离的零系数）。",
+        "reason": "Issue 指出底层 DMP 表示为 DMP([EX(0)], EX, None) 而非 DMP([], EX, None)。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "bad_poly.rep",
+        "reason": "Issue 指出底层 DMP 表示应为 [] 但实际为 [EX(0)]，这是关键差异。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "bad_poly.is_zero",
+        "reason": "Issue 中显示此属性错误地为 False，而期望为 True。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "bad_poly.terms_gcd()",
+        "reason": "Issue 中显示调用此方法会引发 IndexError，是错误行为的直接表现。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "clear_denoms 返回的 Poly 对象的 is_zero 属性应为 True。",
+        "preferred_assertion_style": "equals",
+        "avoid": "仅断言 repr 或 str 输出，因为打印可能正确但行为错误。",
+        "reason": "Issue 的核心是 is_zero 行为不一致，修复后应正确反映多项式为零。"
+      },
+      {
+        "assertion_goal": "clear_denoms 返回的 Poly 对象的 terms_gcd() 方法应正常执行而不引发异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的返回值，因为重点是方法可调用性。",
+        "reason": "Issue 中 terms_gcd() 引发 IndexError，修复后应不再引发。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要从 sympy 导入 Poly, symbols, sympify。可能需要使用 EX 域。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在独立环境中运行，以避免现有补丁的影响。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "导致 DMP 表示包含未剥离零系数的具体代码路径（是 clear_denoms 内部还是其他底层函数）。",
+      "除了 Issue 中给出的复杂表达式外，是否还有其他类型的输入会触发此问题。",
+      "当前版本的 primitive() 返回 (1, Poly(0, x, domain='EX')) 是否被视为正确行为，还是仍存在问题。"
+    ]
+  }
+}

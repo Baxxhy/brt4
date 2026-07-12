@@ -1,0 +1,93 @@
+instance_id: django__django-11163
+
+issue_summary: model_to_dict(instance, fields=[]) 应该返回空字典，但返回了所有字段。
+
+trigger_condition:
+{
+  "text": "调用 model_to_dict(instance, fields=[]) 或 fields=()。",
+  "evidence": [
+    "Issue 描述：'Been called as model_to_dict(instance, fields=[]) function should return empty dict, because no fields were requested.'",
+    "相关测试 2 和 3 展示了 fields=() 的类似场景。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "函数返回了包含所有字段的字典，而不是空字典。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 描述：'But it returns all fields'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当 fields 参数被显式设置为空列表 [] 时，model_to_dict 应返回空字典。",
+  "evidence": [
+    "Issue 描述：'should return empty dict, because no fields were requested.'",
+    "相关测试 2 展示了 fields=() 时 fields_for_model 返回空字典的类似预期行为。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "model_to_dict",
+    "kind": "function",
+    "source_path": "django/forms/models.py",
+    "reason": "Issue 直接报告此函数的缺陷。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "相似测试中调用 model_to_dict 时未指定 fields 参数（即 fields=None）。",
+    "target_pattern": "调用 model_to_dict 时显式传入 fields=[]。",
+    "reason": "Issue 表明当 fields 是空列表时，当前代码错误地将其视为 None，从而跳过过滤，返回所有字段。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "model_to_dict(instance, fields=[]) 的返回值。",
+    "reason": "Issue 的核心是返回值错误，观察返回的字典是否为空能直接判断缺陷是否触发。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证当 fields=[] 时，model_to_dict 返回的字典为空。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言返回字典包含特定字段或完整字段列表，因为 Issue 是关于返回空字典。",
+    "reason": "直接比较返回的字典与空字典 {} 能稳定地验证预期行为。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要一个 Django 模型实例作为 model_to_dict 的参数。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要使用 TestCase 类来管理数据库。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "fields 参数是否也接受空元组 () 并表现出相同的问题？",
+  "exclude 参数的行为是否也受相同逻辑影响？"
+]

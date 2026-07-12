@@ -1,0 +1,136 @@
+instance_id: django__django-13109
+
+issue_summary: ForeignKey.validate() 使用默认管理器而非基管理器进行验证，导致自定义查询集包含被默认管理器过滤的记录时验证失败。
+
+trigger_condition:
+{
+  "text": "当模型定义了过滤默认管理器，且通过自定义查询集（如使用 _base_manager.all()）设置 ForeignKey 字段的 queryset 时，尝试保存或验证一个被默认管理器过滤掉但实际存在的记录。",
+  "evidence": [
+    "Issue 描述：'The above form will never validate as True when a user selects an archived article.'",
+    "Issue 描述：'This is because the ForeignKey validation always uses _default_manager instead of _base_manager.'",
+    "相关测试 1 涉及过滤默认管理器的保存场景。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "验证失败，错误信息类似 'article instance with id 123 does not exist.'，尽管该实例在数据库中存在。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 描述：'The user facing error message is \"article instance with id 123 does not exist.\" (quite confusing to typical users).'",
+    "相关测试 3 展示了错误的 FK 值会引发验证错误。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "ForeignKey.validate() 应使用模型的 _base_manager 进行验证，以确保即使默认管理器过滤了某些记录，只要记录存在且符合约束，验证就能通过。",
+  "evidence": [
+    "Issue 描述：'Suggested solution: the ForeignKey validation should use the _base_manager instead which does not include the default filters.'",
+    "相关源码 3 显示了 _base_manager 的存在。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "django.db.models.fields.related.ForeignKey.validate",
+    "kind": "method",
+    "source_path": "django/db/models/fields/related.py",
+    "reason": "Issue 明确指出问题在于 ForeignKey.validate() 方法使用了错误的 manager。"
+  },
+  {
+    "name": "django.db.models.base.Model._base_manager",
+    "kind": "class_function",
+    "source_path": "django/db/models/base.py",
+    "reason": "Issue 建议的解决方案是使用 _base_manager 而非 _default_manager。"
+  },
+  {
+    "name": "django.db.models.base.Model._default_manager",
+    "kind": "class_function",
+    "source_path": "django/db/models/base.py",
+    "reason": "Issue 指出当前错误使用了 _default_manager。"
+  },
+  {
+    "name": "django.db.models.Model.full_clean",
+    "kind": "method",
+    "source_path": "",
+    "reason": "相关测试 2、3、4、5 都通过调用 full_clean() 来触发字段验证。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "相关测试 1 中，被过滤的实例通过模型的默认管理器创建和保存。",
+    "target_pattern": "创建一个模型，其默认管理器过滤掉某些记录（如 archived=True），但通过 _base_manager 或自定义查询集引用一个被过滤的、已存在的实例进行验证。",
+    "reason": "Issue 的核心是验证时使用了错误的 manager 来获取对象。需要构造一个被默认管理器隐藏但通过 _base_manager 可见的对象，并尝试验证指向它的 ForeignKey。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "相关测试 2/3 中，直接为模型实例的 FK 字段赋值一个 ID，然后调用 full_clean()。",
+    "target_pattern": "在表单或类似上下文中，将 ForeignKey 字段的 queryset 设置为 Article._base_manager.all()，然后尝试验证一个被默认管理器过滤的 ID。",
+    "reason": "Issue 描述的场景涉及表单字段的 queryset 被显式设置为 _base_manager.all()，但验证逻辑内部却使用了 _default_manager。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用 full_clean() 或相关验证方法时是否抛出 ValidationError，及其错误消息。",
+    "reason": "Issue 明确描述了验证失败并抛出特定错误消息。观测异常是判断缺陷是否触发的直接方式。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "ForeignKey.validate() 方法内部用于获取目标对象的查询结果（如使用 _default_manager.get() 还是 _base_manager.get()）。",
+    "reason": "缺陷的根本原因在于验证方法内部使用了哪个管理器来获取对象。插桩可以确认实际调用路径。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "被默认管理器过滤的实例在数据库中的存在状态（例如，通过 _base_manager 查询其是否存在）。",
+    "reason": "需要确认测试对象确实存在于数据库中，但被默认管理器过滤，这是触发条件的关键。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当 ForeignKey 指向一个被默认管理器过滤但实际存在的记录时，验证应该成功（不抛出 ValidationError）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的异常消息字符串，因为消息格式可能因本地化或细节而变。避免断言不相关的模型属性。",
+    "reason": "修复后的预期行为是验证通过。应断言验证调用（如 full_clean()）的结果为 None 或没有引发特定字段的验证错误。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要定义两个模型：一个（如 Article）带有过滤默认管理器，另一个（如 FavoriteArticles）包含指向前者的 ForeignKey。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要使用 TestCase 并设置数据库，因为测试涉及模型实例的创建和保存。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要模拟表单字段设置 queryset 的场景，或者直接在模型实例层面测试验证。",
+    "source": "issue",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "ForeignKey.validate() 方法内部具体哪一行代码使用了 _default_manager，以及如何精确地访问它。",
+  "除了 full_clean()，是否还有其他常见的 API 调用路径会触发 ForeignKey.validate()。",
+  "在修复后的版本中，验证逻辑是否还需要考虑 limit_choices_to 等其他约束。"
+]

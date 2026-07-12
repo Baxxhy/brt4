@@ -1,0 +1,155 @@
+instance_id: pydata__xarray-6938
+
+issue_summary: Dataset.swap_dims() 在某些情况下会意外地修改原始对象的维度坐标属性。
+
+trigger_condition:
+{
+  "text": "对一个 Dataset 对象执行 swap_dims(z='lev') 操作，其中 'lev' 是一个数据变量（data variable），然后对该结果进行 rename_dims(lev='z')、reset_index('lev') 和 reset_coords() 操作，得到一个看似与原始对象相同的 ds2，再对 ds2 执行 swap_dims(z='lev') 操作。",
+  "evidence": [
+    "Issue 中的 MVCE 代码展示了完整的操作链：ds.swap_dims(z='lev').rename_dims(lev='z').reset_index('lev').reset_coords() 得到 ds2，然后 ds2.swap_dims(z='lev')。",
+    "Issue 描述：'It appears that in certain cases .swap_dims() can modify the original object, here the .dims of a data variable that was swapped into being a dimension coordinate variable.'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "在 ds2.swap_dims(z='lev') 操作后，原始的 ds2 对象被修改，具体表现为 ds2['lev'] 的维度（.dims）从原来的 'z' 变成了 'lev'，尽管其他方面看起来相同。",
+  "symptom_type": "state_not_updated",
+  "evidence": [
+    "Issue 中的输出注释：'`ds2['lev']` now has dimension 'lev' although otherwise same'。",
+    "Issue 描述：'.swap_dims() can modify the original object'。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "swap_dims() 方法不应修改调用它的原始 Dataset 对象，应返回一个新的、修改后的 Dataset 对象，保持原始对象不变。",
+  "evidence": [
+    "Issue 描述：'I expected it not to modify the original object.'",
+    "相关测试 1 和 2 中，swap_dims 的调用结果被赋值给新变量（如 actual），并与原始对象（original）进行比较，暗示了非原地修改的预期。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "Dataset.swap_dims",
+    "kind": "method",
+    "source_path": "xarray/core/dataset.py",
+    "reason": "Issue 直接报告了此方法的问题。"
+  },
+  {
+    "name": "Dataset.rename_dims",
+    "kind": "method",
+    "source_path": "xarray/core/dataset.py",
+    "reason": "Issue 的触发条件中使用了此方法。"
+  },
+  {
+    "name": "Dataset.reset_index",
+    "kind": "method",
+    "source_path": "xarray/core/dataset.py",
+    "reason": "Issue 的触发条件中使用了此方法。"
+  },
+  {
+    "name": "Dataset.reset_coords",
+    "kind": "method",
+    "source_path": "xarray/core/dataset.py",
+    "reason": "Issue 的触发条件中使用了此方法。"
+  },
+  {
+    "name": "Dataset._replace_with_new_dims",
+    "kind": "method",
+    "source_path": "xarray/core/dataset.py",
+    "reason": "swap_dims 方法内部调用了此方法，可能是修改逻辑的关键。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "call_chain",
+    "current_pattern": "相关测试 1 中，直接调用 original.swap_dims(...) 并检查结果。",
+    "target_pattern": "按照 Issue 的 MVCE，构造一个操作链：ds.swap_dims(...).rename_dims(...).reset_index(...).reset_coords() 得到中间对象，再对该中间对象调用 swap_dims(...)。",
+    "reason": "Issue 表明，只有在经过特定操作链后，再次调用 swap_dims 才会触发对原始对象的修改。简单的单次 swap_dims 调用可能不会暴露问题。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "相关测试 1 中，原始对象（original）在调用 swap_dims 后没有被再次检查其状态。",
+    "target_pattern": "在调用操作链中的第二个 swap_dims 后，不仅检查返回的新对象，还要检查操作链中产生的中间对象（如 ds2）的状态是否被意外修改。",
+    "reason": "Issue 的核心是原始对象（ds2）的状态被意外修改。测试需要验证操作前后 ds2 的 dims 等属性是否保持不变。",
+    "confidence": "high"
+  },
+  {
+    "slot": "input",
+    "current_pattern": "相关测试 1 中，swap_dims 的输入是简单的维度到变量的映射（如 {'x': 'y'}）。",
+    "target_pattern": "swap_dims 的输入是 {'z': 'lev'}，其中 'lev' 最初是数据变量，经过操作链后可能具有特殊的内部状态（如曾是维度坐标，后被重置为数据变量）。",
+    "reason": "Issue 的触发依赖于 'lev' 变量在操作链中身份（数据变量/坐标）的变化，这可能影响了 swap_dims 内部对其的处理逻辑。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "state",
+    "expression_hint": "在操作链的每个关键步骤前后，检查中间 Dataset 对象（如 ds2）的 .dims 属性、ds2['lev'].dims 属性以及 ds2._variables['lev'] 是否是同一个对象（id）。",
+    "reason": "Issue 的核心是 ds2['lev'] 的 dims 属性被修改。观察这些状态变化可以定位修改发生的具体步骤。"
+  },
+  {
+    "kind": "type",
+    "expression_hint": "检查 ds2['lev'] 在操作链前后是 IndexVariable 还是普通的 Variable。",
+    "reason": "swap_dims 内部会根据变量是否是结果维度来决定是否转换为 IndexVariable，这可能与修改行为有关。"
+  },
+  {
+    "kind": "repr",
+    "expression_hint": "观察 ds2 在第二个 swap_dims 调用前后的字符串表示（repr），特别是 'lev' 变量的维度信息。",
+    "reason": "Issue 中通过打印发现了 dims 的变化，repr 可以提供直观的状态对比。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证在调用 ds2.swap_dims(z='lev') 后，原始的 ds2 对象（特别是 ds2['lev'].dims）保持不变。",
+    "preferred_assertion_style": "before_after_relation",
+    "avoid": "仅断言最终 swap_dims 返回的新对象的结构正确，而忽略对原始 ds2 的检查。",
+    "reason": "Issue 的核心是原始对象被意外修改，因此断言必须直接验证原始对象的状态在操作前后的一致性。"
+  },
+  {
+    "assertion_goal": "验证 swap_dims 方法返回的是一个新对象，而不是修改后的原对象。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "依赖于对象 repr 的完全相等进行断言，这可能过于脆弱。",
+    "reason": "可以通过检查对象 id 或关键属性（如 _variables 字典的 id）是否不同来稳定地判断是否为独立对象。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 xarray 和 numpy 来构造 Dataset 和随机数据。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "可以使用 TestCase 类来组织测试，但并非必须。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  },
+  {
+    "hint": "测试中可能需要使用 deep copy 来确保初始对象的独立性，但 Issue 的 MVCE 并未使用 deep copy，这本身可能就是问题的一部分。",
+    "source": "inference",
+    "confidence": "low"
+  }
+]
+
+uncertainties:
+[
+  "缺陷的确切根源是在 swap_dims 方法内部，还是在 _replace_with_new_dims 方法中，亦或是在 Variable.dims 的 setter 中？",
+  "是否只有在 'lev' 变量经历了从数据变量 -> 维度坐标 -> 数据变量（通过 reset_coords）的完整转换后，才会触发此问题？",
+  "除了 .dims 属性，原始对象的其他内部状态（如 _indexes, _coord_names）是否也被意外修改了？",
+  "这个缺陷是否也存在于 DataArray.swap_dims 方法中？"
+]

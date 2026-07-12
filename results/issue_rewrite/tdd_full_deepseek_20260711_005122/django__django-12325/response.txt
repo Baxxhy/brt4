@@ -1,0 +1,129 @@
+{
+  "issue_summary": "当模型继承中存在多个 OneToOneField 且其中一个标记为 parent_link 时，字段定义顺序会影响模型配置，导致 ImproperlyConfigured 异常。",
+  "trigger_condition": {
+    "text": "定义一个继承自父模型的子模型，其中包含两个 OneToOneField 指向父模型，其中一个标记为 parent_link=True，但该 parent_link 字段定义在另一个 OneToOneField 之后。",
+    "evidence": ["Issue 中提供的两个 Picking 类定义，第一个失败，第二个成功，区别在于 document_ptr 和 origin 字段的顺序。", "Issue 描述：'First issue is that order seems to matter?'"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "抛出 django.core.exceptions.ImproperlyConfigured 异常，消息为 'Add parent_link=True to appname.Picking.origin.'。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 中：'produces django.core.exceptions.ImproperlyConfigured: Add parent_link=True to appname.Picking.origin.'"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "模型配置应能正确识别标记了 parent_link=True 的字段作为父链接，无论多个 OneToOneField 字段的定义顺序如何，都不应抛出 ImproperlyConfigured 异常。",
+    "evidence": ["Issue 中：'Even if ordering is required \"by design\"(It shouldn't be we have explicit parent_link marker) shouldn't it look from top to bottom like it does with managers and other things?'", "相关测试 test_abstract_parent_link 展示了 parent_link 字段被正确识别。"],
+    "confidence": "medium"
+  },
+  "target_apis": [
+    {
+      "name": "models.OneToOneField",
+      "kind": "class",
+      "source_path": "django/db/models/fields/related.py",
+      "reason": "Issue 的核心是关于 OneToOneField 的配置，特别是 parent_link 参数。"
+    },
+    {
+      "name": "models.Model",
+      "kind": "class",
+      "source_path": "",
+      "reason": "Issue 涉及模型继承和字段定义。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/fields/related.py",
+      "object": "OneToOneField",
+      "lines": "",
+      "reason": "Issue 直接涉及 OneToOneField 的配置逻辑，特别是处理 parent_link 标记和多个同类型字段时的顺序问题。"
+    },
+    {
+      "path": "django/db/models/base.py",
+      "object": "ModelBase",
+      "lines": "",
+      "reason": "模型元类负责处理类属性（包括字段）的收集和配置，可能与字段处理顺序有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_missing_parent_link",
+      "test_file": "tests/invalid_models_tests/test_models.py",
+      "why_relevant": "该测试直接验证了当模型继承中缺少 parent_link 标记时会抛出 ImproperlyConfigured 异常，与当前 Issue 的错误类型相同。",
+      "reusable_parts": ["使用 @isolate_apps 装饰器", "使用 assertRaisesMessage 捕获 ImproperlyConfigured 异常", "嵌套类定义模型"],
+      "possible_gap": "该测试只涉及一个 OneToOneField，没有测试多个 OneToOneField 且其中一个标记了 parent_link 的场景。"
+    },
+    {
+      "test_name": "test_abstract_parent_link",
+      "test_file": "tests/model_inheritance/tests.py",
+      "why_relevant": "该测试验证了 parent_link=True 的 OneToOneField 在抽象继承中被正确识别，与 parent_link 功能相关。",
+      "reusable_parts": ["使用 @isolate_apps 装饰器", "嵌套类定义模型继承结构", "使用 assertIs 断言检查 _meta.parents"],
+      "possible_gap": "该测试没有涉及多个 OneToOneField，且模型是抽象的，不是具体模型。"
+    },
+    {
+      "test_name": "test_multiple_o2o",
+      "test_file": "tests/one_to_one/tests.py",
+      "why_relevant": "该测试验证了一个模型上可以存在多个 OneToOneField，与 Issue 中多个 OneToOneField 的场景相关。",
+      "reusable_parts": ["创建具有多个 OneToOneField 的模型实例", "使用 assertEqual 检查关系"],
+      "possible_gap": "该测试不涉及模型继承和 parent_link 参数。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "call_chain",
+      "current_pattern": "相关测试中，模型定义通常只有一个 OneToOneField 或 parent_link 字段定义在第一个。",
+      "target_pattern": "定义模型时，让标记了 parent_link=True 的 OneToOneField 定义在另一个普通的 OneToOneField 之后。",
+      "reason": "Issue 表明字段定义顺序会触发错误，将 parent_link 字段放在后面是触发条件。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "相关测试中，模型字段定义顺序是固定的（通常是 parent_link 在前或只有一个字段）。",
+      "target_pattern": "交换模型中两个 OneToOneField 的声明顺序。",
+      "reason": "Issue 中两个代码片段唯一区别就是字段顺序，这是触发异常的关键。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "在模型类定义后，检查是否抛出 ImproperlyConfigured 异常及其消息。",
+      "reason": "Issue 的核心错误现象是抛出特定消息的 ImproperlyConfigured 异常。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "模型类的 _meta.parents 字典，检查哪个字段被识别为父链接。",
+      "reason": "parent_link 字段应被正确识别并映射到父模型。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证当模型包含多个 OneToOneField 且其中一个标记 parent_link=True 时，无论字段顺序如何，模型都能成功配置，不抛出 ImproperlyConfigured 异常。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言完整的异常消息字符串，因为消息格式可能变化。",
+      "reason": "修复后，模型定义应成功，不应抛出异常。测试应确保在两种字段顺序下都不抛出异常。"
+    },
+    {
+      "assertion_goal": "验证标记了 parent_link=True 的字段被正确识别为父链接。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言内部元数据结构的完整 repr。",
+      "reason": "修复后，_meta.parents 应正确映射到 parent_link 字段，无论其声明顺序。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 @isolate_apps 装饰器来隔离模型定义，避免与项目中其他模型冲突。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试应继承自 SimpleTestCase 或 TestCase，因为涉及模型定义和可能的数据库操作。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "引发 ImproperlyConfigured 异常的具体代码位置和逻辑条件尚不明确。",
+    "除了字段顺序，是否还有其他因素（如 related_name）会影响此行为？",
+    "修复后的预期行为是 parent_link 字段总是被优先识别，还是按照某种规则（如第一个找到的）识别？"
+  ]
+}

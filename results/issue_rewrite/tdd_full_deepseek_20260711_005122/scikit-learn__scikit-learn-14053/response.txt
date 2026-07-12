@@ -1,0 +1,139 @@
+{
+  "issue_summary": "export_text 函数在决策树只有一个特征时抛出 IndexError 异常。",
+  "trigger_condition": {
+    "text": "使用 export_text 函数导出一个仅有一个特征的决策树，并指定 feature_names 参数。",
+    "evidence": ["Issue 的 Steps/Code to Reproduce 中，X 被 reshape 为单列 (X[:, 0].reshape(-1, 1))，然后使用 feature_names=['sepal_length'] 调用 export_text。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "调用 export_text 时抛出 IndexError: list index out of range 异常。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 的 Actual Results 部分显示了 IndexError。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "export_text 函数应能正确处理单特征决策树，并返回文本报告，而不抛出 IndexError。",
+    "evidence": ["Issue 描述表明 export_text 在单特征时不应出错。相关测试 test_export_text 展示了 export_text 在多特征下的正常行为，预期单特征下也应类似。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "sklearn.tree.export.export_text",
+      "kind": "function",
+      "source_path": "sklearn/tree/export.py",
+      "reason": "这是 Issue 中直接触发错误的函数。"
+    },
+    {
+      "name": "sklearn.tree.DecisionTreeClassifier",
+      "kind": "class",
+      "source_path": "sklearn/tree/tree.py",
+      "reason": "Issue 中用于构建决策树的对象。"
+    },
+    {
+      "name": "sklearn.datasets.load_iris",
+      "kind": "function",
+      "source_path": "sklearn/datasets/base.py",
+      "reason": "Issue 中用于生成数据集的函数。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sklearn/tree/export.py",
+      "object": "export_text",
+      "lines": "806-957",
+      "reason": "Issue 的错误发生在该函数内部。源码片段显示函数内部有 feature_names_ = [feature_names[i] for i in tree_.feature] 这样的索引操作，当 tree_.feature 包含无效索引（如 -2，即 _tree.TREE_UNDEFINED）且 feature_names 长度仅为 1 时，可能导致索引越界。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_export_text",
+      "test_file": "sklearn/tree/tests/test_export.py",
+      "why_relevant": "该测试直接测试 export_text 函数，包含多种参数配置（如 feature_names, max_depth, show_weights）下的断言，是生成缺陷复现测试的良好起点。",
+      "reusable_parts": ["imports (DecisionTreeClassifier, export_text)", "基本的 clf.fit(X, y) 模式", "使用 assert 比较 export_text 的输出字符串", "使用 dedent 处理多行字符串"],
+      "possible_gap": "现有测试用例中，决策树使用的特征数（X 的维度）都大于 1，没有覆盖单特征（n_features == 1）的情况。"
+    },
+    {
+      "test_name": "test_export_text_errors",
+      "test_file": "sklearn/tree/tests/test_export.py",
+      "why_relevant": "该测试专门测试 export_text 的错误处理，包括对 feature_names 长度不匹配的检查。",
+      "reusable_parts": ["使用 assert_raise_message 检查 ValueError", "错误消息的验证模式"],
+      "possible_gap": "该测试检查的是 feature_names 长度与 tree_.n_features 不匹配的错误，而 Issue 中的错误是在长度匹配（都为 1）的情况下发生的 IndexError，属于不同路径。"
+    },
+    {
+      "test_name": "test_with_only_one_non_constant_features",
+      "test_file": "sklearn/tree/tests/test_tree.py",
+      "why_relevant": "该测试涉及只有一个有效特征的场景，展示了如何构造单特征（但高维稀疏）的输入数据。",
+      "reusable_parts": ["构造单特征高维数据 X 的模式", "使用 TreeEstimator 进行拟合"],
+      "possible_gap": "该测试关注的是决策树拟合过程本身，并未调用 export_text 函数。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试 test_export_text 中使用的 X 是二维数组，通常有多个特征（例如 X 的形状为 (n_samples, n_features)，其中 n_features > 1）。",
+      "target_pattern": "将 X 构造为仅包含一个特征列，即形状为 (n_samples, 1)。",
+      "reason": "Issue 表明当 tree_.n_features 为 1 时，export_text 内部对 feature_names 的索引操作可能出错。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "test_export_text 中调用 export_text 时，feature_names 参数要么为 None，要么是长度与 n_features（>1）匹配的列表。",
+      "target_pattern": "调用 export_text 时，提供长度为 1 的 feature_names 列表，例如 feature_names=['single_feat']。",
+      "reason": "Issue 的复现代码中指定了 feature_names，且源码显示当提供 feature_names 时会进行索引映射 feature_names_[node] = feature_names[tree_.feature[node]]，在单特征且节点为叶节点（tree_.feature[node] == _tree.TREE_UNDEFINED，值为 -2）时，索引 -2 会超出长度为 1 的列表范围。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "调用 export_text(tree, feature_names=['single_feat']) 时是否抛出 IndexError。",
+      "reason": "Issue 的核心错误现象就是 IndexError。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "在修复后，export_text 的返回值（字符串）应包含决策树的结构描述，而非异常。",
+      "reason": "验证函数在单特征下能正常生成文本报告。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "决策树对象 tree_ 的内部属性，如 tree_.n_features, tree_.feature（特别是叶节点的值是否为 _tree.TREE_UNDEFINED）。",
+      "reason": "理解缺陷触发的内部状态条件。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 export_text 在单特征决策树且提供 feature_names 时，不会抛出 IndexError，并能返回一个非空的字符串。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "避免断言返回字符串的完整精确内容，因为树的结构可能因随机性而变化。",
+      "reason": "修复后，函数应正常执行并返回文本。断言不出现异常是关键，而输出内容的精确匹配可能不稳定。"
+    },
+    {
+      "assertion_goal": "验证 export_text 的返回值是一个字符串类型。",
+      "preferred_assertion_style": "isinstance",
+      "avoid": "避免断言字符串的具体格式，除非 Issue 明确指定。",
+      "reason": "确保函数调用成功并返回了预期类型的结果。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 DecisionTreeClassifier, export_text，以及用于生成数据集的函数（如 load_iris 或自己构造数据）。",
+      "source": "issue|retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "构造一个形状为 (n_samples, 1) 的训练数据 X 和对应的标签 y。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "使用 DecisionTreeClassifier().fit(X, y) 训练一个决策树。",
+      "source": "issue|retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "缺陷是否仅在提供 feature_names 参数时触发？如果 feature_names=None 使用默认名称是否也会出错？",
+    "除了单特征，是否还有其他条件（如树的结构、深度、所有样本纯度相同导致树只有根节点等）会共同影响缺陷触发？",
+    "export_text 源码中具体是哪一行代码（精确行号）导致了 IndexError？"
+  ]
+}

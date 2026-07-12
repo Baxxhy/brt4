@@ -1,0 +1,126 @@
+instance_id: django__django-15561
+
+issue_summary: 在 SQLite 数据库上，AlterField 操作在仅添加或更改字段的 choices 属性时，不应生成 SQL 但实际生成了 SQL。
+
+trigger_condition:
+{
+  "text": "在 SQLite 数据库上，对模型字段执行 AlterField 操作，仅修改或添加不影响数据库模式的字段属性（例如 choices）。",
+  "evidence": [
+    "Issue 描述：'AlterField operation should be noop when adding/changing choices on SQLite.'",
+    "Issue 描述：'even a seemingly db-transparent change like adding choices still generates sql (new table + insert + drop + rename) even though this shouldn't be needed.'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "AlterField 操作生成了不必要的 SQL 语句（例如创建新表、插入、删除、重命名），而在其他数据库（如 PostgreSQL）上相同的迁移不生成 SQL。",
+  "symptom_type": "wrong_sql",
+  "evidence": [
+    "Issue 描述：'still generates sql (new table + insert + drop + rename)'",
+    "Issue 描述：'on e.g. postgres the same migration generates no sql'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "在 SQLite 数据库上，当 AlterField 操作仅修改不影响数据库模式的字段属性（如 choices）时，应不执行任何数据库查询（noop）。",
+  "evidence": [
+    "Issue 描述：'should be noop when adding/changing choices on SQLite.'",
+    "相关测试 1 的测试名称和描述表明 AlterField 在某些情况下应为 noop。",
+    "相关测试 2 的测试名称和描述表明某些字段属性更改不应执行查询。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "AlterField",
+    "kind": "class",
+    "source_path": "django/db/migrations/operations/fields.py",
+    "reason": "Issue 直接关于 AlterField 操作在特定条件下的行为。"
+  },
+  {
+    "name": "AlterField.database_forwards",
+    "kind": "method",
+    "source_path": "django/db/migrations/operations/fields.py",
+    "reason": "该方法负责执行数据库前向迁移，是生成 SQL 的地方。"
+  },
+  {
+    "name": "schema_editor.alter_field",
+    "kind": "method",
+    "source_path": "",
+    "reason": "相关测试中使用了 schema_editor.alter_field，它是底层执行字段变更的 API。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "相似测试中 AlterField 的 field 参数是修改 db_column 或外键属性。",
+    "target_pattern": "AlterField 的 field 参数应修改 choices 属性（例如，从无 choices 到有 choices，或更改 choices 列表）。",
+    "reason": "Issue 明确指出问题是关于添加/更改 choices 属性。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "相似测试可能使用默认数据库配置。",
+    "target_pattern": "测试应配置为使用 SQLite 数据库后端。",
+    "reason": "Issue 描述的问题特定于 SQLite。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "sql",
+    "expression_hint": "在调用 operation.database_forwards 或 editor.alter_field 期间，由 schema_editor 生成的 SQL 语句列表或查询计数。",
+    "reason": "Issue 的核心错误是生成了不必要的 SQL。观测生成的 SQL 可以判断是否触发了问题。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "执行 operation.database_forwards 前后，数据库表结构（例如，通过 introspection）或模型字段 choices 属性的状态。",
+    "reason": "验证数据库模式是否因 choices 更改而发生了不必要的改变。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证在 SQLite 上，当仅更改字段的 choices 属性时，AlterField.database_forwards 执行期间没有数据库查询被执行。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的 SQL 字符串，因为具体 SQL 可能因 Django 版本或配置而变化。",
+    "reason": "Issue 的期望行为是“noop”，即无查询。使用 assertNumQueries(0) 是稳定且直接的验证方式。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 SQLite 内存数据库或临时文件数据库进行测试。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要继承自现有的测试基类（如 OperationTestBase 或 TransactionTestCase）来获得模型设置和断言辅助方法。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要设置一个包含目标字段的测试模型。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "choices 属性是否总是被视为不影响数据库模式？是否还有其他类似属性？",
+  "AlterField 中判断属性是否影响数据库模式的精确逻辑位于何处？",
+  "问题是否也出现在其他数据库后端？Issue 仅提到了 SQLite 和 PostgreSQL 的对比。",
+  "除了 choices，是否还有其他“看似透明”的字段属性更改会触发此问题？"
+]

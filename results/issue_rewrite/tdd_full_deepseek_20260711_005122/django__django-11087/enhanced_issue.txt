@@ -1,0 +1,137 @@
+instance_id: django__django-11087
+
+issue_summary: 在Python 3下，当数据库中存在非UTF-8编码的文本字段时，Django的.delete()操作会因尝试获取所有相关字段（包括不需要的字段）而引发UnicodeDecodeError。
+
+trigger_condition:
+{
+  "text": "在Python 3环境中，对一个具有外键关系的模型实例（例如Job）执行.delete()操作，且其相关模型（例如text_log_error）的某个非主键字段（例如line）包含非UTF-8编码的二进制数据。",
+  "evidence": [
+    "Issue描述：'Querying the text_log_error table for those ids shows there to be junk values in its line field. These are from data inserted when using Python 2.7...'",
+    "Issue描述：'The exception occurs during the .delete() of Jobs...'",
+    "Issue描述：'the UnicodeDecodeError is occurring for a field (text_log_error.line) that is not actually needed for the .delete()'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "执行.delete()时抛出UnicodeDecodeError: 'utf-8' codec can't decode byte ... in position ...: invalid continuation byte。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue中的完整Traceback显示异常来自MySQLdb/connections.py的string_decoder函数。",
+    "Issue描述：'UnicodeDecodeError: 'utf-8' codec can't decode byte 0xed in position 78: invalid continuation byte'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": ".delete()操作应成功执行，仅获取执行级联删除所必需的字段（如主键），避免获取和尝试解码非必需的、可能包含无效编码的字段。",
+  "evidence": [
+    "Issue描述：'the UnicodeDecodeError is occurring for a field (text_log_error.line) that is not actually needed for the .delete() (it's not a primary key etc), so Django shouldn't be fetching that field regardless when making the text_log_error SELECT query'",
+    "Issue标题：'Optimize .delete() to use only required fields.'"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "django.db.models.query.QuerySet.delete",
+    "kind": "method",
+    "source_path": "django/db/models/query.py",
+    "reason": "Issue中触发错误的直接调用是Job查询集的.delete()方法。"
+  },
+  {
+    "name": "django.db.models.deletion.Collector.collect",
+    "kind": "method",
+    "source_path": "django/db/models/deletion.py",
+    "reason": "源码片段显示此方法负责收集要删除的对象，并可能触发对相关对象的查询。"
+  },
+  {
+    "name": "django.db.models.deletion.CASCADE",
+    "kind": "function",
+    "source_path": "django/db/models/deletion.py",
+    "reason": "Issue的Traceback显示异常发生在CASCADE函数调用collect之后，表明级联删除是触发相关查询的路径。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "测试中使用新创建的、编码正确的模型实例数据。",
+    "target_pattern": "模型实例的某个非主键文本字段包含从Python 2时代遗留的、非UTF-8编码的二进制数据。",
+    "reason": "Issue明确指出错误源于包含'junk values'的line字段，这些值在Python 2下插入，在Python 3下解码失败。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "测试通常直接删除顶层对象或使用.all().delete()。",
+    "target_pattern": "通过.filter().delete()触发级联删除，且涉及多层相关模型（如Job -> failure_line -> job_log -> text_log_error）。",
+    "reason": "Issue中的错误发生在Job模型的.filter(guid__in=...).delete()调用中，并级联到text_log_error模型。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "sql",
+    "expression_hint": "在执行.delete()期间，由Django数据库后端生成的SQL查询语句，特别是那些针对相关模型（如text_log_error）的SELECT查询。",
+    "reason": "Issue提供了调试日志中的SQL，显示查询选择了所有字段（包括line）。观测生成的SQL可以确认是否在获取非必需字段。"
+  },
+  {
+    "kind": "exception",
+    "expression_hint": "在执行.delete()调用时捕获的UnicodeDecodeError异常及其堆栈跟踪。",
+    "reason": "这是Issue报告的直接错误现象。观测异常是否被抛出是判断缺陷是否触发的关键。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": ".delete()调用前后，相关模型（如Job, text_log_error）在数据库中的存在状态。",
+    "reason": "即使抛出异常，也可能有部分数据被删除。观测最终状态可以判断操作是否部分成功或完全失败。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": ".delete()操作应成功完成，不抛出UnicodeDecodeError。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言完整的异常消息字符串，因为字节位置可能变化。",
+    "reason": "修复后，即使存在无效编码数据，删除操作也应正常进行。因此，测试应断言不引发UnicodeDecodeError。更稳定的做法可能是断言删除成功（对象计数变为0），并隐含不引发异常。"
+  },
+  {
+    "assertion_goal": "针对相关模型的SELECT查询不应包含非必需的字段（如非主键的文本字段）。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言完整的、特定于数据库的SQL字符串。",
+    "reason": "Issue的核心是优化.delete()只获取必需字段。可以断言生成的SQL不包含有问题的字段名（如'line'）。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用支持事务的数据库后端（如MySQL，PostgreSQL），并配置为使用utf8mb4字符集，以复现与MySQL客户端的交互问题。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要创建具有外键关系的模型链，模拟Issue中的Job -> failure_line -> job_log -> text_log_error结构。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要在相关模型（如text_log_error）的某个非主键文本字段中插入非UTF-8编码的二进制数据。这可能需要直接使用原始SQL或设置特定连接参数来模拟Python 2遗留数据。",
+    "source": "issue",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "在Collector.collect和相关方法中，具体是哪一行代码或逻辑决定了查询时选择所有字段而不是仅选择主键。",
+  "除了text字段，其他类型的字段（如BinaryField）是否也会导致类似问题。",
+  "在修复版本中，'必需字段'的精确定义是什么（是否仅包括主键，还是也包括用于关系连接的外键字段）。",
+  "直接使用测试框架（如TestCase）模拟插入非UTF-8数据到TextField的可行性和具体方法。"
+]

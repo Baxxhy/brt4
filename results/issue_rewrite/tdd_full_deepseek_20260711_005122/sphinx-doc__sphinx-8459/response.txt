@@ -1,0 +1,109 @@
+{
+  "issue_summary": "当 autodoc_typehints 配置为 'description' 时，autodoc_type_aliases 配置的别名未生效，导致生成的文档中类型显示为原始类型而非别名。",
+  "trigger_condition": {
+    "text": "在 Sphinx 配置中同时设置 `autodoc_typehints = 'description'` 和 `autodoc_type_aliases = {'JSONObject': 'types.JSONObject'}`，然后为使用了 `JSONObject` 类型别名的函数生成文档。",
+    "evidence": ["Issue 中提供了 conf.py 配置和 types.py 模块代码。", "Issue 中展示了当 `autodoc_typehints = 'description'` 时，输出为 `Dict[str, Any]`；当移除该配置时，输出为 `types.JSONObject`。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "生成的文档中，函数参数和返回值的类型显示为原始底层类型 `Dict[str, Any]`，而不是配置的别名 `types.JSONObject`。",
+    "symptom_type": "wrong_type",
+    "evidence": ["Issue 中展示的输出片段显示 `(Dict[str, Any])` 和 `Return type Dict[str, Any]`。", "Issue 期望行为是显示 `types.JSONObject`。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "无论 `autodoc_typehints` 配置为 'description' 还是其他值，当配置了 `autodoc_type_aliases` 时，生成的文档中对应的类型都应显示为配置的别名（例如 `types.JSONObject`）。",
+    "evidence": ["Issue 中明确说明期望 `types.JSONObject` instead of `Dict[str, Any]` in both cases。", "相关测试 test_autodoc_type_aliases 展示了配置别名后，类型显示从 `int` 变为 `myint`。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "sphinx.ext.autodoc",
+      "kind": "module",
+      "source_path": "",
+      "reason": "Issue 涉及 Sphinx 的 autodoc 扩展及其配置选项的行为。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "",
+      "object": "",
+      "lines": "",
+      "reason": "iCoRe 未检索到相关源代码片段，无法推断具体位置。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_autodoc_type_aliases",
+      "test_file": "tests/test_ext_autodoc_configs.py",
+      "why_relevant": "该测试直接验证了 `autodoc_type_aliases` 配置在默认情况下的功能，展示了别名替换的预期行为。",
+      "reusable_parts": ["使用 `do_autodoc` 函数生成文档", "使用 `app.config.autodoc_type_aliases` 设置配置", "断言生成的文档字符串列表"],
+      "possible_gap": "该测试没有设置 `autodoc_typehints = 'description'`，因此没有覆盖触发 bug 的配置组合。"
+    },
+    {
+      "test_name": "test_autodoc_typehints_description",
+      "test_file": "tests/test_ext_autodoc_configs.py",
+      "why_relevant": "该测试验证了当 `autodoc_typehints` 设置为 'description' 时的文档生成行为。",
+      "reusable_parts": ["使用 `confoverrides` 设置配置", "构建应用并读取输出文件", "断言输出中包含特定格式的类型提示"],
+      "possible_gap": "该测试没有配置 `autodoc_type_aliases`，因此没有测试别名功能在 'description' 模式下的交互。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "相关测试中，`autodoc_type_aliases` 和 `autodoc_typehints` 的配置通常是分开测试的。",
+      "target_pattern": "在测试中同时设置 `autodoc_typehints = 'description'` 和 `autodoc_type_aliases = {'JSONObject': 'types.JSONObject'}`。",
+      "reason": "Issue 表明只有当这两个配置同时以特定方式设置时，bug 才会触发。",
+      "confidence": "high"
+    },
+    {
+      "slot": "input",
+      "current_pattern": "相关测试使用预定义的测试模块（如 target.annotations, target.typehints）。",
+      "target_pattern": "创建一个新的测试模块，其中包含一个使用类型别名（如 `JSONObject = Dict[str, Any]`）的函数。",
+      "reason": "Issue 中使用的自定义模块和类型别名是触发条件的一部分。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "file_output",
+      "expression_hint": "生成的文档文本输出（例如通过 `do_autodoc` 返回的列表或构建后的文件内容）。",
+      "reason": "错误现象直接体现在生成的文档字符串中，即类型显示是原始类型还是别名。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "文档输出中参数和返回类型部分的字符串片段。",
+      "reason": "Issue 的核心是类型显示错误，需要观测这些特定位置的字符串内容。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "生成的文档中，对应参数和返回值的类型应包含配置的别名（如 'types.JSONObject'），而不是原始类型（如 'Dict[str, Any]'）。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免对整个文档输出字符串进行完全相等断言，因为格式细节可能变化。",
+      "reason": "Issue 关注的是类型别名的替换是否成功，而不是文档的完整格式。使用片段包含断言更稳定。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 `sphinx.testing.fixtures` 中的 `app` fixture 和 `do_autodoc` 辅助函数。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要创建一个临时的测试根目录（testroot），包含 conf.py 和定义类型别名的 Python 模块。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 `confoverrides` 参数或直接修改 `app.config` 来设置配置。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "导致 `autodoc_type_aliases` 在 `autodoc_typehints='description'` 模式下失效的具体代码位置和逻辑。",
+    "除了 `Dict[str, Any]` 别名，其他类型的别名是否也会受此影响。",
+    "`autodoc_typehints` 设置为其他值（如 'signature'）时，别名功能是否完全正常。"
+  ]
+}

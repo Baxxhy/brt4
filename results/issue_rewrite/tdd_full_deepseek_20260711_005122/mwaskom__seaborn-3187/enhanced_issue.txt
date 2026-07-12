@@ -1,0 +1,161 @@
+instance_id: mwaskom__seaborn-3187
+
+issue_summary: 使用 ScalarFormatter 且带有 offset 的大数值图例标签未正确显示乘性偏移值。
+
+trigger_condition:
+{
+  "text": "使用 seaborn.objects.Plot 或 seaborn.scatterplot 绘制数据，其中某个连续变量（如 size）的值非常大（例如 1E6 量级），并且该变量的刻度格式化器使用了 ScalarFormatter 并启用了 offset 功能。",
+  "evidence": [
+    "Issue 描述中提供了使用 seaborn.objects.Plot 和 seaborn.scatterplot 的示例代码，其中 `body_mass_mg` 列的值约为 1E6。",
+    "Issue 指出问题源于 `ScalarFormatter` 的 offset 值未被用于生成图例标签。",
+    "Issue 提到问题可能与 rcParams `axes.formatter.useoffset` 和 `axes.formatter.offset_threshold` 有关。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "图例标签显示错误的数值，未包含乘性偏移值（例如，应显示类似 '1e6' 或带偏移后缀的标签，但实际显示为原始大数字）。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 截图显示图例标签为 '4000000' 等大数字，而非带偏移的格式。",
+    "Issue 描述：“legends describing large numbers ... are formatted without their multiplicative offset value”。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当连续变量的刻度标签使用 ScalarFormatter 并产生 offset 时，图例标签应正确反映该 offset，例如显示为 '4e6' 或带有 '1e6' 乘数说明的格式。",
+  "evidence": [
+    "Issue 描述：“The offset value can be safely retrieved from all formatters and based on that it can be used to create the legend title and/or labels.” 暗示了修复后的预期行为。",
+    "相关测试 TestContinuous.test_label_unit 和 test_label_unit_with_sep 展示了刻度标签与单位（可类比 offset）的正确组合。"
+  ],
+  "confidence": "medium"
+}
+
+target_apis:
+[
+  {
+    "name": "seaborn.objects.Plot",
+    "kind": "class",
+    "source_path": "seaborn/_core/plot.py",
+    "reason": "Issue 中触发 bug 的示例代码使用了此 API。"
+  },
+  {
+    "name": "seaborn.objects.Dot",
+    "kind": "class",
+    "source_path": "seaborn/_marks/dot.py",
+    "reason": "Issue 示例中作为 mark 使用。"
+  },
+  {
+    "name": "seaborn.scatterplot",
+    "kind": "function",
+    "source_path": "seaborn/relational.py",
+    "reason": "Issue 提到问题在 scatterplot 中也会复现。"
+  },
+  {
+    "name": "_ScatterPlotter",
+    "kind": "class",
+    "source_path": "",
+    "reason": "相关测试 test_legend_data 大量使用此类，它负责处理图例数据，可能与图例标签生成有关。"
+  },
+  {
+    "name": "seaborn._core.scales",
+    "kind": "module",
+    "source_path": "seaborn/_core/scales.py",
+    "reason": "Issue 中链接的代码指向此模块的第 377-382 行，认为是问题根源。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相关测试中使用常规范围数值数据（如 `long_df` 中的 'x', 'y', 'a', 's' 列）。",
+    "target_pattern": "使用具有非常大数值范围（例如 1E6 量级）的数据列作为 size 或 color 变量。",
+    "reason": "大数值是触发 ScalarFormatter 使用 offset 模式的关键条件。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "测试通常使用默认的 matplotlib rcParams 设置。",
+    "target_pattern": "可能需要设置 `mpl.rcParams['axes.formatter.useoffset'] = True` 并调整 `offset_threshold` 以确保 offset 被激活。",
+    "reason": "Issue 提到问题依赖于这些 rcParam 设置，尽管未测试，但它们是触发 offset 格式化行为的配置。",
+    "confidence": "medium"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "测试 test_legend_data 直接使用 _ScatterPlotter 并调用 `add_legend_data`。",
+    "target_pattern": "可能需要通过 seaborn.objects.Plot(...).add(so.Dot()) 或 seaborn.scatterplot 的高级接口来触发完整的绘图和标签生成流程。",
+    "reason": "Issue 的示例和复现路径使用了高级接口，bug 可能出现在从高级接口到底层标签生成的某个环节。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "通过 `ax.get_legend_handles_labels()` 获取的 `labels` 列表中的文本内容。",
+    "reason": "这是直接观察图例标签是否正确包含 offset 信息（如 '1e6' 乘数）的位置。"
+  },
+  {
+    "kind": "config",
+    "expression_hint": "`mpl.rcParams['axes.formatter.useoffset']` 和 `mpl.rcParams['axes.formatter.offset_threshold']` 的值。",
+    "reason": "确认测试环境是否配置为会触发 ScalarFormatter 的 offset 行为。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "对应坐标轴（如 size 轴）的 `formatter` 对象及其 `get_offset()` 或 `orderOfMagnitude` 等属性值。",
+    "reason": "Issue 指出 offset 值可以从 formatter 安全获取，观察这些值可以确认 offset 是否被正确计算但未用于图例。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "图例标签文本应包含表示乘性偏移的片段（如科学计数法 'e+06' 或类似的 offset 指示符），而不是完整的原始大数字字符串。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "断言完整的标签字符串完全等于某个特定值，因为 offset 的确切格式可能因 matplotlib 版本或配置而异。",
+    "reason": "Issue 的核心是 offset 信息缺失，因此断言标签包含 offset 指示符（如 'e'）是稳定且与问题对齐的。"
+  },
+  {
+    "assertion_goal": "图例标签文本不应是未经缩放的完整大整数（如 '4000000'）。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "仅断言标签不为空或长度大于0。",
+    "reason": "直接针对错误现象（显示原始大数字）进行否定断言，是正向断言的有力补充。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要准备包含大数值列（如 ~1E6）的 pandas DataFrame fixture。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要使用 `plt.subplots()` 创建图形和坐标轴，用于承载绘图和获取图例。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要临时设置 matplotlib 的 rcParams 以确保 offset 行为被启用。",
+    "source": "issue",
+    "confidence": "medium"
+  },
+  {
+    "hint": "可能需要导入 seaborn.objects 为 so，以及 seaborn 本身。",
+    "source": "issue",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "bug 的确切位置是在 scales.py 的第 377-382 行，还是在图例生成流程的其他部分。",
+  "rcParams `axes.formatter.useoffset` 和 `offset_threshold` 的确切影响是否需要显式设置才能稳定复现。",
+  "使用 seaborn.objects 接口与直接使用 _ScatterPlotter 在触发 bug 的路径上是否有本质区别。",
+  "修复后图例标签的确切格式（例如，是 '4e6'，还是 '4 (1e6)'，或带有标题说明）尚不明确。"
+]

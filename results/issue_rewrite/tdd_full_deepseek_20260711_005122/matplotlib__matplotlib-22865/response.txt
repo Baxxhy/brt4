@@ -1,0 +1,118 @@
+```json
+{
+    "issue_summary": "当 matplotlib 的 colorbar 设置 drawedges=True 且 extend='both' 时，两端的黑色分隔线没有显示。",
+    "trigger_condition": {
+        "text": "使用 from_levels_and_colors 创建带有 extend='both' 的 cmap 和 norm，然后用 ColorbarBase 或 Colorbar 创建 colorbar 并设置 drawedges=True。",
+        "evidence": ["Issue 中的代码示例展示了使用 from_levels_and_colors(..., extend='both') 和 ColorbarBase(..., drawedges=True)。", "源码片段 2 显示了 from_levels_and_colors 函数处理 extend='both' 的逻辑。"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "colorbar 两端的黑色分隔线缺失，而中间的分隔线正常显示。",
+        "symptom_type": "unknown",
+        "evidence": ["Issue 中的实际结果图片显示两端没有黑线，期望结果图片显示两端有黑线。"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "colorbar 的所有分隔线，包括两端的，在 drawedges=True 且 extend='both' 时都应显示。",
+        "evidence": ["Issue 中的期望结果图片显示了两端的黑线。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "matplotlib.colorbar.ColorbarBase",
+            "kind": "class",
+            "source_path": "lib/matplotlib/colorbar.py",
+            "reason": "Issue 中用于创建 colorbar 的类，且源码片段 1 显示它是 Colorbar 的别名。"
+        },
+        {
+            "name": "matplotlib.colorbar.Colorbar",
+            "kind": "class",
+            "source_path": "lib/matplotlib/colorbar.py",
+            "reason": "ColorbarBase 的实际实现类，是缺陷可能发生的核心类。"
+        },
+        {
+            "name": "matplotlib.colors.from_levels_and_colors",
+            "kind": "function",
+            "source_path": "lib/matplotlib/colors.py",
+            "reason": "Issue 中用于创建带有 extend='both' 的 cmap 和 norm 的函数。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "lib/matplotlib/colorbar.py",
+            "object": "Colorbar",
+            "lines": "",
+            "reason": "Colorbar 类负责绘制分隔线（drawedges），其逻辑可能在处理 extend='both' 时忽略了绘制两端的线。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_colorbar_closed_patch",
+            "test_file": "lib/matplotlib/tests/test_colorbar.py",
+            "why_relevant": "该测试使用了 extend='both' 和 drawedges（通过 rc_context 设置线宽），并检查 colorbar 的绘制结果。",
+            "reusable_parts": ["imports (matplotlib.pyplot, numpy)", "使用 extend='both' 创建 colorbar 的模式", "使用 plt.colorbar 或 Colorbar 的 API 调用风格"],
+            "possible_gap": "该测试主要关注 closed patch 和 extendfrac/extendrect，没有专门检查 drawedges 在 extend='both' 时两端的线是否绘制。"
+        },
+        {
+            "test_name": "test_colorbar_extension_inverted_axis",
+            "test_file": "lib/matplotlib/tests/test_colorbar.py",
+            "why_relevant": "该测试直接操作 extend 参数（包括 'both'）并检查 _extend_patches 属性，与 colorbar 的扩展部分相关。",
+            "reusable_parts": ["使用 extend='both' 的参数化测试结构", "对 _extend_patches 属性的断言风格"],
+            "possible_gap": "该测试关注的是扩展部分的颜色，而不是分隔线（drawedges）的绘制。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "argument",
+            "current_pattern": "相关测试中可能使用 extend='both' 但不设置 drawedges，或设置 drawedges 但 extend='neither'。",
+            "target_pattern": "同时设置 extend='both' 和 drawedges=True。",
+            "reason": "Issue 表明只有当这两个条件同时满足时，缺陷才会触发。",
+            "confidence": "high"
+        },
+        {
+            "slot": "config",
+            "current_pattern": "测试可能使用默认的 colormap 或简单的 norm。",
+            "target_pattern": "使用 from_levels_and_colors 创建的带有 extend='both' 的 cmap 和 norm。",
+            "reason": "Issue 的复现代码使用了这种特定的配置方式，可能与缺陷触发路径有关。",
+            "confidence": "medium"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "state",
+            "expression_hint": "cbar._edges 或类似的属性，包含分隔线（LineCollection）的对象。",
+            "reason": "分隔线是否被正确创建和包含两端的信息应存储在此类属性中。"
+        },
+        {
+            "kind": "file_output",
+            "expression_hint": "渲染后的图像中，colorbar 两端区域的颜色或线条像素。",
+            "reason": "缺陷的最终表现是视觉上的线条缺失，可以通过图像比较或像素检查来验证。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "验证 colorbar 对象中代表分隔线的集合（如 _edges）包含了对应于两端扩展区域的分隔线元素。",
+            "preferred_assertion_style": "contains_fragment",
+            "avoid": "断言完整的图像文件字节相等或完整的 repr 字符串。",
+            "reason": "断言内部状态（如线条数量、位置）比断言最终渲染图像更稳定，且直接对应缺陷逻辑。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要使用 matplotlib 的 non-interactive 后端（如 'Agg'）进行测试，并可能需要 image_comparison 或类似的 fixture 来捕获输出。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "测试可能需要设置特定的图形大小和坐标轴位置以隔离 colorbar。",
+            "source": "issue",
+            "confidence": "medium"
+        }
+    ],
+    "uncertainties": [
+        "Colorbar 类中具体哪个方法或属性负责计算和绘制 drawedges，尤其是在 extend 区域。",
+        "from_levels_and_colors 创建的 cmap/norm 是否对缺陷触发是必需的，还是任何 extend='both' 的 colorbar 都会触发。",
+        "缺陷是否也存在于其他 extend 模式（'min', 'max'）下。"
+    ]
+}
+```

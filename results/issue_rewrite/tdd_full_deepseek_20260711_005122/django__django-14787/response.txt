@@ -1,0 +1,138 @@
+{
+  "issue_summary": "method_decorator() 在装饰一个返回 functools.partial 对象的装饰器时，未能正确保留包装函数的属性（如 __name__）。",
+  "trigger_condition": {
+    "text": "使用 method_decorator 装饰一个类方法，且传入的装饰器（如 logger）在其内部尝试访问被装饰函数（func）的 __name__ 等属性，但被装饰的函数实际上是一个 functools.partial 对象。",
+    "evidence": ["Issue 描述：'the function that is passed to the decorator is a partial object and does not have any of the attributes expected from a function i.e. __name__, __module__ etc...'", "Issue 中的示例代码：@method_decorator(logger) 装饰了 hello_world 方法，并在 logger 装饰器内部调用了 func.__name__。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "调用被装饰的方法时，抛出 AttributeError: 'functools.partial' object has no attribute '__name__'。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 中给出的异常信息：\"AttributeError: 'functools.partial' object has no attribute '__name__'\""],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "method_decorator 应该正确处理装饰器返回的 partial 对象，确保包装后的方法对象具有正确的函数属性（如 __name__），或者装饰器内部能够正常访问这些属性而不引发异常。",
+    "evidence": ["相关测试 1 (test_preserve_attributes) 验证了 method_decorator 应保留方法的 __name__ 和 __doc__ 等属性。", "Issue 的上下文暗示装饰器应能正常访问 func.__name__ 进行日志记录。"],
+    "confidence": "medium"
+  },
+  "target_apis": [
+    {
+      "name": "method_decorator",
+      "kind": "function",
+      "source_path": "django/utils/decorators.py",
+      "reason": "这是 Issue 报告的核心函数，用于将函数装饰器转换为方法装饰器。"
+    },
+    {
+      "name": "update_wrapper",
+      "kind": "function",
+      "source_path": "",
+      "reason": "源码片段 1 中 method_decorator 函数内部使用了 update_wrapper，可能与包装属性的设置有关。"
+    },
+    {
+      "name": "_multi_decorate",
+      "kind": "function",
+      "source_path": "django/utils/decorators.py",
+      "reason": "源码片段 1 中 method_decorator 内部调用了 _multi_decorate 来实际应用装饰器，是生成包装对象的关键。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/utils/decorators.py",
+      "object": "method_decorator",
+      "lines": "53-86",
+      "reason": "这是问题发生的核心函数，负责处理装饰器转换，可能未正确处理装饰器返回的 partial 对象。"
+    },
+    {
+      "path": "django/utils/decorators.py",
+      "object": "_multi_decorate",
+      "lines": "",
+      "reason": "method_decorator 内部调用它来应用装饰器，它可能负责创建最终的包装对象，其实现可能影响了属性的保留。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "MethodDecoratorTests.test_preserve_attributes",
+      "test_file": "tests/decorators/tests.py",
+      "why_relevant": "该测试直接验证 method_decorator 在各种场景下是否保留方法的属性（如 __name__, __doc__），与 Issue 的核心问题（属性丢失）高度相关。",
+      "reusable_parts": ["测试类结构 (MethodDecoratorTests)", "使用 @method_decorator 装饰类和方法的模式", "使用 getattr 检查属性的断言风格", "对 __name__ 和 __doc__ 的验证"],
+      "possible_gap": "该测试使用的装饰器（myattr_dec, myattr2_dec）可能不返回 partial 对象，因此无法复现当装饰器返回 partial 时属性访问失败的问题。"
+    },
+    {
+      "test_name": "MethodDecoratorTests.test_new_attribute",
+      "test_file": "tests/decorators/tests.py",
+      "why_relevant": "该测试展示了装饰器通过 method_decorator 为方法设置新属性，涉及装饰器对方法对象的修改。",
+      "reusable_parts": ["定义一个简单装饰器（decorate）的模式", "使用 @method_decorator(decorate) 装饰类方法", "通过 obj.method.x 访问装饰器设置的属性"],
+      "possible_gap": "该装饰器直接设置属性并返回原函数，不涉及返回 partial 对象或访问 __name__ 等内置属性。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试中使用的装饰器是直接修改或包装函数的普通装饰器（如设置 myattr 或 x）。",
+      "target_pattern": "使用一个返回 functools.partial 对象的装饰器，并且在该装饰器内部尝试访问 func.__name__。",
+      "reason": "Issue 表明当装饰器返回 partial 对象且访问其 __name__ 时会触发异常，这是当前测试未覆盖的路径。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "测试中装饰器直接调用被装饰函数 func(*args, **kwargs)。",
+      "target_pattern": "装饰器内部在调用 func(*args, **kwargs) 之前或之后，尝试访问 func.__name__。",
+      "reason": "Issue 中的 logger 装饰器在日志语句中使用了 func.__name__，这是触发 AttributeError 的直接原因。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "调用被 @method_decorator(logger) 装饰的方法时是否抛出 AttributeError。",
+      "reason": "Issue 明确报告了此异常，是缺陷触发的直接标志。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "在装饰器内部，检查传入的 func 参数的类型（是否为 functools.partial）。",
+      "reason": "Issue 指出传入装饰器的函数是 partial 对象，了解其类型有助于理解问题根源。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "被装饰的方法调用后的返回值，确认功能是否正常（排除异常后）。",
+      "reason": "在修复后，方法应能正常执行并返回预期结果，同时日志功能正常工作。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证被 @method_decorator 装饰的方法在调用时不会抛出 AttributeError。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言具体的完整异常消息字符串，因为消息可能因 Python 版本微调。",
+      "reason": "Issue 的核心是异常，断言不引发特定异常能直接验证缺陷是否被修复。"
+    },
+    {
+      "assertion_goal": "验证装饰器内部能够成功访问到被包装函数的 __name__ 属性（或一个合理的替代值）。",
+      "preferred_assertion_style": "isinstance",
+      "avoid": "断言 __name__ 必须等于某个固定字符串，因为被装饰的方法名可能不同。",
+      "reason": "修复后，装饰器应能正常访问函数属性进行日志记录，断言属性存在且为字符串类型更稳定。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 method_decorator 和 functools.partial。",
+      "source": "issue|inference",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试应继承自 SimpleTestCase（如相关测试所示）。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要定义一个返回 functools.partial 的装饰器，并在其中访问 func.__name__。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "method_decorator 内部具体是哪个步骤导致 partial 对象的属性未被正确设置或传递。",
+    "修复后的预期行为是 partial 对象本身获得 __name__ 属性，还是 method_decorator 生成的包装对象应具有这些属性。",
+    "除了 __name__，其他函数属性（如 __module__, __doc__, __annotations__）是否也会受到影响。"
+  ]
+}

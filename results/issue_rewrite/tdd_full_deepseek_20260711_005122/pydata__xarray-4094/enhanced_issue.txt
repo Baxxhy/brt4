@@ -1,0 +1,143 @@
+instance_id: pydata__xarray-4094
+
+issue_summary: to_unstacked_dataset 方法在处理仅包含单个维度的变量时失败，导致无法完成 stack/unstack 的往返操作。
+
+trigger_condition:
+{
+  "text": "对一个包含多个变量的 Dataset 调用 to_stacked_array，其中至少有一个变量只有一个维度（即 sample_dims 之外的维度为空），然后对生成的 DataArray 调用 to_unstacked_dataset。",
+  "evidence": [
+    "Issue 中的 MCVE 代码显示，变量 'a' 和 'b' 都只有一个维度 'x'，sample_dims=['x']，导致 stacking_dims 为空。",
+    "源码片段 3 中 to_stacked_array 方法定义 stacking_dims = tuple(dim for dim in self.dims if dim not in sample_dims)。",
+    "相关测试 2 测试了变量具有不同维度的情况，但未明确测试 stacking_dims 为空的情况。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "抛出 MergeError: conflicting values for variable 'y' on objects to be combined. You can skip this check by specifying compat='override'。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中的 MCVE 代码注释了错误信息。",
+    "源码片段 5 定义了 MergeError 类。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "to_unstacked_dataset 应能成功处理由 to_stacked_array 生成的 DataArray，即使原始变量只有一个维度，也应能正确还原为原始 Dataset，实现往返操作。",
+  "evidence": [
+    "Issue 的 'Expected Output' 部分为 'A working roundtrip'。",
+    "相关测试 1 和 2 的测试目标都是 assert_identical(D, x)，即往返后数据集相同。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "Dataset.to_stacked_array",
+    "kind": "method",
+    "source_path": "xarray/core/dataset.py",
+    "reason": "Issue 中触发 bug 的第一步操作，用于生成堆叠后的 DataArray。"
+  },
+  {
+    "name": "DataArray.to_unstacked_dataset",
+    "kind": "method",
+    "source_path": "xarray/core/dataarray.py",
+    "reason": "Issue 中触发 bug 的第二步操作，用于从堆叠的 DataArray 还原 Dataset，但当前在特定条件下失败。"
+  },
+  {
+    "name": "xr.Dataset",
+    "kind": "class",
+    "source_path": "xarray/core/dataset.py",
+    "reason": "Issue 中构造初始数据对象。"
+  },
+  {
+    "name": "xr.DataArray",
+    "kind": "class",
+    "source_path": "xarray/core/dataarray.py",
+    "reason": "to_stacked_array 的返回类型和 to_unstacked_dataset 的调用者。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相关测试 2 中使用 create_test_stacked_array() 生成二维变量 'a' 和 'b'，然后对 'b' 使用 .isel(y=0) 得到一个维度为 ('x',) 的变量。",
+    "target_pattern": "像 Issue 中那样，直接构造两个 DataArray，它们都只有一个共同的维度（例如 'x'），并且没有其他维度。然后使用这两个变量创建 Dataset。",
+    "reason": "这确保了在调用 to_stacked_array(sample_dims=['x']) 时，stacking_dims 计算结果为空元组 ()，这是触发 bug 的关键条件。",
+    "confidence": "high"
+  },
+  {
+    "slot": "argument",
+    "current_pattern": "相关测试中 sample_dims 设置为 ['x']，但变量 'a' 的维度是 ('x', 'y')。",
+    "target_pattern": "sample_dims 设置为与变量完全相同的维度列表，例如对于维度仅为 ('x',) 的变量，设置 sample_dims=['x']。",
+    "reason": "这使得 stacking_dims 为空，进入 to_stacked_array 中 ensure_stackable 函数处理单维度变量的特殊分支。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用 stacked.to_unstacked_dataset('y') 时是否抛出 MergeError。",
+    "reason": "Issue 中明确观察到的错误现象就是抛出此异常。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "stacked.indexes[new_dim] 的结构，特别是其 levels 和 names 属性，以及 variable_dim 对应的 level 内容。",
+    "reason": "to_unstacked_dataset 方法依赖 MultiIndex 的信息来还原变量。观察其结构有助于理解 bug 根源。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "在 to_stacked_array 内部，ensure_stackable 函数处理每个变量后生成的中间 DataArray 的维度和坐标。",
+    "reason": "当 stacking_dims 为空时，expand_dims 和 stack 操作可能产生非常规的 MultiIndex，导致后续 unstack 失败。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "对由单维度变量堆叠生成的 DataArray 调用 to_unstacked_dataset 不应抛出异常，并应成功返回一个 Dataset。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言完整的错误信息字符串，因为信息可能微调。",
+    "reason": "Issue 的核心是当前操作会抛出 MergeError，修复后应不再抛出。使用 pytest.raises 并匹配错误类型是验证修复的直接方式。修复后，此断言应被替换为验证往返结果正确的断言。"
+  },
+  {
+    "assertion_goal": "修复后，to_unstacked_dataset 返回的 Dataset 应与原始 Dataset 在数据上相同（允许坐标表示上的微小差异）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言两个对象的完全 identical（可能包含内部缓存等），应关注数据等价性。",
+    "reason": "Issue 的期望是 'A working roundtrip'，即能正确还原。使用 assert_identical 或 assert_equal 验证数据一致性是稳定且与现有测试风格一致的断言。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 xarray as xr 和 numpy as np。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可以放在一个类中（如 TestDataset），遵循现有测试文件的组织方式。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可以使用 pytest 作为测试运行器，并使用 pytest.raises 来捕获预期的异常。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "MergeError 具体是在 to_unstacked_dataset 方法内部的哪一行代码抛出的？是 self.sel({variable_dim: k}) 时，还是在构建返回的 Dataset 时？",
+  "当 stacking_dims 为空时，to_stacked_array 生成的 MultiIndex 的具体结构是什么？其 levels 和 names 是否与 to_unstacked_dataset 的预期输入不匹配？",
+  "除了 MergeError，是否还有其他潜在的错误行为（如数据错误、坐标错误）？",
+  "修复方案是需要修改 to_stacked_array 的生成逻辑，还是修改 to_unstacked_dataset 的解析逻辑，或者两者都需要？"
+]

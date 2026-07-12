@@ -1,0 +1,480 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Unit equality comparison with None raises TypeError for UnrecognizedUnit
+```
+In [12]: x = u.Unit('asdf', parse_strict='silent')
+
+In [13]: x == None  # Should be False
+---------------------------------------------------------------------------
+TypeError                                 Traceback (most recent call last)
+<ipython-input-13-2486f2ccf928> in <module>()
+----> 1 x == None  # Should be False
+
+/Users/aldcroft/anaconda3/lib/python3.5/site-packages/astropy/units/core.py in __eq__(self, other)
+   1699 
+   1700     def __eq__(self, other):
+-> 1701         other = Unit(other, parse_strict='silent')
+   1702         return isinstance(other, UnrecognizedUnit) and self.name == other.name
+   1703 
+
+/Users/aldcroft/anaconda3/lib/python3.5/site-packages/astropy/units/core.py in __call__(self, s, represents, format, namespace, doc, parse_strict)
+   1808 
+   1809         elif s is None:
+-> 1810             raise TypeError("None is not a valid Unit")
+   1811 
+   1812         else:
+
+TypeError: None is not a valid Unit
+```
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：astropy/units/core.py
+对象名称：Unit
+节点类型：class
+父节点：core
+行号范围：1828-1946
+代码：
+class Unit(NamedUnit, metaclass=_UnitMetaClass):
+    """
+    The main unit class.
+
+    There are a number of different ways to construct a Unit, but
+    always returns a `UnitBase` instance.  If the arguments refer to
+    an already-existing unit, that existing unit instance is returned,
+    rather than a new one.
+
+    - From a string::
+
+        Unit(s, format=None, parse_strict='silent')
+
+      Construct from a string representing a (possibly compound) unit.
+
+      The optional `format` keyword argument specifies the format the
+      string is in, by default ``"generic"``.  For a description of
+      the available formats, see `astropy.units.format`.
+
+      The optional ``parse_strict`` keyword controls what happens when an
+      unrecognized unit string is passed in.  It may be one of the following:
+
+         - ``'raise'``: (default) raise a ValueError exception.
+
+         - ``'warn'``: emit a Warning, and return an
+           `UnrecognizedUnit` instance.
+
+         - ``'silent'``: return an `UnrecognizedUnit` instance.
+
+    - From a number::
+
+        Unit(number)
+
+      Creates a dimensionless unit.
+
+    - From a `UnitBase` instance::
+
+        Unit(unit)
+
+      Returns the given unit unchanged.
+
+    - From `None`::
+
+        Unit()
+
+      Returns the null unit.
+
+    - The last form, which creates a new `Unit` is described in detail
+      below.
+
+    Parameters
+    ----------
+    st : str or list of str
+        The name of the unit.  If a list, the first element is the
+        canonical (short) name, and the rest of the elements are
+        aliases.
+
+    represents : UnitBase instance
+        The unit that this named unit represents.
+
+    doc : str, optional
+        A docstring describing the unit.
+
+    format : dict, optional
+        A mapping to format-specific representations of this unit.
+        For example, for the ``Ohm`` unit, it might be nice to have it
+        displayed as ``\\Omega`` by the ``latex`` formatter.  In that
+        case, `format` argument should be set to::
+
+            {'latex': r'\\Omega'}
+
+    namespace : dictionary, optional
+        When provided, inject the unit (and all of its aliases) into
+        the given namespace.
+
+    Raises
+    ------
+    ValueError
+        If any of the given unit names are already in the registry.
+
+    ValueError
+        If any of the given unit names are not valid Python tokens.
+    """
+    def __init__(self, st, represents=None, doc=None,
+                 format=None, namespace=None):
+
+    @property
+    def represents(self):
+    def decompose(self, bases=set()):
+    def is_unity(self):
+    def __hash__(self):
+    @classmethod
+    def _from_physical_type_id(cls, physical_type_id):
+
+
+【源码片段 2】
+文件路径：astropy/units/core.py
+对象名称：__eq__
+节点类型：class_function
+父节点：UnrecognizedUnit
+行号范围：1712-1714
+代码：
+    def __eq__(self, other):
+        other = Unit(other, parse_strict='silent')
+        return isinstance(other, UnrecognizedUnit) and self.name == other.name
+
+
+【源码片段 3】
+文件路径：astropy/units/core.py
+对象名称：UnrecognizedUnit
+节点类型：class
+父节点：core
+行号范围：1675-1733
+代码：
+class UnrecognizedUnit(IrreducibleUnit):
+    """
+    A unit that did not parse correctly.  This allows for
+    roundtripping it as a string, but no unit operations actually work
+    on it.
+
+    Parameters
+    ----------
+    st : str
+        The name of the unit.
+    """
+    __reduce__ = object.__reduce__
+    def __repr__(self):
+    def __bytes__(self):
+    def __str__(self):
+    def to_string(self, format=None):
+    def _unrecognized_operator(self, *args, **kwargs):
+    __pow__ = __div__ = __rdiv__ = __truediv__ = __rtruediv__ = __mul__ = \
+        __rmul__ = __lt__ = __gt__ = __le__ = __ge__ = __neg__ = \
+        _unrecognized_operator
+    def __eq__(self, other):
+    def __ne__(self, other):
+    def is_equivalent(self, other, equivalencies=None):
+    def _get_converter(self, other, equivalencies=None):
+    def get_format_name(self, format):
+    def is_unity(self):
+
+
+【源码片段 4】
+文件路径：astropy/units/core.py
+对象名称：__call__
+节点类型：class_function
+父节点：_UnitMetaClass
+行号范围：1744-1825
+代码：
+    def __call__(self, s, represents=None, format=None, namespace=None,
+                 doc=None, parse_strict='raise'):
+
+        # Short-circuit if we're already a unit
+        if hasattr(s, '_get_physical_type_id'):
+            return s
+
+        # turn possible Quantity input for s or represents into a Unit
+        from .quantity import Quantity
+
+        if isinstance(represents, Quantity):
+            if is_effectively_unity(represents.value):
+                represents = represents.unit
+            else:
+                # cannot use _error_check=False: scale may be effectively unity
+                represents = CompositeUnit(represents.value *
+                                           represents.unit.scale,
+                                           bases=represents.unit.bases,
+                                           powers=represents.unit.powers)
+
+        if isinstance(s, Quantity):
+            if is_effectively_unity(s.value):
+                s = s.unit
+            else:
+                s = CompositeUnit(s.value * s.unit.scale,
+                                  bases=s.unit.bases,
+                                  powers=s.unit.powers)
+
+        # now decide what we really need to do; define derived Unit?
+        if isinstance(represents, UnitBase):
+            # This has the effect of calling the real __new__ and
+            # __init__ on the Unit class.
+            return super().__call__(
+                s, represents, format=format, namespace=namespace, doc=doc)
+
+        # or interpret a Quantity (now became unit), string or number?
+        if isinstance(s, UnitBase):
+            return s
+
+        elif isinstance(s, (bytes, str)):
+            if len(s.strip()) == 0:
+                # Return the NULL unit
+                return dimensionless_unscaled
+
+            if format is None:
+                format = unit_format.Generic
+
+            f = unit_format.get_format(format)
+            if isinstance(s, bytes):
+                s = s.decode('ascii')
+
+            try:
+                return f.parse(s)
+            except Exception as e:
+                if parse_strict == 'silent':
+                    pass
+                else:
+                    # Deliberately not issubclass here. Subclasses
+                    # should use their name.
+                    if f is not unit_format.Generic:
+                        format_clause = f.name + ' '
+                    else:
+                        format_clause = ''
+                    msg = ("'{0}' did not parse as {1}unit: {2}"
+                           .format(s, format_clause, str(e)))
+                    if parse_strict == 'raise':
+                        raise ValueError(msg)
+                    elif parse_strict == 'warn':
+                        warnings.warn(msg, UnitsWarning)
+                    else:
+                        raise ValueError("'parse_strict' must be 'warn', "
+                                         "'raise' or 'silent'")
+                return UnrecognizedUnit(s)
+
+        elif isinstance(s, (int, float, np.floating, np.integer)):
+            return CompositeUnit(s, [], [])
+
+        elif s is None:
+            raise TypeError("None is not a valid Unit")
+
+        else:
+            raise TypeError("{0} can not be converted to a Unit".format(s))
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：astropy/units/tests/test_units.py
+测试名称：test_compare_with_none
+测试代码：
+def test_compare_with_none():
+    # Ensure that equality comparisons with `None` work, and don't
+    # raise exceptions.  We are deliberately not using `is None` here
+    # because that doesn't trigger the bug.  See #3108.
+    assert not (u.m == None)  # nopep8
+    assert u.m != None  # nopep8
+
+【相关测试 2】
+测试文件：astropy/units/tests/test_units.py
+测试名称：test_unknown_unit3
+测试代码：
+def test_unknown_unit3():
+    unit = u.Unit("FOO", parse_strict='silent')
+    assert isinstance(unit, u.UnrecognizedUnit)
+    assert unit.name == "FOO"
+
+    unit2 = u.Unit("FOO", parse_strict='silent')
+    assert unit == unit2
+    assert unit.is_equivalent(unit2)
+
+    unit3 = u.Unit("BAR", parse_strict='silent')
+    assert unit != unit3
+    assert not unit.is_equivalent(unit3)
+
+    with pytest.raises(ValueError):
+        unit._get_converter(unit3)
+
+    x = unit.to_string('latex')
+    y = unit2.to_string('cgs')
+
+    with pytest.raises(ValueError):
+        unit4 = u.Unit("BAR", parse_strict='strict')
+
+    with pytest.raises(TypeError):
+        unit5 = u.Unit(None)
+
+【相关测试 3】
+测试文件：astropy/units/tests/test_units.py
+测试名称：test_pickle_unrecognized_unit
+测试代码：
+def test_pickle_unrecognized_unit():
+    """
+    Issue #2047
+    """
+    a = u.Unit('asdf', parse_strict='silent')
+    pickle.loads(pickle.dumps(a))
+
+【相关测试 4】
+测试文件：astropy/units/tests/test_quantity_decorator.py
+测试名称：test_args_None_kwarg
+测试代码：
+def test_args_None_kwarg():
+    x_target = u.deg
+    x_unit = u.arcsec
+    y_target = u.km
+
+    @u.quantity_input(x=x_target, y=y_target)
+    def myfunc_args(x, y=None):
+        return x, y
+
+    x, y = myfunc_args(1*x_unit)
+    assert isinstance(x, u.Quantity)
+    assert x.unit == x_unit
+    assert y is None
+
+    x, y = myfunc_args(1*x_unit, None)
+    assert isinstance(x, u.Quantity)
+    assert x.unit == x_unit
+    assert y is None
+
+    with pytest.raises(TypeError):
+        x, y = myfunc_args(None, None)
+
+【相关测试 5】
+测试文件：astropy/units/tests/test_units.py
+测试名称：test_unknown_unit
+测试代码：
+def test_unknown_unit():
+    with catch_warnings(u.UnitsWarning) as warning_lines:
+        u.Unit("FOO", parse_strict='warn')
+
+    assert 'FOO' in str(warning_lines[0].message)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

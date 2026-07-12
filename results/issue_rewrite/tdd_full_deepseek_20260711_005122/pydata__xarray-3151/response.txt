@@ -1,0 +1,115 @@
+{
+  "issue_summary": "combine_by_coords 在坐标值相同但非单调时错误地抛出 ValueError。",
+  "trigger_condition": {
+    "text": "使用 combine_by_coords 合并多个 Dataset，这些 Dataset 在某个坐标维度上具有完全相同的坐标值，且这些坐标值是非单调的（例如 ['a', 'c', 'b']）。",
+    "evidence": ["Issue 中的 MCVE 代码示例展示了 y 坐标相同且非单调的情况。", "Issue 描述指出“identical coordinate dimensions are still required to be monotonic”。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "抛出 ValueError: Resulting object does not have monotonic global indexes along dimension y。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 中的错误信息片段。", "源码片段 1 中 combine_by_coords 函数在检查坐标单调性时抛出此异常。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "combine_by_coords 应成功合并数据集，因为根据文档，在数据集之间没有变化的坐标维度应被忽略，不应要求其单调。",
+    "evidence": ["Issue 中引用的文档说明：“Non-coordinate dimensions will be ignored, as will any coordinate dimensions which do not vary between each dataset”。", "Issue 的“Expected Output”部分指出应无错误返回。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "combine_by_coords",
+      "kind": "function",
+      "source_path": "xarray/core/combine.py",
+      "reason": "Issue 直接报告此函数的问题，是缺陷复现的核心调用点。"
+    },
+    {
+      "name": "_infer_concat_order_from_coords",
+      "kind": "function",
+      "source_path": "xarray/core/combine.py",
+      "reason": "相关测试中涉及此函数，且它被 combine_by_coords 调用以推断连接顺序。"
+    },
+    {
+      "name": "Dataset",
+      "kind": "class",
+      "source_path": "xarray/core/dataset.py",
+      "reason": "Issue 中构造 Dataset 对象，是 combine_by_coords 的输入。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "xarray/core/combine.py",
+      "object": "combine_by_coords",
+      "lines": "393-515",
+      "reason": "该函数在合并后对所有维度坐标进行单调性检查，但根据文档，对于数据集间没有变化的坐标维度，不应进行此检查。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "TestCombineAuto.test_combine_by_coords",
+      "test_file": "xarray/tests/test_combine.py",
+      "why_relevant": "该测试直接测试 combine_by_coords 函数，包含多个合并场景，可作为起点。",
+      "reusable_parts": ["imports", "Dataset 构造", "combine_by_coords 调用", "assert_identical/assert_equal 断言风格"],
+      "possible_gap": "现有测试未覆盖坐标相同但非单调的场景，它们要么坐标不同，要么坐标单调。"
+    },
+    {
+      "test_name": "TestTileIDsFromCoords.test_string_coords",
+      "test_file": "xarray/tests/test_combine.py",
+      "why_relevant": "该测试使用字符串坐标，与 Issue 中 y 坐标为字符串类似，且测试了 _infer_concat_order_from_coords。",
+      "reusable_parts": ["Dataset 构造", "字符串坐标", "_infer_concat_order_from_coords 调用"],
+      "possible_gap": "该测试坐标在不同数据集中是不同且单调的，未测试相同非单调坐标。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中，待合并数据集的坐标值在不同数据集间是不同且单调递增的（例如 x: [0], x: [1]）。",
+      "target_pattern": "待合并数据集的某个坐标维度在所有数据集中具有完全相同的值，且这些值是非单调的（例如 y: ['a', 'c', 'b']）。",
+      "reason": "Issue 表明，当坐标相同且非单调时，combine_by_coords 会错误地要求单调性。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "Dataset 的坐标索引是单调的（例如 is_monotonic_increasing 为 True）。",
+      "target_pattern": "Dataset 的坐标索引是非单调的（例如 is_monotonic_increasing 和 is_monotonic_decreasing 均为 False）。",
+      "reason": "combine_by_coords 内部检查 concatenated.indexes.get(dim).is_monotonic_increasing/decreasing，非单调索引会触发异常。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "调用 combine_by_coords 时是否抛出 ValueError 及其消息。",
+      "reason": "Issue 的核心错误现象是抛出特定 ValueError。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "如果未抛出异常，观察返回的 Dataset 的坐标值是否正确合并。",
+      "reason": "验证修复后函数能正常返回合并后的数据集。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "当坐标相同但非单调时，combine_by_coords 应成功返回合并后的 Dataset，而不抛出 ValueError。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "断言完整的异常消息字符串，因为消息可能微调。",
+      "reason": "Issue 期望函数正常返回，因此断言不应包含异常片段。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 xarray 和 numpy 以构造 Dataset 和随机数据。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可以使用 pytest 的 raises 上下文管理器来捕获预期异常（用于验证当前 buggy 行为）。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "combine_by_coords 内部是否在其他地方（如 _infer_concat_order_from_coords）也对相同非单调坐标有额外检查。",
+    "修复后，对于相同非单调坐标，合并后的数据集坐标顺序应如何确定（保持原顺序？）。"
+  ]
+}

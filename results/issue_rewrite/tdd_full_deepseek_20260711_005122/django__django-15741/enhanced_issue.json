@@ -1,0 +1,329 @@
+{
+  "instance_id": "django__django-15741",
+  "issue_summary": "django.utils.formats.get_format 函数在接收 lazy string 参数时抛出 TypeError，导致模板过滤器（如 date）无法处理 lazy 字符串。",
+  "trigger_condition": {
+    "text": "当模板过滤器（如 date）接收到一个 lazy 字符串作为参数时，例如 `some_date|date:_('Y-m-d')`，会调用 `get_format` 函数，并将 lazy 字符串作为 `format_type` 参数传入。",
+    "evidence": [
+      "Issue 描述：'date template filter (possibly others are affected too) receives a lazy string, like in some_date|date:_('Y-m-d')'",
+      "源码片段 1 显示 `get_format` 函数接收 `format_type` 参数，并在第 28 行使用 `getattr(module, format_type, None)`。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "抛出 TypeError: getattr(): attribute name must be string。",
+    "symptom_type": "exception",
+    "evidence": [
+      "Issue 描述：'This fails with: TypeError: getattr(): attribute name must be string in django.utils.formats.get_format.'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "`get_format` 函数应能正确处理 lazy string 参数，允许模板过滤器使用 lazy 字符串作为格式参数，而不会抛出 TypeError。",
+    "evidence": [
+      "Issue 描述暗示这是一个回归，修复后应允许 lazy 参数。",
+      "相关测试 2、3、4、5 展示了 Django 中 lazy 字符串在其他上下文（如模板渲染、字符串格式化）中的预期正常使用。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "django.utils.formats.get_format",
+      "kind": "function",
+      "source_path": "django/utils/formats.py",
+      "reason": "Issue 直接指出该函数在接收 lazy 参数时抛出 TypeError。"
+    },
+    {
+      "name": "django.utils.translation.gettext_lazy",
+      "kind": "function",
+      "source_path": "django/utils/translation/trans_null.py",
+      "reason": "用于生成 lazy 字符串，是触发条件中提到的 `_('Y-m-d')` 的来源。"
+    },
+    {
+      "name": "django.template.defaultfilters.date",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 中提到的触发 bug 的模板过滤器。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/utils/formats.py",
+      "object": "get_format",
+      "lines": "100-143",
+      "reason": "Issue 明确指出错误发生在该函数中，且源码显示其内部使用了 `getattr(module, format_type, None)`，当 `format_type` 是 lazy 对象时可能导致 `getattr` 参数类型错误。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_date02_l10n",
+      "test_file": "tests/template_tests/filter_tests/test_date.py",
+      "why_relevant": "它测试了 `date` 模板过滤器，但使用的是默认格式，而不是 lazy 字符串参数。",
+      "reusable_parts": [
+        "导入和设置：`from datetime import datetime`， `with translation.override`",
+        "测试类 `DateTests` 和 `TimezoneTestCase` 的继承结构",
+        "使用 `self.engine.render_to_string` 渲染模板的调用模式"
+      ],
+      "possible_gap": "它没有向 `date` 过滤器传递 lazy 字符串参数，因此不会触发 `get_format` 中的 bug。"
+    },
+    {
+      "test_name": "test_lazy_template_string",
+      "test_file": "tests/template_tests/test_base.py",
+      "why_relevant": "它测试了 Template 对 lazy 字符串的处理，展示了 lazy 字符串在模板上下文中的基本使用。",
+      "reusable_parts": [
+        "`gettext_lazy` 的导入和使用",
+        "`Template` 和 `Context` 的构造",
+        "简单的 `self.assertEqual` 断言风格"
+      ],
+      "possible_gap": "它没有涉及 `date` 过滤器或 `get_format` 函数。"
+    },
+    {
+      "test_name": "test_lazy_objects",
+      "test_file": "tests/i18n/tests.py",
+      "why_relevant": "它测试了 lazy 对象的字符串格式化和比较，展示了 lazy 对象在 Django 中的预期行为。",
+      "reusable_parts": [
+        "`gettext_lazy` 的导入和使用",
+        "`with translation.override` 的上下文管理",
+        "对 lazy 对象进行 `%` 格式化和 `assertEqual` 比较的模式"
+      ],
+      "possible_gap": "它没有测试 `get_format` 函数或模板过滤器。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "`date` 过滤器使用硬编码字符串（如 'Y-m-d'）或无参数。",
+      "target_pattern": "`date` 过滤器使用 lazy 字符串参数，如 `_('Y-m-d')`。",
+      "reason": "Issue 明确指出当 `date` 过滤器接收 lazy 字符串时会触发 bug。",
+      "confidence": "high"
+    },
+    {
+      "slot": "input",
+      "current_pattern": "`get_format` 的 `format_type` 参数是普通字符串。",
+      "target_pattern": "`get_format` 的 `format_type` 参数是 lazy 字符串对象。",
+      "reason": "源码中 `getattr(module, format_type, None)` 期望 `format_type` 是字符串，但 lazy 对象可能未正确转换。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "调用 `get_format` 或渲染包含 `date` 过滤器（带 lazy 参数）的模板时是否抛出 `TypeError`。",
+      "reason": "Issue 描述的错误现象是抛出 `TypeError`。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "传入 `get_format` 的 `format_type` 参数的类型（是否为 lazy 对象）。",
+      "reason": "核心问题是 `get_format` 对参数类型的处理。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "使用 lazy 字符串参数调用 `date` 过滤器后的模板输出。",
+      "reason": "修复后应能正常渲染，输出符合格式的日期字符串。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "使用 lazy 字符串作为参数的 `date` 过滤器应能正常渲染，不抛出异常。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "断言完整的输出字符串，因为具体输出可能依赖于本地化设置。",
+      "reason": "Issue 的核心是避免 `TypeError`，修复后应能正常执行。"
+    },
+    {
+      "assertion_goal": "`get_format` 函数在接收 lazy 字符串参数时应返回正确的格式字符串。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言内部缓存键或复杂的中间状态。",
+      "reason": "修复后 `get_format` 应能正确处理 lazy 参数并返回预期值。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 `SimpleTestCase` 或 `TimezoneTestCase` 作为测试基类。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 `translation.override` 来设置语言环境。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    },
+    {
+      "hint": "需要导入 `gettext_lazy` (或 `_`) 来生成 lazy 字符串。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要构造一个 datetime 对象作为 `date` 过滤器的输入。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "除了 `date` 过滤器，还有哪些模板过滤器可能受此影响？",
+    "`get_format` 函数内部具体哪一行代码（`getattr` 调用）首先触发了 TypeError？",
+    "修复后，lazy 字符串是否需要在 `get_format` 内部被显式转换为字符串？如果是，如何转换？"
+  ],
+  "raw": {
+    "issue_summary": "django.utils.formats.get_format 函数在接收 lazy string 参数时抛出 TypeError，导致模板过滤器（如 date）无法处理 lazy 字符串。",
+    "trigger_condition": {
+      "text": "当模板过滤器（如 date）接收到一个 lazy 字符串作为参数时，例如 `some_date|date:_('Y-m-d')`，会调用 `get_format` 函数，并将 lazy 字符串作为 `format_type` 参数传入。",
+      "evidence": [
+        "Issue 描述：'date template filter (possibly others are affected too) receives a lazy string, like in some_date|date:_('Y-m-d')'",
+        "源码片段 1 显示 `get_format` 函数接收 `format_type` 参数，并在第 28 行使用 `getattr(module, format_type, None)`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: getattr(): attribute name must be string。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'This fails with: TypeError: getattr(): attribute name must be string in django.utils.formats.get_format.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "`get_format` 函数应能正确处理 lazy string 参数，允许模板过滤器使用 lazy 字符串作为格式参数，而不会抛出 TypeError。",
+      "evidence": [
+        "Issue 描述暗示这是一个回归，修复后应允许 lazy 参数。",
+        "相关测试 2、3、4、5 展示了 Django 中 lazy 字符串在其他上下文（如模板渲染、字符串格式化）中的预期正常使用。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.utils.formats.get_format",
+        "kind": "function",
+        "source_path": "django/utils/formats.py",
+        "reason": "Issue 直接指出该函数在接收 lazy 参数时抛出 TypeError。"
+      },
+      {
+        "name": "django.utils.translation.gettext_lazy",
+        "kind": "function",
+        "source_path": "django/utils/translation/trans_null.py",
+        "reason": "用于生成 lazy 字符串，是触发条件中提到的 `_('Y-m-d')` 的来源。"
+      },
+      {
+        "name": "django.template.defaultfilters.date",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中提到的触发 bug 的模板过滤器。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/formats.py",
+        "object": "get_format",
+        "lines": "100-143",
+        "reason": "Issue 明确指出错误发生在该函数中，且源码显示其内部使用了 `getattr(module, format_type, None)`，当 `format_type` 是 lazy 对象时可能导致 `getattr` 参数类型错误。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_date02_l10n",
+        "test_file": "tests/template_tests/filter_tests/test_date.py",
+        "why_relevant": "它测试了 `date` 模板过滤器，但使用的是默认格式，而不是 lazy 字符串参数。",
+        "reusable_parts": [
+          "导入和设置：`from datetime import datetime`， `with translation.override`",
+          "测试类 `DateTests` 和 `TimezoneTestCase` 的继承结构",
+          "使用 `self.engine.render_to_string` 渲染模板的调用模式"
+        ],
+        "possible_gap": "它没有向 `date` 过滤器传递 lazy 字符串参数，因此不会触发 `get_format` 中的 bug。"
+      },
+      {
+        "test_name": "test_lazy_template_string",
+        "test_file": "tests/template_tests/test_base.py",
+        "why_relevant": "它测试了 Template 对 lazy 字符串的处理，展示了 lazy 字符串在模板上下文中的基本使用。",
+        "reusable_parts": [
+          "`gettext_lazy` 的导入和使用",
+          "`Template` 和 `Context` 的构造",
+          "简单的 `self.assertEqual` 断言风格"
+        ],
+        "possible_gap": "它没有涉及 `date` 过滤器或 `get_format` 函数。"
+      },
+      {
+        "test_name": "test_lazy_objects",
+        "test_file": "tests/i18n/tests.py",
+        "why_relevant": "它测试了 lazy 对象的字符串格式化和比较，展示了 lazy 对象在 Django 中的预期行为。",
+        "reusable_parts": [
+          "`gettext_lazy` 的导入和使用",
+          "`with translation.override` 的上下文管理",
+          "对 lazy 对象进行 `%` 格式化和 `assertEqual` 比较的模式"
+        ],
+        "possible_gap": "它没有测试 `get_format` 函数或模板过滤器。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "`date` 过滤器使用硬编码字符串（如 'Y-m-d'）或无参数。",
+        "target_pattern": "`date` 过滤器使用 lazy 字符串参数，如 `_('Y-m-d')`。",
+        "reason": "Issue 明确指出当 `date` 过滤器接收 lazy 字符串时会触发 bug。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "`get_format` 的 `format_type` 参数是普通字符串。",
+        "target_pattern": "`get_format` 的 `format_type` 参数是 lazy 字符串对象。",
+        "reason": "源码中 `getattr(module, format_type, None)` 期望 `format_type` 是字符串，但 lazy 对象可能未正确转换。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 `get_format` 或渲染包含 `date` 过滤器（带 lazy 参数）的模板时是否抛出 `TypeError`。",
+        "reason": "Issue 描述的错误现象是抛出 `TypeError`。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "传入 `get_format` 的 `format_type` 参数的类型（是否为 lazy 对象）。",
+        "reason": "核心问题是 `get_format` 对参数类型的处理。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "使用 lazy 字符串参数调用 `date` 过滤器后的模板输出。",
+        "reason": "修复后应能正常渲染，输出符合格式的日期字符串。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 lazy 字符串作为参数的 `date` 过滤器应能正常渲染，不抛出异常。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的输出字符串，因为具体输出可能依赖于本地化设置。",
+        "reason": "Issue 的核心是避免 `TypeError`，修复后应能正常执行。"
+      },
+      {
+        "assertion_goal": "`get_format` 函数在接收 lazy 字符串参数时应返回正确的格式字符串。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言内部缓存键或复杂的中间状态。",
+        "reason": "修复后 `get_format` 应能正确处理 lazy 参数并返回预期值。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 `SimpleTestCase` 或 `TimezoneTestCase` 作为测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 `translation.override` 来设置语言环境。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要导入 `gettext_lazy` (或 `_`) 来生成 lazy 字符串。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构造一个 datetime 对象作为 `date` 过滤器的输入。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "除了 `date` 过滤器，还有哪些模板过滤器可能受此影响？",
+      "`get_format` 函数内部具体哪一行代码（`getattr` 调用）首先触发了 TypeError？",
+      "修复后，lazy 字符串是否需要在 `get_format` 内部被显式转换为字符串？如果是，如何转换？"
+    ]
+  }
+}

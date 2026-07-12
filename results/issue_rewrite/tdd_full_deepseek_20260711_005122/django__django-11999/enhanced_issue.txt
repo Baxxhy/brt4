@@ -1,0 +1,119 @@
+instance_id: django__django-11999
+
+issue_summary: 在 Django 2.2+ 中，用户无法通过自定义方法覆盖模型的 get_FIELD_display() 方法。
+
+trigger_condition:
+{
+  "text": "定义一个继承自 models.Model 的类，其中包含一个带有 choices 参数的字段，并在该类中定义一个名为 get_<fieldname>_display 的方法。然后，创建该模型的一个实例，并调用其 get_<fieldname>_display 方法。",
+  "evidence": [
+    "Issue 描述中提供了示例代码：定义 FooBar 类，包含 foo_bar 字段和 get_foo_bar_display 方法，并在 __str__ 中调用该方法。",
+    "相关测试 1 展示了调用 get_c_display() 的正常模式。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "自定义的 get_foo_bar_display 方法没有被调用，而是返回了默认的 choices 显示值（例如 'foo' 或 'bar'），而不是预期的覆盖返回值（例如 'something'）。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 描述中说明：'This returns 'foo' or 'bar' in 2.2, but 'something' in 2.1'。",
+    "Issue 明确表示在 2.1 版本中覆盖有效，但在 2.2+ 中失效。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "用户定义的 get_<fieldname>_display 方法应该被调用，并返回其定义的值，而不是默认的 choices 显示值。",
+  "evidence": [
+    "Issue 描述中用户期望：'What I expect is that I should be able to override this function.'。",
+    "相关测试 5 展示了覆盖 get_absolute_url 方法的类似模式，暗示 Django 支持此类方法覆盖。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "Model.get_FIELD_display",
+    "kind": "method",
+    "source_path": "django/db/models/base.py",
+    "reason": "Issue 的核心是关于 get_FIELD_display 方法的行为。"
+  },
+  {
+    "name": "models.CharField",
+    "kind": "class",
+    "source_path": "django/db/models/fields/__init__.py",
+    "reason": "Issue 示例中使用了带有 choices 的 CharField。"
+  },
+  {
+    "name": "django.utils.translation.gettext_lazy",
+    "kind": "function",
+    "source_path": "django/utils/translation/trans_null.py",
+    "reason": "Issue 示例代码中使用了 _() 进行翻译标记，可能与字段定义相关。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "相似测试中，模型类没有定义自定义的 get_FIELD_display 方法，直接调用默认实现。",
+    "target_pattern": "在模型类中显式定义一个与字段名对应的 get_<fieldname>_display 方法，并返回一个特定的字符串（如 'something'）。",
+    "reason": "Issue 表明，在 Django 2.2+ 中，这种显式定义的方法没有被调用，导致覆盖失败。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "在测试中直接调用 instance.get_c_display()。",
+    "target_pattern": "在另一个方法（如 __str__）中间接调用 instance.get_foo_bar_display()，如 Issue 示例所示。",
+    "reason": "Issue 示例中是在 __str__ 方法中调用，这可能影响方法解析路径，但核心问题应是直接调用也失败。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "instance.get_foo_bar_display() 的返回值。",
+    "reason": "直接比较返回值是判断自定义方法是否被调用的最直接证据。预期应返回自定义值，实际可能返回默认 choices 值。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "检查 instance 对象上是否存在自定义的 get_foo_bar_display 方法属性（如 hasattr(instance, 'get_foo_bar_display') 及其来源）。",
+    "reason": "有助于判断方法是否被正确添加到实例，或者是否被其他机制（如描述符）覆盖。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "断言调用 get_foo_bar_display() 返回的是用户自定义方法返回的值（例如 'something'），而不是默认的 choices 显示值。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言返回完整的默认 choices 映射或无关的模型状态。",
+    "reason": "Issue 的核心是返回值错误，直接断言返回值是否等于自定义值能稳定地捕捉缺陷。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要定义一个简单的 Django 模型，包含一个带有 choices 的字段，并在模型中定义对应的 get_<fieldname>_display 方法。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要使用 SimpleTestCase 或 TransactionTestCase，并确保模型在适当的 apps 中注册。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "导致覆盖失败的确切代码位置和机制（例如，是属性描述符、元类还是其他动态方法生成逻辑的问题）。",
+  "除了 CharField 之外，其他带有 choices 的字段类型（如 IntegerField）是否也存在同样的问题。",
+  "方法覆盖失败是否与 Django 版本升级中的其他特定更改（如缓存、描述符协议）直接相关。"
+]

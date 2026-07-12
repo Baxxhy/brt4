@@ -1,0 +1,119 @@
+instance_id: astropy__astropy-7166
+
+issue_summary: InheritDocstrings 元类无法为属性（property）正确继承文档字符串，因为其内部使用了 inspect.isfunction 进行判断，而该函数对属性返回 False。
+
+trigger_condition:
+{
+  "text": "创建一个使用 InheritDocstrings 作为元类的类，并在其子类中定义一个属性（property），该属性覆盖了基类中的同名属性。",
+  "evidence": [
+    "Issue 明确指出 InheritDocstrings metaclass doesn't work for properties，并提到内部使用了 inspect.isfunction。",
+    "源码片段 1 展示了 InheritDocstrings 类，其目的是自动为覆盖基类的方法填充文档字符串。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "子类属性的 __doc__ 为 None 或未从基类继承正确的文档字符串。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 描述 InheritDocstrings metaclass doesn't work for properties，暗示预期的文档字符串继承失败。",
+    "相关测试 1 (test_classproperty_docstring) 关注属性的 __doc__ 设置，表明文档字符串的正确性是测试重点。"
+  ],
+  "confidence": "medium"
+}
+
+expected_behavior:
+{
+  "text": "使用 InheritDocstrings 元类时，子类中定义的属性（property）应能自动继承基类中同名属性的文档字符串。",
+  "evidence": [
+    "源码片段 1 中 InheritDocstrings 的文档字符串说明其目标是使方法自动继承其覆盖的基类方法的文档字符串。",
+    "Issue 标题和描述暗示这是一个功能缺陷，即属性也应能正常工作。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "InheritDocstrings",
+    "kind": "class",
+    "source_path": "astropy/utils/misc.py",
+    "reason": "这是 Issue 报告存在缺陷的元类。"
+  },
+  {
+    "name": "inspect.isfunction",
+    "kind": "function",
+    "source_path": "",
+    "reason": "Issue 明确指出该函数是导致属性文档字符串继承失败的原因。"
+  },
+  {
+    "name": "property",
+    "kind": "class",
+    "source_path": "",
+    "reason": "Issue 的核心是关于 property 类型对象的文档字符串继承问题。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "相关测试中定义的属性通常是普通方法、classmethod、staticmethod 或特定装饰器（如 classproperty）创建的属性。",
+    "target_pattern": "定义一个使用内置 @property 装饰器或 property() 函数创建的属性，并让其继承自一个使用 InheritDocstrings 元类的基类。",
+    "reason": "Issue 明确指出问题出在 property 上，而相似测试未使用普通的 property 与 InheritDocstrings 结合。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "相似测试中直接断言属性的 __doc__ 或行为。",
+    "target_pattern": "在 InheritDocstrings 元类生效的类层次结构中，检查子类 property 的 __doc__ 是否继承自基类。",
+    "reason": "需要触发 InheritDocstrings 元类中针对 property 的文档字符串继承逻辑。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "子类属性对象的 __doc__ 属性。",
+    "reason": "Issue 的核心是文档字符串未正确继承，直接观察 __doc__ 是最直接的判断方式。"
+  },
+  {
+    "kind": "type",
+    "expression_hint": "子类中定义的属性对象的类型（例如 type(cls.prop)）。",
+    "reason": "需要确认被观察的对象确实是 property 类型，而非普通函数。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "子类中定义的 property 的 __doc__ 应与基类中同名 property 的 __doc__ 相等（且不为 None）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言完整的、可能包含动态内容的文档字符串字面量；避免断言不相关的属性。",
+    "reason": "这直接验证了文档字符串继承功能是否对 property 生效，与 Issue 描述和元类的设计目标一致。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 InheritDocstrings 元类，并创建使用该元类的基类和子类。",
+    "source": "retrieved_source",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要在类定义内部进行（类似现有测试的模式），或直接操作类对象。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "InheritDocstrings.__init__ 方法内部使用 inspect.isfunction 的具体上下文和逻辑尚不明确。",
+  "除了普通的 @property，其他 property 子类（如 classproperty）是否也受影响？",
+  "在多重继承场景下，property 文档字符串的继承行为具体如何？"
+]

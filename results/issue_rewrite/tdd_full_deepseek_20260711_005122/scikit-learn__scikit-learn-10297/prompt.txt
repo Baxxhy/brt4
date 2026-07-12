@@ -1,0 +1,396 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+linear_model.RidgeClassifierCV's Parameter store_cv_values issue
+#### Description
+Parameter store_cv_values error on sklearn.linear_model.RidgeClassifierCV
+
+#### Steps/Code to Reproduce
+import numpy as np
+from sklearn import linear_model as lm
+
+#test database
+n = 100
+x = np.random.randn(n, 30)
+y = np.random.normal(size = n)
+
+rr = lm.RidgeClassifierCV(alphas = np.arange(0.1, 1000, 0.1), normalize = True, 
+                                         store_cv_values = True).fit(x, y)
+
+#### Expected Results
+Expected to get the usual ridge regression model output, keeping the cross validation predictions as attribute.
+
+#### Actual Results
+TypeError: __init__() got an unexpected keyword argument 'store_cv_values'
+
+lm.RidgeClassifierCV actually has no parameter store_cv_values, even though some attributes depends on it.
+
+#### Versions
+Windows-10-10.0.14393-SP0
+Python 3.6.3 |Anaconda, Inc.| (default, Oct 15 2017, 03:27:45) [MSC v.1900 64 bit (AMD64)]
+NumPy 1.13.3
+SciPy 0.19.1
+Scikit-Learn 0.19.1
+
+
+Add store_cv_values boolean flag support to RidgeClassifierCV
+Add store_cv_values support to RidgeClassifierCV - documentation claims that usage of this flag is possible:
+
+> cv_values_ : array, shape = [n_samples, n_alphas] or shape = [n_samples, n_responses, n_alphas], optional
+> Cross-validation values for each alpha (if **store_cv_values**=True and `cv=None`).
+
+While actually usage of this flag gives 
+
+> TypeError: **init**() got an unexpected keyword argument 'store_cv_values'
+
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sklearn/linear_model/ridge.py
+对象名称：RidgeClassifierCV
+节点类型：class
+父节点：ridge
+行号范围：1247-1381
+代码：
+class RidgeClassifierCV(LinearClassifierMixin, _BaseRidgeCV):
+    """Ridge classifier with built-in cross-validation.
+
+    By default, it performs Generalized Cross-Validation, which is a form of
+    efficient Leave-One-Out cross-validation. Currently, only the n_features >
+    n_samples case is handled efficiently.
+
+    Read more in the :ref:`User Guide <ridge_regression>`.
+
+    Parameters
+    ----------
+    alphas : numpy array of shape [n_alphas]
+        Array of alpha values to try.
+        Regularization strength; must be a positive float. Regularization
+        improves the conditioning of the problem and reduces the variance of
+        the estimates. Larger values specify stronger regularization.
+        Alpha corresponds to ``C^-1`` in other linear models such as
+        LogisticRegression or LinearSVC.
+
+    fit_intercept : boolean
+        Whether to calculate the intercept for this model. If set
+        to false, no intercept will be used in calculations
+        (e.g. data is expected to be already centered).
+
+    normalize : boolean, optional, default False
+        This parameter is ignored when ``fit_intercept`` is set to False.
+        If True, the regressors X will be normalized before regression by
+        subtracting the mean and dividing by the l2-norm.
+        If you wish to standardize, please use
+        :class:`sklearn.preprocessing.StandardScaler` before calling ``fit``
+        on an estimator with ``normalize=False``.
+
+    scoring : string, callable or None, optional, default: None
+        A string (see model evaluation documentation) or
+        a scorer callable object / function with signature
+        ``scorer(estimator, X, y)``.
+
+    cv : int, cross-validation generator or an iterable, optional
+        Determines the cross-validation splitting strategy.
+        Possible inputs for cv are:
+
+        - None, to use the efficient Leave-One-Out cross-validation
+        - integer, to specify the number of folds.
+        - An object to be used as a cross-validation generator.
+        - An iterable yielding train/test splits.
+
+        Refer :ref:`User Guide <cross_validation>` for the various
+        cross-validation strategies that can be used here.
+
+    class_weight : dict or 'balanced', optional
+        Weights associated with classes in the form ``{class_label: weight}``.
+        If not given, all classes are supposed to have weight one.
+
+        The "balanced" mode uses the values of y to automatically adjust
+        weights inversely proportional to class frequencies in the input data
+        as ``n_samples / (n_classes * np.bincount(y))``
+
+    Attributes
+    ----------
+    cv_values_ : array, shape = [n_samples, n_alphas] or \
+    shape = [n_samples, n_responses, n_alphas], optional
+        Cross-validation values for each alpha (if `store_cv_values=True` and
+    `cv=None`). After `fit()` has been called, this attribute will contain \
+    the mean squared errors (by default) or the values of the \
+    `{loss,score}_func` function (if provided in the constructor).
+
+    coef_ : array, shape = [n_features] or [n_targets, n_features]
+        Weight vector(s).
+
+    intercept_ : float | array, shape = (n_targets,)
+        Independent term in decision function. Set to 0.0 if
+        ``fit_intercept = False``.
+
+    alpha_ : float
+        Estimated regularization parameter
+
+    See also
+    --------
+    Ridge : Ridge regression
+    RidgeClassifier : Ridge classifier
+    RidgeCV : Ridge regression with built-in cross validation
+
+    Notes
+    -----
+    For multi-class classification, n_class classifiers are trained in
+    def __init__(self, alphas=(0.1, 1.0, 10.0), fit_intercept=True,
+                 normalize=False, scoring=None, cv=None, class_weight=None):
+    def fit(self, X, y, sample_weight=None):
+    @property
+    def classes_(self):
+
+
+【源码片段 2】
+文件路径：sklearn/linear_model/ridge.py
+对象名称：__init__
+节点类型：class_function
+父节点：RidgeClassifierCV
+行号范围：1335-1340
+代码：
+    def __init__(self, alphas=(0.1, 1.0, 10.0), fit_intercept=True,
+                 normalize=False, scoring=None, cv=None, class_weight=None):
+        super(RidgeClassifierCV, self).__init__(
+            alphas=alphas, fit_intercept=fit_intercept, normalize=normalize,
+            scoring=scoring, cv=cv)
+        self.class_weight = class_weight
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sklearn/linear_model/tests/test_ridge.py
+测试名称：test_ridgecv_store_cv_values
+测试代码：
+def test_ridgecv_store_cv_values():
+    # Test _RidgeCV's store_cv_values attribute.
+    rng = rng = np.random.RandomState(42)
+
+    n_samples = 8
+    n_features = 5
+    x = rng.randn(n_samples, n_features)
+    alphas = [1e-1, 1e0, 1e1]
+    n_alphas = len(alphas)
+
+    r = RidgeCV(alphas=alphas, store_cv_values=True)
+
+    # with len(y.shape) == 1
+    y = rng.randn(n_samples)
+    r.fit(x, y)
+    assert_equal(r.cv_values_.shape, (n_samples, n_alphas))
+
+    # with len(y.shape) == 2
+    n_responses = 3
+    y = rng.randn(n_samples, n_responses)
+    r.fit(x, y)
+    assert_equal(r.cv_values_.shape, (n_samples, n_responses, n_alphas))
+
+【相关测试 2】
+测试文件：sklearn/linear_model/tests/test_ridge.py
+测试名称：test_class_weights_cv
+测试代码：
+def test_class_weights_cv():
+    # Test class weights for cross validated ridge classifier.
+    X = np.array([[-1.0, -1.0], [-1.0, 0], [-.8, -1.0],
+                  [1.0, 1.0], [1.0, 0.0]])
+    y = [1, 1, 1, -1, -1]
+
+    reg = RidgeClassifierCV(class_weight=None, alphas=[.01, .1, 1])
+    reg.fit(X, y)
+
+    # we give a small weights to class 1
+    reg = RidgeClassifierCV(class_weight={1: 0.001}, alphas=[.01, .1, 1, 10])
+    reg.fit(X, y)
+
+    assert_array_equal(reg.predict([[-.2, 2]]), np.array([-1]))
+
+【相关测试 3】
+测试文件：sklearn/linear_model/tests/test_ridge.py
+测试名称：test_ridge_cv_sparse_svd
+测试代码：
+def test_ridge_cv_sparse_svd():
+    X = sp.csr_matrix(X_diabetes)
+    ridge = RidgeCV(gcv_mode="svd")
+    assert_raises(TypeError, ridge.fit, X)
+
+【相关测试 4】
+测试文件：sklearn/tests/test_discriminant_analysis.py
+测试名称：test_lda_store_covariance
+测试代码：
+def test_lda_store_covariance():
+    # Test for slover 'lsqr' and 'eigen'
+    # 'store_covariance' has no effect on 'lsqr' and 'eigen' solvers
+    for solver in ('lsqr', 'eigen'):
+        clf = LinearDiscriminantAnalysis(solver=solver).fit(X6, y6)
+        assert_true(hasattr(clf, 'covariance_'))
+
+        # Test the actual attribute:
+        clf = LinearDiscriminantAnalysis(solver=solver,
+                                         store_covariance=True).fit(X6, y6)
+        assert_true(hasattr(clf, 'covariance_'))
+
+        assert_array_almost_equal(
+            clf.covariance_,
+            np.array([[0.422222, 0.088889], [0.088889, 0.533333]])
+        )
+
+    # Test for SVD slover, the default is to not set the covariances_ attribute
+    clf = LinearDiscriminantAnalysis(solver='svd').fit(X6, y6)
+    assert_false(hasattr(clf, 'covariance_'))
+
+    # Test the actual attribute:
+    clf = LinearDiscriminantAnalysis(solver=solver,
+                                     store_covariance=True).fit(X6, y6)
+    assert_true(hasattr(clf, 'covariance_'))
+
+    assert_array_almost_equal(
+        clf.covariance_,
+        np.array([[0.422222, 0.088889], [0.088889, 0.533333]])
+    )
+
+【相关测试 5】
+测试文件：sklearn/tests/test_discriminant_analysis.py
+测试名称：test_qda_store_covariance
+测试代码：
+def test_qda_store_covariance():
+    # The default is to not set the covariances_ attribute
+    clf = QuadraticDiscriminantAnalysis().fit(X6, y6)
+    assert_false(hasattr(clf, 'covariance_'))
+
+    # Test the actual attribute:
+    clf = QuadraticDiscriminantAnalysis(store_covariance=True).fit(X6, y6)
+    assert_true(hasattr(clf, 'covariance_'))
+
+    assert_array_almost_equal(
+        clf.covariance_[0],
+        np.array([[0.7, 0.45], [0.45, 0.7]])
+    )
+
+    assert_array_almost_equal(
+        clf.covariance_[1],
+        np.array([[0.33333333, -0.33333333], [-0.33333333, 0.66666667]])
+    )
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

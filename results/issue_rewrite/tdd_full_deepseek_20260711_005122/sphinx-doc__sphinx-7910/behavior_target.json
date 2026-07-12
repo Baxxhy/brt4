@@ -1,0 +1,287 @@
+{
+  "instance_id": "sphinx-doc__sphinx-7910",
+  "issue_summary": "当类的 __init__ 方法被装饰器装饰后，Sphinx 的文档生成功能无法正确识别并生成其文档。",
+  "trigger_condition": {
+    "text": "配置 `napoleon_include_init_with_doc = True`，并且一个类的 `__init__` 方法被装饰器（如 `functools.wraps`）装饰。",
+    "evidence": [
+      "Issue 中描述：'I have `napoleon_include_init_with_doc = True`, so `__init__` will be documented. But if I decorate the `__init__` method, it will not show up in docs.'",
+      "Issue 中描述：'I decorate it with `functools.wraps`'"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "被装饰的 `__init__` 方法没有出现在生成的文档中。",
+    "symptom_type": "unknown",
+    "evidence": [
+      "Issue 中描述：'But if I decorate the `__init__` method, it will not show up in docs.'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "即使 `__init__` 方法被装饰器装饰，只要其 `__doc__` 属性存在且 `napoleon_include_init_with_doc = True`，它就应该出现在生成的文档中。",
+    "evidence": [
+      "Issue 中描述：'I have `napoleon_include_init_with_doc = True`, so `__init__` will be documented.'",
+      "Issue 中描述：'I decorate it with `functools.wraps`, so the decorated object still has the same `__doc__`.'"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "sphinx.ext.autodoc",
+      "kind": "module",
+      "source_path": "",
+      "reason": "Issue 涉及 Sphinx 自动文档生成功能，特别是处理类方法（如 `__init__`）的部分。"
+    },
+    {
+      "name": "inspect.getdoc",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试 `test_getdoc_inherited_decorated_method` 使用了此函数来检查装饰方法的文档字符串。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "",
+      "object": "",
+      "lines": "",
+      "reason": "Issue 指出问题根源在于一个提交（https://github.com/sphinx-doc/sphinx/commit/bbfd0d058aecf85bd3b711a846c83e2fe00fa136）中的一行代码 `cls = obj.__globals__[cls_path]`，当 `obj` 是被装饰的方法时，其 `__globals__` 可能不包含类定义，导致 `cls_is_owner=False`。但 iCoRe 未检索到该段具体源码。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_automethod_for_decorated",
+      "test_file": "tests/test_ext_autodoc.py",
+      "why_relevant": "该测试直接检查被装饰方法（`Bar.meth`）的文档生成。",
+      "reusable_parts": [
+        "测试装饰器 `@pytest.mark.sphinx` 的使用",
+        "`do_autodoc` 辅助函数的调用模式",
+        "对生成文档片段（`actual`）的断言风格"
+      ],
+      "possible_gap": "该测试针对的是普通方法 `meth`，而非 Issue 中特定的 `__init__` 方法，且未涉及 `napoleon_include_init_with_doc` 配置。"
+    },
+    {
+      "test_name": "test_autoclass_content_init",
+      "test_file": "tests/test_ext_autodoc_configs.py",
+      "why_relevant": "该测试检查 `autoclass_content = 'init'` 配置下 `__init__` 方法的文档生成。",
+      "reusable_parts": [
+        "配置 `app.config.autoclass_content` 的设置",
+        "`do_autodoc` 辅助函数的调用模式",
+        "对包含 `__init__` 文档的类文档输出的断言"
+      ],
+      "possible_gap": "该测试中的类 `__init__` 方法未被装饰器装饰。"
+    },
+    {
+      "test_name": "test_getdoc_inherited_decorated_method",
+      "test_file": "tests/test_util_inspect.py",
+      "why_relevant": "该测试直接涉及继承和装饰的方法（使用 `@functools.lru_cache()`），并检查其文档字符串。",
+      "reusable_parts": [
+        "使用 `functools.lru_cache()` 装饰器",
+        "创建继承的类结构",
+        "使用 `inspect.getdoc` 检查文档"
+      ],
+      "possible_gap": "该测试是单元测试，不涉及 Sphinx 文档生成流程，且装饰器是 `lru_cache` 而非 `wraps`。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试中使用未装饰的 `__init__` 方法或普通装饰方法。",
+      "target_pattern": "创建一个类，其 `__init__` 方法被 `functools.wraps`（或类似）装饰器装饰。",
+      "reason": "Issue 明确指出当 `__init__` 被装饰时触发 bug，因为装饰后方法的 `__globals__` 属性可能发生变化。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "相似测试可能未设置 `napoleon_include_init_with_doc = True`。",
+      "target_pattern": "在测试配置中设置 `app.config.napoleon_include_init_with_doc = True`。",
+      "reason": "Issue 描述此配置为 `True` 时 `__init__` 应被文档化，但装饰后失效。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "`do_autodoc` 调用返回的文档内容（`actual`）中是否包含被装饰 `__init__` 方法的签名或文档字符串。",
+      "reason": "Issue 的核心症状是文档内容缺失，直接观察生成文档片段可以判断缺陷是否触发。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "在疑似缺陷代码位置（如 `cls_is_owner` 的值）或装饰后方法的 `__globals__` 属性。",
+      "reason": "Issue 指出问题源于装饰方法 `__globals__` 不包含类，导致 `cls_is_owner=False`，从而影响文档生成逻辑。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "生成的文档应包含被装饰 `__init__` 方法的签名或文档字符串。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的、固定的文档输出字符串，因为具体签名可能因装饰器而变。",
+      "reason": "Issue 关注的是 `__init__` 是否出现在文档中，而非其精确格式。使用片段包含断言更稳定。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 `@pytest.mark.sphinx` fixture 和 `do_autodoc` 辅助函数来模拟 Sphinx 文档生成环境。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要创建目标模块，其中包含一个类，其 `__init__` 方法被 `functools.wraps` 装饰。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要在测试中配置 `app.config.napoleon_include_init_with_doc = True`。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "Issue 中提到的具体缺陷代码位置（`cls = obj.__globals__[cls_path]`）的确切文件路径和上下文未知。",
+    "除了 `functools.wraps`，其他装饰器是否也会触发相同问题？",
+    "`napoleon_include_init_with_doc` 配置与其他 Sphinx 扩展或配置的交互细节。",
+    "修复后，被装饰 `__init__` 方法在文档中的确切输出格式（签名表示）是什么？"
+  ],
+  "raw": {
+    "issue_summary": "当类的 __init__ 方法被装饰器装饰后，Sphinx 的文档生成功能无法正确识别并生成其文档。",
+    "trigger_condition": {
+      "text": "配置 `napoleon_include_init_with_doc = True`，并且一个类的 `__init__` 方法被装饰器（如 `functools.wraps`）装饰。",
+      "evidence": [
+        "Issue 中描述：'I have `napoleon_include_init_with_doc = True`, so `__init__` will be documented. But if I decorate the `__init__` method, it will not show up in docs.'",
+        "Issue 中描述：'I decorate it with `functools.wraps`'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "被装饰的 `__init__` 方法没有出现在生成的文档中。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 中描述：'But if I decorate the `__init__` method, it will not show up in docs.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "即使 `__init__` 方法被装饰器装饰，只要其 `__doc__` 属性存在且 `napoleon_include_init_with_doc = True`，它就应该出现在生成的文档中。",
+      "evidence": [
+        "Issue 中描述：'I have `napoleon_include_init_with_doc = True`, so `__init__` will be documented.'",
+        "Issue 中描述：'I decorate it with `functools.wraps`, so the decorated object still has the same `__doc__`.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sphinx.ext.autodoc",
+        "kind": "module",
+        "source_path": "",
+        "reason": "Issue 涉及 Sphinx 自动文档生成功能，特别是处理类方法（如 `__init__`）的部分。"
+      },
+      {
+        "name": "inspect.getdoc",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 `test_getdoc_inherited_decorated_method` 使用了此函数来检查装饰方法的文档字符串。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 指出问题根源在于一个提交（https://github.com/sphinx-doc/sphinx/commit/bbfd0d058aecf85bd3b711a846c83e2fe00fa136）中的一行代码 `cls = obj.__globals__[cls_path]`，当 `obj` 是被装饰的方法时，其 `__globals__` 可能不包含类定义，导致 `cls_is_owner=False`。但 iCoRe 未检索到该段具体源码。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_automethod_for_decorated",
+        "test_file": "tests/test_ext_autodoc.py",
+        "why_relevant": "该测试直接检查被装饰方法（`Bar.meth`）的文档生成。",
+        "reusable_parts": [
+          "测试装饰器 `@pytest.mark.sphinx` 的使用",
+          "`do_autodoc` 辅助函数的调用模式",
+          "对生成文档片段（`actual`）的断言风格"
+        ],
+        "possible_gap": "该测试针对的是普通方法 `meth`，而非 Issue 中特定的 `__init__` 方法，且未涉及 `napoleon_include_init_with_doc` 配置。"
+      },
+      {
+        "test_name": "test_autoclass_content_init",
+        "test_file": "tests/test_ext_autodoc_configs.py",
+        "why_relevant": "该测试检查 `autoclass_content = 'init'` 配置下 `__init__` 方法的文档生成。",
+        "reusable_parts": [
+          "配置 `app.config.autoclass_content` 的设置",
+          "`do_autodoc` 辅助函数的调用模式",
+          "对包含 `__init__` 文档的类文档输出的断言"
+        ],
+        "possible_gap": "该测试中的类 `__init__` 方法未被装饰器装饰。"
+      },
+      {
+        "test_name": "test_getdoc_inherited_decorated_method",
+        "test_file": "tests/test_util_inspect.py",
+        "why_relevant": "该测试直接涉及继承和装饰的方法（使用 `@functools.lru_cache()`），并检查其文档字符串。",
+        "reusable_parts": [
+          "使用 `functools.lru_cache()` 装饰器",
+          "创建继承的类结构",
+          "使用 `inspect.getdoc` 检查文档"
+        ],
+        "possible_gap": "该测试是单元测试，不涉及 Sphinx 文档生成流程，且装饰器是 `lru_cache` 而非 `wraps`。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中使用未装饰的 `__init__` 方法或普通装饰方法。",
+        "target_pattern": "创建一个类，其 `__init__` 方法被 `functools.wraps`（或类似）装饰器装饰。",
+        "reason": "Issue 明确指出当 `__init__` 被装饰时触发 bug，因为装饰后方法的 `__globals__` 属性可能发生变化。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试可能未设置 `napoleon_include_init_with_doc = True`。",
+        "target_pattern": "在测试配置中设置 `app.config.napoleon_include_init_with_doc = True`。",
+        "reason": "Issue 描述此配置为 `True` 时 `__init__` 应被文档化，但装饰后失效。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "`do_autodoc` 调用返回的文档内容（`actual`）中是否包含被装饰 `__init__` 方法的签名或文档字符串。",
+        "reason": "Issue 的核心症状是文档内容缺失，直接观察生成文档片段可以判断缺陷是否触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在疑似缺陷代码位置（如 `cls_is_owner` 的值）或装饰后方法的 `__globals__` 属性。",
+        "reason": "Issue 指出问题源于装饰方法 `__globals__` 不包含类，导致 `cls_is_owner=False`，从而影响文档生成逻辑。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的文档应包含被装饰 `__init__` 方法的签名或文档字符串。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、固定的文档输出字符串，因为具体签名可能因装饰器而变。",
+        "reason": "Issue 关注的是 `__init__` 是否出现在文档中，而非其精确格式。使用片段包含断言更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 `@pytest.mark.sphinx` fixture 和 `do_autodoc` 辅助函数来模拟 Sphinx 文档生成环境。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建目标模块，其中包含一个类，其 `__init__` 方法被 `functools.wraps` 装饰。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要在测试中配置 `app.config.napoleon_include_init_with_doc = True`。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到的具体缺陷代码位置（`cls = obj.__globals__[cls_path]`）的确切文件路径和上下文未知。",
+      "除了 `functools.wraps`，其他装饰器是否也会触发相同问题？",
+      "`napoleon_include_init_with_doc` 配置与其他 Sphinx 扩展或配置的交互细节。",
+      "修复后，被装饰 `__init__` 方法在文档中的确切输出格式（签名表示）是什么？"
+    ]
+  }
+}

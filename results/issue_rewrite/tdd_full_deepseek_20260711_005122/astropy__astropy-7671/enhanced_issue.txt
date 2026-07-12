@@ -1,0 +1,107 @@
+instance_id: astropy__astropy-7671
+
+issue_summary: minversion 函数在比较包含 'dev' 后缀的版本字符串与包含数字的版本字符串时，因 LooseVersion 内部比较引发 TypeError。
+
+trigger_condition:
+{
+  "text": "调用 minversion(module, version)，其中 version 参数为类似 '1.14dev' 的字符串，且模块的实际版本字符串为类似 '1.14.3' 的字符串。",
+  "evidence": [
+    "Issue 中示例：minversion('numpy', '1.14dev') 且 numpy 版本为 '1.14.3' 时触发。",
+    "Issue 中说明：LooseVersion('1.14.3') >= LooseVersion('1.14dev') 会失败。",
+    "源码片段 1 第 145-148 行显示 minversion 内部使用 LooseVersion 进行比较。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "抛出 TypeError: '<' not supported between instances of 'int' and 'str'。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中堆栈跟踪显示 TypeError 来自 distutils.version.LooseVersion 的 _cmp 方法。",
+    "Issue 中直接展示了 LooseVersion('1.14.3') >= LooseVersion('1.14dev') 产生相同的异常。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "minversion 函数应能正确处理包含 'dev' 等后缀的版本字符串与数字版本字符串的比较，并返回布尔值，而不抛出 TypeError。",
+  "evidence": [
+    "Issue 中提到使用 pkg_resources.parse_version 可以正常工作：parse_version('1.14.3') >= parse_version('1.14dev') 返回 True。",
+    "minversion 函数的文档字符串描述其功能是返回布尔值以检查版本要求。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "minversion",
+    "kind": "function",
+    "source_path": "astropy/utils/introspection.py",
+    "reason": "Issue 直接报告此函数在特定输入下失败。"
+  },
+  {
+    "name": "LooseVersion",
+    "kind": "class",
+    "source_path": "distutils.version",
+    "reason": "Issue 指出错误根源在于 LooseVersion 的内部比较逻辑存在缺陷。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "测试中使用的版本字符串如 '0.12.0.dev' 和 '1.2rc1'。",
+    "target_pattern": "使用类似 '1.14dev' 作为 version 参数，并确保模块版本为类似 '1.14.3' 的字符串。",
+    "reason": "Issue 表明当 version 参数为 '1.14dev' 且实际版本为 '1.14.3' 时，LooseVersion 内部比较会因 int('3') 与 str('dev') 比较而失败。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用 minversion(module, '1.14dev') 时是否抛出 TypeError。",
+    "reason": "Issue 的核心错误现象是抛出 TypeError，观测此异常可直接判断缺陷是否触发。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "minversion 函数的返回值（应为布尔值）。",
+    "reason": "在修复后，函数应正常返回布尔值而非抛出异常。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "minversion 函数在给定触发条件下应正常执行并返回一个布尔值，而不抛出 TypeError。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言返回的具体布尔值（True/False），因为修复后的正确比较逻辑可能依赖于 LooseVersion 的修复或替代方案。",
+    "reason": "当前 Issue 的核心是异常，因此断言不抛出异常是首要目标。修复后，函数应能正常返回，但具体返回值可能依赖于版本比较语义的修正。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要创建一个模拟模块对象，并设置其 __version__ 属性为类似 '1.14.3' 的字符串。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要模拟或导入 numpy 模块，或者使用一个自定义模块来避免依赖外部包。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "修复后的 minversion 函数对于 '1.14.3' 和 '1.14dev' 的具体比较结果（True 或 False）是什么？Issue 中 pkg_resources.parse_version 返回 True，但修复方案可能不同。",
+  "除了 'dev' 后缀，是否还有其他类似的版本字符串格式会触发此问题？",
+  "修复是应该在 astropy 的 minversion 中替换 LooseVersion，还是等待 Python 修复 LooseVersion？"
+]

@@ -1,0 +1,255 @@
+{
+  "instance_id": "sympy__sympy-16450",
+  "issue_summary": "posify 函数在将符号替换为正数虚拟符号时，忽略了原符号的有限性（finite）假设，导致替换后的符号 is_finite 返回 None。",
+  "trigger_condition": {
+    "text": "对一个具有 finite=True 假设的符号调用 posify 函数。",
+    "evidence": [
+      "Issue 中展示了 x = Symbol('x', finite=True) 后调用 xp, _ = posify(x)。",
+      "源码片段 1 显示 posify 为 free_symbols 中 is_positive is None 的符号创建 positive=True 的 Dummy 符号。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "posify 返回的新符号 xp 的 is_finite 属性返回 None，而原符号 x.is_finite 返回 True。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 中 In[6] 和 In[7] 显示 xp.is_finite 返回 None，打印输出为 None。",
+      "Issue 中 In[3] 显示 x.is_finite 返回 True。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "posify 返回的新符号应保留原符号的有限性（finite）假设，使得 xp.is_finite 返回 True。",
+    "evidence": [
+      "Issue 中作者陈述 'I think that posify should preserve the finiteness assumption.'",
+      "源码片段 5 中 real 的文档说明 'Every real number is finite.'，而 posify 为新符号设置了 real=True，逻辑上应隐含 finite。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "posify",
+      "kind": "function",
+      "source_path": "sympy/simplify/simplify.py",
+      "reason": "Issue 直接报告该函数的行为问题，是缺陷复现的核心调用。"
+    },
+    {
+      "name": "Symbol",
+      "kind": "class",
+      "source_path": "",
+      "reason": "用于创建具有特定假设（如 finite=True）的符号，是触发条件的构造部分。"
+    },
+    {
+      "name": "Dummy",
+      "kind": "class",
+      "source_path": "",
+      "reason": "posify 内部使用 Dummy 创建替换符号，其假设设置是缺陷的关键。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/simplify/simplify.py",
+      "object": "posify",
+      "lines": "202-257",
+      "reason": "该函数负责创建替换符号，但只设置了 positive=True，未从原符号继承其他假设如 finite。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_posify",
+      "test_file": "sympy/simplify/tests/test_simplify.py",
+      "why_relevant": "这是 posify 函数的主要测试，包含了基本的调用和验证模式。",
+      "reusable_parts": [
+        "from sympy import posify, Symbol, log",
+        "eq, rep = posify(...) 的调用模式",
+        "使用 .subs(rep) 恢复原符号的验证模式"
+      ],
+      "possible_gap": "现有测试未覆盖带有 finite 等非正负性假设的符号，也未检查 is_finite 等属性。"
+    },
+    {
+      "test_name": "test_float_1",
+      "test_file": "sympy/assumptions/tests/test_query.py",
+      "why_relevant": "该测试展示了如何查询各种假设属性，包括 Q.finite。",
+      "reusable_parts": [
+        "ask(Q.finite(...)) 的调用模式",
+        "对假设查询结果（True/False/None）的断言风格"
+      ],
+      "possible_gap": "测试对象是浮点数，而非通过 posify 处理的符号。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中使用无额外假设或仅 positive/negative 假设的符号。",
+      "target_pattern": "使用具有 finite=True 假设的符号作为 posify 的输入。",
+      "reason": "Issue 表明当符号具有 finite=True 假设时，posify 的输出丢失了该假设。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "测试断言替换后表达式的字符串表示或代数等价性。",
+      "target_pattern": "测试断言替换后符号的 is_finite 属性应为 True。",
+      "reason": "缺陷表现为 is_finite 属性错误地变为 None，需要针对此属性进行验证。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "xp.is_finite",
+      "reason": "Issue 的核心错误现象是 is_finite 返回 None 而非 True。"
+    },
+    {
+      "kind": "repr",
+      "expression_hint": "xp._assumptions",
+      "reason": "可以观察替换后符号的假设字典，确认是否包含 'finite': True。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "posify 返回的新符号应具有 is_finite 属性为 True。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的 _assumptions 字典字符串相等，因为其他假设可能合理变化。",
+      "reason": "直接验证 is_finite 属性与预期一致，这是 Issue 报告的核心偏差。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 sympy 的 Symbol, posify 以及可能的 assumptions 模块。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "除了 finite，还有哪些假设（如 integer, rational）也可能被 posify 忽略，但 Issue 未明确验证。",
+    "posify 是否应该、以及如何从原符号继承所有相关假设到新 Dummy 符号的精确规则。",
+    "修复后，新符号的 _assumptions 字典中是否应显式包含 'finite': True，还是仅通过 real=True 隐含。"
+  ],
+  "raw": {
+    "issue_summary": "posify 函数在将符号替换为正数虚拟符号时，忽略了原符号的有限性（finite）假设，导致替换后的符号 is_finite 返回 None。",
+    "trigger_condition": {
+      "text": "对一个具有 finite=True 假设的符号调用 posify 函数。",
+      "evidence": [
+        "Issue 中展示了 x = Symbol('x', finite=True) 后调用 xp, _ = posify(x)。",
+        "源码片段 1 显示 posify 为 free_symbols 中 is_positive is None 的符号创建 positive=True 的 Dummy 符号。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "posify 返回的新符号 xp 的 is_finite 属性返回 None，而原符号 x.is_finite 返回 True。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中 In[6] 和 In[7] 显示 xp.is_finite 返回 None，打印输出为 None。",
+        "Issue 中 In[3] 显示 x.is_finite 返回 True。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "posify 返回的新符号应保留原符号的有限性（finite）假设，使得 xp.is_finite 返回 True。",
+      "evidence": [
+        "Issue 中作者陈述 'I think that posify should preserve the finiteness assumption.'",
+        "源码片段 5 中 real 的文档说明 'Every real number is finite.'，而 posify 为新符号设置了 real=True，逻辑上应隐含 finite。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "posify",
+        "kind": "function",
+        "source_path": "sympy/simplify/simplify.py",
+        "reason": "Issue 直接报告该函数的行为问题，是缺陷复现的核心调用。"
+      },
+      {
+        "name": "Symbol",
+        "kind": "class",
+        "source_path": "",
+        "reason": "用于创建具有特定假设（如 finite=True）的符号，是触发条件的构造部分。"
+      },
+      {
+        "name": "Dummy",
+        "kind": "class",
+        "source_path": "",
+        "reason": "posify 内部使用 Dummy 创建替换符号，其假设设置是缺陷的关键。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/simplify/simplify.py",
+        "object": "posify",
+        "lines": "202-257",
+        "reason": "该函数负责创建替换符号，但只设置了 positive=True，未从原符号继承其他假设如 finite。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_posify",
+        "test_file": "sympy/simplify/tests/test_simplify.py",
+        "why_relevant": "这是 posify 函数的主要测试，包含了基本的调用和验证模式。",
+        "reusable_parts": [
+          "from sympy import posify, Symbol, log",
+          "eq, rep = posify(...) 的调用模式",
+          "使用 .subs(rep) 恢复原符号的验证模式"
+        ],
+        "possible_gap": "现有测试未覆盖带有 finite 等非正负性假设的符号，也未检查 is_finite 等属性。"
+      },
+      {
+        "test_name": "test_float_1",
+        "test_file": "sympy/assumptions/tests/test_query.py",
+        "why_relevant": "该测试展示了如何查询各种假设属性，包括 Q.finite。",
+        "reusable_parts": [
+          "ask(Q.finite(...)) 的调用模式",
+          "对假设查询结果（True/False/None）的断言风格"
+        ],
+        "possible_gap": "测试对象是浮点数，而非通过 posify 处理的符号。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用无额外假设或仅 positive/negative 假设的符号。",
+        "target_pattern": "使用具有 finite=True 假设的符号作为 posify 的输入。",
+        "reason": "Issue 表明当符号具有 finite=True 假设时，posify 的输出丢失了该假设。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试断言替换后表达式的字符串表示或代数等价性。",
+        "target_pattern": "测试断言替换后符号的 is_finite 属性应为 True。",
+        "reason": "缺陷表现为 is_finite 属性错误地变为 None，需要针对此属性进行验证。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "xp.is_finite",
+        "reason": "Issue 的核心错误现象是 is_finite 返回 None 而非 True。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "xp._assumptions",
+        "reason": "可以观察替换后符号的假设字典，确认是否包含 'finite': True。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "posify 返回的新符号应具有 is_finite 属性为 True。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 _assumptions 字典字符串相等，因为其他假设可能合理变化。",
+        "reason": "直接验证 is_finite 属性与预期一致，这是 Issue 报告的核心偏差。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 的 Symbol, posify 以及可能的 assumptions 模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "除了 finite，还有哪些假设（如 integer, rational）也可能被 posify 忽略，但 Issue 未明确验证。",
+      "posify 是否应该、以及如何从原符号继承所有相关假设到新 Dummy 符号的精确规则。",
+      "修复后，新符号的 _assumptions 字典中是否应显式包含 'finite': True，还是仅通过 real=True 隐含。"
+    ]
+  }
+}

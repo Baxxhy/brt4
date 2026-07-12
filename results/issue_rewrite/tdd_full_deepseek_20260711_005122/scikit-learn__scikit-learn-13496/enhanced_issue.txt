@@ -1,0 +1,139 @@
+instance_id: scikit-learn__scikit-learn-13496
+
+issue_summary: IsolationForest 类没有在 __init__ 中暴露其继承自 BaseBagging 的 warm_start 参数，导致用户难以发现和使用增量训练功能。
+
+trigger_condition:
+{
+  "text": "用户尝试使用 IsolationForest 的增量训练功能，但发现 warm_start 参数未在构造函数中公开，需要通过修改实例属性 warm_start 为 True 并递增 n_estimators 来间接使用。",
+  "evidence": [
+    "Issue 描述：'Even though this parameter is not exposed in `__init__()` , it gets inherited from `BaseBagging` and one can use it by changing it to `True` after initialization. To make it work, you have to also increment `n_estimators` on every iteration.'",
+    "源码片段 1 显示 IsolationForest.__init__ 签名未包含 warm_start 参数。",
+    "源码片段 2 显示 BaseBagging.__init__ 包含 warm_start 参数。",
+    "源码片段 4 显示 RandomForestClassifier.__init__ 包含 warm_start 参数并有文档。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "IsolationForest 的 warm_start 参数未在 __init__ 中暴露，导致 API 不一致且用户难以发现该功能。",
+  "symptom_type": "unknown",
+  "evidence": [
+    "Issue 描述：'It seems to me that `sklearn.ensemble.IsolationForest` supports incremental addition of new trees with the `warm_start` parameter of its parent class, `sklearn.ensemble.BaseBagging`. Even though this parameter is not exposed in `__init__()`...'",
+    "Issue 建议：'To make it more easier to use, I'd suggest to: * expose `warm_start` in `IsolationForest.__init__()`, default `False`;'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "IsolationForest 应在 __init__ 中公开 warm_start 参数，使其行为与 RandomForestClassifier 等同类森林模型一致，并支持增量训练。",
+  "evidence": [
+    "Issue 描述：'Also, it looks to me that the behavior is in-line with `sklearn.ensemble.BaseForest` that is behind e.g. `sklearn.ensemble.RandomForestClassifier`.'",
+    "Issue 建议：'expose `warm_start` in `IsolationForest.__init__()`, default `False`; document it in the same way as it is documented for `RandomForestClassifier`...'",
+    "源码片段 4 显示 RandomForestClassifier 的 warm_start 参数有完整文档。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "sklearn.ensemble.IsolationForest",
+    "kind": "class",
+    "source_path": "sklearn/ensemble/iforest.py",
+    "reason": "Issue 的核心是关于 IsolationForest 类缺少 warm_start 参数暴露。"
+  },
+  {
+    "name": "sklearn.ensemble.IsolationForest.__init__",
+    "kind": "method",
+    "source_path": "sklearn/ensemble/iforest.py",
+    "reason": "需要检查或修改 __init__ 方法以添加 warm_start 参数。"
+  },
+  {
+    "name": "sklearn.ensemble.BaseBagging",
+    "kind": "class",
+    "source_path": "sklearn/ensemble/bagging.py",
+    "reason": "IsolationForest 继承自 BaseBagging，而 warm_start 参数定义在 BaseBagging 中。"
+  },
+  {
+    "name": "sklearn.ensemble.RandomForestClassifier",
+    "kind": "class",
+    "source_path": "sklearn/ensemble/forest.py",
+    "reason": "Issue 提到 RandomForestClassifier 是 warm_start 参数正确暴露和文档化的参考。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "相似测试中，模型（如 BaggingClassifier）在初始化时通过 warm_start=True 参数启用增量训练。",
+    "target_pattern": "对于 IsolationForest，尝试在初始化时不提供 warm_start 参数（因为当前未暴露），然后通过设置实例属性 .warm_start = True 来启用。",
+    "reason": "Issue 指出当前用户必须通过修改实例属性来使用 warm_start，这正是触发 API 不一致问题的路径。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "相似测试中，模型在初始化时已配置好 warm_start 参数。",
+    "target_pattern": "创建 IsolationForest 实例后，动态修改其 warm_start 和 n_estimators 属性，然后再次调用 fit。",
+    "reason": "Issue 描述的使用方式：'one can use it by changing it to `True` after initialization. To make it work, you have to also increment `n_estimators` on every iteration.'",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "config",
+    "expression_hint": "IsolationForest 实例的 __init__ 参数列表（通过 inspect.signature 或实例的 __dict__/get_params）",
+    "reason": "观察 warm_start 参数是否出现在可配置参数中，以判断 API 是否暴露。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "调用 fit 前后，实例的 estimators_ 列表长度",
+    "reason": "在 warm_start=True 且递增 n_estimators 后，estimators_ 应增长，而不是被替换，以验证增量训练功能是否正常工作。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "模型预测或决策函数的结果在增量训练前后的变化",
+    "reason": "验证增量添加树后，模型的输出是否合理变化（例如，性能提升或保持稳定）。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "IsolationForest 实例应支持通过 warm_start 参数进行增量训练，即在 warm_start=True 且 n_estimators 增加后再次调用 fit 会添加新的估计器，而不是替换所有估计器。",
+    "preferred_assertion_style": "before_after_relation",
+    "avoid": "避免断言完整的模型 repr 字符串或所有超参数的精确相等，因为 focus 是 warm_start 行为。",
+    "reason": "Issue 的核心是功能可用性，而非特定输出值。应验证增量训练的基本语义成立。"
+  },
+  {
+    "assertion_goal": "IsolationForest 的 __init__ 应接受 warm_start 参数（修复后），或当前行为下通过属性设置能启用增量训练（当前状态）。",
+    "preferred_assertion_style": "isinstance",
+    "avoid": "避免断言具体的异常类型或消息，因为 Issue 不是关于运行时错误，而是 API 缺失。",
+    "reason": "需要验证参数是否可配置，这是 Issue 报告的核心问题。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要创建简单的合成数据集（如 make_blobs）用于训练 IsolationForest。",
+    "source": "inference",
+    "confidence": "medium"
+  },
+  {
+    "hint": "可能需要使用 pytest 的参数化或 fixture 来测试不同的配置组合。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "FOREST_ESTIMATORS 列表中是否包含 IsolationForest，从而现有森林测试是否已覆盖其 warm_start 行为。",
+  "IsolationForest 在 warm_start=True 时，除了继承 BaseBagging 的逻辑外，是否有其他特殊处理或限制。",
+  "当前代码库中是否已有针对 IsolationForest warm_start 的测试（可能在其他文件中）。"
+]

@@ -1,0 +1,438 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+SI._collect_factor_and_dimension() cannot properly detect that exponent is dimensionless
+How to reproduce:
+
+```python
+from sympy import exp
+from sympy.physics import units
+from sympy.physics.units.systems.si import SI
+
+expr = units.second / (units.ohm * units.farad)
+dim = SI._collect_factor_and_dimension(expr)[1]
+
+assert SI.get_dimension_system().is_dimensionless(dim)
+
+buggy_expr = 100 + exp(expr)
+SI._collect_factor_and_dimension(buggy_expr)
+
+# results in ValueError: Dimension of "exp(second/(farad*ohm))" is Dimension(time/(capacitance*impedance)), but it should be Dimension(1)
+```
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/physics/units/unitsystem.py
+对象名称：_collect_factor_and_dimension
+节点类型：class_function
+父节点：UnitSystem
+行号范围：152-200
+代码：
+    def _collect_factor_and_dimension(self, expr):
+        """
+        Return tuple with scale factor expression and dimension expression.
+        """
+        from sympy.physics.units import Quantity
+        if isinstance(expr, Quantity):
+            return expr.scale_factor, expr.dimension
+        elif isinstance(expr, Mul):
+            factor = 1
+            dimension = Dimension(1)
+            for arg in expr.args:
+                arg_factor, arg_dim = self._collect_factor_and_dimension(arg)
+                factor *= arg_factor
+                dimension *= arg_dim
+            return factor, dimension
+        elif isinstance(expr, Pow):
+            factor, dim = self._collect_factor_and_dimension(expr.base)
+            exp_factor, exp_dim = self._collect_factor_and_dimension(expr.exp)
+            if self.get_dimension_system().is_dimensionless(exp_dim):
+                exp_dim = 1
+            return factor ** exp_factor, dim ** (exp_factor * exp_dim)
+        elif isinstance(expr, Add):
+            factor, dim = self._collect_factor_and_dimension(expr.args[0])
+            for addend in expr.args[1:]:
+                addend_factor, addend_dim = \
+                    self._collect_factor_and_dimension(addend)
+                if dim != addend_dim:
+                    raise ValueError(
+                        'Dimension of "{}" is {}, '
+                        'but it should be {}'.format(
+                            addend, addend_dim, dim))
+                factor += addend_factor
+            return factor, dim
+        elif isinstance(expr, Derivative):
+            factor, dim = self._collect_factor_and_dimension(expr.args[0])
+            for independent, count in expr.variable_count:
+                ifactor, idim = self._collect_factor_and_dimension(independent)
+                factor /= ifactor**count
+                dim /= idim**count
+            return factor, dim
+        elif isinstance(expr, Function):
+            fds = [self._collect_factor_and_dimension(
+                arg) for arg in expr.args]
+            return (expr.func(*(f[0] for f in fds)),
+                    *(d[1] for d in fds))
+        elif isinstance(expr, Dimension):
+            return S.One, expr
+        else:
+            return expr, Dimension(1)
+
+
+【源码片段 2】
+文件路径：sympy/physics/units/unitsystem.py
+对象名称：get_dimension_system
+节点类型：class_function
+父节点：UnitSystem
+行号范围：75-76
+代码：
+    def get_dimension_system(self):
+        return self._dimension_system
+
+
+【源码片段 3】
+文件路径：sympy/physics/units/dimensions.py
+对象名称：is_dimensionless
+节点类型：class_function
+父节点：DimensionSystem
+行号范围：447-455
+代码：
+    def is_dimensionless(self, dimension):
+        """
+        Check if the dimension object really has a dimension.
+
+        A dimension should have at least one component with non-zero power.
+        """
+        if dimension.name == 1:
+            return True
+        return self.get_dimensional_dependencies(dimension) == {}
+
+
+【源码片段 4】
+文件路径：sympy/parsing/latex/_antlr/latexparser.py
+对象名称：exp
+节点类型：class_function
+父节点：LaTeXParser
+行号范围：1428-1492
+代码：
+    def exp(self, _p:int=0):
+        _parentctx = self._ctx
+        _parentState = self.state
+        localctx = LaTeXParser.ExpContext(self, self._ctx, _parentState)
+        _prevctx = localctx
+        _startState = 30
+        self.enterRecursionRule(localctx, 30, self.RULE_exp, _p)
+        try:
+            self.enterOuterAlt(localctx, 1)
+            self.state = 197
+            self.comp()
+            self._ctx.stop = self._input.LT(-1)
+            self.state = 213
+            self._errHandler.sync(self)
+            _alt = self._interp.adaptivePredict(self._input,16,self._ctx)
+            while _alt!=2 and _alt!=ATN.INVALID_ALT_NUMBER:
+                if _alt==1:
+                    if self._parseListeners is not None:
+                        self.triggerExitRuleEvent()
+                    _prevctx = localctx
+                    localctx = LaTeXParser.ExpContext(self, _parentctx, _parentState)
+                    self.pushNewRecursionContext(localctx, _startState, self.RULE_exp)
+                    self.state = 199
+                    if not self.precpred(self._ctx, 2):
+                        from antlr4.error.Errors import FailedPredicateException
+                        raise FailedPredicateException(self, "self.precpred(self._ctx, 2)")
+                    self.state = 200
+                    self.match(LaTeXParser.CARET)
+                    self.state = 206
+                    self._errHandler.sync(self)
+                    token = self._input.LA(1)
+                    if token in [LaTeXParser.BAR, LaTeXParser.L_BAR, LaTeXParser.L_ANGLE, LaTeXParser.CMD_FRAC, LaTeXParser.CMD_BINOM, LaTeXParser.CMD_DBINOM, LaTeXParser.CMD_TBINOM, LaTeXParser.CMD_MATHIT, LaTeXParser.DIFFERENTIAL, LaTeXParser.LETTER, LaTeXParser.DIGIT, LaTeXParser.SYMBOL]:
+                        self.state = 201
+                        self.atom()
+                        pass
+                    elif token in [LaTeXParser.L_BRACE]:
+                        self.state = 202
+                        self.match(LaTeXParser.L_BRACE)
+                        self.state = 203
+                        self.expr()
+                        self.state = 204
+                        self.match(LaTeXParser.R_BRACE)
+                        pass
+                    else:
+                        raise NoViableAltException(self)
+
+                    self.state = 209
+                    self._errHandler.sync(self)
+                    la_ = self._interp.adaptivePredict(self._input,15,self._ctx)
+                    if la_ == 1:
+                        self.state = 208
+                        self.subexpr()
+
+
+                self.state = 215
+                self._errHandler.sync(self)
+                _alt = self._interp.adaptivePredict(self._input,16,self._ctx)
+
+        except RecognitionException as re:
+            localctx.exception = re
+            self._errHandler.reportError(self, re)
+            self._errHandler.recover(self, re)
+        finally:
+            self.unrollRecursionContexts(_parentctx)
+        return localctx
+
+
+【源码片段 5】
+文件路径：sympy/physics/units/definitions/unit_definitions.py
+对象名称：second
+节点类型：global_var
+父节点：unit_definitions
+行号范围：47-47
+代码：
+s = second = seconds = Quantity("second", abbrev="s")
+
+
+【源码片段 6】
+文件路径：sympy/physics/units/definitions/unit_definitions.py
+对象名称：ohm
+节点类型：global_var
+父节点：unit_definitions
+行号范围：75-75
+代码：
+ohm = ohms = Quantity("ohm", abbrev='ohm', latex_repr=r"\Omega")
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/physics/units/tests/test_quantities.py
+测试名称：test_factor_and_dimension
+测试代码：
+def test_factor_and_dimension():
+    assert (3000, Dimension(1)) == SI._collect_factor_and_dimension(3000)
+    assert (1001, length) == SI._collect_factor_and_dimension(meter + km)
+    assert (2, length/time) == SI._collect_factor_and_dimension(
+        meter/second + 36*km/(10*hour))
+
+    x, y = symbols('x y')
+    assert (x + y/100, length) == SI._collect_factor_and_dimension(
+        x*m + y*centimeter)
+
+    cH = Quantity('cH')
+    SI.set_quantity_dimension(cH, amount_of_substance/volume)
+
+    pH = -log(cH)
+
+    assert (1, volume/amount_of_substance) == SI._collect_factor_and_dimension(
+        exp(pH))
+
+    v_w1 = Quantity('v_w1')
+    v_w2 = Quantity('v_w2')
+
+    v_w1.set_global_relative_scale_factor(Rational(3, 2), meter/second)
+    v_w2.set_global_relative_scale_factor(2, meter/second)
+
+    expr = Abs(v_w1/2 - v_w2)
+    assert (Rational(5, 4), length/time) == \
+        SI._collect_factor_and_dimension(expr)
+
+    expr = Rational(5, 2)*second/meter*v_w1 - 3000
+    assert (-(2996 + Rational(1, 4)), Dimension(1)) == \
+        SI._collect_factor_and_dimension(expr)
+
+    expr = v_w1**(v_w2/v_w1)
+    assert ((Rational(3, 2))**Rational(4, 3), (length/time)**Rational(4, 3)) == \
+        SI._collect_factor_and_dimension(expr)
+
+    with warns_deprecated_sympy():
+        assert (3000, Dimension(1)) == Quantity._collect_factor_and_dimension(3000)
+
+【相关测试 2】
+测试文件：sympy/physics/units/tests/test_quantities.py
+测试名称：test_get_dimensional_expr_with_function
+测试代码：
+def test_get_dimensional_expr_with_function():
+    v_w1 = Quantity('v_w1')
+    v_w2 = Quantity('v_w2')
+    v_w1.set_global_relative_scale_factor(1, meter/second)
+    v_w2.set_global_relative_scale_factor(1, meter/second)
+
+    assert SI.get_dimensional_expr(sin(v_w1)) == \
+        sin(SI.get_dimensional_expr(v_w1))
+    assert SI.get_dimensional_expr(sin(v_w1/v_w2)) == 1
+
+【相关测试 3】
+测试文件：sympy/physics/units/tests/test_quantities.py
+测试名称：test_factor_and_dimension_with_Abs
+测试代码：
+@XFAIL
+def test_factor_and_dimension_with_Abs():
+    with warns_deprecated_sympy():
+        v_w1 = Quantity('v_w1', length/time, Rational(3, 2)*meter/second)
+    v_w1.set_global_relative_scale_factor(Rational(3, 2), meter/second)
+    expr = v_w1 - Abs(v_w1)
+    with warns_deprecated_sympy():
+        assert (0, length/time) == Quantity._collect_factor_and_dimension(expr)
+
+【相关测试 4】
+测试文件：sympy/physics/units/tests/test_util.py
+测试名称：test_quantity_simplify_across_dimensions
+测试代码：
+def test_quantity_simplify_across_dimensions():
+    from sympy.physics.units.util import quantity_simplify
+    from sympy.physics.units import ampere, ohm, volt, joule, pascal, farad, second, watt, siemens, henry, tesla, weber, hour, newton
+
+    assert quantity_simplify(ampere*ohm, across_dimensions=True, unit_system="SI") == volt
+    assert quantity_simplify(6*ampere*ohm, across_dimensions=True, unit_system="SI") == 6*volt
+    assert quantity_simplify(volt/ampere, across_dimensions=True, unit_system="SI") == ohm
+    assert quantity_simplify(volt/ohm, across_dimensions=True, unit_system="SI") == ampere
+    assert quantity_simplify(joule/meter**3, across_dimensions=True, unit_system="SI") == pascal
+    assert quantity_simplify(farad*ohm, across_dimensions=True, unit_system="SI") == second
+    assert quantity_simplify(joule/second, across_dimensions=True, unit_system="SI") == watt
+    assert quantity_simplify(meter**3/second, across_dimensions=True, unit_system="SI") == meter**3/second
+    assert quantity_simplify(joule/second, across_dimensions=True, unit_system="SI") == watt
+
+    assert quantity_simplify(joule/coulomb, across_dimensions=True, unit_system="SI") == volt
+    assert quantity_simplify(volt/ampere, across_dimensions=True, unit_system="SI") == ohm
+    assert quantity_simplify(ampere/volt, across_dimensions=True, unit_system="SI") == siemens
+    assert quantity_simplify(coulomb/volt, across_dimensions=True, unit_system="SI") == farad
+    assert quantity_simplify(volt*second/ampere, across_dimensions=True, unit_system="SI") == henry
+    assert quantity_simplify(volt*second/meter**2, across_dimensions=True, unit_system="SI") == tesla
+    assert quantity_simplify(joule/ampere, across_dimensions=True, unit_system="SI") == weber
+
+    assert quantity_simplify(5*kilometer/hour, across_dimensions=True, unit_system="SI") == 25*meter/(18*second)
+    assert quantity_simplify(5*kilogram*meter/second**2, across_dimensions=True, unit_system="SI") == 5*newton
+
+【相关测试 5】
+测试文件：sympy/physics/units/tests/test_dimensions.py
+测试名称：test_Dimension_properties
+测试代码：
+def test_Dimension_properties():
+    assert dimsys_SI.is_dimensionless(length) is False
+    assert dimsys_SI.is_dimensionless(length/length) is True
+    assert dimsys_SI.is_dimensionless(Dimension("undefined")) is False
+
+    assert length.has_integer_powers(dimsys_SI) is True
+    assert (length**(-1)).has_integer_powers(dimsys_SI) is True
+    assert (length**1.5).has_integer_powers(dimsys_SI) is False
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

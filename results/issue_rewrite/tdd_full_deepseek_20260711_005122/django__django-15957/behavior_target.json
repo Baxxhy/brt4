@@ -1,0 +1,267 @@
+{
+  "instance_id": "django__django-15957",
+  "issue_summary": "Prefetch 对象与切片查询集一起使用时引发异常，无法高效预取部分相关对象。",
+  "trigger_condition": {
+    "text": "在 prefetch_related 中使用 Prefetch 对象，其 queryset 参数是一个切片查询集（例如 Post.objects.all()[:3]）。",
+    "evidence": [
+      "Issue 中给出的示例代码：Category.objects.prefetch_related(Prefetch('post_set', queryset=Post.objects.all()[:3], to_attr='example_posts',))"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "引发 AssertionError: Cannot filter a query once a slice has been taken.",
+    "symptom_type": "exception",
+    "evidence": [
+      "Issue 中明确说明：'results in AssertionError: Cannot filter a query once a slice has been taken.'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "Prefetch 对象应能接受切片查询集作为 queryset 参数，并成功预取指定数量的相关对象，而不会引发异常。",
+    "evidence": [
+      "Issue 描述的使用场景：'I want to display a list of categories while displaying couple of example objects from each category next to it.' 以及 'Prefetching without slicing would prefetch all objects (and there may be thousands of them) instead of the three examples that are needed.' 这暗示了期望切片查询集能正常工作以实现高效预取。"
+    ],
+    "confidence": "medium"
+  },
+  "target_apis": [
+    {
+      "name": "Prefetch",
+      "kind": "class",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 的核心是 Prefetch 类的使用，其构造函数的 queryset 参数被传递了切片查询集。"
+    },
+    {
+      "name": "prefetch_related",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Prefetch 对象作为参数传递给 QuerySet 的 prefetch_related 方法。"
+    },
+    {
+      "name": "QuerySet.__getitem__",
+      "kind": "method",
+      "source_path": "",
+      "reason": "切片操作（如 [:3]）会调用此方法，生成切片查询集。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/query.py",
+      "object": "Prefetch",
+      "lines": "2142-2200",
+      "reason": "Prefetch 类负责处理自定义查询集，可能未正确处理切片查询集的状态。"
+    },
+    {
+      "path": "django/db/models/query.py",
+      "object": "prefetch_related_objects",
+      "lines": "",
+      "reason": "实际执行预取的内部函数，可能在对 Prefetch 的 queryset 进行进一步操作（如过滤）时，未检查或处理其切片状态。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "CustomPrefetchTests.test_custom_qs",
+      "test_file": "tests/prefetch_related/tests.py",
+      "why_relevant": "该测试广泛使用了 Prefetch 对象和自定义 queryset，包括过滤、select_related 和嵌套 prefetch，展示了 Prefetch 的正常工作模式。",
+      "reusable_parts": [
+        "TestCase 框架、模型导入（Person, House, Room）、Prefetch 对象的构造方式、prefetch_related 的调用模式、assertNumQueries 和 assertEqual 的断言风格。"
+      ],
+      "possible_gap": "该测试中所有传递给 Prefetch 的 queryset 都是未切片的（如 House.objects.all() 或带 filter 的查询集），没有测试切片查询集的情况。"
+    },
+    {
+      "test_name": "QuerySetSupportsPythonIdioms.test_slicing_cannot_filter_queryset_once_sliced",
+      "test_file": "tests/queries/tests.py",
+      "why_relevant": "该测试直接验证了切片查询集不能再次过滤的行为，并捕获了与 Issue 中相同的错误消息。",
+      "reusable_parts": [
+        "异常断言模式：with self.assertRaisesMessage(TypeError, msg)。",
+        "切片操作的使用：Article.objects.all()[0:5]。"
+      ],
+      "possible_gap": "该测试关注的是 QuerySet 本身的切片后过滤限制，而非 Prefetch 内部使用切片查询集时触发的相同限制。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试 CustomPrefetchTests.test_custom_qs 中，Prefetch 的 queryset 参数是未切片的查询集，如 House.objects.all() 或 House.objects.filter(...)。",
+      "target_pattern": "将 queryset 参数变异为切片查询集，如 House.objects.all()[:3]。",
+      "reason": "Issue 表明，当 queryset 是切片查询集时，会触发 'Cannot filter a query once a slice has been taken.' 异常。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "在相似测试中，Prefetch 对象被构造并直接传递给 prefetch_related，然后对主查询集求值（如 list(...)）。",
+      "target_pattern": "保持相同的调用链，但确保 Prefetch 内部的 queryset 是切片查询集。",
+      "reason": "Issue 中的触发条件正是 Prefetch 对象包含切片查询集，并在 prefetch_related 求值时出错。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "在调用 list(main_queryset) 或对主查询集求值时捕获的异常类型和消息。",
+      "reason": "Issue 明确报告了 AssertionError 和特定错误消息，这是判断缺陷是否触发的直接标志。"
+    },
+    {
+      "kind": "sql",
+      "expression_hint": "通过 django.db.connection.queries 或 assertNumQueries 观察生成的 SQL 语句数量或内容。",
+      "reason": "可以验证切片是否影响了预取查询的生成，或者是否因为异常导致查询未正常执行。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证当 Prefetch 使用切片查询集时，不会引发 'Cannot filter a query once a slice has been taken.' 异常。",
+      "preferred_assertion_style": "raises",
+      "avoid": "避免断言完整的异常消息字符串，除非 Issue 提供了精确措辞。避免断言不相关的 SQL 细节。",
+      "reason": "Issue 的核心是异常被引发。修复后，该异常不应再出现。断言风格应与测试种子 test_slicing_cannot_filter_queryset_once_sliced 一致。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要 Django TestCase 和相关的模型（如 Category 和 Post，或使用现有测试模型如 Person 和 House）。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要创建测试数据，确保相关对象存在，以便预取操作有数据可处理。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "错误消息在 Issue 中是 'AssertionError'，但在相关测试 3 中是 'TypeError'。需要确认实际抛出的异常类型。",
+    "Prefetch 内部处理切片查询集的具体失败点（例如，是在 Prefetch 初始化时，还是在 prefetch_related_objects 内部处理时）尚不明确。",
+    "修复后，切片查询集是否真的能按预期只预取指定数量的对象，还是需要其他调整。"
+  ],
+  "raw": {
+    "issue_summary": "Prefetch 对象与切片查询集一起使用时引发异常，无法高效预取部分相关对象。",
+    "trigger_condition": {
+      "text": "在 prefetch_related 中使用 Prefetch 对象，其 queryset 参数是一个切片查询集（例如 Post.objects.all()[:3]）。",
+      "evidence": [
+        "Issue 中给出的示例代码：Category.objects.prefetch_related(Prefetch('post_set', queryset=Post.objects.all()[:3], to_attr='example_posts',))"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "引发 AssertionError: Cannot filter a query once a slice has been taken.",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中明确说明：'results in AssertionError: Cannot filter a query once a slice has been taken.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Prefetch 对象应能接受切片查询集作为 queryset 参数，并成功预取指定数量的相关对象，而不会引发异常。",
+      "evidence": [
+        "Issue 描述的使用场景：'I want to display a list of categories while displaying couple of example objects from each category next to it.' 以及 'Prefetching without slicing would prefetch all objects (and there may be thousands of them) instead of the three examples that are needed.' 这暗示了期望切片查询集能正常工作以实现高效预取。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "Prefetch",
+        "kind": "class",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 的核心是 Prefetch 类的使用，其构造函数的 queryset 参数被传递了切片查询集。"
+      },
+      {
+        "name": "prefetch_related",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Prefetch 对象作为参数传递给 QuerySet 的 prefetch_related 方法。"
+      },
+      {
+        "name": "QuerySet.__getitem__",
+        "kind": "method",
+        "source_path": "",
+        "reason": "切片操作（如 [:3]）会调用此方法，生成切片查询集。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "Prefetch",
+        "lines": "2142-2200",
+        "reason": "Prefetch 类负责处理自定义查询集，可能未正确处理切片查询集的状态。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "prefetch_related_objects",
+        "lines": "",
+        "reason": "实际执行预取的内部函数，可能在对 Prefetch 的 queryset 进行进一步操作（如过滤）时，未检查或处理其切片状态。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "CustomPrefetchTests.test_custom_qs",
+        "test_file": "tests/prefetch_related/tests.py",
+        "why_relevant": "该测试广泛使用了 Prefetch 对象和自定义 queryset，包括过滤、select_related 和嵌套 prefetch，展示了 Prefetch 的正常工作模式。",
+        "reusable_parts": [
+          "TestCase 框架、模型导入（Person, House, Room）、Prefetch 对象的构造方式、prefetch_related 的调用模式、assertNumQueries 和 assertEqual 的断言风格。"
+        ],
+        "possible_gap": "该测试中所有传递给 Prefetch 的 queryset 都是未切片的（如 House.objects.all() 或带 filter 的查询集），没有测试切片查询集的情况。"
+      },
+      {
+        "test_name": "QuerySetSupportsPythonIdioms.test_slicing_cannot_filter_queryset_once_sliced",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试直接验证了切片查询集不能再次过滤的行为，并捕获了与 Issue 中相同的错误消息。",
+        "reusable_parts": [
+          "异常断言模式：with self.assertRaisesMessage(TypeError, msg)。",
+          "切片操作的使用：Article.objects.all()[0:5]。"
+        ],
+        "possible_gap": "该测试关注的是 QuerySet 本身的切片后过滤限制，而非 Prefetch 内部使用切片查询集时触发的相同限制。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 CustomPrefetchTests.test_custom_qs 中，Prefetch 的 queryset 参数是未切片的查询集，如 House.objects.all() 或 House.objects.filter(...)。",
+        "target_pattern": "将 queryset 参数变异为切片查询集，如 House.objects.all()[:3]。",
+        "reason": "Issue 表明，当 queryset 是切片查询集时，会触发 'Cannot filter a query once a slice has been taken.' 异常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "在相似测试中，Prefetch 对象被构造并直接传递给 prefetch_related，然后对主查询集求值（如 list(...)）。",
+        "target_pattern": "保持相同的调用链，但确保 Prefetch 内部的 queryset 是切片查询集。",
+        "reason": "Issue 中的触发条件正是 Prefetch 对象包含切片查询集，并在 prefetch_related 求值时出错。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 list(main_queryset) 或对主查询集求值时捕获的异常类型和消息。",
+        "reason": "Issue 明确报告了 AssertionError 和特定错误消息，这是判断缺陷是否触发的直接标志。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "通过 django.db.connection.queries 或 assertNumQueries 观察生成的 SQL 语句数量或内容。",
+        "reason": "可以验证切片是否影响了预取查询的生成，或者是否因为异常导致查询未正常执行。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当 Prefetch 使用切片查询集时，不会引发 'Cannot filter a query once a slice has been taken.' 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的异常消息字符串，除非 Issue 提供了精确措辞。避免断言不相关的 SQL 细节。",
+        "reason": "Issue 的核心是异常被引发。修复后，该异常不应再出现。断言风格应与测试种子 test_slicing_cannot_filter_queryset_once_sliced 一致。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要 Django TestCase 和相关的模型（如 Category 和 Post，或使用现有测试模型如 Person 和 House）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建测试数据，确保相关对象存在，以便预取操作有数据可处理。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "错误消息在 Issue 中是 'AssertionError'，但在相关测试 3 中是 'TypeError'。需要确认实际抛出的异常类型。",
+      "Prefetch 内部处理切片查询集的具体失败点（例如，是在 Prefetch 初始化时，还是在 prefetch_related_objects 内部处理时）尚不明确。",
+      "修复后，切片查询集是否真的能按预期只预取指定数量的对象，还是需要其他调整。"
+    ]
+  }
+}

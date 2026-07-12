@@ -1,0 +1,107 @@
+```json
+{
+    "issue_summary": "DateFormat.Y() 对于年份小于 1000 的情况没有进行零填充。",
+    "trigger_condition": {
+        "text": "使用 DateFormat.Y() 格式化一个年份小于 1000 的日期时间对象。",
+        "evidence": ["Issue 描述：'This doesn't seem to be the case for year < 1000.'"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "对于年份小于 1000 的日期，Y 格式符返回的年份字符串不是四位且零填充的。",
+        "symptom_type": "wrong_return",
+        "evidence": ["Issue 描述：'The Y specifier ... is supposed to always return a four-digit year padded with zeros. This doesn't seem to be the case for year < 1000.'"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "DateFormat.Y() 应该始终返回一个四位数的年份字符串，即使年份小于 1000，也应用零填充至四位。",
+        "evidence": ["Issue 描述：'The Y specifier for django.utils.dateformat.DateFormat is supposed to always return a four-digit year padded with zeros.'"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "django.utils.dateformat.DateFormat.Y",
+            "kind": "method",
+            "source_path": "django/utils/dateformat.py",
+            "reason": "这是 Issue 直接报告的有问题的 API。"
+        },
+        {
+            "name": "django.utils.dateformat.format",
+            "kind": "function",
+            "source_path": "",
+            "reason": "相关测试中用于调用 DateFormat API 的公共接口。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/utils/dateformat.py",
+            "object": "DateFormat.Y",
+            "lines": "315-317",
+            "reason": "源码显示 Y() 方法直接返回 self.data.year，这可能是一个整数，没有进行零填充或格式化。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "DateFormatTests.test_year_before_1000",
+            "test_file": "tests/utils_tests/test_dateformat.py",
+            "why_relevant": "它测试了年份小于 1000 时 'y' 格式符（两位年份）的行为，与当前 Issue 的触发条件（年份 < 1000）和 API（DateFormat）高度相关。",
+            "reusable_parts": ["imports (datetime, dateformat)", "测试类 DateFormatTests", "使用 datetime 构造特定年份的日期对象", "使用 dateformat.format 进行格式化", "assertEqual 断言风格"],
+            "possible_gap": "它测试的是 'y' 格式符（两位年份），而 Issue 是关于 'Y' 格式符（四位年份）。"
+        },
+        {
+            "test_name": "DateFormatTests.test_futuredates",
+            "test_file": "tests/utils_tests/test_dateformat.py",
+            "why_relevant": "它直接测试了 'Y' 格式符，并验证了其输出为四位数字符串。",
+            "reusable_parts": ["imports (datetime, dateformat)", "测试类 DateFormatTests", "使用 datetime 构造日期对象", "使用 dateformat.format 和 'Y' 格式符", "assertEqual 断言风格"],
+            "possible_gap": "它测试的年份是 2100（>=1000），没有覆盖 Issue 中提到的年份小于 1000 的边界情况。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "input",
+            "current_pattern": "相关测试 2 中使用了年份为 2100 的日期对象。",
+            "target_pattern": "使用年份小于 1000 的日期对象，例如 476, 42, 4。",
+            "reason": "Issue 明确指出问题发生在 year < 1000 时。",
+            "confidence": "high"
+        },
+        {
+            "slot": "argument",
+            "current_pattern": "相关测试 1 中使用了格式符 'y'（两位年份）。",
+            "target_pattern": "使用格式符 'Y'（四位年份）。",
+            "reason": "Issue 是关于 'Y' 格式符的。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "return_value",
+            "expression_hint": "dateformat.format(datetime_obj, 'Y') 的返回值",
+            "reason": "Issue 的核心是返回值格式错误，需要观察其字符串长度和内容。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "验证对于年份小于 1000 的日期，'Y' 格式符返回的字符串长度为 4。",
+            "preferred_assertion_style": "equals",
+            "avoid": "断言完整的、具体的四位数字符串（如 '0476'），因为 Issue 没有给出精确的修复后输出。",
+            "reason": "Issue 的核心要求是“四位且零填充”，长度是更稳定的断言目标，避免了猜测具体填充结果。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要使用 datetime 构造年份小于 1000 的日期对象。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "测试类可能需要继承 SimpleTestCase 并使用 @override_settings。",
+            "source": "retrieved_test",
+            "confidence": "medium"
+        }
+    ],
+    "uncertainties": [
+        "对于年份小于 1000 的具体情况（如 1 年或 999 年），Y() 方法当前的确切返回值是什么？",
+        "修复后，对于年份 1，Y() 应该返回 '0001' 还是 '1' 填充为 '0001'？Issue 没有给出具体例子。",
+        "Y() 方法是否应该处理负年份（公元前）？Issue 未提及。"
+    ]
+}
+```

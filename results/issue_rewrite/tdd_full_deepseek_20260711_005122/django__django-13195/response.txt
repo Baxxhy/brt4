@@ -1,0 +1,137 @@
+{
+  "issue_summary": "HttpResponse.delete_cookie() 在删除 cookie 时没有保留原 cookie 的 samesite 属性，可能导致浏览器忽略删除请求并产生警告。",
+  "trigger_condition": {
+    "text": "调用 HttpResponse.delete_cookie() 删除一个设置了 samesite 属性（例如 'Lax'）的 cookie。",
+    "evidence": ["Issue 描述中提到 messages cookie 在 POST 时设置了 SameSite=Lax，但后续 GET 中通过 delete_cookie 删除时没有 SameSite 属性。", "源码片段 1 显示 delete_cookie 方法调用 set_cookie 时没有传递 samesite 参数。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "浏览器控制台出现关于 SameSite 属性的警告，并且 cookie 可能未被正确删除（被浏览器忽略）。",
+    "symptom_type": "warning",
+    "evidence": ["Issue 中引用了 Firefox 的警告信息：'Cookie “messages” will be soon rejected because it has the “sameSite” attribute set to “none” or an invalid value, without the “secure” attribute.'", "Issue 指出如果 cookie 的 key 不以 'Secure' 或 'Host' 开头，Chrome 和 Firefox 可能会忽略通过 delete_cookie 方法设置的 Set-Cookie 头。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "HttpResponse.delete_cookie() 在设置删除 cookie 的 Set-Cookie 头时，应保留原 cookie 的 samesite 属性值。",
+    "evidence": ["Issue 中用户修改的 delete_cookie 代码尝试传递 samesite 参数给 set_cookie。", "相关测试 4 显示 CookieStorage 在删除 cookie 时保留了 SESSION_COOKIE_SAMESITE 设置。", "相关测试 3 表明 set_cookie 方法支持设置 samesite 属性。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "HttpResponseBase.delete_cookie",
+      "kind": "method",
+      "source_path": "django/http/response.py",
+      "reason": "这是 Issue 报告的直接缺陷方法。"
+    },
+    {
+      "name": "HttpResponseBase.set_cookie",
+      "kind": "method",
+      "source_path": "django/http/response.py",
+      "reason": "delete_cookie 内部调用了 set_cookie，需要检查其参数传递。"
+    },
+    {
+      "name": "django.contrib.messages.storage.cookie.CookieStorage",
+      "kind": "class",
+      "source_path": "",
+      "reason": "Issue 中提到 messages 系统使用了 delete_cookie 方法，是触发场景之一。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/http/response.py",
+      "object": "HttpResponseBase.delete_cookie",
+      "lines": "213-220",
+      "reason": "该方法调用 set_cookie 时没有传递 samesite 参数，导致该属性丢失。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "DeleteCookieTests.test_default",
+      "test_file": "tests/responses/test_cookie.py",
+      "why_relevant": "这是测试 delete_cookie 基本行为的测试，可以作为起点。",
+      "reusable_parts": ["HttpResponse 对象构造", "delete_cookie 调用", "对 response.cookies 字典的断言风格"],
+      "possible_gap": "它没有测试删除一个已设置 samesite 属性的 cookie，也没有断言 samesite 属性是否存在。"
+    },
+    {
+      "test_name": "DeleteCookieTests.test_delete_cookie_secure_prefix",
+      "test_file": "tests/responses/test_cookie.py",
+      "why_relevant": "它测试了 delete_cookie 对特定前缀 cookie 的 secure 标志处理，展示了如何测试 delete_cookie 的参数传递逻辑。",
+      "reusable_parts": ["测试 secure 标志的断言方法", "使用 subTest 进行参数化测试的模式"],
+      "possible_gap": "它只关注 secure 标志，不涉及 samesite 属性。"
+    },
+    {
+      "test_name": "SetCookieTests.test_samesite",
+      "test_file": "tests/responses/test_cookie.py",
+      "why_relevant": "它直接测试了 set_cookie 方法对 samesite 参数的支持，展示了如何断言 samesite 属性。",
+      "reusable_parts": ["samesite 参数的合法值测试", "对 response.cookies['example']['samesite'] 的断言模式"],
+      "possible_gap": "它测试的是 set_cookie，不是 delete_cookie。"
+    },
+    {
+      "test_name": "CookieTests.test_cookie_setings",
+      "test_file": "tests/messages_tests/test_cookie.py",
+      "why_relevant": "它测试了消息 cookie 的存储和删除，包括 samesite 属性，并且涉及了 delete_cookie 的使用场景（通过 storage.update）。",
+      "reusable_parts": ["使用 override_settings 配置 SESSION_COOKIE_SAMESITE", "模拟 cookie 消费和删除的流程", "对 cookie 各属性（包括 samesite）的断言"],
+      "possible_gap": "它依赖于特定的 messages 存储后端，且测试的是高层集成行为，而非直接测试 HttpResponse.delete_cookie。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "测试在默认配置下运行，SESSION_COOKIE_SAMESITE 可能为 None 或未设置。",
+      "target_pattern": "通过 override_settings 将 SESSION_COOKIE_SAMESITE 设置为 'Lax' 或 'Strict'。",
+      "reason": "Issue 表明当原 cookie 有 samesite 属性时，删除操作应保留它。设置此配置可以模拟该场景。",
+      "confidence": "medium"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "相似测试直接调用 delete_cookie 并断言其设置的属性。",
+      "target_pattern": "先调用 set_cookie 设置一个带有 samesite 属性的 cookie，再调用 delete_cookie 删除同一个 cookie。",
+      "reason": "这更贴近 Issue 中描述的真实场景：一个已存在的、带有 samesite 属性的 cookie 被删除。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "delete_cookie 调用时不传递 samesite 参数（当前 API 不支持）。",
+      "target_pattern": "Issue 中用户修改的代码暗示可能需要修改 delete_cookie 的签名或内部逻辑以传递 samesite。对于测试生成，变异点在于观测 delete_cookie 的输出是否包含了预期的 samesite 值。",
+      "reason": "缺陷在于 delete_cookie 内部没有将 samesite 信息传递给 set_cookie。测试需要验证输出是否纠正了这一点。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "state",
+      "expression_hint": "response.cookies[key] 字典的内容，特别是 'samesite' 键是否存在及其值。",
+      "reason": "这是判断 delete_cookie 是否设置了 samesite 属性的直接观测点。"
+    },
+    {
+      "kind": "warning",
+      "expression_hint": "运行测试时是否产生关于 SameSite 的警告（可能需要捕获日志或 warnings）。",
+      "reason": "Issue 的核心症状是浏览器警告，观测警告有助于确认问题。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证调用 delete_cookie 后，生成的 Set-Cookie 头中包含了与配置或原 cookie 一致的 samesite 属性值。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的、格式化的 Set-Cookie 字符串，因为格式可能变化。",
+      "reason": "应直接断言 response.cookies 字典中对应键的 'samesite' 项的值，这与现有测试风格一致且稳定。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 SimpleTestCase 或 TestCase。可能需要使用 override_settings 来设置 SESSION_COOKIE_SAMESITE。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "构造一个 HttpResponse 对象。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "delete_cookie 方法是否应该从某个地方（如原 cookie 或全局设置）自动获取 samesite 值，还是需要调用者显式传递。Issue 中的修改使用了 SESSION_COOKIE_SAMESITE，但报告者指出这不适合所有情况。",
+    "除了 samesite，secure 标志的逻辑是否也需要调整以符合浏览器对 'SameSite=None' 必须 Secure 的要求。Issue 提到了这一点，但焦点在 samesite 的缺失。",
+    "在修复版本中，delete_cookie 的 API 签名是否会改变（增加 samesite 参数）。"
+  ]
+}

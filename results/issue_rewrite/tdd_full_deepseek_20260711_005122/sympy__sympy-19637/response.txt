@@ -1,0 +1,102 @@
+{
+  "issue_summary": "调用 kernS 函数处理特定字符串时，因局部变量 kern 未定义而引发 UnboundLocalError。",
+  "trigger_condition": {
+    "text": "调用 kernS 函数，传入一个包含括号但不包含引号的字符串，且该字符串在处理过程中需要引入一个唯一的 kern 符号（即字符串中包含空格）。",
+    "evidence": ["Issue 中提供的输入字符串为 \"(2*x)/(x-1)\"。", "源码片段 1 显示，当字符串包含 '(' 且不包含引号，并且处理后的字符串中包含空格时，会尝试生成一个唯一的 kern 符号并替换空格。", "源码片段 1 第 85 行有 `hit = kern in s`，但若 `' ' in s` 条件不满足，则 `kern` 变量可能未被赋值。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "UnboundLocalError: local variable 'kern' referenced before assignment",
+    "symptom_type": "exception",
+    "evidence": ["Issue 中明确给出了此异常信息。", "源码片段 1 第 85 行 `hit = kern in s` 可能在 `kern` 未定义时执行。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "kernS 函数应能正确处理输入字符串 \"(2*x)/(x-1)\" 并返回一个 sympy 表达式，而不引发 UnboundLocalError。",
+    "evidence": ["Issue 中调用 kernS 的目的是将字符串转换为表达式，这表明正常行为应是成功转换。", "相关测试 1 展示了 kernS 处理各种字符串（包括带括号的）的正常用例。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "kernS",
+      "kind": "function",
+      "source_path": "sympy/core/sympify.py",
+      "reason": "Issue 中直接调用了此函数并触发了错误。"
+    },
+    {
+      "name": "sympify",
+      "kind": "function",
+      "source_path": "sympy/core/sympify.py",
+      "reason": "kernS 函数内部调用了 sympify 来最终转换字符串。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/core/sympify.py",
+      "object": "kernS",
+      "lines": "442-541",
+      "reason": "Issue 中的错误指向此函数，且源码显示变量 `kern` 的赋值依赖于条件 `if ' ' in s:`，若条件不满足，后续 `hit = kern in s` 会引用未定义的变量。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_kernS",
+      "test_file": "sympy/core/tests/test_sympify.py",
+      "why_relevant": "这是专门测试 kernS 函数的测试，包含了多种输入用例，是生成新测试的天然起点。",
+      "reusable_parts": ["从 sympy.core.sympify 导入 kernS", "使用 assert 验证表达式结果", "构造包含括号的字符串输入"],
+      "possible_gap": "现有测试用例可能没有覆盖到触发 `' ' in s` 条件为 False 但 `hit = kern in s` 仍会执行的路径，即 Issue 中报告的特定输入。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试 1 中的输入字符串通常较复杂，包含多个运算符和括号，例如 \"-1 - 2*(-(-x + 1/x)/(x*(x - 1/x)**2) - 1/(x*(x - 1/x)))\"。",
+      "target_pattern": "使用 Issue 中提供的更简单的输入字符串 \"(2*x)/(x-1)\"。",
+      "reason": "这个简单字符串可能使得 kernS 内部的逻辑在处理空格和 kern 符号生成时走入不同分支，从而暴露变量未定义的缺陷。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "调用 kernS('(2*x)/(x-1)') 时是否引发 UnboundLocalError。",
+      "reason": "Issue 的核心症状就是这个异常，直接观测它即可判断缺陷是否被触发。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "在无异常情况下，kernS 的返回值类型和基本结构（例如是否为 sympy 表达式）。",
+      "reason": "确认函数在修复后能正常返回表达式，而非因错误路径返回其他结果。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "使用输入 \"(2*x)/(x-1)\" 调用 kernS 不应引发 UnboundLocalError。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言返回表达式的精确字符串表示，因为具体形式可能因 sympy 版本或内部简化而变。",
+      "reason": "Issue 的核心是异常，因此断言不引发该异常是首要目标。修复后，函数应正常返回。"
+    },
+    {
+      "assertion_goal": "kernS('(2*x)/(x-1)') 应成功返回一个 sympy 表达式。",
+      "preferred_assertion_style": "isinstance",
+      "avoid": "断言返回的表达式完全等于某个特定值，因为 Issue 未指定精确结果。",
+      "reason": "这验证了函数的基本功能在修复后是正常的。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要从 sympy.core.sympify 导入 kernS。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要 sympy 的基础符号（如 x, y）用于表达式构造或比较，但当前 Issue 输入是纯字符串。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "输入字符串 \"(2*x)/(x-1)\" 在 kernS 函数内部处理时，具体是哪一步导致 `' ' in s` 条件为假，从而跳过了 `kern` 变量的赋值。",
+    "除了 UnboundLocalError，这个输入是否还会导致其他潜在的错误或非预期结果。",
+    "修复后的预期返回值的确切形式是什么，Issue 中没有说明。"
+  ]
+}

@@ -1,0 +1,422 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+.subs on coth(log(tan(x))) errors for certain integral values
+    >>> from sympy import *
+    >>> x = Symbol('x')
+    >>> e = coth(log(tan(x)))
+    >>> print(e.subs(x, 2))
+    ...
+    File "C:\Users\E\Desktop\sympy-master\sympy\functions\elementary\hyperbolic.py", line 590, in eval
+        if cotm is S.ComplexInfinity:
+    NameError: name 'cotm' is not defined
+
+Fails for 2, 3, 5, 6, 8, 9, 11, 12, 13, 15, 18, ... etc.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/functions/elementary/hyperbolic.py
+对象名称：coth
+节点类型：class
+父节点：hyperbolic
+行号范围：537-667
+代码：
+class coth(HyperbolicFunction):
+    r"""
+    The hyperbolic cotangent function, `\frac{\cosh(x)}{\sinh(x)}`.
+
+    * coth(x) -> Returns the hyperbolic cotangent of x
+    """
+    def fdiff(self, argindex=1):
+    def inverse(self, argindex=1):
+    @classmethod
+    def eval(cls, arg):
+    @staticmethod
+    @cacheit
+    def taylor_term(n, x, *previous_terms):
+    def _eval_conjugate(self):
+    def as_real_imag(self, deep=True, **hints):
+    def _eval_rewrite_as_tractable(self, arg):
+    def _eval_rewrite_as_exp(self, arg):
+    def _eval_rewrite_as_sinh(self, arg):
+    def _eval_rewrite_as_cosh(self, arg):
+    def _eval_rewrite_as_tanh(self, arg):
+    def _eval_as_leading_term(self, x):
+
+
+【源码片段 2】
+文件路径：sympy/plotting/intervalmath/lib_interval.py
+对象名称：log
+节点类型：top-level function
+父节点：lib_interval
+行号范围：36-54
+代码：
+def log(x):
+    """evaluates the natural logarithm of an interval"""
+    np = import_module('numpy')
+    if isinstance(x, (int, float)):
+        if x <= 0:
+            return interval(-np.inf, np.inf, is_valid=False)
+        else:
+            return interval(np.log(x))
+    elif isinstance(x, interval):
+        if not x.is_valid:
+            return interval(-np.inf, np.inf, is_valid=x.is_valid)
+        elif x.end <= 0:
+            return interval(-np.inf, np.inf, is_valid=False)
+        elif x.start <= 0:
+            return interval(-np.inf, np.inf, is_valid=None)
+
+        return interval(np.log(x.start), np.log(x.end))
+    else:
+        raise NotImplementedError
+
+
+【源码片段 3】
+文件路径：sympy/plotting/intervalmath/lib_interval.py
+对象名称：tan
+节点类型：top-level function
+父节点：lib_interval
+行号范围：152-154
+代码：
+def tan(x):
+    """Evaluates the tan of an interval"""
+    return sin(x) / cos(x)
+
+
+【源码片段 4】
+文件路径：sympy/assumptions/tests/test_query.py
+对象名称：Symbol
+节点类型：class_function
+父节点：MyAskHandler
+行号范围：2008-2009
+代码：
+        def Symbol(expr, assumptions):
+            return True
+
+
+【源码片段 5】
+文件路径：sympy/physics/vector/dyadic.py
+对象名称：subs
+节点类型：class_function
+父节点：Dyadic
+行号范围：503-520
+代码：
+    def subs(self, *args, **kwargs):
+        """Substituion on the Dyadic.
+
+        Examples
+        ========
+
+        >>> from sympy.physics.vector import ReferenceFrame
+        >>> from sympy import Symbol
+        >>> N = ReferenceFrame('N')
+        >>> s = Symbol('s')
+        >>> a = s * (N.x|N.x)
+        >>> a.subs({s: 2})
+        2*(N.x|N.x)
+
+        """
+
+        return sum([Dyadic([(v[0].subs(*args, **kwargs), v[1], v[2])])
+                    for v in self.args], Dyadic(0))
+
+
+【源码片段 6】
+文件路径：sympy/functions/elementary/hyperbolic.py
+对象名称：eval
+节点类型：class_function
+父节点：coth
+行号范围：557-607
+代码：
+    def eval(cls, arg):
+        from sympy import cot
+        arg = sympify(arg)
+
+        if arg.is_Number:
+            if arg is S.NaN:
+                return S.NaN
+            elif arg is S.Infinity:
+                return S.One
+            elif arg is S.NegativeInfinity:
+                return S.NegativeOne
+            elif arg is S.Zero:
+                return S.ComplexInfinity
+            elif arg.is_negative:
+                return -cls(-arg)
+        else:
+            if arg is S.ComplexInfinity:
+                return S.NaN
+
+            i_coeff = arg.as_coefficient(S.ImaginaryUnit)
+
+            if i_coeff is not None:
+                if _coeff_isneg(i_coeff):
+                    return S.ImaginaryUnit * cot(-i_coeff)
+                return -S.ImaginaryUnit * cot(i_coeff)
+            else:
+                if _coeff_isneg(arg):
+                    return -cls(-arg)
+
+            if arg.is_Add:
+                x, m = _peeloff_ipi(arg)
+                if m:
+                    cothm = coth(m)
+                    if cotm is S.ComplexInfinity:
+                        return coth(x)
+                    else: # cothm == 0
+                        return tanh(x)
+
+            if arg.func == asinh:
+                x = arg.args[0]
+                return sqrt(1 + x**2)/x
+
+            if arg.func == acosh:
+                x = arg.args[0]
+                return x/(sqrt(x - 1) * sqrt(x + 1))
+
+            if arg.func == atanh:
+                return 1/arg.args[0]
+
+            if arg.func == acoth:
+                return arg.args[0]
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/functions/elementary/tests/test_hyperbolic.py
+测试名称：test_coth
+测试代码：
+def test_coth():
+    x, y = symbols('x,y')
+
+    k = Symbol('k', integer=True)
+
+    assert coth(nan) == nan
+    assert coth(zoo) == nan
+
+    assert coth(oo) == 1
+    assert coth(-oo) == -1
+
+    assert coth(0) == coth(0)
+    assert coth(0) == zoo
+    assert coth(1) == coth(1)
+    assert coth(-1) == -coth(1)
+
+    assert coth(x) == coth(x)
+    assert coth(-x) == -coth(x)
+
+    assert coth(pi*I) == -I*cot(pi)
+    assert coth(-pi*I) == cot(pi)*I
+
+    assert coth(2**1024 * E) == coth(2**1024 * E)
+    assert coth(-2**1024 * E) == -coth(2**1024 * E)
+
+    assert coth(pi*I) == -I*cot(pi)
+    assert coth(-pi*I) == I*cot(pi)
+    assert coth(2*pi*I) == -I*cot(2*pi)
+    assert coth(-2*pi*I) == I*cot(2*pi)
+    assert coth(-3*10**73*pi*I) == I*cot(3*10**73*pi)
+    assert coth(7*10**103*pi*I) == -I*cot(7*10**103*pi)
+
+    assert coth(pi*I/2) == 0
+    assert coth(-pi*I/2) == 0
+    assert coth(5*pi*I/2) == 0
+    assert coth(7*pi*I/2) == 0
+
+    assert coth(pi*I/3) == -I/sqrt(3)
+    assert coth(-2*pi*I/3) == -I/sqrt(3)
+
+    assert coth(pi*I/4) == -I
+    assert coth(-pi*I/4) == I
+    assert coth(17*pi*I/4) == -I
+    assert coth(-3*pi*I/4) == -I
+
+    assert coth(pi*I/6) == -sqrt(3)*I
+    assert coth(-pi*I/6) == sqrt(3)*I
+    assert coth(7*pi*I/6) == -sqrt(3)*I
+    assert coth(-5*pi*I/6) == -sqrt(3)*I
+
+    assert coth(pi*I/105) == -cot(pi/105)*I
+    assert coth(-pi*I/105) == cot(pi/105)*I
+
+    assert coth(2 + 3*I) == coth(2 + 3*I)
+
+    assert coth(x*I) == -cot(x)*I
+
+    assert coth(k*pi*I) == -cot(k*pi)*I
+    assert coth(17*k*pi*I) == -cot(17*k*pi)*I
+
+    assert coth(k*pi*I) == -cot(k*pi)*I
+
+【相关测试 2】
+测试文件：sympy/functions/elementary/tests/test_hyperbolic.py
+测试名称：test_coth_series
+测试代码：
+def test_coth_series():
+    x = Symbol('x')
+    assert coth(x).series(x, 0, 8) == \
+        1/x + x/3 - x**3/45 + 2*x**5/945 - x**7/4725 + O(x**8)
+
+【相关测试 3】
+测试文件：sympy/functions/elementary/tests/test_hyperbolic.py
+测试名称：test_coth_rewrite
+测试代码：
+def test_coth_rewrite():
+    x = Symbol('x')
+    assert coth(x).rewrite(exp) == (exp(x) + exp(-x))/(exp(x) - exp(-x)) \
+        == coth(x).rewrite('tractable')
+    assert coth(x).rewrite(sinh) == -I*sinh(I*pi/2 - x)/sinh(x)
+    assert coth(x).rewrite(cosh) == -I*cosh(x)/cosh(I*pi/2 - x)
+    assert coth(x).rewrite(tanh) == 1/tanh(x)
+
+【相关测试 4】
+测试文件：sympy/functions/elementary/tests/test_trigonometric.py
+测试名称：test_tan_subs
+测试代码：
+def test_tan_subs():
+    assert tan(x).subs(tan(x), y) == y
+    assert tan(x).subs(x, y) == tan(y)
+    assert tan(x).subs(x, S.Pi/2) == zoo
+    assert tan(x).subs(x, 3*S.Pi/2) == zoo
+
+【相关测试 5】
+测试文件：sympy/functions/elementary/tests/test_hyperbolic.py
+测试名称：test_derivs
+测试代码：
+def test_derivs():
+    x = Symbol('x')
+    assert coth(x).diff(x) == -sinh(x)**(-2)
+    assert sinh(x).diff(x) == cosh(x)
+    assert cosh(x).diff(x) == sinh(x)
+    assert tanh(x).diff(x) == -tanh(x)**2 + 1
+    assert csch(x).diff(x) == -coth(x)*csch(x)
+    assert sech(x).diff(x) == -tanh(x)*sech(x)
+    assert acoth(x).diff(x) == 1/(-x**2 + 1)
+    assert asinh(x).diff(x) == 1/sqrt(x**2 + 1)
+    assert acosh(x).diff(x) == 1/sqrt(x**2 - 1)
+    assert atanh(x).diff(x) == 1/(-x**2 + 1)
+    assert asech(x).diff(x) == -1/(x*sqrt(1 - x**2))
+    assert acsch(x).diff(x) == -1/(x**2*sqrt(1 + x**(-2)))
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

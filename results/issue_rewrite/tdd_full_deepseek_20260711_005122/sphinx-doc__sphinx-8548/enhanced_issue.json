@@ -1,0 +1,261 @@
+{
+  "instance_id": "sphinx-doc__sphinx-8548",
+  "issue_summary": "autodoc 的 inherited-members 选项对继承的属性（数据成员）不起作用。",
+  "trigger_condition": {
+    "text": "使用 autodoc 生成文档时，为类启用 `inherited-members` 选项，并且该类包含从基类继承的属性（数据成员）。",
+    "evidence": [
+      "Issue 标题和描述指出 inherited-members won't work for inherited attributes (data members)。",
+      "相关测试 4 展示了为类启用 `inherited-members: True` 的场景。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "继承的属性（数据成员）的文档字符串没有被正确生成或显示。",
+    "symptom_type": "unknown",
+    "evidence": [
+      "Issue 描述指出 autodoc 使用 (namespace, attrname) 作为搜索键查找缓存的文档字符串，但没有检查基类的命名空间。"
+    ],
+    "confidence": "medium"
+  },
+  "expected_behavior": {
+    "text": "当启用 `inherited-members` 选项时，从基类继承的属性（数据成员）的文档应该被正确生成和显示。",
+    "evidence": [
+      "Issue 标题暗示 inherited-members 应该对 inherited attributes 起作用。",
+      "相关测试 4 展示了继承的实例变量（如 attr1, attr2）被期望在文档中列出。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "do_autodoc",
+      "kind": "function",
+      "source_path": "",
+      "reason": "多个相关测试都使用此函数来执行 autodoc 并获取输出，是测试 autodoc 行为的主要接口。"
+    },
+    {
+      "name": "autodoc_inherit_docstrings",
+      "kind": "config",
+      "source_path": "",
+      "reason": "相关测试 3 涉及此配置，它控制是否继承文档字符串，与 inherited-members 功能相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "",
+      "object": "",
+      "lines": "",
+      "reason": "Issue 描述提到 autodoc 搜索缓存文档字符串时使用 (namespace, attrname) 作为键，但没有检查基类命名空间。具体源码位置未知。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_autodoc_inherited_members",
+      "test_file": "tests/test_ext_autodoc.py",
+      "why_relevant": "此测试直接验证 `inherited-members` 选项对继承的方法（method）是否有效，与 Issue 主题高度相关。",
+      "reusable_parts": [
+        "使用 `do_autodoc` 函数",
+        "使用 `app` fixture",
+        "使用 `testroot='ext-autodoc'`",
+        "断言风格：检查输出列表中的片段"
+      ],
+      "possible_gap": "此测试只检查了继承的方法（method），没有检查继承的属性（attribute/data member），而这正是 Issue 报告的问题。"
+    },
+    {
+      "test_name": "test_autodoc_typed_inherited_instance_variables",
+      "test_file": "tests/test_ext_autodoc.py",
+      "why_relevant": "此测试验证了 `inherited-members: True` 对继承的实例变量（typed instance variables）的文档生成，直接涉及继承的属性。",
+      "reusable_parts": [
+        "使用 `do_autodoc` 函数",
+        "使用 `app` fixture",
+        "使用 `testroot='ext-autodoc'`",
+        "设置 `undoc-members: True`",
+        "断言风格：检查完整的输出列表"
+      ],
+      "possible_gap": "此测试针对的是有类型注解的实例变量，Issue 可能涉及更一般的属性（包括无类型注解的）。此外，该测试似乎运行正常（列出了继承的属性），这可能意味着它测试的场景不是缺陷触发路径，或者缺陷存在于其他类型的属性上。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试 1 和 4 中，`do_autodoc` 的目标是类（如 'target.inheritance.Derived', 'target.typed_vars.Derived'）。",
+      "target_pattern": "目标类应包含从基类继承的、非类型注解的普通属性（数据成员）。",
+      "reason": "Issue 明确指出 inherited attributes (data members) 有问题，而现有测试可能只覆盖了方法或有类型注解的变量。",
+      "confidence": "medium"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "相关测试 4 中使用了 `inherited-members: True` 和 `undoc-members: True`。",
+      "target_pattern": "可能需要测试 `inherited-members` 为 `None`（默认？）或 `True` 时，对普通继承属性的行为。",
+      "reason": "Issue 没有指定具体的配置值，只提到 `inherited-members` 选项。需要覆盖不同的配置值以触发缺陷。",
+      "confidence": "low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "`do_autodoc` 函数的返回值（actual），特别是其中关于继承属性的部分。",
+      "reason": "缺陷表现为继承属性的文档缺失或错误，直接观察 autodoc 的输出是判断问题是否触发的关键。"
+    },
+    {
+      "kind": "cache",
+      "expression_hint": "autodoc 内部用于查找文档字符串的缓存键（namespace, attrname）以及是否包含基类命名空间。",
+      "reason": "Issue 明确指出缺陷原因是搜索缓存时没有检查基类命名空间。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证生成的文档中包含了从基类继承的特定属性（数据成员）的条目。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的、具体的输出字符串相等，因为文档格式可能变化。",
+      "reason": "Issue 的核心是继承的属性是否出现，而不是其精确格式。使用片段包含断言更稳定。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 `app` fixture 和 `testroot='ext-autodoc'` 来创建 Sphinx 应用并加载测试目标模块。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要定义包含继承属性的测试目标类（例如在 `target/` 目录下的模块中）。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "缺陷是否只影响特定类型的继承属性（例如，无类型注解的 vs 有类型注解的）。",
+    "`inherited-members` 选项的具体值（True, None, \"Base\" 等）中，哪些会触发缺陷。",
+    "导致缺陷的确切代码位置和调用链。",
+    "修复后的正确输出具体是什么样子（完整的文档字符串格式）。"
+  ],
+  "raw": {
+    "issue_summary": "autodoc 的 inherited-members 选项对继承的属性（数据成员）不起作用。",
+    "trigger_condition": {
+      "text": "使用 autodoc 生成文档时，为类启用 `inherited-members` 选项，并且该类包含从基类继承的属性（数据成员）。",
+      "evidence": [
+        "Issue 标题和描述指出 inherited-members won't work for inherited attributes (data members)。",
+        "相关测试 4 展示了为类启用 `inherited-members: True` 的场景。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "继承的属性（数据成员）的文档字符串没有被正确生成或显示。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述指出 autodoc 使用 (namespace, attrname) 作为搜索键查找缓存的文档字符串，但没有检查基类的命名空间。"
+      ],
+      "confidence": "medium"
+    },
+    "expected_behavior": {
+      "text": "当启用 `inherited-members` 选项时，从基类继承的属性（数据成员）的文档应该被正确生成和显示。",
+      "evidence": [
+        "Issue 标题暗示 inherited-members 应该对 inherited attributes 起作用。",
+        "相关测试 4 展示了继承的实例变量（如 attr1, attr2）被期望在文档中列出。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "do_autodoc",
+        "kind": "function",
+        "source_path": "",
+        "reason": "多个相关测试都使用此函数来执行 autodoc 并获取输出，是测试 autodoc 行为的主要接口。"
+      },
+      {
+        "name": "autodoc_inherit_docstrings",
+        "kind": "config",
+        "source_path": "",
+        "reason": "相关测试 3 涉及此配置，它控制是否继承文档字符串，与 inherited-members 功能相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 描述提到 autodoc 搜索缓存文档字符串时使用 (namespace, attrname) 作为键，但没有检查基类命名空间。具体源码位置未知。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_autodoc_inherited_members",
+        "test_file": "tests/test_ext_autodoc.py",
+        "why_relevant": "此测试直接验证 `inherited-members` 选项对继承的方法（method）是否有效，与 Issue 主题高度相关。",
+        "reusable_parts": [
+          "使用 `do_autodoc` 函数",
+          "使用 `app` fixture",
+          "使用 `testroot='ext-autodoc'`",
+          "断言风格：检查输出列表中的片段"
+        ],
+        "possible_gap": "此测试只检查了继承的方法（method），没有检查继承的属性（attribute/data member），而这正是 Issue 报告的问题。"
+      },
+      {
+        "test_name": "test_autodoc_typed_inherited_instance_variables",
+        "test_file": "tests/test_ext_autodoc.py",
+        "why_relevant": "此测试验证了 `inherited-members: True` 对继承的实例变量（typed instance variables）的文档生成，直接涉及继承的属性。",
+        "reusable_parts": [
+          "使用 `do_autodoc` 函数",
+          "使用 `app` fixture",
+          "使用 `testroot='ext-autodoc'`",
+          "设置 `undoc-members: True`",
+          "断言风格：检查完整的输出列表"
+        ],
+        "possible_gap": "此测试针对的是有类型注解的实例变量，Issue 可能涉及更一般的属性（包括无类型注解的）。此外，该测试似乎运行正常（列出了继承的属性），这可能意味着它测试的场景不是缺陷触发路径，或者缺陷存在于其他类型的属性上。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 和 4 中，`do_autodoc` 的目标是类（如 'target.inheritance.Derived', 'target.typed_vars.Derived'）。",
+        "target_pattern": "目标类应包含从基类继承的、非类型注解的普通属性（数据成员）。",
+        "reason": "Issue 明确指出 inherited attributes (data members) 有问题，而现有测试可能只覆盖了方法或有类型注解的变量。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 4 中使用了 `inherited-members: True` 和 `undoc-members: True`。",
+        "target_pattern": "可能需要测试 `inherited-members` 为 `None`（默认？）或 `True` 时，对普通继承属性的行为。",
+        "reason": "Issue 没有指定具体的配置值，只提到 `inherited-members` 选项。需要覆盖不同的配置值以触发缺陷。",
+        "confidence": "low"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "`do_autodoc` 函数的返回值（actual），特别是其中关于继承属性的部分。",
+        "reason": "缺陷表现为继承属性的文档缺失或错误，直接观察 autodoc 的输出是判断问题是否触发的关键。"
+      },
+      {
+        "kind": "cache",
+        "expression_hint": "autodoc 内部用于查找文档字符串的缓存键（namespace, attrname）以及是否包含基类命名空间。",
+        "reason": "Issue 明确指出缺陷原因是搜索缓存时没有检查基类命名空间。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证生成的文档中包含了从基类继承的特定属性（数据成员）的条目。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、具体的输出字符串相等，因为文档格式可能变化。",
+        "reason": "Issue 的核心是继承的属性是否出现，而不是其精确格式。使用片段包含断言更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 `app` fixture 和 `testroot='ext-autodoc'` 来创建 Sphinx 应用并加载测试目标模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要定义包含继承属性的测试目标类（例如在 `target/` 目录下的模块中）。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否只影响特定类型的继承属性（例如，无类型注解的 vs 有类型注解的）。",
+      "`inherited-members` 选项的具体值（True, None, \"Base\" 等）中，哪些会触发缺陷。",
+      "导致缺陷的确切代码位置和调用链。",
+      "修复后的正确输出具体是什么样子（完整的文档字符串格式）。"
+    ]
+  }
+}

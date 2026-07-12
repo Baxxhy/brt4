@@ -1,0 +1,160 @@
+```json
+{
+    "issue_summary": "PythonCodePrinter 不支持将 SymPy 的 Min 和 Max 函数转换为 Python 代码。",
+    "trigger_condition": {
+        "text": "使用 pycode 函数或 PythonCodePrinter 的 doprint 方法处理包含 Min 或 Max 函数的 SymPy 表达式。",
+        "evidence": ["Issue 中的示例代码：`print(pycode(c))` 其中 `c = Min(a,b)`。", "相关测试 1 展示了使用 PythonCodePrinter.doprint 处理各种表达式。"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "生成的 Python 代码包含注释 `# Not supported in Python:` 和 `# Min`，并直接输出原始的 SymPy 函数名（如 `Min(a, b)`），而不是有效的 Python 内置函数 `min(a, b)`。",
+        "symptom_type": "wrong_return",
+        "evidence": ["Issue 中的输出示例：`# Not supported in Python:\n  # Min\nMin(a, b)`。", "源码片段 1 显示 `_print_lowergamma = CodePrinter._print_not_supported`，暗示未实现的方法会回退到不支持的行为。"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "PythonCodePrinter 应能正确地将 SymPy 的 Min 和 Max 函数分别转换为 Python 的内置函数 `min` 和 `max` 调用。",
+        "evidence": ["Issue 中建议的修复代码：`return \"min({})\".format(...)` 和 `return \"max({})\".format(...)`。", "相关测试 3 和 4 展示了其他打印机（如 C 和 C++）对 Min/Max 的正确转换模式。", "相关测试 5 展示了 MathML 打印机的正确输出模式。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "pycode",
+            "kind": "function",
+            "source_path": "sympy/printing/pycode.py",
+            "reason": "Issue 中直接调用的函数，用于将 SymPy 表达式转换为 Python 代码字符串。"
+        },
+        {
+            "name": "PythonCodePrinter.doprint",
+            "kind": "method",
+            "source_path": "sympy/printing/pycode.py",
+            "reason": "底层打印方法，用于生成代码字符串，相关测试 1 中大量使用。"
+        },
+        {
+            "name": "PythonCodePrinter._print_Min",
+            "kind": "method",
+            "source_path": "sympy/printing/pycode.py",
+            "reason": "Issue 指出需要添加此方法来处理 Min 函数。"
+        },
+        {
+            "name": "PythonCodePrinter._print_Max",
+            "kind": "method",
+            "source_path": "sympy/printing/pycode.py",
+            "reason": "Issue 指出需要添加此方法来处理 Max 函数。"
+        },
+        {
+            "name": "sympy.Min",
+            "kind": "class",
+            "source_path": "sympy/functions/elementary/miscellaneous.py",
+            "reason": "Issue 中涉及的 SymPy 函数，需要被正确打印。"
+        },
+        {
+            "name": "sympy.Max",
+            "kind": "class",
+            "source_path": "sympy/functions/elementary/miscellaneous.py",
+            "reason": "Issue 中涉及的 SymPy 函数，需要被正确打印。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "sympy/printing/pycode.py",
+            "object": "PythonCodePrinter",
+            "lines": "425-471",
+            "reason": "这是负责 Python 代码打印的类，但根据 Issue 和源码片段 1，它缺少 `_print_Min` 和 `_print_Max` 方法。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_PythonCodePrinter",
+            "test_file": "sympy/printing/tests/test_pycode.py",
+            "why_relevant": "这是直接测试 PythonCodePrinter 的测试，包含了使用 doprint 方法处理各种 SymPy 表达式（如 And, Or, Piecewise）并验证输出的模式。",
+            "reusable_parts": ["导入：`from sympy.printing.pycode import PythonCodePrinter`", "对象构造：`prntr = PythonCodePrinter()`", "API 调用模式：`prntr.doprint(expr)`", "assert 风格：直接比较输出字符串。"],
+            "possible_gap": "该测试目前没有包含对 Min 或 Max 表达式的测试用例，因此无法复现 Issue。"
+        },
+        {
+            "test_name": "test_ccode_Max_Min",
+            "test_file": "sympy/printing/tests/test_c.py",
+            "why_relevant": "它测试了 C 语言打印机对 Max 和 Min 的处理，展示了如何为特定打印机添加对 Min/Max 的支持，并验证了正确的输出模式。",
+            "reusable_parts": ["测试用例构造模式：使用 `Max(x, 0)` 和 `Min(x, 0, sqrt(x))` 等表达式。", "assert 风格：验证输出字符串是否匹配预期模式。"],
+            "possible_gap": "它测试的是 C 语言打印机（`ccode`），而不是 Python 打印机（`pycode` 或 `PythonCodePrinter`）。"
+        },
+        {
+            "test_name": "test_Min_Max",
+            "test_file": "sympy/utilities/tests/test_lambdify.py",
+            "why_relevant": "它测试了 Min 和 Max 函数通过 lambdify 在数值计算中的行为，证明了 Min/Max 作为 SymPy 函数本身是功能正常的。",
+            "reusable_parts": ["表达式构造：`Min(x, y, z)` 和 `Max(x, y, z)`。", "assert 风格：使用 lambdify 进行数值计算并比较结果。"],
+            "possible_gap": "它测试的是 lambdify 的数值计算功能，而不是代码打印功能。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "input",
+            "current_pattern": "相似测试 test_PythonCodePrinter 中测试了多种表达式输入，如 `x**y`, `Mod(x,2)`, `And(x,y)`, `Piecewise(...)`。",
+            "target_pattern": "将输入表达式替换为包含 `Min` 或 `Max` 的表达式，例如 `Min(a, b)` 或 `Max(x, y, z)`。",
+            "reason": "Issue 明确指出当前缺陷在输入包含 Min 或 Max 函数时触发。",
+            "confidence": "high"
+        },
+        {
+            "slot": "call_chain",
+            "current_pattern": "在 test_PythonCodePrinter 中，直接调用 `prntr.doprint(expr)`。",
+            "target_pattern": "保持相同的调用链，但传入 Min/Max 表达式。也可以考虑调用顶层的 `pycode(expr)` 函数。",
+            "reason": "Issue 示例使用了 `pycode(c)`，而底层都涉及 PythonCodePrinter 的打印逻辑。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "return_value",
+            "expression_hint": "`prntr.doprint(Min(a, b))` 或 `pycode(Min(a, b))` 的返回值字符串。",
+            "reason": "Issue 的核心错误现象是返回值字符串不正确（包含不支持注释和原始函数名）。"
+        },
+        {
+            "kind": "warning",
+            "expression_hint": "调用过程中是否产生任何警告（如 `UserWarning`）。",
+            "reason": "某些打印机的 `_print_not_supported` 方法可能会发出警告。"
+        },
+        {
+            "kind": "repr",
+            "expression_hint": "`repr(prntr.doprint(Min(a, b)))` 或直接观察输出字符串的格式。",
+            "reason": "有助于确认输出中是否包含 `# Not supported` 注释或原始的 `Min`/`Max` 字样。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "生成的 Python 代码字符串应包含有效的 Python 内置函数调用 `min(...)` 或 `max(...)`，且不应包含 `# Not supported` 注释或原始的 SymPy 函数名 `Min`/`Max`。",
+            "preferred_assertion_style": "not_contains_fragment",
+            "avoid": "断言完整的输出字符串完全等于某个特定字符串（因为参数顺序可能变化）。避免断言不相关的导入或格式细节。",
+            "reason": "修复后，输出应是一个有效的 Python 表达式。断言不包含错误标记（注释和原始函数名）比断言完整字符串更稳定，且与 Issue 描述的错误现象直接对应。"
+        },
+        {
+            "assertion_goal": "生成的 Python 代码字符串应能通过 `eval` 安全执行（在适当符号替换后）并产生与 SymPy 的 Min/Max 函数语义一致的结果。",
+            "preferred_assertion_style": "before_after_relation",
+            "avoid": "直接对未定义符号进行 `eval` 可能导致错误。避免复杂的数值验证，除非使用 lambdify。",
+            "reason": "这验证了生成代码的功能正确性，而不仅仅是格式正确。可以借鉴 test_Min_Max 中 lambdify 的验证思路。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要导入 `sympy` 相关符号和函数（如 `symbols`, `Min`, `Max`）以及打印机类（`PythonCodePrinter`, `pycode`）。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "测试可以是一个简单的函数，不需要复杂的 fixture 或 TestCase 类。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "可能需要处理 `module_imports` 属性，但 Issue 主要关注输出字符串本身。",
+            "source": "inference",
+            "confidence": "medium"
+        }
+    ],
+    "uncertainties": [
+        "`PythonCodePrinter` 中 `_print_not_supported` 方法的确切行为（是抛出异常、返回占位符还是输出注释）需要确认。",
+        "修复后，`min`/`max` 函数调用中多个参数的打印顺序是否必须与输入顺序一致？其他打印机（如 C++）的输出顺序似乎不固定。",
+        "生成的代码是否需要对参数进行特殊处理（例如，如果参数本身是复杂表达式）？Issue 中建议的简单实现可能足够。",
+        "`pycode` 函数内部是否直接使用 `PythonCodePrinter`，还是有其他中间层？"
+    ]
+}
+```

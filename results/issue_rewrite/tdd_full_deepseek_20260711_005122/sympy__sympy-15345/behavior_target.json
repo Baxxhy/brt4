@@ -1,0 +1,275 @@
+{
+  "instance_id": "sympy__sympy-15345",
+  "issue_summary": "mathematica_code 函数在处理 Max 表达式时，输出错误的 Mathematica 语法（使用圆括号而非方括号）。",
+  "trigger_condition": {
+    "text": "调用 mathematica_code 函数，输入参数为 Max(x, 2)，其中 x 是一个符号。",
+    "evidence": [
+      "Issue 中的代码示例：`mathematica_code(Max(x,2))`"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "函数返回了 `'Max(2, x)'`，这是一个无效的 Mathematica 代码（应使用方括号 `[]` 而非圆括号 `()`）。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 描述：'but instead I get `'Max(2, x)'` which is not valid Mathematica code'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "函数应返回有效的 Mathematica 代码，即函数调用应使用方括号，例如 `'Max[x,2]'`。",
+    "evidence": [
+      "Issue 描述：'I would expect the output `'Max[x,2]'` which is valid Mathematica code'",
+      "相关测试1 (test_Function) 显示函数调用格式为 `f[x, y, z]`"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "mathematica_code",
+      "kind": "function",
+      "source_path": "sympy/printing/mathematica.py",
+      "reason": "这是 Issue 中直接调用的函数，负责将 SymPy 表达式转换为 Mathematica 代码字符串。"
+    },
+    {
+      "name": "Max",
+      "kind": "class",
+      "source_path": "sympy/functions/elementary/miscellaneous.py",
+      "reason": "这是导致问题的表达式类型，其打印逻辑可能存在问题。"
+    },
+    {
+      "name": "MCodePrinter.doprint",
+      "kind": "method",
+      "source_path": "sympy/printing/mathematica.py",
+      "reason": "mathematica_code 函数内部调用了此方法进行实际打印。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/printing/mathematica.py",
+      "object": "MCodePrinter",
+      "lines": "",
+      "reason": "负责打印 Mathematica 代码的类，可能缺少对 Max 类（或更通用的函数类）的特殊处理，导致使用了默认的打印方式（圆括号）。"
+    },
+    {
+      "path": "sympy/functions/elementary/miscellaneous.py",
+      "object": "Max",
+      "lines": "",
+      "reason": "Max 类可能没有定义正确的 _mathematica 或 _print 方法，导致打印时未使用 Mathematica 语法。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_Function",
+      "test_file": "sympy/printing/tests/test_mathematica.py",
+      "why_relevant": "它测试了通用函数（如 `f`）的 Mathematica 代码生成，展示了正确的输出格式应为 `f[x, y, z]`（使用方括号）。",
+      "reusable_parts": [
+        "导入 `mcode` (即 `mathematica_code`)",
+        "使用 `assert mcode(...) == ...` 的断言风格",
+        "符号构造（如 `x, y, z`）"
+      ],
+      "possible_gap": "该测试使用的是通用函数 `f`，而非特定的 `Max` 函数。`Max` 可能被系统视为一个具有特殊语义（如排序、化简）的类，而非普通函数，其打印逻辑可能不同。"
+    },
+    {
+      "test_name": "test_mathematica",
+      "test_file": "sympy/parsing/tests/test_mathematica.py",
+      "why_relevant": "它包含了对 `Max[1,-2,3,-4]` 的解析测试，表明 `Max` 在 Mathematica 语法中应使用方括号。",
+      "reusable_parts": [
+        "使用 `mathematica` 函数（解析器）和 `sympify`",
+        "字典驱动的测试模式"
+      ],
+      "possible_gap": "这是解析测试（从 Mathematica 到 SymPy），而非代码生成测试（从 SymPy 到 Mathematica）。它验证了输入格式，但没有测试 `mathematica_code` 的输出。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试 `test_Function` 中使用普通函数 `f(x, y, z)` 作为输入。",
+      "target_pattern": "使用 `Max(x, 2)` 作为 `mathematica_code` 的输入。",
+      "reason": "`Max` 是 SymPy 中的一个特殊类，可能触发与普通函数不同的代码路径，导致错误的打印格式。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "测试中函数参数通常是符号或简单表达式。",
+      "target_pattern": "使用包含符号和数字的混合参数 `Max(x, 2)`。",
+      "reason": "参数顺序或类型可能影响 `Max` 的内部化简或表示，进而影响其打印结果。Issue 中输出为 `Max(2, x)` 显示了参数顺序被重排。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "`result = mathematica_code(Max(x, 2))` 的返回值 `result`。",
+      "reason": "直接观察输出字符串是否符合 Mathematica 语法（是否使用方括号）。"
+    },
+    {
+      "kind": "repr",
+      "expression_hint": "`repr(Max(x, 2))` 或 `str(Max(x, 2))` 在 SymPy 内部的表示。",
+      "reason": "了解 `Max` 对象在 SymPy 中的默认字符串表示，以判断问题是否源于 `mathematica_code` 未覆盖此类型。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "生成的 Mathematica 代码字符串中，函数调用应使用方括号 `[]` 而非圆括号 `()`。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的输出字符串完全等于某个特定值（如 `'Max[x,2]'`），因为参数顺序可能因内部化简而改变（如 `Max(x,2)` 可能输出 `Max[2, x]` 但仍是有效的）。",
+      "reason": "Issue 的核心是语法错误（括号类型），而非参数顺序。断言包含 `'Max['` 和 `']'` 片段能更稳定地捕获语法正确性。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要从 `sympy` 导入 `symbols`, `Max`, `mathematica_code`。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可以放在 `sympy/printing/tests/test_mathematica.py` 文件中，遵循现有测试的导入和命名风格。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "`Max` 类在 SymPy 内部是否有特殊的打印方法（如 `_mathematica` 或 `_print` 方法）？",
+    "`mathematica_code` 是否对所有 SymPy 函数类都有统一的处理逻辑？还是需要为每个函数类单独注册？",
+    "参数顺序（`Max(2, x)` vs `Max(x, 2)`）在输出中是否重要？Issue 中期望的是 `'Max[x,2]'`，但有效的 `'Max[2,x]'` 是否也可接受？",
+    "除了 `Max`，其他函数（如 `Min`）是否也存在相同问题？"
+  ],
+  "raw": {
+    "issue_summary": "mathematica_code 函数在处理 Max 表达式时，输出错误的 Mathematica 语法（使用圆括号而非方括号）。",
+    "trigger_condition": {
+      "text": "调用 mathematica_code 函数，输入参数为 Max(x, 2)，其中 x 是一个符号。",
+      "evidence": [
+        "Issue 中的代码示例：`mathematica_code(Max(x,2))`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "函数返回了 `'Max(2, x)'`，这是一个无效的 Mathematica 代码（应使用方括号 `[]` 而非圆括号 `()`）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'but instead I get `'Max(2, x)'` which is not valid Mathematica code'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "函数应返回有效的 Mathematica 代码，即函数调用应使用方括号，例如 `'Max[x,2]'`。",
+      "evidence": [
+        "Issue 描述：'I would expect the output `'Max[x,2]'` which is valid Mathematica code'",
+        "相关测试1 (test_Function) 显示函数调用格式为 `f[x, y, z]`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "mathematica_code",
+        "kind": "function",
+        "source_path": "sympy/printing/mathematica.py",
+        "reason": "这是 Issue 中直接调用的函数，负责将 SymPy 表达式转换为 Mathematica 代码字符串。"
+      },
+      {
+        "name": "Max",
+        "kind": "class",
+        "source_path": "sympy/functions/elementary/miscellaneous.py",
+        "reason": "这是导致问题的表达式类型，其打印逻辑可能存在问题。"
+      },
+      {
+        "name": "MCodePrinter.doprint",
+        "kind": "method",
+        "source_path": "sympy/printing/mathematica.py",
+        "reason": "mathematica_code 函数内部调用了此方法进行实际打印。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/printing/mathematica.py",
+        "object": "MCodePrinter",
+        "lines": "",
+        "reason": "负责打印 Mathematica 代码的类，可能缺少对 Max 类（或更通用的函数类）的特殊处理，导致使用了默认的打印方式（圆括号）。"
+      },
+      {
+        "path": "sympy/functions/elementary/miscellaneous.py",
+        "object": "Max",
+        "lines": "",
+        "reason": "Max 类可能没有定义正确的 _mathematica 或 _print 方法，导致打印时未使用 Mathematica 语法。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_Function",
+        "test_file": "sympy/printing/tests/test_mathematica.py",
+        "why_relevant": "它测试了通用函数（如 `f`）的 Mathematica 代码生成，展示了正确的输出格式应为 `f[x, y, z]`（使用方括号）。",
+        "reusable_parts": [
+          "导入 `mcode` (即 `mathematica_code`)",
+          "使用 `assert mcode(...) == ...` 的断言风格",
+          "符号构造（如 `x, y, z`）"
+        ],
+        "possible_gap": "该测试使用的是通用函数 `f`，而非特定的 `Max` 函数。`Max` 可能被系统视为一个具有特殊语义（如排序、化简）的类，而非普通函数，其打印逻辑可能不同。"
+      },
+      {
+        "test_name": "test_mathematica",
+        "test_file": "sympy/parsing/tests/test_mathematica.py",
+        "why_relevant": "它包含了对 `Max[1,-2,3,-4]` 的解析测试，表明 `Max` 在 Mathematica 语法中应使用方括号。",
+        "reusable_parts": [
+          "使用 `mathematica` 函数（解析器）和 `sympify`",
+          "字典驱动的测试模式"
+        ],
+        "possible_gap": "这是解析测试（从 Mathematica 到 SymPy），而非代码生成测试（从 SymPy 到 Mathematica）。它验证了输入格式，但没有测试 `mathematica_code` 的输出。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 `test_Function` 中使用普通函数 `f(x, y, z)` 作为输入。",
+        "target_pattern": "使用 `Max(x, 2)` 作为 `mathematica_code` 的输入。",
+        "reason": "`Max` 是 SymPy 中的一个特殊类，可能触发与普通函数不同的代码路径，导致错误的打印格式。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "测试中函数参数通常是符号或简单表达式。",
+        "target_pattern": "使用包含符号和数字的混合参数 `Max(x, 2)`。",
+        "reason": "参数顺序或类型可能影响 `Max` 的内部化简或表示，进而影响其打印结果。Issue 中输出为 `Max(2, x)` 显示了参数顺序被重排。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "`result = mathematica_code(Max(x, 2))` 的返回值 `result`。",
+        "reason": "直接观察输出字符串是否符合 Mathematica 语法（是否使用方括号）。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "`repr(Max(x, 2))` 或 `str(Max(x, 2))` 在 SymPy 内部的表示。",
+        "reason": "了解 `Max` 对象在 SymPy 中的默认字符串表示，以判断问题是否源于 `mathematica_code` 未覆盖此类型。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的 Mathematica 代码字符串中，函数调用应使用方括号 `[]` 而非圆括号 `()`。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的输出字符串完全等于某个特定值（如 `'Max[x,2]'`），因为参数顺序可能因内部化简而改变（如 `Max(x,2)` 可能输出 `Max[2, x]` 但仍是有效的）。",
+        "reason": "Issue 的核心是语法错误（括号类型），而非参数顺序。断言包含 `'Max['` 和 `']'` 片段能更稳定地捕获语法正确性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要从 `sympy` 导入 `symbols`, `Max`, `mathematica_code`。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可以放在 `sympy/printing/tests/test_mathematica.py` 文件中，遵循现有测试的导入和命名风格。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "`Max` 类在 SymPy 内部是否有特殊的打印方法（如 `_mathematica` 或 `_print` 方法）？",
+      "`mathematica_code` 是否对所有 SymPy 函数类都有统一的处理逻辑？还是需要为每个函数类单独注册？",
+      "参数顺序（`Max(2, x)` vs `Max(x, 2)`）在输出中是否重要？Issue 中期望的是 `'Max[x,2]'`，但有效的 `'Max[2,x]'` 是否也可接受？",
+      "除了 `Max`，其他函数（如 `Min`）是否也存在相同问题？"
+    ]
+  }
+}

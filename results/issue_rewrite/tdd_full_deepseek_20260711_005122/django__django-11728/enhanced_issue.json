@@ -1,0 +1,207 @@
+{
+  "instance_id": "django__django-11728",
+  "issue_summary": "replace_named_groups() 函数在正则表达式模式缺少尾部斜杠时，无法正确替换最后一个命名捕获组。",
+  "trigger_condition": {
+    "text": "调用 replace_named_groups() 函数，传入一个包含至少两个命名捕获组且缺少尾部斜杠的正则表达式模式字符串。",
+    "evidence": [
+      "Issue 描述：'replace_named_groups() fails to replace the final named group if the urlpattern passed in is missing a trailing '/'.'",
+      "Issue 示例输入：r'entries/(?P<pk>[^/.]+)/relationships/(?P<related_field>\\w+)'"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "最后一个命名组（例如 'related_field'）没有被其组名替换，导致输出模式不正确。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 描述：'the \"related_field\" does not get properly replaced.'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "replace_named_groups() 函数应能正确识别并替换输入模式中的所有命名捕获组，无论模式是否以特定字符（如 '/'）结尾。",
+    "evidence": [
+      "源码中函数文档字符串描述：'Find named groups in `pattern` and replace them with the group name.'",
+      "Issue 中提到的变通方法：'A workaround is to tack on a '/' at the end and then it works.' 暗示了期望的正确行为。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "replace_named_groups",
+      "kind": "function",
+      "source_path": "django/contrib/admindocs/utils.py",
+      "reason": "Issue 直接报告了此函数的缺陷。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/contrib/admindocs/utils.py",
+      "object": "replace_named_groups",
+      "lines": "153-187",
+      "reason": "Issue 明确指向此函数，且检索出的源码片段正是该函数实现。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "NormalizeTests.test_group_named",
+      "test_file": "tests/utils_tests/test_regex_helper.py",
+      "why_relevant": "它测试了 normalize 函数处理命名组，而 normalize 可能内部使用了 replace_named_groups 或涉及类似逻辑。",
+      "reusable_parts": [
+        "测试类结构 (unittest.TestCase)",
+        "使用正则表达式模式作为输入的测试模式",
+        "使用 assertEqual 进行结果比较的风格"
+      ],
+      "possible_gap": "该测试的模式以非捕获组或特定字符结尾，可能未覆盖 Issue 中描述的缺少尾部字符导致最后一个组未替换的场景。"
+    },
+    {
+      "test_name": "NormalizeTests.test_group_backreference",
+      "test_file": "tests/utils_tests/test_regex_helper.py",
+      "why_relevant": "它测试了包含命名组的正则表达式，与 Issue 中模式结构相似。",
+      "reusable_parts": [
+        "测试类结构",
+        "正则表达式模式输入",
+        "assertEqual 断言风格"
+      ],
+      "possible_gap": "该测试模式包含反向引用，且可能以特定方式结尾，未直接测试尾部字符缺失对组替换的影响。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试中使用的正则表达式模式，如 r\"(?P<first_group_name>.*)-(?P<second_group_name>.*)\"（以 .* 结尾）。",
+      "target_pattern": "构造一个包含至少两个命名组，且模式字符串不以 '/' 或其他可能被算法误判为组结束的字符结尾的模式，例如 r\"entries/(?P<pk>[^/.]+)/relationships/(?P<related_field>\\w+)\"。",
+      "reason": "Issue 指出当模式缺少尾部 '/' 时，最后一个命名组替换失败。需要变异输入以匹配此触发条件。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "replace_named_groups(pattern) 的返回值，观察其中是否包含类似 \"<related_field>\" 的替换结果，还是保留了原始的 \"(?P<related_field>\\w+)\"。",
+      "reason": "Issue 的核心错误是最后一个命名组未被替换，直接观察函数输出可以判断缺陷是否触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 replace_named_groups() 的输出字符串中，所有命名捕获组模式（如 (?P<name>...)）都已被替换为对应的组名（如 <name>）。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "避免断言完整的、具体的输出字符串，因为替换逻辑可能涉及转义或格式细节。",
+      "reason": "断言输出中不包含原始的命名组语法片段（如 \"(?P<\"）是稳定且直接针对 Issue 核心的验证方式。修复后，所有命名组都应被替换。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 replace_named_groups 函数。可能需要在 Django 的测试环境中运行，以确保相关依赖可用。",
+      "source": "retrieved_source",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "replace_named_groups 函数是否被 normalize 函数直接调用，以及它们在 Django 中的具体调用链路。",
+    "除了尾部 '/' 缺失，是否还有其他边界条件（如转义括号、嵌套深度）会导致相同的缺陷。",
+    "函数内部用于检测组结束的算法（基于括号平衡）在特定输入下的精确行为。"
+  ],
+  "raw": {
+    "issue_summary": "replace_named_groups() 函数在正则表达式模式缺少尾部斜杠时，无法正确替换最后一个命名捕获组。",
+    "trigger_condition": {
+      "text": "调用 replace_named_groups() 函数，传入一个包含至少两个命名捕获组且缺少尾部斜杠的正则表达式模式字符串。",
+      "evidence": [
+        "Issue 描述：'replace_named_groups() fails to replace the final named group if the urlpattern passed in is missing a trailing '/'.'",
+        "Issue 示例输入：r'entries/(?P<pk>[^/.]+)/relationships/(?P<related_field>\\w+)'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "最后一个命名组（例如 'related_field'）没有被其组名替换，导致输出模式不正确。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'the \"related_field\" does not get properly replaced.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "replace_named_groups() 函数应能正确识别并替换输入模式中的所有命名捕获组，无论模式是否以特定字符（如 '/'）结尾。",
+      "evidence": [
+        "源码中函数文档字符串描述：'Find named groups in `pattern` and replace them with the group name.'",
+        "Issue 中提到的变通方法：'A workaround is to tack on a '/' at the end and then it works.' 暗示了期望的正确行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "replace_named_groups",
+        "kind": "function",
+        "source_path": "django/contrib/admindocs/utils.py",
+        "reason": "Issue 直接报告了此函数的缺陷。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admindocs/utils.py",
+        "object": "replace_named_groups",
+        "lines": "153-187",
+        "reason": "Issue 明确指向此函数，且检索出的源码片段正是该函数实现。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "NormalizeTests.test_group_named",
+        "test_file": "tests/utils_tests/test_regex_helper.py",
+        "why_relevant": "它测试了 normalize 函数处理命名组，而 normalize 可能内部使用了 replace_named_groups 或涉及类似逻辑。",
+        "reusable_parts": [
+          "测试类结构 (unittest.TestCase)",
+          "使用正则表达式模式作为输入的测试模式",
+          "使用 assertEqual 进行结果比较的风格"
+        ],
+        "possible_gap": "该测试的模式以非捕获组或特定字符结尾，可能未覆盖 Issue 中描述的缺少尾部字符导致最后一个组未替换的场景。"
+      },
+      {
+        "test_name": "NormalizeTests.test_group_backreference",
+        "test_file": "tests/utils_tests/test_regex_helper.py",
+        "why_relevant": "它测试了包含命名组的正则表达式，与 Issue 中模式结构相似。",
+        "reusable_parts": [
+          "测试类结构",
+          "正则表达式模式输入",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试模式包含反向引用，且可能以特定方式结尾，未直接测试尾部字符缺失对组替换的影响。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用的正则表达式模式，如 r\"(?P<first_group_name>.*)-(?P<second_group_name>.*)\"（以 .* 结尾）。",
+        "target_pattern": "构造一个包含至少两个命名组，且模式字符串不以 '/' 或其他可能被算法误判为组结束的字符结尾的模式，例如 r\"entries/(?P<pk>[^/.]+)/relationships/(?P<related_field>\\w+)\"。",
+        "reason": "Issue 指出当模式缺少尾部 '/' 时，最后一个命名组替换失败。需要变异输入以匹配此触发条件。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "replace_named_groups(pattern) 的返回值，观察其中是否包含类似 \"<related_field>\" 的替换结果，还是保留了原始的 \"(?P<related_field>\\w+)\"。",
+        "reason": "Issue 的核心错误是最后一个命名组未被替换，直接观察函数输出可以判断缺陷是否触发。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 replace_named_groups() 的输出字符串中，所有命名捕获组模式（如 (?P<name>...)）都已被替换为对应的组名（如 <name>）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言完整的、具体的输出字符串，因为替换逻辑可能涉及转义或格式细节。",
+        "reason": "断言输出中不包含原始的命名组语法片段（如 \"(?P<\"）是稳定且直接针对 Issue 核心的验证方式。修复后，所有命名组都应被替换。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 replace_named_groups 函数。可能需要在 Django 的测试环境中运行，以确保相关依赖可用。",
+        "source": "retrieved_source",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "replace_named_groups 函数是否被 normalize 函数直接调用，以及它们在 Django 中的具体调用链路。",
+      "除了尾部 '/' 缺失，是否还有其他边界条件（如转义括号、嵌套深度）会导致相同的缺陷。",
+      "函数内部用于检测组结束的算法（基于括号平衡）在特定输入下的精确行为。"
+    ]
+  }
+}

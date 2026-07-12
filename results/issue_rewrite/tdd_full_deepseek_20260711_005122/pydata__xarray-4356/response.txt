@@ -1,0 +1,113 @@
+```json
+{
+    "issue_summary": "DataArray.sum 方法在指定多个维度并设置 min_count 参数时出错。",
+    "trigger_condition": {
+        "text": "调用 DataArray.sum 方法，dim 参数传入包含多个维度的列表（例如 ['dim_0', 'dim_1']），并设置 min_count 参数（例如 min_count=1）。",
+        "evidence": ["Issue 中的示例代码：`da.sum([\"dim_0\", \"dim_1\"], min_count=1)`"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "程序抛出错误，提示 min_count 在 reduction 超过一个维度时不可用。",
+        "symptom_type": "exception",
+        "evidence": ["Issue 标题：\"min_count is not available for reduction with more than one dimensions\""],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "DataArray.sum 方法在指定多个维度并设置 min_count 参数时应能正确计算，返回一个标量或降维后的 DataArray。",
+        "evidence": ["Issue 中引用的源码位置（nanops.py）暗示了计算有效元素数量的逻辑，预期 min_count 应能正常工作。", "相关测试 test_min_count 表明 min_count 参数在单维度 reduction 中是可用的。"],
+        "confidence": "medium"
+    },
+    "target_apis": [
+        {
+            "name": "DataArray.sum",
+            "kind": "method",
+            "source_path": "xarray/core/dataarray.py",
+            "reason": "Issue 直接报告了 DataArray.sum 方法在特定参数下的问题。"
+        },
+        {
+            "name": "xarray.core.duck_array_ops.sum",
+            "kind": "function",
+            "source_path": "xarray/core/duck_array_ops.py",
+            "reason": "源码片段显示 DataArray.sum 可能底层调用了 duck_array_ops.sum。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "xarray/core/nanops.py",
+            "object": "计算有效元素数量的逻辑",
+            "lines": "35",
+            "reason": "Issue 描述中明确指出了问题可能出在 nanops.py 第 35 行附近计算有效元素数量的逻辑，并给出了修复建议。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_min_count",
+            "test_file": "xarray/tests/test_duck_array_ops.py",
+            "why_relevant": "该测试专门针对 min_count 参数，测试了 sum 和 prod 方法在不同维度数量和数据类型下的行为。",
+            "reusable_parts": ["construct_dataarray fixture 的使用", "使用 getattr(da, func) 调用聚合方法", "使用 series_reduce 生成预期结果", "assert_allclose 和 assert_dask_array 断言风格"],
+            "possible_gap": "该测试的 @pytest.mark.parametrize(\"aggdim\", [None, \"x\"]) 表明它只测试了单维度（\"x\"）或全部维度（None）的 reduction，没有测试同时指定多个维度（如 ['x', 'y']）的情况。"
+        },
+        {
+            "test_name": "test_multiple_dims",
+            "test_file": "xarray/tests/test_duck_array_ops.py",
+            "why_relevant": "该测试专门测试了在多个维度上进行 reduction 的行为（例如 da.sum((\"x\", \"y\"))）。",
+            "reusable_parts": ["construct_dataarray fixture 的使用", "多维度 reduction 的调用方式：getattr(da, func)((\"x\", \"y\"))", "通过链式调用生成预期结果的模式", "assert_allclose 断言风格"],
+            "possible_gap": "该测试没有设置 min_count 参数，因此无法触发 Issue 中描述的错误。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "argument",
+            "current_pattern": "相似测试 test_min_count 中，dim 参数为单个维度（如 \"x\"）或 None。",
+            "target_pattern": "将 dim 参数改为包含多个维度的列表或元组（如 [\"dim_0\", \"dim_1\"] 或 (\"dim_0\", \"dim_1\")）。",
+            "reason": "Issue 明确指出错误发生在传递多个维度时。",
+            "confidence": "high"
+        },
+        {
+            "slot": "argument",
+            "current_pattern": "相似测试 test_multiple_dims 中，调用聚合函数时没有设置 min_count 参数。",
+            "target_pattern": "在调用聚合函数时添加 min_count 参数（例如 min_count=1）。",
+            "reason": "Issue 表明 min_count 参数与多维度 reduction 结合时才会触发错误。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "exception",
+            "expression_hint": "调用 da.sum([\"dim_0\", \"dim_1\"], min_count=1) 时是否抛出异常及其类型和消息。",
+            "reason": "Issue 描述的错误现象是抛出异常，观测异常是判断缺陷是否触发的直接方式。"
+        },
+        {
+            "kind": "return_value",
+            "expression_hint": "在修复后，调用 da.sum([\"dim_0\", \"dim_1\"], min_count=1) 的返回值，应与链式调用 da.sum(\"dim_0\").sum(\"dim_1\") 或使用 series_reduce 辅助函数的结果一致。",
+            "reason": "验证修复后多维度 reduction 与 min_count 结合的计算结果是否正确。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "验证在指定多个维度和 min_count 参数时，sum 方法能正常执行而不抛出异常，并返回正确的计算结果。",
+            "preferred_assertion_style": "equals",
+            "avoid": "避免断言完整的异常消息字符串，因为消息可能随版本变化。",
+            "reason": "Issue 的核心是功能缺失（抛出异常），修复后应能正常计算。使用 equals 比较实际结果与预期结果（如链式调用结果）是稳定的断言方式。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "使用 construct_dataarray fixture 或类似方式构造一个包含 NaN 值的多维 DataArray，以测试 skipna 和 min_count 的交互。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "可能需要导入 pytest 和 xarray 相关模块，以及 assert_allclose 等断言函数。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "错误的确切异常类型和完整消息是什么？Issue 只给出了错误描述，没有具体的异常栈。",
+        "除了 sum 方法，其他聚合方法（如 prod）是否也存在相同问题？Issue 只提到了 sum，但相关测试同时测试了 sum 和 prod。",
+        "修复建议（替换 mask.shape[axis] 为 np.take(a.shape, axis).prod()）是否完全正确？需要后续验证。",
+        "错误是否只发生在 DataArray 上，Dataset 的相应方法是否受影响？"
+    ]
+}
+```

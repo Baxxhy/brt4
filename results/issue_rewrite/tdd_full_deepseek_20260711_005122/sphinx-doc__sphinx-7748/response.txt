@@ -1,0 +1,116 @@
+{
+  "issue_summary": "使用 SWIG 包装 C++ 类时，如果类中有重载方法，autodoc_docstring_signature 只能提取 docstring 中的第一个签名，无法提取所有重载签名。",
+  "trigger_condition": {
+    "text": "当使用 Sphinx 的 autodoc 扩展，且配置了 autodoc_docstring_signature = True 时，为一个通过 SWIG 包装的、包含重载方法的 C++ 类生成文档。",
+    "evidence": ["Issue 提到使用 SWIG 包装 C++ 类，且类有重载方法。", "相关测试 1 展示了 autodoc_docstring_signature 配置为 True 时，会从 docstring 中提取签名。"],
+    "confidence": "medium"
+  },
+  "error_symptom": {
+    "text": "生成的文档中，重载方法的签名只显示了第一个，后续的重载签名缺失。",
+    "symptom_type": "wrong_return",
+    "evidence": ["Issue 描述：'Currently, `autodoc_docstring_signature` can only pick up the first one.'"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "autodoc_docstring_signature 应该能够提取 docstring 中所有重载方法的签名，并在生成的文档中正确显示。",
+    "evidence": ["Issue 描述：'It would be nice to be able to pick up all of them.'"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "sphinx.ext.autodoc",
+      "kind": "module",
+      "source_path": "",
+      "reason": "Issue 是关于 Sphinx autodoc 扩展的功能缺陷。"
+    },
+    {
+      "name": "autodoc_docstring_signature",
+      "kind": "unknown",
+      "source_path": "",
+      "reason": "这是触发问题的配置项，相关测试中多次出现。"
+    },
+    {
+      "name": "format_signature",
+      "kind": "method",
+      "source_path": "",
+      "reason": "相关测试 5 测试了此方法，它负责处理签名格式，可能与提取多个签名有关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "",
+      "object": "",
+      "lines": "",
+      "reason": "iCoRe 未提供相关源代码片段，无法定位。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_autodoc_docstring_signature",
+      "test_file": "tests/test_ext_autodoc_configs.py",
+      "why_relevant": "该测试直接验证了 autodoc_docstring_signature 配置项的行为，包括从 docstring 中提取签名。",
+      "reusable_parts": ["使用 do_autodoc 函数生成文档", "配置 app.config.autodoc_docstring_signature", "断言生成的文档字符串列表"],
+      "possible_gap": "当前测试只处理了单个签名的情况，没有测试 docstring 中包含多个重载签名的情况。"
+    },
+    {
+      "test_name": "test_format_signature",
+      "test_file": "tests/test_ext_autodoc.py",
+      "why_relevant": "该测试深入测试了 format_signature 方法，这是生成签名的核心逻辑，可能与提取多个签名有关。",
+      "reusable_parts": ["formatsig 辅助函数", "对各种对象类型（函数、类、方法）的签名格式化测试", "处理 __init__ 的 docstring 签名"],
+      "possible_gap": "测试中没有涉及从单个 docstring 中解析多个签名的情况。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "测试中使用的 docstring 包含单个签名（如 'meth(FOO, BAR=1) -> BAZ'）或没有签名。",
+      "target_pattern": "创建一个 docstring，其中包含多个用换行符分隔的重载方法签名（例如 'signature1\\nsignature2'）。",
+      "reason": "Issue 指出当前逻辑只能提取第一个签名，因此需要变异输入以包含多个签名来触发缺陷。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "相关测试中，autodoc_docstring_signature 配置为 True（默认）或 False。",
+      "target_pattern": "保持 autodoc_docstring_signature 为 True，这是触发缺陷的必要配置。",
+      "reason": "Issue 描述的问题只有在启用 autodoc_docstring_signature 时才会出现。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "do_autodoc 函数返回的文档字符串列表，特别是包含方法签名的部分。",
+      "reason": "缺陷表现为生成的文档中缺少某些签名，观察输出可以判断是否只提取了第一个签名。"
+    },
+    {
+      "kind": "config",
+      "expression_hint": "app.config.autodoc_docstring_signature 的值。",
+      "reason": "需要确认配置已启用，以排除配置错误。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "生成的文档应包含 docstring 中所有重载方法的签名。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的、固定的文档字符串列表，因为具体输出可能因实现而变化。",
+      "reason": "Issue 的核心是签名缺失，因此断言应检查所有预期的签名片段是否都出现在输出中。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 pytest.mark.sphinx fixture 和 testroot='ext-autodoc' 来设置 Sphinx 应用。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要创建一个包含重载方法且 docstring 中有多个签名的目标模块（如 target.overloaded）。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "重载方法签名在 docstring 中的具体格式（例如，是连续行还是用特定分隔符）。",
+    "提取多个签名后，它们在最终文档中的呈现格式（例如，是合并成一个条目还是多个条目）。",
+    "缺陷的确切代码位置，因为没有提供相关源代码片段。"
+  ]
+}

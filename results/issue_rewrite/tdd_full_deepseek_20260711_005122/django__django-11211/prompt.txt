@@ -1,0 +1,417 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Prefetch related is not working when used GFK for model that uses UUID field as PK.
+Description
+	
+How to reproduce:
+create model with UUID as primary key
+class Foo(models.Model):
+	id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+	...
+create another model with GFK to model Foo
+class Bar(models.Model):
+	foo_content_type = models.ForeignKey(
+		ContentType, related_name='actor',
+		on_delete=models.CASCADE, db_index=True
+	)
+	foo_object_id = models.CharField(max_length=255, db_index=True)
+	foo = GenericForeignKey('foo_content_type', 'foo_object_id')
+	...
+and try to get queryset with prefetch related (django orm engine return None for attribute foo):
+Bar.objects.all().prefetch_related('foo')
+Thanks a lot for your attention! Also i wanna point out some related bug report from third party library in which previously i faced with that issue, maybe it would useful – ​https://github.com/justquick/django-activity-stream/issues/245
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/db/models/fields/__init__.py
+对象名称：UUIDField
+节点类型：class
+父节点：__init__
+行号范围：2309-2355
+代码：
+class UUIDField(Field):
+    default_error_messages = {
+        'invalid': _("'%(value)s' is not a valid UUID."),
+    }
+    description = _('Universally unique identifier')
+    empty_strings_allowed = False
+    def __init__(self, verbose_name=None, **kwargs):
+    def deconstruct(self):
+    def get_internal_type(self):
+    def get_db_prep_value(self, value, connection, prepared=False):
+    def to_python(self, value):
+    def formfield(self, **kwargs):
+
+
+【源码片段 2】
+文件路径：django/db/models/fields/related.py
+对象名称：ForeignKey
+节点类型：class
+父节点：related
+行号范围：759-986
+代码：
+class ForeignKey(ForeignObject):
+    """
+    Provide a many-to-one relation by adding a column to the local model
+    to hold the remote value.
+
+    By default ForeignKey will target the pk of the remote model but this
+    behavior can be changed by using the ``to_field`` argument.
+    """
+    many_to_many = False
+    many_to_one = True
+    one_to_many = False
+    one_to_one = False
+    rel_class = ManyToOneRel
+    empty_strings_allowed = False
+    default_error_messages = {
+        'invalid': _('%(model)s instance with %(field)s %(value)r does not exist.')
+    }
+    description = _("Foreign Key (type determined by related field)")
+    def __init__(self, to, on_delete, related_name=None, related_query_name=None,
+                 limit_choices_to=None, parent_link=False, to_field=None,
+                 db_constraint=True, **kwargs):
+    def check(self, **kwargs):
+    def _check_on_delete(self):
+    def _check_unique(self, **kwargs):
+    def deconstruct(self):
+    def to_python(self, value):
+    @property
+    def target_field(self):
+    def get_reverse_path_info(self, filtered_relation=None):
+    def validate(self, value, model_instance):
+    def get_attname(self):
+    def get_attname_column(self):
+    def get_default(self):
+    def get_db_prep_save(self, value, connection):
+    def get_db_prep_value(self, value, connection, prepared=False):
+    def contribute_to_related_class(self, cls, related):
+    def formfield(self, *, using=None, **kwargs):
+    def db_check(self, connection):
+    def db_type(self, connection):
+    def db_parameters(self, connection):
+    def convert_empty_strings(self, value, expression, connection):
+    def get_db_converters(self, connection):
+    def get_col(self, alias, output_field=None):
+
+
+【源码片段 3】
+文件路径：django/contrib/contenttypes/models.py
+对象名称：ContentType
+节点类型：class
+父节点：models
+行号范围：133-184
+代码：
+class ContentType(models.Model):
+    app_label = models.CharField(max_length=100)
+    model = models.CharField(_('python model class name'), max_length=100)
+    objects = ContentTypeManager()
+    def __str__(self):
+    @property
+    def name(self):
+    @property
+    def app_labeled_name(self):
+    def model_class(self):
+    def get_object_for_this_type(self, **kwargs):
+    def get_all_objects_for_this_type(self, **kwargs):
+    def natural_key(self):
+
+
+【源码片段 4】
+文件路径：django/contrib/contenttypes/fields.py
+对象名称：GenericForeignKey
+节点类型：class
+父节点：fields
+行号范围：18-255
+代码：
+class GenericForeignKey(FieldCacheMixin):
+    """
+    Provide a generic many-to-one relation through the ``content_type`` and
+    ``object_id`` fields.
+
+    This class also doubles as an accessor to the related object (similar to
+    ForwardManyToOneDescriptor) by adding itself as a model attribute.
+    """
+    auto_created = False
+    concrete = False
+    editable = False
+    hidden = False
+    is_relation = True
+    many_to_many = False
+    many_to_one = True
+    one_to_many = False
+    one_to_one = False
+    related_model = None
+    remote_field = None
+    def __init__(self, ct_field='content_type', fk_field='object_id', for_concrete_model=True):
+    def contribute_to_class(self, cls, name, **kwargs):
+    def get_filter_kwargs_for_object(self, obj):
+    def get_forward_related_filter(self, obj):
+    def __str__(self):
+    def check(self, **kwargs):
+    def _check_field_name(self):
+    def _check_object_id_field(self):
+    def _check_content_type_field(self):
+    def get_cache_name(self):
+    def get_content_type(self, obj=None, id=None, using=None):
+    def get_prefetch_queryset(self, instances, queryset=None):
+    def __get__(self, instance, cls=None):
+    def __set__(self, instance, value):
+
+
+【源码片段 5】
+文件路径：django/db/models/query.py
+对象名称：all
+节点类型：class_function
+父节点：QuerySet
+行号范围：869-874
+代码：
+    def all(self):
+        """
+        Return a new QuerySet that is a copy of the current one. This allows a
+        QuerySet to proxy for a model manager in some cases.
+        """
+        return self._chain()
+
+
+【源码片段 6】
+文件路径：django/db/models/query.py
+对象名称：prefetch_related
+节点类型：class_function
+父节点：QuerySet
+行号范围：989-1009
+代码：
+    def prefetch_related(self, *lookups):
+        """
+        Return a new QuerySet instance that will prefetch the specified
+        Many-To-One and Many-To-Many related objects when the QuerySet is
+        evaluated.
+
+        When prefetch_related() is called more than once, append to the list of
+        prefetch lookups. If prefetch_related(None) is called, clear the list.
+        """
+        clone = self._chain()
+        if lookups == (None,):
+            clone._prefetch_related_lookups = ()
+        else:
+            for lookup in lookups:
+                if isinstance(lookup, Prefetch):
+                    lookup = lookup.prefetch_to
+                lookup = lookup.split(LOOKUP_SEP, 1)[0]
+                if lookup in self.query._filtered_relations:
+                    raise ValueError('prefetch_related() is not supported with FilteredRelation.')
+            clone._prefetch_related_lookups = clone._prefetch_related_lookups + lookups
+        return clone
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/prefetch_related/tests.py
+测试名称：test_prefetch_GFK_nonint_pk
+测试代码：
+class GenericRelationTests(TestCase):
+    def test_prefetch_GFK_nonint_pk(self):
+        Comment.objects.create(comment="awesome", content_object=self.book1)
+
+        # 1 for Comment table, 1 for Book table
+        with self.assertNumQueries(2):
+            qs = Comment.objects.prefetch_related('content_object')
+            [c.content_object for c in qs]
+
+【相关测试 2】
+测试文件：tests/prefetch_related/tests.py
+测试名称：test_prefetch_GFK
+测试代码：
+class GenericRelationTests(TestCase):
+    def test_prefetch_GFK(self):
+        TaggedItem.objects.create(tag="awesome", content_object=self.book1)
+        TaggedItem.objects.create(tag="great", content_object=self.reader1)
+        TaggedItem.objects.create(tag="outstanding", content_object=self.book2)
+        TaggedItem.objects.create(tag="amazing", content_object=self.reader3)
+
+        # 1 for TaggedItem table, 1 for Book table, 1 for Reader table
+        with self.assertNumQueries(3):
+            qs = TaggedItem.objects.prefetch_related('content_object')
+            list(qs)
+
+【相关测试 3】
+测试文件：tests/prefetch_related/test_uuid.py
+测试名称：test_prefetch_related_from_uuid_model
+测试代码：
+class UUIDPrefetchRelated(TestCase):
+    def test_prefetch_related_from_uuid_model(self):
+        Pet.objects.create(name='Fifi').people.add(
+            Person.objects.create(name='Ellen'),
+            Person.objects.create(name='George'),
+        )
+
+        with self.assertNumQueries(2):
+            pet = Pet.objects.prefetch_related('people').get(name='Fifi')
+        with self.assertNumQueries(0):
+            self.assertEqual(2, len(pet.people.all()))
+
+【相关测试 4】
+测试文件：tests/prefetch_related/test_uuid.py
+测试名称：test_prefetch_related_to_uuid_model
+测试代码：
+class UUIDPrefetchRelated(TestCase):
+    def test_prefetch_related_to_uuid_model(self):
+        Person.objects.create(name='Bella').pets.add(
+            Pet.objects.create(name='Socks'),
+            Pet.objects.create(name='Coffee'),
+        )
+
+        with self.assertNumQueries(2):
+            person = Person.objects.prefetch_related('pets').get(name='Bella')
+        with self.assertNumQueries(0):
+            self.assertEqual(2, len(person.pets.all()))
+
+【相关测试 5】
+测试文件：tests/prefetch_related/tests.py
+测试名称：test_m2m_through_gfk
+测试代码：
+class CustomPrefetchTests(TestCase):
+    def test_m2m_through_gfk(self):
+        TaggedItem.objects.create(tag="houses", content_object=self.house1)
+        TaggedItem.objects.create(tag="houses", content_object=self.house2)
+
+        # Control lookups.
+        with self.assertNumQueries(3):
+            lst1 = self.traverse_qs(
+                TaggedItem.objects.filter(tag='houses').prefetch_related('content_object__rooms'),
+                [['content_object', 'rooms']]
+            )
+
+        # Test lookups.
+        with self.assertNumQueries(3):
+            lst2 = self.traverse_qs(
+                TaggedItem.objects.prefetch_related(
+                    Prefetch('content_object'),
+                    Prefetch('content_object__rooms', to_attr='rooms_lst')
+                ),
+                [['content_object', 'rooms_lst']]
+            )
+        self.assertEqual(lst1, lst2)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

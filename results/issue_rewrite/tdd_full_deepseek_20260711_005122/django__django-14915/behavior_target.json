@@ -1,0 +1,327 @@
+{
+  "instance_id": "django__django-14915",
+  "issue_summary": "ModelChoiceIteratorValue 实例在自定义 create_option 方法中用于字典成员检查时引发 TypeError: unhashable type，因为其未实现 __hash__ 方法。",
+  "trigger_condition": {
+    "text": "在 Django 3.1 中，自定义 ChoiceWidget 子类的 create_option 方法，当 value 参数是 ModelChoiceIteratorValue 实例时，使用 'value in dict' 或 'value in list' 操作。",
+    "evidence": [
+      "Issue 中用户代码：if value in self.show_fields: # This is a dict {1: ['first_name', 'last_name']}",
+      "Issue 中用户代码：if value in allowed_values: # This is an array [1, 2]"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "执行 'value in dict' 操作时抛出 TypeError: unhashable type: 'ModelChoiceIteratorValue'。",
+    "symptom_type": "exception",
+    "evidence": [
+      "Issue 描述：Error is {TypeError}unhashable type: 'ModelChoiceIteratorValue'."
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "ModelChoiceIteratorValue 实例应能用于 'in' 操作符检查其值是否存在于字典键或列表中，而不引发 TypeError。",
+    "evidence": [
+      "Issue 中用户期望：在 Django 3.0 中类似代码正常工作，迁移到 3.1 后出错。",
+      "相关测试 1 和 2 显示自定义 create_option 方法可以访问 value.obj 或 value.instance 属性，暗示 value 应可被操作。"
+    ],
+    "confidence": "medium"
+  },
+  "target_apis": [
+    {
+      "name": "ModelChoiceIteratorValue",
+      "kind": "class",
+      "source_path": "django/forms/models.py",
+      "reason": "Issue 直接指出此类的实例不可哈希导致错误。"
+    },
+    {
+      "name": "ChoiceWidget.create_option",
+      "kind": "method",
+      "source_path": "django/forms/widgets.py",
+      "reason": "Issue 中用户自定义此方法，value 参数可能为 ModelChoiceIteratorValue 实例。"
+    },
+    {
+      "name": "ModelChoiceIterator",
+      "kind": "class",
+      "source_path": "",
+      "reason": "相关测试显示它是 ModelChoiceField 默认的迭代器，生成 ModelChoiceIteratorValue。"
+    },
+    {
+      "name": "ModelChoiceField",
+      "kind": "class",
+      "source_path": "",
+      "reason": "相关测试中用于创建字段，其 choices 属性使用 ModelChoiceIterator。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/forms/models.py",
+      "object": "ModelChoiceIteratorValue",
+      "lines": "1161-1172",
+      "reason": "源码片段显示其定义了 __eq__ 但未定义 __hash__，导致实例不可哈希，无法用于字典成员检查。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_custom_choice_iterator_passes_model_to_widget",
+      "test_file": "tests/model_forms/test_modelchoicefield.py",
+      "why_relevant": "它自定义了 create_option 方法，并访问 value.obj 属性，展示了如何与自定义的 choice 值交互。",
+      "reusable_parts": [
+        "CustomCheckboxSelectMultiple 子类定义",
+        "create_option 方法重写模式",
+        "ModelMultipleChoiceField 与自定义 iterator 的配置",
+        "使用 Category 测试数据"
+      ],
+      "possible_gap": "该测试没有对 value 执行 'in dict' 或 'in list' 操作，因此不会触发哈希错误。"
+    },
+    {
+      "test_name": "test_choice_iterator_passes_model_to_widget",
+      "test_file": "tests/model_forms/test_modelchoicefield.py",
+      "why_relevant": "它自定义了 create_option 方法，并访问 value.instance 属性，展示了与 ModelChoiceIteratorValue 实例交互的模式。",
+      "reusable_parts": [
+        "CustomCheckboxSelectMultiple 子类定义",
+        "create_option 方法重写模式",
+        "ModelMultipleChoiceField 的配置",
+        "使用 Category 测试数据"
+      ],
+      "possible_gap": "该测试没有对 value 执行 'in dict' 或 'in list' 操作，因此不会触发哈希错误。"
+    },
+    {
+      "test_name": "test_options",
+      "test_file": "tests/forms_tests/widget_tests/test_select.py",
+      "why_relevant": "它展示了如何调用 widget.options 并检查返回的选项字典结构，包括 value 字段。",
+      "reusable_parts": [
+        "WidgetTest 基类",
+        "self.widget 和 choices 的构造",
+        "options 方法的调用方式",
+        "对返回字典的断言模式"
+      ],
+      "possible_gap": "它使用简单的字符串值，而非 ModelChoiceIteratorValue 实例。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试中 create_option 的 value 参数被用于访问 .obj 或 .instance 属性。",
+      "target_pattern": "在 create_option 方法体中，对 value 参数执行 'value in some_dict' 或 'value in some_list' 操作。",
+      "reason": "Issue 表明此操作在 Django 3.1 中会因 ModelChoiceIteratorValue 不可哈希而失败。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "相关测试中 self.show_fields 或 allowed_values 不存在。",
+      "target_pattern": "在自定义 widget 中定义实例属性 self.show_fields（字典）或 allowed_values（列表）。",
+      "reason": "Issue 中错误发生在检查 value 是否在这些容器的键或元素中。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "在 create_option 方法内执行 'value in container' 操作时捕获的异常。",
+      "reason": "Issue 的核心错误是 TypeError，观测此异常能直接确认缺陷是否触发。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "create_option 方法中 value 参数的类型（type(value)）。",
+      "reason": "确认 value 是否为 ModelChoiceIteratorValue 实例，这是触发条件的关键。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "create_option 方法返回的 context 字典，特别是 'attrs' 字段。",
+      "reason": "Issue 中用户试图设置 data-fields 属性，观测返回值可检查操作是否成功。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "当 value 是 ModelChoiceIteratorValue 实例且其底层值在容器中时，'value in container' 操作应成功且不引发 TypeError，并能正确设置上下文属性。",
+      "preferred_assertion_style": "raises",
+      "avoid": "避免断言完整的 HTML 输出或具体的属性值字符串，因为 Issue 未提供精确输出。",
+      "reason": "当前缺陷表现为异常，因此初始复现测试应断言异常被引发。修复后，断言应转为验证操作成功（例如，不引发异常或属性被设置）。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要 Django 测试环境，可能涉及数据库模型（如 Category）用于创建 ModelChoiceField。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要自定义 ChoiceWidget 子类（如 Select 或 CheckboxSelectMultiple）并重写 create_option 方法。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要在自定义 widget 中设置实例属性（如 self.show_fields）作为字典。",
+      "source": "issue",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "ModelChoiceIteratorValue 在 Django 3.0 中是否可哈希，或者其行为在 3.1 中具体如何变化。",
+    "除了 __hash__ 缺失，ModelChoiceIteratorValue 的 __eq__ 实现是否也影响了 'in' 操作的行为。",
+    "用户示例中 self.show_fields 字典的键具体是什么类型（整数还是其他），以及 ModelChoiceIteratorValue 的 __eq__ 如何与之比较。",
+    "修复后的确切行为：是让 ModelChoiceIteratorValue 可哈希，还是改变 'in' 操作的语义以使用 __eq__ 而不要求哈希。"
+  ],
+  "raw": {
+    "issue_summary": "ModelChoiceIteratorValue 实例在自定义 create_option 方法中用于字典成员检查时引发 TypeError: unhashable type，因为其未实现 __hash__ 方法。",
+    "trigger_condition": {
+      "text": "在 Django 3.1 中，自定义 ChoiceWidget 子类的 create_option 方法，当 value 参数是 ModelChoiceIteratorValue 实例时，使用 'value in dict' 或 'value in list' 操作。",
+      "evidence": [
+        "Issue 中用户代码：if value in self.show_fields: # This is a dict {1: ['first_name', 'last_name']}",
+        "Issue 中用户代码：if value in allowed_values: # This is an array [1, 2]"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行 'value in dict' 操作时抛出 TypeError: unhashable type: 'ModelChoiceIteratorValue'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：Error is {TypeError}unhashable type: 'ModelChoiceIteratorValue'."
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "ModelChoiceIteratorValue 实例应能用于 'in' 操作符检查其值是否存在于字典键或列表中，而不引发 TypeError。",
+      "evidence": [
+        "Issue 中用户期望：在 Django 3.0 中类似代码正常工作，迁移到 3.1 后出错。",
+        "相关测试 1 和 2 显示自定义 create_option 方法可以访问 value.obj 或 value.instance 属性，暗示 value 应可被操作。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "ModelChoiceIteratorValue",
+        "kind": "class",
+        "source_path": "django/forms/models.py",
+        "reason": "Issue 直接指出此类的实例不可哈希导致错误。"
+      },
+      {
+        "name": "ChoiceWidget.create_option",
+        "kind": "method",
+        "source_path": "django/forms/widgets.py",
+        "reason": "Issue 中用户自定义此方法，value 参数可能为 ModelChoiceIteratorValue 实例。"
+      },
+      {
+        "name": "ModelChoiceIterator",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试显示它是 ModelChoiceField 默认的迭代器，生成 ModelChoiceIteratorValue。"
+      },
+      {
+        "name": "ModelChoiceField",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试中用于创建字段，其 choices 属性使用 ModelChoiceIterator。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/models.py",
+        "object": "ModelChoiceIteratorValue",
+        "lines": "1161-1172",
+        "reason": "源码片段显示其定义了 __eq__ 但未定义 __hash__，导致实例不可哈希，无法用于字典成员检查。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_custom_choice_iterator_passes_model_to_widget",
+        "test_file": "tests/model_forms/test_modelchoicefield.py",
+        "why_relevant": "它自定义了 create_option 方法，并访问 value.obj 属性，展示了如何与自定义的 choice 值交互。",
+        "reusable_parts": [
+          "CustomCheckboxSelectMultiple 子类定义",
+          "create_option 方法重写模式",
+          "ModelMultipleChoiceField 与自定义 iterator 的配置",
+          "使用 Category 测试数据"
+        ],
+        "possible_gap": "该测试没有对 value 执行 'in dict' 或 'in list' 操作，因此不会触发哈希错误。"
+      },
+      {
+        "test_name": "test_choice_iterator_passes_model_to_widget",
+        "test_file": "tests/model_forms/test_modelchoicefield.py",
+        "why_relevant": "它自定义了 create_option 方法，并访问 value.instance 属性，展示了与 ModelChoiceIteratorValue 实例交互的模式。",
+        "reusable_parts": [
+          "CustomCheckboxSelectMultiple 子类定义",
+          "create_option 方法重写模式",
+          "ModelMultipleChoiceField 的配置",
+          "使用 Category 测试数据"
+        ],
+        "possible_gap": "该测试没有对 value 执行 'in dict' 或 'in list' 操作，因此不会触发哈希错误。"
+      },
+      {
+        "test_name": "test_options",
+        "test_file": "tests/forms_tests/widget_tests/test_select.py",
+        "why_relevant": "它展示了如何调用 widget.options 并检查返回的选项字典结构，包括 value 字段。",
+        "reusable_parts": [
+          "WidgetTest 基类",
+          "self.widget 和 choices 的构造",
+          "options 方法的调用方式",
+          "对返回字典的断言模式"
+        ],
+        "possible_gap": "它使用简单的字符串值，而非 ModelChoiceIteratorValue 实例。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中 create_option 的 value 参数被用于访问 .obj 或 .instance 属性。",
+        "target_pattern": "在 create_option 方法体中，对 value 参数执行 'value in some_dict' 或 'value in some_list' 操作。",
+        "reason": "Issue 表明此操作在 Django 3.1 中会因 ModelChoiceIteratorValue 不可哈希而失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试中 self.show_fields 或 allowed_values 不存在。",
+        "target_pattern": "在自定义 widget 中定义实例属性 self.show_fields（字典）或 allowed_values（列表）。",
+        "reason": "Issue 中错误发生在检查 value 是否在这些容器的键或元素中。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在 create_option 方法内执行 'value in container' 操作时捕获的异常。",
+        "reason": "Issue 的核心错误是 TypeError，观测此异常能直接确认缺陷是否触发。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "create_option 方法中 value 参数的类型（type(value)）。",
+        "reason": "确认 value 是否为 ModelChoiceIteratorValue 实例，这是触发条件的关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "create_option 方法返回的 context 字典，特别是 'attrs' 字段。",
+        "reason": "Issue 中用户试图设置 data-fields 属性，观测返回值可检查操作是否成功。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 value 是 ModelChoiceIteratorValue 实例且其底层值在容器中时，'value in container' 操作应成功且不引发 TypeError，并能正确设置上下文属性。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的 HTML 输出或具体的属性值字符串，因为 Issue 未提供精确输出。",
+        "reason": "当前缺陷表现为异常，因此初始复现测试应断言异常被引发。修复后，断言应转为验证操作成功（例如，不引发异常或属性被设置）。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要 Django 测试环境，可能涉及数据库模型（如 Category）用于创建 ModelChoiceField。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要自定义 ChoiceWidget 子类（如 Select 或 CheckboxSelectMultiple）并重写 create_option 方法。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要在自定义 widget 中设置实例属性（如 self.show_fields）作为字典。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "ModelChoiceIteratorValue 在 Django 3.0 中是否可哈希，或者其行为在 3.1 中具体如何变化。",
+      "除了 __hash__ 缺失，ModelChoiceIteratorValue 的 __eq__ 实现是否也影响了 'in' 操作的行为。",
+      "用户示例中 self.show_fields 字典的键具体是什么类型（整数还是其他），以及 ModelChoiceIteratorValue 的 __eq__ 如何与之比较。",
+      "修复后的确切行为：是让 ModelChoiceIteratorValue 可哈希，还是改变 'in' 操作的语义以使用 __eq__ 而不要求哈希。"
+    ]
+  }
+}

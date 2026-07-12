@@ -1,0 +1,164 @@
+{
+  "issue_summary": "当使用 TextChoices/IntegerChoices 枚举值作为 CharField/IntegerField 的 choices 时，新创建模型实例的字段 getter 返回的是枚举成员对象而非其底层值（如字符串或整数）。",
+  "trigger_condition": {
+    "text": "创建一个模型实例，其 CharField 或 IntegerField 的 choices 参数指向一个 TextChoices 或 IntegerChoices 枚举类，并使用枚举成员（如 MyChoice.FIRST_CHOICE）作为字段值进行赋值和创建。",
+    "evidence": ["Issue 中的模型定义 `MyObject` 和 `setUp` 方法：`self.my_object = MyObject.objects.create(my_str_value=MyChoice.FIRST_CHOICE)`", "相关测试 1 中 `Post.objects.create(title=Event.C, body=Event.F)`"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "新创建（未从数据库刷新或重新获取）的模型实例，其字段的字符串表示（`str(...)`）是枚举成员的表示（如 'MyChoice.FIRST_CHOICE'），而不是枚举的底层值（如 'first'）。字段值的类型也不是预期的 str 或 int。",
+    "symptom_type": "wrong_return",
+    "evidence": ["Issue 中测试失败信息：`AssertionError: 'MyChoice.FIRST_CHOICE' != 'first'`", "Issue 中 `self.assertIsInstance(my_object.my_str_value, str)` 预期失败（未明确写出但隐含）"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "无论模型实例是新创建的还是从数据库检索的，其字段的 getter 应返回枚举的底层值（字符串或整数），且该值的类型应与字段定义（CharField 或 IntegerField）匹配。",
+    "evidence": ["Issue 中测试的预期：`self.assertEqual(str(my_object.my_str_value), \"first\")` 和 `self.assertIsInstance(my_object.my_str_value, str)`", "相关测试 1 中 `self.assertEqual(p1.title, 'Carnival!')` 和 `self.assertEqual(p1.title, Event.C)` 同时成立，暗示字段值应与枚举值相等且为字符串。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "models.CharField",
+      "kind": "class",
+      "source_path": "django/db/models/fields/__init__.py",
+      "reason": "Issue 中涉及的字段类型，其 `to_python` 或 `get_prep_value` 方法可能负责处理枚举值到数据库值的转换。"
+    },
+    {
+      "name": "models.IntegerField",
+      "kind": "class",
+      "source_path": "django/db/models/fields/__init__.py",
+      "reason": "Issue 中涉及的另一种字段类型，同样用于 IntegerChoices。"
+    },
+    {
+      "name": "models.TextChoices",
+      "kind": "class",
+      "source_path": "django/db/models/enums.py",
+      "reason": "Issue 中用于生成 choices 的枚举基类。"
+    },
+    {
+      "name": "models.IntegerChoices",
+      "kind": "class",
+      "source_path": "django/db/models/enums.py",
+      "reason": "Issue 中涉及的另一种枚举基类。"
+    },
+    {
+      "name": "ChoicesMeta.choices",
+      "kind": "class_function",
+      "source_path": "django/db/models/enums.py",
+      "reason": "提供 choices 列表的属性，用于字段初始化。"
+    },
+    {
+      "name": "Model.objects.create",
+      "kind": "method",
+      "source_path": "",
+      "reason": "Issue 中创建模型实例的 API。"
+    },
+    {
+      "name": "Model.refresh_from_db",
+      "kind": "method",
+      "source_path": "",
+      "reason": "相关测试 1 中用于刷新实例状态，可能与缺陷行为对比相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/fields/__init__.py",
+      "object": "CharField.to_python 或 CharField.get_prep_value",
+      "lines": "",
+      "reason": "这些方法负责将 Python 对象转换为字段的 Python 表示和数据库表示。当输入是枚举成员时，可能未正确提取其 `.value` 属性。"
+    },
+    {
+      "path": "django/db/models/fields/__init__.py",
+      "object": "IntegerField.to_python 或 IntegerField.get_prep_value",
+      "lines": "",
+      "reason": "与 CharField 类似，负责处理 IntegerChoices 枚举值。"
+    },
+    {
+      "path": "django/db/models/enums.py",
+      "object": "TextChoices 或 IntegerChoices 类",
+      "lines": "",
+      "reason": "枚举类可能影响了其成员在赋值给模型字段时的行为。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "TestCharField.test_assignment_from_choice_enum",
+      "test_file": "tests/model_fields/test_charfield.py",
+      "why_relevant": "它测试了使用 TextChoices 枚举值赋值给 CharField 并创建模型实例的场景，与 Issue 触发条件高度相似。",
+      "reusable_parts": ["imports (models, TestCase)", "模型定义模式（Post）", "使用枚举成员创建实例：`Post.objects.create(title=Event.C)`", "使用 `refresh_from_db()`", "assert 风格：`self.assertEqual(p1.title, 'Carnival!')` 和 `self.assertEqual(p1.title, Event.C)`"],
+      "possible_gap": "该测试在创建后立即调用了 `refresh_from_db()`，这可能绕过了新创建实例（未刷新）的缺陷路径。它也没有直接检查新创建实例字段的 `str()` 表示或类型。"
+    },
+    {
+      "test_name": "ValidationTests.test_enum_choices_cleans_valid_string",
+      "test_file": "tests/model_fields/test_charfield.py",
+      "why_relevant": "它测试了 CharField 的 `clean` 方法处理枚举 choices 的输入，涉及字段级别的值转换。",
+      "reusable_parts": ["字段构造：`models.CharField(choices=self.Choices.choices, max_length=1)`", "调用 `f.clean('c', None)`", "assert 风格：`self.assertEqual(f.clean('c', None), 'c')`"],
+      "possible_gap": "它测试的是字段验证器（`clean`），而不是模型实例创建后的字段 getter 行为。输入是原始字符串，而不是枚举成员对象。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "object_state",
+      "current_pattern": "相关测试 1 中，创建实例后立即调用 `refresh_from_db()`，然后进行断言。",
+      "target_pattern": "创建实例后，不调用 `refresh_from_db()`，直接对新实例的字段进行 `str()` 和 `type()` 检查。",
+      "reason": "Issue 表明缺陷出现在新创建（未刷新）的实例上，刷新后可能恢复正常。",
+      "confidence": "high"
+    },
+    {
+      "slot": "input",
+      "current_pattern": "相关测试 2 和 3 中，`clean` 方法的输入是原始字符串（如 'c', '1'）。",
+      "target_pattern": "使用枚举成员对象（如 `MyChoice.FIRST_CHOICE`）作为字段赋值或 `clean` 的输入。",
+      "reason": "Issue 的触发条件是使用枚举成员本身，而不是其 `.value` 字符串。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "type",
+      "expression_hint": "`type(instance.my_field)` 在新创建实例和从数据库检索实例上的差异。",
+      "reason": "Issue 涉及类型不一致：新实例返回枚举类型，检索实例返回底层值类型。"
+    },
+    {
+      "kind": "str",
+      "expression_hint": "`str(instance.my_field)` 在新创建实例和从数据库检索实例上的差异。",
+      "reason": "Issue 中直接展示了 `str()` 结果的错误：返回枚举表示而非其值。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "`instance.my_field` 直接获取的值，观察其是枚举成员还是字符串/整数。",
+      "reason": "这是字段 getter 的核心返回值，是判断缺陷的直接依据。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "新创建模型实例的字段值应为字符串（对于 CharField）或整数（对于 IntegerField），且其字符串表示等于枚举的底层值。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的枚举成员 repr（如 `<MyChoice.FIRST_CHOICE: 'first'>`），因为实现可能变化。避免断言不相关的字段属性。",
+      "reason": "Issue 的核心是字段值的类型和字符串表示应与枚举的 `.value` 一致，而不是枚举对象本身。"
+    },
+    {
+      "assertion_goal": "新创建实例的字段值与从数据库检索的同一实例的字段值应相等且类型相同。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言两个对象是同一个实例（id相同）。",
+      "reason": "Issue 描述了新创建实例和检索实例行为不一致的问题。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 TestCase 并创建测试数据库，因为涉及模型实例的创建和数据库查询。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要定义继承自 models.TextChoices 或 models.IntegerChoices 的枚举类，并在模型字段的 choices 参数中使用它。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "缺陷是否也影响 IntegerField 与 IntegerChoices 的组合（Issue 提到了但示例是 CharField）。",
+    "字段的 `to_python` 和 `get_prep_value` 方法中，具体是哪一步未正确处理枚举成员对象。",
+    "除了 `str()` 和类型，其他操作（如序列化、比较）是否也受影响。",
+    "是否所有 Django 版本（如 3.0, 3.1, 3.2）都受此影响。"
+  ]
+}

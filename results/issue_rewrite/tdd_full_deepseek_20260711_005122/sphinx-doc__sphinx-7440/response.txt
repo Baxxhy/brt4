@@ -1,0 +1,91 @@
+{
+  "issue_summary": "Sphinx 在构建文档时，对 glossary 中大小写不同的重复术语（例如 MySQL 和 mysql）错误地报告了重复术语警告。",
+  "trigger_condition": {
+    "text": "构建一个包含 glossary 指令的 reStructuredText 文档，其中包含两个拼写相同但大小写不同的术语（例如 'MySQL' 和 'mysql'）。",
+    "evidence": ["Issue 描述中提到了 'MySQL != mysql term right ?'，并给出了触发错误的构建步骤。", "相关测试 1 中包含了 'duplicated terms' 的测试用例，表明重复术语会触发警告。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "Sphinx 构建过程将大小写不同的术语视为重复，并输出警告：'duplicate term description of mysql, other instance in glossary'，且该警告被当作错误处理。",
+    "symptom_type": "warning",
+    "evidence": ["Issue 中直接给出了错误信息：'Warning, treated as error: doc/glossary.rst:243:duplicate term description of mysql, other instance in glossary'。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "Sphinx 在 glossary 中应区分大小写，将 'MySQL' 和 'mysql' 视为不同的术语，不报告重复术语警告。",
+    "evidence": ["Issue 中提问 'MySQL != mysql term right ?'，暗示期望它们被视为不同术语。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "sphinx.domains.rst",
+      "kind": "module",
+      "source_path": "sphinx/domains/rst.py",
+      "reason": "iCoRe 检索出的相关源代码指向此模块，它很可能负责处理 reStructuredText 域，包括 glossary 指令。"
+    },
+    {
+      "name": "restructuredtext.parse",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试 1 中使用了此函数来解析包含 glossary 的文本，它是触发警告的入口点。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sphinx/domains/rst.py",
+      "object": "处理 glossary 术语重复性检查的代码",
+      "lines": "",
+      "reason": "iCoRe 检索出的相关源代码指向此文件，且 Issue 与 glossary 术语重复性检查相关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_glossary_warning",
+      "test_file": "tests/test_domain_std.py",
+      "why_relevant": "它直接测试 glossary 指令的警告，包括重复术语警告，与 Issue 的核心问题（重复术语警告）高度相关。",
+      "reusable_parts": ["使用 restructuredtext.parse 函数解析文本", "使用 warning fixture 捕获警告", "使用 assert 检查警告信息是否包含特定字符串"],
+      "possible_gap": "该测试使用完全相同的字符串 'term-case4' 作为重复术语，没有测试大小写不同的情况。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "重复术语使用完全相同的字符串，例如 'term-case4' 和 'term-case4'。",
+      "target_pattern": "重复术语使用拼写相同但大小写不同的字符串，例如 'MySQL' 和 'mysql'。",
+      "reason": "Issue 表明当前实现在大小写不同的情况下错误地报告了重复，因此需要变异输入来触发此条件。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "warning",
+      "expression_hint": "warning.getvalue()",
+      "reason": "Issue 的核心错误现象是一个关于重复术语的警告，观测警告输出是判断缺陷是否触发的直接方式。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "当 glossary 中包含大小写不同的相同术语时，不应出现 'duplicate term description of ...' 的警告。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "断言完整的警告字符串相等，因为行号等信息可能变化。",
+      "reason": "Issue 期望大小写不同的术语不被视为重复，因此断言警告信息中不包含重复术语的警告片段是稳定且与目标对齐的。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 app, status, warning fixture 来构建和捕获输出。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试环境可能需要 Sphinx 和特定的构建器（如 'html'）。",
+      "source": "issue",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "重复术语检查的具体实现逻辑和位置在 sphinx/domains/rst.py 中的确切行号。",
+    "术语比较是否默认进行了大小写规范化，或者是在哪个环节进行的。",
+    "除了警告，是否还有其他副作用（如构建失败）取决于配置。"
+  ]
+}

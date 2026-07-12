@@ -1,0 +1,124 @@
+instance_id: django__django-16899
+
+issue_summary: ModelAdmin 的 readonly_fields 检查错误信息未包含字段名，而其他字段如 list_editable 会包含。
+
+trigger_condition:
+{
+  "text": "在 ModelAdmin 或 Inline 子类中，将 readonly_fields 设置为一个不存在的字段名或无效值。",
+  "evidence": [
+    "Issue 描述提到 'When subclassing a ModelAdmin, the current error message for the readonly_fields would indicate the index of the value at fault but it will not include the field's name'",
+    "相关测试 1 和 2 展示了 readonly_fields 包含不存在字段时触发检查。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "错误信息仅显示索引（如 'readonly_fields[0]'），而未包含有问题的字段名（如 'i_dont_exist'）。",
+  "symptom_type": "warning",
+  "evidence": [
+    "Issue 中给出的错误信息示例：'The value of 'readonly_fields[0]' is not a callable, an attribute of 'CityInline', or an attribute of 'admin_checks.City'.'",
+    "相关测试 1 和 2 的 expected 错误信息中只包含索引，不包含字段名。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "readonly_fields 的检查错误信息应包含有问题的字段名，以与其他字段（如 list_editable）的错误信息格式统一。",
+  "evidence": [
+    "Issue 描述：'It would be good if we can unify this and include the field name in the readonly_fields checks'",
+    "相关测试 3 中 list_editable 的错误信息包含了字段名 'test'：'refers to 'test''。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "ModelAdmin.check",
+    "kind": "method",
+    "source_path": "django/contrib/admin/options.py",
+    "reason": "Issue 涉及的检查错误信息由 ModelAdmin 的 check 方法（或其使用的 checks_class）生成。"
+  },
+  {
+    "name": "ModelAdminChecks",
+    "kind": "class",
+    "source_path": "django/contrib/admin/options.py",
+    "reason": "ModelAdmin 的 checks_class 属性指向 ModelAdminChecks，负责执行包括 readonly_fields 在内的各种检查。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相关测试 1 中 readonly_fields = ['i_dont_exist']",
+    "target_pattern": "readonly_fields = ['some_nonexistent_field_name']",
+    "reason": "使用不同的不存在字段名可以验证错误信息是否动态包含了该字段名，而非固定索引。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "相关测试 1 和 2 在 ModelAdmin/Inline 子类中直接定义 readonly_fields。",
+    "target_pattern": "在更复杂的继承或混合场景中定义 readonly_fields。",
+    "reason": "Issue 提到 'When subclassing a ModelAdmin'，可能涉及多层继承，但核心触发条件不变。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "warning",
+    "expression_hint": "admin_instance.check() 返回的错误列表中的 checks.Error 对象的 .msg 属性。",
+    "reason": "错误信息内容直接反映了 Issue 描述的问题（是否包含字段名）。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "admin_instance.check() 返回的错误列表的长度和元素类型。",
+    "reason": "确保检查确实触发并返回了预期的错误对象。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证 readonly_fields 检查错误信息中包含了有问题的字段名称。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "断言完整的错误信息字符串相等，因为具体措辞可能在修复中调整。",
+    "reason": "Issue 的核心是信息内容（包含字段名），而非固定措辞。使用 contains_fragment 可以稳定地检查字段名是否出现。"
+  },
+  {
+    "assertion_goal": "验证触发的错误是 admin.E035。",
+    "preferred_assertion_style": "equals",
+    "avoid": "忽略错误码或与其他检查错误混淆。",
+    "reason": "错误码是稳定标识符，用于确认触发的是正确的检查。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 @override_settings 配置 INSTALLED_APPS 以包含自定义模型（如 'admin_checks'）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要导入 admin、checks 模块以及相关的模型（如 Song, City, State）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试类应继承自 SimpleTestCase 或类似的 Django 测试基类。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "错误信息生成和格式化的具体源码位置（在 checks.py 还是 options.py 中）。",
+  "修复后错误信息的完整确切措辞（例如，是 'refers to X' 还是 'includes X' 或其他格式）。",
+  "除了字段不存在，其他导致 E035 的错误情况（如非可调用、非属性）是否也应包含字段名。"
+]

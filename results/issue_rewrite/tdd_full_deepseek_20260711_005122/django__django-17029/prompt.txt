@@ -1,0 +1,303 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Apps.clear_cache() does not clear get_swappable_settings_name cache.
+Description
+	
+We use apps.clear_cache() in django-stubs to be able to reset the previous state on consequential mypy runs.
+Code: ​https://github.com/typeddjango/django-stubs/pull/1601/files#diff-c49d8fe2cd0a58fad3c36ab3a88c7745e9622f3098e60cd512953eb17b8a1994R63-R64
+But, looks like we don't clear all the object's cache this way, because get_swappable_settings_name (which is a functools._lru_cache_wrapper) is not cleared.
+I think that this is not correct. .clear_cache doc states: Clear all internal caches, for methods that alter the app registry.
+Looks like that is not the case.
+I propose to add: self.get_swappable_settings_name.cache_clear() line to def clear_cache.
+If others agree, I will make a PR.
+Original discussion: ​https://github.com/typeddjango/django-stubs/pull/1601#discussion_r1246344533
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/apps/registry.py
+对象名称：clear_cache
+节点类型：class_function
+父节点：Apps
+行号范围：370-384
+代码：
+    def clear_cache(self):
+        """
+        Clear all internal caches, for methods that alter the app registry.
+
+        This is mostly used in tests.
+        """
+        # Call expire cache on each model. This will purge
+        # the relation tree and the fields cache.
+        self.get_models.cache_clear()
+        if self.ready:
+            # Circumvent self.get_models() to prevent that the cache is refilled.
+            # This particularly prevents that an empty value is cached while cloning.
+            for app_config in self.app_configs.values():
+                for model in app_config.get_models(include_auto_created=True):
+                    model._meta._expire_cache()
+
+
+【源码片段 2】
+文件路径：django/apps/registry.py
+对象名称：get_swappable_settings_name
+节点类型：class_function
+父节点：Apps
+行号范围：284-304
+代码：
+    def get_swappable_settings_name(self, to_string):
+        """
+        For a given model string (e.g. "auth.User"), return the name of the
+        corresponding settings name if it refers to a swappable model. If the
+        referred model is not swappable, return None.
+
+        This method is decorated with @functools.cache because it's performance
+        critical when it comes to migrations. Since the swappable settings don't
+        change after Django has loaded the settings, there is no reason to get
+        the respective settings attribute over and over again.
+        """
+        to_string = to_string.lower()
+        for model in self.get_models(include_swapped=True):
+            swapped = model._meta.swapped
+            # Is this model swapped out for the model given by to_string?
+            if swapped and swapped.lower() == to_string:
+                return model._meta.swappable
+            # Is this model swappable and the one given by to_string?
+            if model._meta.swappable and model._meta.label_lower == to_string:
+                return model._meta.swappable
+        return None
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/apps/tests.py
+测试名称：AppsTests.test_models_not_loaded
+测试代码：
+class AppsTests(SimpleTestCase):
+    def test_models_not_loaded(self):
+        """
+        apps.get_models() raises an exception if apps.models_ready isn't True.
+        """
+        apps.models_ready = False
+        try:
+            # The cache must be cleared to trigger the exception.
+            apps.get_models.cache_clear()
+            with self.assertRaisesMessage(
+                AppRegistryNotReady, "Models aren't loaded yet."
+            ):
+                apps.get_models()
+        finally:
+            apps.models_ready = True
+
+【相关测试 2】
+测试文件：tests/model_meta/tests.py
+测试名称：RelationTreeTests.test_clear_cache_clears_relation_tree
+测试代码：
+class RelationTreeTests(SimpleTestCase):
+    def test_clear_cache_clears_relation_tree(self):
+        # The apps.clear_cache is setUp() should have deleted all trees.
+        # Exclude abstract models that are not included in the Apps registry
+        # and have no cache.
+        all_models_with_cache = (m for m in self.all_models if not m._meta.abstract)
+        for m in all_models_with_cache:
+            self.assertNotIn("_relation_tree", m._meta.__dict__)
+
+【相关测试 3】
+测试文件：tests/swappable_models/tests.py
+测试名称：SwappableModelTests.test_generated_data
+测试代码：
+class SwappableModelTests(TestCase):
+    @override_settings(TEST_ARTICLE_MODEL="swappable_models.AlternateArticle")
+    def test_generated_data(self):
+        "Permissions and content types are not created for a swapped model"
+
+        # Delete all permissions and content_types
+        Permission.objects.filter(content_type__app_label="swappable_models").delete()
+        ContentType.objects.filter(app_label="swappable_models").delete()
+
+        # Re-run migrate. This will re-build the permissions and content types.
+        management.call_command("migrate", interactive=False, verbosity=0)
+
+        # Content types and permissions exist for the swapped model,
+        # but not for the swappable model.
+        apps_models = [
+            (p.content_type.app_label, p.content_type.model)
+            for p in Permission.objects.all()
+        ]
+        self.assertIn(("swappable_models", "alternatearticle"), apps_models)
+        self.assertNotIn(("swappable_models", "article"), apps_models)
+
+        apps_models = [(ct.app_label, ct.model) for ct in ContentType.objects.all()]
+        self.assertIn(("swappable_models", "alternatearticle"), apps_models)
+        self.assertNotIn(("swappable_models", "article"), apps_models)
+
+【相关测试 4】
+测试文件：tests/cache/tests.py
+测试名称：BaseCacheTests.test_clear
+测试代码：
+class BaseCacheTests:
+    def test_clear(self):
+        # The cache can be emptied using clear
+        cache.set_many({"key1": "spam", "key2": "eggs"})
+        cache.clear()
+        self.assertIsNone(cache.get("key1"))
+        self.assertIsNone(cache.get("key2"))
+
+【相关测试 5】
+测试文件：tests/contenttypes_tests/test_models.py
+测试名称：ContentTypesTests.test_lookup_cache
+测试代码：
+class ContentTypesTests(TestCase):
+    def test_lookup_cache(self):
+        """
+        The content type cache (see ContentTypeManager) works correctly.
+        Lookups for a particular content type -- by model, ID, or natural key
+        -- should hit the database only on the first lookup.
+        """
+        # At this point, a lookup for a ContentType should hit the DB
+        with self.assertNumQueries(1):
+            ContentType.objects.get_for_model(ContentType)
+
+        # A second hit, though, won't hit the DB, nor will a lookup by ID
+        # or natural key
+        with self.assertNumQueries(0):
+            ct = ContentType.objects.get_for_model(ContentType)
+        with self.assertNumQueries(0):
+            ContentType.objects.get_for_id(ct.id)
+        with self.assertNumQueries(0):
+            ContentType.objects.get_by_natural_key("contenttypes", "contenttype")
+
+        # Once we clear the cache, another lookup will again hit the DB
+        ContentType.objects.clear_cache()
+        with self.assertNumQueries(1):
+            ContentType.objects.get_for_model(ContentType)
+
+        # The same should happen with a lookup by natural key
+        ContentType.objects.clear_cache()
+        with self.assertNumQueries(1):
+            ContentType.objects.get_by_natural_key("contenttypes", "contenttype")
+        # And a second hit shouldn't hit the DB
+        with self.assertNumQueries(0):
+            ContentType.objects.get_by_natural_key("contenttypes", "contenttype")
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

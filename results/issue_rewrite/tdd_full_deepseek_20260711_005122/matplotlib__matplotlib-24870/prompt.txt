@@ -1,0 +1,294 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+[ENH]: Auto-detect bool arrays passed to contour()?
+### Problem
+
+I find myself fairly regularly calling
+```python
+plt.contour(boolean_2d_array, levels=[.5], ...)
+```
+to draw the boundary line between True and False regions on a boolean 2d array.  Without `levels=[.5]`, one gets the default 8 levels which go at 0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.05 resulting in all the contour lines being drawn on top of one another; but clearly(?), for boolean inputs, the only choice that makes sense is to have a single level at 0.5 (or rather, anywhere between 0 and 1).
+```python
+from pylab import *
+ii, jj = np.ogrid[:100, :100]; im = (ii+jj) % 20 < 10; subplot(121).contour(im); subplot(122).contour(im, levels=[.5])
+```
+![test](https://user-images.githubusercontent.com/1322974/199115826-8746ebbc-e469-48fa-a7f0-d302750018b5.png)
+
+
+### Proposed solution
+
+Autodetect boolean inputs to contour, and default levels to [0.5] in that case.
+
+I guess the closest similar kind of autodetection in the library is for imshow, which auto-switches between 0-1 float RGBA arrays and 0-255 uint8 RGBA arrays (when given a 3D array as input).
+
+Thoughts?
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：lib/matplotlib/pyplot.py
+对象名称：contour
+节点类型：top-level function
+父节点：pyplot
+行号范围：2515-2520
+代码：
+def contour(*args, data=None, **kwargs):
+    __ret = gca().contour(
+        *args, **({"data": data} if data is not None else {}),
+        **kwargs)
+    if __ret._A is not None: sci(__ret)  # noqa
+    return __ret
+
+
+【源码片段 2】
+文件路径：plot_types/arrays/contour.py
+对象名称：levels
+节点类型：global_var
+父节点：contour
+行号范围：16-16
+代码：
+levels = np.linspace(np.min(Z), np.max(Z), 7)
+
+
+【源码片段 3】
+文件路径：lib/matplotlib/pyplot.py
+对象名称：imshow
+节点类型：top-level function
+父节点：pyplot
+行号范围：2679-2693
+代码：
+def imshow(
+        X, cmap=None, norm=None, *, aspect=None, interpolation=None,
+        alpha=None, vmin=None, vmax=None, origin=None, extent=None,
+        interpolation_stage=None, filternorm=True, filterrad=4.0,
+        resample=None, url=None, data=None, **kwargs):
+    __ret = gca().imshow(
+        X, cmap=cmap, norm=norm, aspect=aspect,
+        interpolation=interpolation, alpha=alpha, vmin=vmin,
+        vmax=vmax, origin=origin, extent=extent,
+        interpolation_stage=interpolation_stage,
+        filternorm=filternorm, filterrad=filterrad, resample=resample,
+        url=url, **({"data": data} if data is not None else {}),
+        **kwargs)
+    sci(__ret)
+    return __ret
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：lib/matplotlib/tests/test_contour.py
+测试名称：test_contour_Nlevels
+测试代码：
+def test_contour_Nlevels():
+    # A scalar levels arg or kwarg should trigger auto level generation.
+    # https://github.com/matplotlib/matplotlib/issues/11913
+    z = np.arange(12).reshape((3, 4))
+    fig, ax = plt.subplots()
+    cs1 = ax.contour(z, 5)
+    assert len(cs1.levels) > 1
+    cs2 = ax.contour(z, levels=5)
+    assert (cs1.levels == cs2.levels).all()
+
+【相关测试 2】
+测试文件：lib/matplotlib/tests/test_contour.py
+测试名称：test_contour_empty_levels
+测试代码：
+def test_contour_empty_levels():
+
+    x = np.arange(9)
+    z = np.random.random((9, 9))
+
+    fig, ax = plt.subplots()
+    with pytest.warns(UserWarning) as record:
+        ax.contour(x, x, z, levels=[])
+    assert len(record) == 1
+
+【相关测试 3】
+测试文件：lib/matplotlib/tests/test_contour.py
+测试名称：test_given_colors_levels_and_extends
+测试代码：
+@image_comparison(['contour_manual_colors_and_levels.png'], remove_text=True)
+def test_given_colors_levels_and_extends():
+    # Remove this line when this test image is regenerated.
+    plt.rcParams['pcolormesh.snap'] = False
+
+    _, axs = plt.subplots(2, 4)
+
+    data = np.arange(12).reshape(3, 4)
+
+    colors = ['red', 'yellow', 'pink', 'blue', 'black']
+    levels = [2, 4, 8, 10]
+
+    for i, ax in enumerate(axs.flat):
+        filled = i % 2 == 0.
+        extend = ['neither', 'min', 'max', 'both'][i // 2]
+
+        if filled:
+            # If filled, we have 3 colors with no extension,
+            # 4 colors with one extension, and 5 colors with both extensions
+            first_color = 1 if extend in ['max', 'neither'] else None
+            last_color = -1 if extend in ['min', 'neither'] else None
+            c = ax.contourf(data, colors=colors[first_color:last_color],
+                            levels=levels, extend=extend)
+        else:
+            # If not filled, we have 4 levels and 4 colors
+            c = ax.contour(data, colors=colors[:-1],
+                           levels=levels, extend=extend)
+
+        plt.colorbar(c, ax=ax)
+
+【相关测试 4】
+测试文件：lib/matplotlib/tests/test_contour.py
+测试名称：test_contour_legend_elements
+测试代码：
+def test_contour_legend_elements():
+    from matplotlib.collections import LineCollection
+    x = np.arange(1, 10)
+    y = x.reshape(-1, 1)
+    h = x * y
+
+    colors = ['blue', '#00FF00', 'red']
+    cs = plt.contour(h, levels=[10, 30, 50],
+                     colors=colors,
+                     extend='both')
+    artists, labels = cs.legend_elements()
+    assert labels == ['$x = 10.0$', '$x = 30.0$', '$x = 50.0$']
+    assert all(isinstance(a, LineCollection) for a in artists)
+    assert all(same_color(a.get_color(), c)
+               for a, c in zip(artists, colors))
+
+【相关测试 5】
+测试文件：lib/mpl_toolkits/mplot3d/tests/test_axes3d.py
+测试名称：test_contour3d_1d_input
+测试代码：
+def test_contour3d_1d_input():
+    # Check that 1D sequences of different length for {x, y} doesn't error
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+    nx, ny = 30, 20
+    x = np.linspace(-10, 10, nx)
+    y = np.linspace(-10, 10, ny)
+    z = np.random.randint(0, 2, [ny, nx])
+    ax.contour(x, y, z, [0.5])
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

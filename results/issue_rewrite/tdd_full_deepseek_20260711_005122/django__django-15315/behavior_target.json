@@ -1,0 +1,303 @@
+{
+  "instance_id": "django__django-15315",
+  "issue_summary": "Field.__hash__() 在字段被赋值给模型类后哈希值发生变化，导致其作为字典键时行为异常。",
+  "trigger_condition": {
+    "text": "创建一个 Field 实例（如 CharField），将其用作字典键，然后将该字段赋值给一个模型类（如 Book.title = f）。",
+    "evidence": [
+      "Issue 中的示例代码：f = models.CharField(max_length=200); d = {f: 1}; class Book(models.Model): title = f; assert f in d"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "断言失败（AssertionError），因为字段 f 在赋值给模型类后，其哈希值改变，导致 f in d 为 False。",
+    "symptom_type": "exception",
+    "evidence": [
+      "Issue 描述：'This code crashes with an AssertionError'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "Field 实例的 __hash__() 方法应返回一个不可变的值，确保其哈希值在生命周期内（包括被赋值给模型类后）保持不变，从而能稳定地用作字典键。",
+    "evidence": [
+      "Issue 描述：'Field.__hash__() should be immutable.'，'But it's bad if an object's hash changes, since it breaks its use in dicts.'"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "django.db.models.fields.Field.__hash__",
+      "kind": "method",
+      "source_path": "django/db/models/fields/__init__.py",
+      "reason": "Issue 明确指出 __hash__ 方法在字段赋值给模型类后值会改变。"
+    },
+    {
+      "name": "django.db.models.fields.CharField",
+      "kind": "class",
+      "source_path": "django/db/models/fields/__init__.py",
+      "reason": "Issue 示例中使用了 CharField。"
+    },
+    {
+      "name": "django.db.models.base.Model",
+      "kind": "class",
+      "source_path": "django/db/models/base.py",
+      "reason": "字段被赋值给模型类（如 Book.title = f），这涉及到模型类的创建和字段的关联。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/fields/__init__.py",
+      "object": "Field.__hash__",
+      "lines": "544-549",
+      "reason": "源码片段 1 显示了 __hash__ 方法的实现，其返回值依赖于 self.model 属性，该属性可能在字段被赋值给模型类（contribute_to_class）后才被设置，导致哈希值改变。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "SimpleExpressionTests.test_hash",
+      "test_file": "tests/expressions/tests.py",
+      "why_relevant": "该测试直接验证了 Expression 对象（可能包含 Field）的哈希行为，并涉及了字段的哈希比较。",
+      "reusable_parts": [
+        "导入 CharField、IntegerField、Model",
+        "使用 hash() 函数进行比较的断言风格",
+        "从模型元数据获取字段的用法"
+      ],
+      "possible_gap": "该测试关注的是 Expression 对象的哈希，而非直接测试 Field 实例本身在赋值给模型类前后的哈希不变性。"
+    },
+    {
+      "test_name": "ModelTest.test_hash_function",
+      "test_file": "tests/basic/tests.py",
+      "why_relevant": "该测试验证了模型实例（基于主键）的哈希行为，并展示了模型实例作为字典键的用例。",
+      "reusable_parts": [
+        "创建模型实例的 fixture",
+        "使用集合和字典的测试模式",
+        "assertIn 断言风格"
+      ],
+      "possible_gap": "该测试关注的是 Model 实例的哈希，而非 Field 实例的哈希。"
+    },
+    {
+      "test_name": "BasicFieldTests.test_field_instance_is_picklable",
+      "test_file": "tests/model_fields/tests.py",
+      "why_relevant": "该测试直接操作 Field 实例，并检查其序列化属性，与操作 Field 实例相关。",
+      "reusable_parts": [
+        "Field 实例的构造",
+        "对 Field 实例属性的操作（如 _get_default）"
+      ],
+      "possible_gap": "该测试不涉及哈希或字典键的使用。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "object_state",
+      "current_pattern": "在测试中直接使用从模型元数据获取的字段（如 TestModel._meta.get_field('field')），这些字段已经关联了模型。",
+      "target_pattern": "先创建一个独立的 Field 实例（未关联模型），将其用作字典键，然后再将其赋值给一个模型类。",
+      "reason": "Issue 的核心是字段在关联模型前后哈希值发生变化。相似测试通常使用已关联模型的字段，需要变异为测试字段状态变化的过程。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "测试中可能直接比较两个不同字段的哈希值。",
+      "target_pattern": "测试同一个字段实例在关联模型前后哈希值的一致性，并将其用作字典键进行成员检查。",
+      "reason": "Issue 的触发条件是字段状态变化导致字典查找失败，需要变异测试流程以包含状态变化和字典操作。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "hash(field_instance) 在字段赋值给模型类前后的值。",
+      "reason": "直接观测哈希值是否变化，这是 Issue 的核心。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "field_instance.model 属性在赋值前后的状态。",
+      "reason": "源码显示 __hash__ 依赖于 self.model，观测其变化可以理解哈希值变化的原因。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "field_instance in dictionary 的布尔结果。",
+      "reason": "Issue 的最终错误现象是字典成员检查失败。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "字段实例在赋值给模型类前后，其哈希值应保持不变。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的哈希值具体数字（可能因实现细节变化），或断言字典的完整内部表示。",
+      "reason": "哈希不变性是修复后的核心语义，使用 equals 直接验证。"
+    },
+    {
+      "assertion_goal": "字段实例在作为字典键插入后，即使在关联模型后，仍能被成功查找（即 `field in dict` 为 True）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言字典的键列表完全相等，或断言字典的迭代顺序。",
+      "reason": "这直接对应 Issue 中崩溃的断言，验证修复后字典功能的正确性。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "可能需要使用 SimpleTestCase 或 TestCase，因为涉及模型定义。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    },
+    {
+      "hint": "需要导入 django.db.models 中的相关类（如 models.CharField, models.Model）。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "字段的 `creation_counter` 在哈希计算中的作用及其在字段生命周期中是否变化。",
+    "除了 `self.model` 属性，`__hash__` 实现中是否还有其他因素会导致哈希值在特定操作后改变。",
+    "Issue 中提到的 #31750 具体修改了哪些代码，但根据规则不应使用补丁信息。"
+  ],
+  "raw": {
+    "issue_summary": "Field.__hash__() 在字段被赋值给模型类后哈希值发生变化，导致其作为字典键时行为异常。",
+    "trigger_condition": {
+      "text": "创建一个 Field 实例（如 CharField），将其用作字典键，然后将该字段赋值给一个模型类（如 Book.title = f）。",
+      "evidence": [
+        "Issue 中的示例代码：f = models.CharField(max_length=200); d = {f: 1}; class Book(models.Model): title = f; assert f in d"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "断言失败（AssertionError），因为字段 f 在赋值给模型类后，其哈希值改变，导致 f in d 为 False。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'This code crashes with an AssertionError'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Field 实例的 __hash__() 方法应返回一个不可变的值，确保其哈希值在生命周期内（包括被赋值给模型类后）保持不变，从而能稳定地用作字典键。",
+      "evidence": [
+        "Issue 描述：'Field.__hash__() should be immutable.'，'But it's bad if an object's hash changes, since it breaks its use in dicts.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.fields.Field.__hash__",
+        "kind": "method",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 明确指出 __hash__ 方法在字段赋值给模型类后值会改变。"
+      },
+      {
+        "name": "django.db.models.fields.CharField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 示例中使用了 CharField。"
+      },
+      {
+        "name": "django.db.models.base.Model",
+        "kind": "class",
+        "source_path": "django/db/models/base.py",
+        "reason": "字段被赋值给模型类（如 Book.title = f），这涉及到模型类的创建和字段的关联。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field.__hash__",
+        "lines": "544-549",
+        "reason": "源码片段 1 显示了 __hash__ 方法的实现，其返回值依赖于 self.model 属性，该属性可能在字段被赋值给模型类（contribute_to_class）后才被设置，导致哈希值改变。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "SimpleExpressionTests.test_hash",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "该测试直接验证了 Expression 对象（可能包含 Field）的哈希行为，并涉及了字段的哈希比较。",
+        "reusable_parts": [
+          "导入 CharField、IntegerField、Model",
+          "使用 hash() 函数进行比较的断言风格",
+          "从模型元数据获取字段的用法"
+        ],
+        "possible_gap": "该测试关注的是 Expression 对象的哈希，而非直接测试 Field 实例本身在赋值给模型类前后的哈希不变性。"
+      },
+      {
+        "test_name": "ModelTest.test_hash_function",
+        "test_file": "tests/basic/tests.py",
+        "why_relevant": "该测试验证了模型实例（基于主键）的哈希行为，并展示了模型实例作为字典键的用例。",
+        "reusable_parts": [
+          "创建模型实例的 fixture",
+          "使用集合和字典的测试模式",
+          "assertIn 断言风格"
+        ],
+        "possible_gap": "该测试关注的是 Model 实例的哈希，而非 Field 实例的哈希。"
+      },
+      {
+        "test_name": "BasicFieldTests.test_field_instance_is_picklable",
+        "test_file": "tests/model_fields/tests.py",
+        "why_relevant": "该测试直接操作 Field 实例，并检查其序列化属性，与操作 Field 实例相关。",
+        "reusable_parts": [
+          "Field 实例的构造",
+          "对 Field 实例属性的操作（如 _get_default）"
+        ],
+        "possible_gap": "该测试不涉及哈希或字典键的使用。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "在测试中直接使用从模型元数据获取的字段（如 TestModel._meta.get_field('field')），这些字段已经关联了模型。",
+        "target_pattern": "先创建一个独立的 Field 实例（未关联模型），将其用作字典键，然后再将其赋值给一个模型类。",
+        "reason": "Issue 的核心是字段在关联模型前后哈希值发生变化。相似测试通常使用已关联模型的字段，需要变异为测试字段状态变化的过程。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中可能直接比较两个不同字段的哈希值。",
+        "target_pattern": "测试同一个字段实例在关联模型前后哈希值的一致性，并将其用作字典键进行成员检查。",
+        "reason": "Issue 的触发条件是字段状态变化导致字典查找失败，需要变异测试流程以包含状态变化和字典操作。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "hash(field_instance) 在字段赋值给模型类前后的值。",
+        "reason": "直接观测哈希值是否变化，这是 Issue 的核心。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "field_instance.model 属性在赋值前后的状态。",
+        "reason": "源码显示 __hash__ 依赖于 self.model，观测其变化可以理解哈希值变化的原因。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "field_instance in dictionary 的布尔结果。",
+        "reason": "Issue 的最终错误现象是字典成员检查失败。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "字段实例在赋值给模型类前后，其哈希值应保持不变。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的哈希值具体数字（可能因实现细节变化），或断言字典的完整内部表示。",
+        "reason": "哈希不变性是修复后的核心语义，使用 equals 直接验证。"
+      },
+      {
+        "assertion_goal": "字段实例在作为字典键插入后，即使在关联模型后，仍能被成功查找（即 `field in dict` 为 True）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言字典的键列表完全相等，或断言字典的迭代顺序。",
+        "reason": "这直接对应 Issue 中崩溃的断言，验证修复后字典功能的正确性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要使用 SimpleTestCase 或 TestCase，因为涉及模型定义。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要导入 django.db.models 中的相关类（如 models.CharField, models.Model）。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "字段的 `creation_counter` 在哈希计算中的作用及其在字段生命周期中是否变化。",
+      "除了 `self.model` 属性，`__hash__` 实现中是否还有其他因素会导致哈希值在特定操作后改变。",
+      "Issue 中提到的 #31750 具体修改了哪些代码，但根据规则不应使用补丁信息。"
+    ]
+  }
+}

@@ -1,0 +1,142 @@
+{
+  "issue_summary": "BaseConstraint.validate 方法抛出的 ValidationError 无法自定义其 code 属性。",
+  "trigger_condition": {
+    "text": "创建一个 BaseConstraint 子类（如 CheckConstraint 或 UniqueConstraint）的实例，调用其 validate 方法，当约束被违反时，会抛出 ValidationError。",
+    "evidence": ["Issue 描述：'ValidationError raised by BaseConstraint.validate'", "源码片段 2：BaseConstraint.validate 方法签名", "相关测试 4：CheckConstraintTests.test_validate 中调用 constraint.validate 并断言会抛出 ValidationError"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "当约束被违反时，抛出的 ValidationError 的 code 属性无法通过约束的构造函数参数进行自定义，只能通过子类化并重写 validate 方法来捕获和重新抛出。",
+    "symptom_type": "wrong_return",
+    "evidence": ["Issue 描述：'It is currently possible to customize the violation_error_message of a ValidationError raised by a constraint but not the code.'", "Issue 描述：'Currently, to achieve the same result, you have to subclass the constraint to tweak validate to catch and reraise the ValidationError.'"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "BaseConstraint 应该支持通过一个构造函数参数（例如 violation_error_code）来设置其 validate 方法抛出的 ValidationError 的 code 属性。",
+    "evidence": ["Issue 描述：'I'd like to add a new violation_error_message parameter to BaseConstraint to allow to easily add one.' (注：此处 Issue 作者可能笔误，应为 violation_error_code 或类似参数)", "Issue 描述：'Since the documentation recommends to Provide a descriptive error code to the constructor: when raising a ValidationError ... I think it would make sense to provide this possibility for errors raised by constraints.'"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "BaseConstraint.validate",
+      "kind": "method",
+      "source_path": "django/db/models/constraints.py",
+      "reason": "Issue 的核心是关于该方法抛出的 ValidationError 的 code 属性无法自定义。"
+    },
+    {
+      "name": "BaseConstraint.__init__",
+      "kind": "method",
+      "source_path": "django/db/models/constraints.py",
+      "reason": "预期的修复可能是在此方法中添加一个新的参数（如 violation_error_code）来接收自定义的错误码。"
+    },
+    {
+      "name": "ValidationError.__init__",
+      "kind": "method",
+      "source_path": "django/core/exceptions.py",
+      "reason": "Issue 涉及 ValidationError 的 code 参数，需要了解其构造函数。"
+    },
+    {
+      "name": "CheckConstraint",
+      "kind": "class",
+      "source_path": "django/db/models/constraints.py",
+      "reason": "相关测试中使用了 CheckConstraint 来测试 validate 方法。"
+    },
+    {
+      "name": "UniqueConstraint",
+      "kind": "class",
+      "source_path": "django/db/models/constraints.py",
+      "reason": "相关测试 5 中使用了 UniqueConstraint 的子类来测试自定义 validate 方法。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/constraints.py",
+      "object": "BaseConstraint.__init__",
+      "lines": "19-81",
+      "reason": "当前构造函数有 violation_error_message 参数，但缺少用于设置 ValidationError code 的对应参数。"
+    },
+    {
+      "path": "django/db/models/constraints.py",
+      "object": "BaseConstraint.validate",
+      "lines": "62-63",
+      "reason": "这是抛出 ValidationError 的抽象方法，其具体子类（如 CheckConstraint.validate）的实现中可能直接构造 ValidationError 而未使用一个可配置的 code。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "BaseConstraintTests.test_custom_violation_error_message",
+      "test_file": "tests/constraints/tests.py",
+      "why_relevant": "它测试了 BaseConstraint 的 violation_error_message 参数，这与 Issue 希望为 code 属性添加类似功能的模式高度相似。",
+      "reusable_parts": ["BaseConstraint 的构造方式", "使用 get_violation_error_message() 方法进行断言"],
+      "possible_gap": "它只测试了消息字符串的格式化，没有测试 validate 方法实际抛出 ValidationError 时 code 属性的行为。"
+    },
+    {
+      "test_name": "CheckConstraintTests.test_validate",
+      "test_file": "tests/constraints/tests.py",
+      "why_relevant": "它直接调用了 constraint.validate 并断言会抛出 ValidationError，这是触发缺陷的核心操作。",
+      "reusable_parts": ["CheckConstraint 的构造", "Product 模型 fixture", "调用 validate 并捕获 ValidationError 的断言模式"],
+      "possible_gap": "它没有检查抛出的 ValidationError 的 code 属性，只检查了异常类型。"
+    },
+    {
+      "test_name": "UniqueConstraintTests.test_model_validation_constraint_no_code_error",
+      "test_file": "tests/constraints/tests.py",
+      "why_relevant": "它展示了通过子类化 UniqueConstraint 并重写 validate 方法来抛出一个带有自定义消息但没有 code 的 ValidationError，这印证了 Issue 中提到的当前变通方法。",
+      "reusable_parts": ["通过子类化约束并重写 validate 的模式", "使用模型和 validate_constraints() 的测试上下文"],
+      "possible_gap": "它测试的是一个完全自定义的 validate 方法，而不是测试通过标准构造函数参数配置 code 的能力。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "BaseConstraint(name=\"base_name\", violation_error_message=\"custom %(name)s message\")",
+      "target_pattern": "BaseConstraint(name=\"base_name\", violation_error_message=\"custom %(name)s message\", violation_error_code=\"custom_code\")",
+      "reason": "Issue 希望添加一个类似 violation_error_message 的参数来设置 code。变异构造函数调用以包含这个假设的新参数。",
+      "confidence": "medium"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "constraint.validate(...) 抛出 ValidationError，测试仅断言异常类型。",
+      "target_pattern": "constraint.validate(...) 抛出 ValidationError，测试断言异常的 code 属性等于构造函数中传入的值。",
+      "reason": "缺陷的核心是 code 属性无法从外部配置。变异测试以检查 code 属性。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "捕获到的 ValidationError 实例的 .code 属性。",
+      "reason": "Issue 直接关注 ValidationError 的 code 属性是否可以被自定义。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "BaseConstraint 实例的某个属性（例如 .violation_error_code，如果实现的话）。",
+      "reason": "需要观察约束对象是否存储了传入的 code 配置。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "当约束被违反时，抛出的 ValidationError 的 code 属性应该等于通过构造函数（或类似方式）设置的值。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的异常消息字符串，因为消息可能被格式化且与 code 无关。避免断言异常类型以外的无关属性。",
+      "reason": "这直接验证了 Issue 要求的功能：能够自定义错误码。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要一个违反约束的模型实例。可以使用类似 Product 的测试模型。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能需要继承自 TestCase 以支持数据库操作。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "新参数的具体名称是什么（例如 violation_error_code 还是其他）？",
+    "BaseConstraint 的哪个具体子类（CheckConstraint, UniqueConstraint）的 validate 方法实现会首先被修改以使用这个新参数？",
+    "如果未提供自定义 code，默认的 code 应该是什么（可能是 None 或一个默认字符串）？",
+    "get_violation_error_message 方法是否也需要对应修改以处理 code？"
+  ]
+}

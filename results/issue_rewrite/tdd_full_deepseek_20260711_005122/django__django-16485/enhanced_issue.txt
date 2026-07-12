@@ -1,0 +1,107 @@
+instance_id: django__django-16485
+
+issue_summary: floatformat() 在输入为 '0.00' 或 Decimal('0.00') 且 arg=0 时抛出 ValueError: valid range for prec is [1, MAX_PREC]。
+
+trigger_condition:
+{
+  "text": "调用 floatformat(text, arg) 函数，其中 text 为字符串 '0.00' 或 Decimal('0.00')，arg 为整数 0。",
+  "evidence": [
+    "Issue 中：floatformat('0.00', 0) 和 floatformat(Decimal('0.00'), 0) 均抛出异常。",
+    "源码片段 1 第 96-206 行定义了 floatformat 函数。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "抛出 ValueError 异常，消息为 'valid range for prec is [1, MAX_PREC]'。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中：Both throw ValueError: valid range for prec is [1, MAX_PREC]。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "floatformat('0.00', 0) 和 floatformat(Decimal('0.00'), 0) 应正常返回一个格式化后的字符串，例如 '0' 或 '0.0'，而不是抛出异常。",
+  "evidence": [
+    "相关测试 1 (test_inputs) 中：self.assertEqual(floatformat(0.0), \"0\") 和 self.assertEqual(floatformat(7.7, 0), \"8\") 表明 arg=0 时函数应正常工作。",
+    "相关测试 2 (test_zero_values) 中：self.assertEqual(floatformat(0, 6), \"0.000000\") 表明零值输入与正数 arg 应正常工作。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "floatformat",
+    "kind": "function",
+    "source_path": "django/template/defaultfilters.py",
+    "reason": "Issue 直接报告此函数在特定输入下崩溃。"
+  },
+  {
+    "name": "Decimal",
+    "kind": "class",
+    "source_path": "",
+    "reason": "Issue 和源码中使用了 Decimal 对象作为输入。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "test_inputs 中：floatformat(0.0) 或 floatformat(Decimal(\"09.000\"))。",
+    "target_pattern": "floatformat('0.00', 0) 或 floatformat(Decimal('0.00'), 0)。",
+    "reason": "Issue 表明当 text 是表示零的字符串或 Decimal，且 arg 为 0 时触发 bug。相似测试中缺少 arg=0 与精确零值字符串/Decimal 的组合。",
+    "confidence": "high"
+  },
+  {
+    "slot": "argument",
+    "current_pattern": "test_inputs 中：floatformat(7.7, 0) 使用浮点数 7.7 和 arg=0。",
+    "target_pattern": "将第一个参数从浮点数 7.7 改为字符串 '0.00' 或 Decimal('0.00')。",
+    "reason": "bug 似乎与输入值的表示形式（字符串/Decimal 零）和 arg=0 的交互有关，而不仅仅是 arg=0。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用 floatformat('0.00', 0) 或 floatformat(Decimal('0.00'), 0) 时是否抛出 ValueError。",
+    "reason": "Issue 的核心错误现象是抛出特定异常。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "成功调用后 floatformat 的返回值（字符串）。",
+    "reason": "修复后函数应返回一个格式化的字符串，而非异常。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证 floatformat('0.00', 0) 和 floatformat(Decimal('0.00'), 0) 不抛出 ValueError 异常，并返回一个非空字符串。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言返回值的精确字符串内容，因为 Issue 未指定修复后的确切输出格式（例如是 '0' 还是 '0.0'）。",
+    "reason": "Issue 表明当前行为是异常，修复后应正常返回。断言不抛异常并返回字符串是稳定且与 Issue 对齐的目标。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 floatformat 和 Decimal。使用 SimpleTestCase 或其子类作为测试基类。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "修复后 floatformat('0.00', 0) 的确切返回值是什么？是 '0'、'0.0' 还是其他？",
+  "bug 是否也存在于其他类似零值字符串（如 '0.0'、'0.000'）与 arg=0 的组合？",
+  "bug 的根本原因是否在源码中计算 prec 变量的部分？"
+]

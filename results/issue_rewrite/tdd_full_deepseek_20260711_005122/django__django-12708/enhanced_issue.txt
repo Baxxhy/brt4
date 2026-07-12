@@ -1,0 +1,127 @@
+instance_id: django__django-12708
+
+issue_summary: 当同一组字段同时存在于 unique_together 和 index_together 时，删除 index_together 的迁移操作会崩溃。
+
+trigger_condition:
+{
+  "text": "对一个模型，将相同的两个字段同时添加到 unique_together 和 index_together 约束中，然后执行删除 index_together 的迁移操作。",
+  "evidence": [
+    "Issue 描述：'Create models with 2 fields, add 2 same fields to unique_together and to index_together'，'Delete index_together -> Fail'。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "在 django/db/backends/base/schema.py 的 _delete_composed_index() 方法第 378 行抛出 ValueError: Found wrong number (2) of constraints for as this one will find two constraints, the _uniq and the _idx one.",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 描述：'It will fail at django/db/backends/base/schema.py, line 378, in _delete_composed_index(), ValueError: Found wrong number (2) of constraints...'。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当同一组字段同时存在于 unique_together 和 index_together 时，删除 index_together 的迁移操作应该成功，只删除索引约束，而不影响唯一约束。",
+  "evidence": [
+    "Issue 描述：'The deletion of index_together should be possible alone or made coherent (migrations side?) with unique_together'。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "DatabaseSchemaEditor._delete_composed_index",
+    "kind": "method",
+    "source_path": "django/db/backends/base/schema.py",
+    "reason": "Issue 中明确指出错误发生在此方法中。"
+  },
+  {
+    "name": "DatabaseSchemaEditor.alter_index_together",
+    "kind": "method",
+    "source_path": "",
+    "reason": "Issue 中涉及的迁移操作是删除 index_together，这通常通过 alter_index_together 方法实现。相关测试也使用了此方法。"
+  },
+  {
+    "name": "DatabaseSchemaEditor._constraint_names",
+    "kind": "method",
+    "source_path": "",
+    "reason": "相关源码片段 1 中，_delete_composed_index 方法调用了 _constraint_names 来查找约束。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "相似测试中，模型通常只设置 index_together 或 unique_together 中的一种。",
+    "target_pattern": "模型应同时为相同的字段组设置 index_together 和 unique_together 约束。",
+    "reason": "Issue 表明，当两种约束共存于相同字段时，删除 index_together 的逻辑会出错。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "相似测试中，通常先创建模型，然后单独调用 alter_index_together 或 alter_unique_together。",
+    "target_pattern": "创建模型后，先调用 alter_unique_together 添加唯一约束，再调用 alter_index_together 添加索引约束，最后调用 alter_index_together 删除索引约束。",
+    "reason": "Issue 的复现步骤要求先同时添加两种约束，再删除 index_together。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "在调用 editor.alter_index_together 删除约束时，捕获并检查是否抛出 ValueError。",
+    "reason": "Issue 中明确描述了会抛出 ValueError，这是判断缺陷是否触发的直接标志。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "在删除 index_together 操作前后，使用 self.get_constraints 检查数据库中对应该字段组的约束数量和类型（index 和 unique）。",
+    "reason": "Issue 的核心是约束查找逻辑错误地找到了两个约束。观测约束状态可以验证预期行为（只删除索引）是否达成。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当删除 index_together 时，迁移操作不应抛出 ValueError，且数据库中对应该字段组的唯一约束应保持不变。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言完整的异常消息字符串，因为具体措辞可能变化。",
+    "reason": "修复后，删除操作应成功，不再抛出异常。因此，断言不应再期待异常。"
+  },
+  {
+    "assertion_goal": "删除 index_together 后，数据库中对应该字段组的唯一约束仍然存在。",
+    "preferred_assertion_style": "before_after_relation",
+    "avoid": "断言约束名称的精确匹配，因为名称生成可能因后端或版本而异。",
+    "reason": "Issue 期望删除 index_together 不影响 unique_together。断言唯一约束的存在性比断言具体约束名称更稳定。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 TransactionTestCase 和 connection.schema_editor() 来执行数据库模式变更。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要定义一个包含至少两个字段的简单模型。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要针对特定数据库后端（如 MySQL）进行测试，因为相关源码片段 1 来自 MySQL 后端。",
+    "source": "retrieved_source",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "错误是否在所有数据库后端（如 PostgreSQL、SQLite）上都会发生，还是特定于 MySQL（因为检索出的相关源码是 MySQL 后端的）。",
+  "除了 ValueError，是否还有其他副作用，例如错误地删除了 unique_together 约束。",
+  "修复后的正确行为下，删除 index_together 后，数据库中的索引约束名称是否会被正确识别和删除。"
+]

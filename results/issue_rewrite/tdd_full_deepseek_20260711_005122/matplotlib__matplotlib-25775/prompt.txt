@@ -1,0 +1,423 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+[ENH]: Add get/set_antialiased to Text objects
+### Problem
+
+Currently, Text objects always retrieve their antialiasing state via the global rcParams["text.antialias"], unlike other artists for which this can be configured on a per-artist basis via `set_antialiased` (and read via `set_antialiased`).
+
+### Proposed solution
+
+Add similar getters/setters on Text objects (also adjusting Annotations accordingly, if needed) and use that info in the drawing stage.
+
+Should be relatively easy to implement, except that the slight fiddling needed with backends requires some understanding of backend code (I think we need to replace the access to `rcParams["text.antialiased"]` by going through the GraphicsContext state).
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：lib/matplotlib/text.py
+对象名称：Text
+节点类型：class
+父节点：text
+行号范围：95-1336
+代码：
+class Text(Artist):
+    """Handle storing and drawing of text in window or data coordinates."""
+    zorder = 3
+    _charsize_cache = dict()
+    def __repr__(self):
+    def __init__(self,
+                 x=0, y=0, text='', *,
+                 color=None,           # defaults to rc params
+                 verticalalignment='baseline',
+                 horizontalalignment='left',
+                 multialignment=None,
+                 fontproperties=None,  # defaults to FontProperties()
+                 rotation=None,
+                 linespacing=None,
+                 rotation_mode=None,
+                 usetex=None,          # defaults to rcParams['text.usetex']
+                 wrap=False,
+                 transform_rotates_text=False,
+                 parse_math=None,    # defaults to rcParams['text.parse_math']
+                 **kwargs
+                 ):
+    def _reset_visual_defaults(
+        self,
+        text='',
+        color=None,
+        fontproperties=None,
+        usetex=None,
+        parse_math=None,
+        wrap=False,
+        verticalalignment='baseline',
+        horizontalalignment='left',
+        multialignment=None,
+        rotation=None,
+        transform_rotates_text=False,
+        linespacing=None,
+        rotation_mode=None,
+    ):
+    def update(self, kwargs):
+    def __getstate__(self):
+    def contains(self, mouseevent):
+    def _get_xy_display(self):
+    def _get_multialignment(self):
+    def _char_index_at(self, x):
+    def get_rotation(self):
+    def get_transform_rotates_text(self):
+    def set_rotation_mode(self, m):
+    def get_rotation_mode(self):
+    def update_from(self, other):
+    def _get_layout(self, renderer):
+    def set_bbox(self, rectprops):
+    def get_bbox_patch(self):
+    def update_bbox_position_size(self, renderer):
+    def _update_clip_properties(self):
+    def set_clip_box(self, clipbox):
+    def set_clip_path(self, path, transform=None):
+    def set_clip_on(self, b):
+    def get_wrap(self):
+    def set_wrap(self, wrap):
+    def _get_wrap_line_width(self):
+    def _get_dist_to_box(self, rotation, x0, y0, figure_box):
+    def _get_rendered_text_width(self, text):
+    def _get_wrapped_text(self):
+    @artist.allow_rasterization
+    def draw(self, renderer):
+
+    def get_color(self):
+    def get_fontproperties(self):
+    def get_fontfamily(self):
+    def get_fontname(self):
+    def get_fontstyle(self):
+    def get_fontsize(self):
+    def get_fontvariant(self):
+    def get_fontweight(self):
+    def get_stretch(self):
+    def get_horizontalalignment(self):
+    def get_unitless_position(self):
+    def get_position(self):
+    def get_text(self):
+    def get_verticalalignment(self):
+    def get_window_extent(self, renderer=None, dpi=None):
+    def set_backgroundcolor(self, color):
+    def set_color(self, color):
+    def set_horizontalalignment(self, align):
+    def set_multialignment(self, align):
+    def set_linespacing(self, spacing):
+    def set_fontfamily(self, fontname):
+    def set_fontvariant(self, variant):
+    def set_fontstyle(self, fontstyle):
+    def set_fontsize(self, fontsize):
+    def get_math_fontfamily(self):
+    def set_math_fontfamily(self, fontfamily):
+    def set_fontweight(self, weight):
+    def set_fontstretch(self, stretch):
+    def set_position(self, xy):
+    def set_x(self, x):
+    def set_y(self, y):
+    def set_rotation(self, s):
+    def set_transform_rotates_text(self, t):
+    def set_verticalalignment(self, align):
+    def set_text(self, s):
+    def _preprocess_math(self, s):
+    def set_fontproperties(self, fp):
+    def set_usetex(self, usetex):
+    def get_usetex(self):
+    def set_parse_math(self, parse_math):
+    def get_parse_math(self):
+    def set_fontname(self, fontname):
+
+
+【源码片段 2】
+文件路径：lib/matplotlib/text.py
+对象名称：Annotation
+节点类型：class
+父节点：text
+行号范围：1592-1999
+代码：
+class Annotation(Text, _AnnotationBase):
+    """
+    An `.Annotation` is a `.Text` that can refer to a specific position *xy*.
+    Optionally an arrow pointing from the text to *xy* can be drawn.
+
+    Attributes
+    ----------
+    xy
+        The annotated position.
+    xycoords
+        The coordinate system for *xy*.
+    arrow_patch
+        A `.FancyArrowPatch` to point from *xytext* to *xy*.
+    """
+    def __str__(self):
+    def __init__(self, text, xy,
+                 xytext=None,
+                 xycoords='data',
+                 textcoords=None,
+                 arrowprops=None,
+                 annotation_clip=None,
+                 **kwargs):
+    @_api.rename_parameter("3.8", "event", "mouseevent")
+    def contains(self, mouseevent):
+    @property
+    def xycoords(self):
+    @xycoords.setter
+    def xycoords(self, xycoords):
+    @property
+    def xyann(self):
+    @xyann.setter
+    def xyann(self, xytext):
+    def get_anncoords(self):
+    def set_anncoords(self, coords):
+    anncoords = property(get_anncoords, set_anncoords, doc="""
+        The coordinate system to use for `.Annotation.xyann`.""")
+    def set_figure(self, fig):
+    def update_positions(self, renderer):
+    @artist.allow_rasterization
+    def draw(self, renderer):
+    def get_window_extent(self, renderer=None):
+    def get_tightbbox(self, renderer=None):
+
+
+【源码片段 3】
+文件路径：lib/matplotlib/lines.py
+对象名称：set_antialiased
+节点类型：class_function
+父节点：Line2D
+行号范围：1041-1051
+代码：
+    def set_antialiased(self, b):
+        """
+        Set whether to use antialiased rendering.
+
+        Parameters
+        ----------
+        b : bool
+        """
+        if self._antialiased != b:
+            self.stale = True
+        self._antialiased = b
+
+
+【源码片段 4】
+文件路径：lib/matplotlib/lines.py
+对象名称：get_antialiased
+节点类型：class_function
+父节点：Line2D
+行号范围：884-886
+代码：
+    def get_antialiased(self):
+        """Return whether antialiased rendering is used."""
+        return self._antialiased
+
+
+【源码片段 5】
+文件路径：lib/matplotlib/__init__.py
+对象名称：rcParams
+节点类型：global_var
+父节点：__init__
+行号范围：975-975
+代码：
+rcParams = RcParams()  # The global instance.
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：lib/matplotlib/tests/test_patches.py
+测试名称：test_default_antialiased
+测试代码：
+def test_default_antialiased():
+    patch = Patch()
+
+    patch.set_antialiased(not rcParams['patch.antialiased'])
+    assert patch.get_antialiased() == (not rcParams['patch.antialiased'])
+    # Check that None resets the state
+    patch.set_antialiased(None)
+    assert patch.get_antialiased() == rcParams['patch.antialiased']
+
+【相关测试 2】
+测试文件：lib/matplotlib/tests/test_text.py
+测试名称：test_antialiasing
+测试代码：
+@image_comparison(['antialiased.png'])
+def test_antialiasing():
+    mpl.rcParams['text.antialiased'] = True
+
+    fig = plt.figure(figsize=(5.25, 0.75))
+    fig.text(0.5, 0.75, "antialiased", horizontalalignment='center',
+             verticalalignment='center')
+    fig.text(0.5, 0.25, r"$\sqrt{x}$", horizontalalignment='center',
+             verticalalignment='center')
+
+【相关测试 3】
+测试文件：lib/matplotlib/tests/test_image.py
+测试名称：test_imshow_antialiased
+测试代码：
+@pytest.mark.parametrize(
+    "img_size, fig_size, interpolation",
+    [(5, 2, "hanning"),  # data larger than figure.
+     (5, 5, "nearest"),  # exact resample.
+     (5, 10, "nearest"),  # double sample.
+     (3, 2.9, "hanning"),  # <3 upsample.
+     (3, 9.1, "nearest"),  # >3 upsample.
+     ])
+@check_figures_equal(extensions=['png'])
+def test_imshow_antialiased(fig_test, fig_ref,
+                            img_size, fig_size, interpolation):
+    np.random.seed(19680801)
+    dpi = plt.rcParams["savefig.dpi"]
+    A = np.random.rand(int(dpi * img_size), int(dpi * img_size))
+    for fig in [fig_test, fig_ref]:
+        fig.set_size_inches(fig_size, fig_size)
+    ax = fig_test.subplots()
+    ax.set_position([0, 0, 1, 1])
+    ax.imshow(A, interpolation='antialiased')
+    ax = fig_ref.subplots()
+    ax.set_position([0, 0, 1, 1])
+    ax.imshow(A, interpolation=interpolation)
+
+【相关测试 4】
+测试文件：lib/matplotlib/tests/test_text.py
+测试名称：test_get_rotation_string
+测试代码：
+def test_get_rotation_string():
+    assert Text(rotation='horizontal').get_rotation() == 0.
+    assert Text(rotation='vertical').get_rotation() == 90.
+
+【相关测试 5】
+测试文件：lib/matplotlib/tests/test_text.py
+测试名称：test_annotation_contains
+测试代码：
+def test_annotation_contains():
+    # Check that Annotation.contains looks at the bboxes of the text and the
+    # arrow separately, not at the joint bbox.
+    fig, ax = plt.subplots()
+    ann = ax.annotate(
+        "hello", xy=(.4, .4), xytext=(.6, .6), arrowprops={"arrowstyle": "->"})
+    fig.canvas.draw()  # Needed for the same reason as in test_contains.
+    event = MouseEvent(
+        "button_press_event", fig.canvas, *ax.transData.transform((.5, .6)))
+    assert ann.contains(event) == (False, {})
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

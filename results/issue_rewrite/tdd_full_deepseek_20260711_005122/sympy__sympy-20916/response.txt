@@ -1,0 +1,106 @@
+{
+  "issue_summary": "pprint 在输出希腊字母带下标时，下标格式错误。",
+  "trigger_condition": {
+    "text": "使用 pprint 或 upretty 函数输出包含希腊字母（如 ω）并带有下标（如 ₀）的符号。",
+    "evidence": ["Issue 中展示了包含希腊字母 ω 和下标 ₀ 的符号输出对比。", "相关测试 test_upretty_greek 和 test_upretty_sub_super 涉及希腊字母和下标/上标的格式化。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "希腊字母（如 ω）的下标（如 ₀）未能正确格式化为 Unicode 下标，而是显示为普通数字（如 0）。",
+    "symptom_type": "wrong_return",
+    "evidence": ["Issue 中 'Bad' 示例显示为 '-t₀⋅ω0'，其中 ω 后的下标 0 未格式化为下标。", "Issue 中 'Good' 示例显示为 '-t₀⋅w₀'，其中拉丁字母 w 的下标 ₀ 格式正确。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "希腊字母（如 ω）的下标应能正确格式化为 Unicode 下标，与拉丁字母的下标格式化行为一致。",
+    "evidence": ["Issue 中 'Good' 示例展示了拉丁字母 w 的下标 ₀ 格式正确。", "相关测试 test_upretty_greek 和 test_upretty_sub_super 表明系统应支持希腊字母和下标/上标的正确格式化。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "pprint",
+      "kind": "function",
+      "source_path": "sympy/printing/pretty/pretty.py",
+      "reason": "Issue 标题直接提及 pprint，且源码片段显示 pprint 是 pretty_print 的别名。"
+    },
+    {
+      "name": "upretty",
+      "kind": "function",
+      "source_path": "",
+      "reason": "所有相关测试都使用 upretty 函数来测试 Unicode 漂亮打印，这与 Issue 中描述的 Unicode 格式化问题直接相关。"
+    },
+    {
+      "name": "prettyForm.unicode",
+      "kind": "method",
+      "source_path": "sympy/printing/pretty/stringpict.py",
+      "reason": "源码片段显示 unicode 方法返回 self._unicode，可能与 Unicode 字符串生成有关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/printing/pretty/pretty_symbology.py",
+      "object": "greek_unicode",
+      "lines": "105-105",
+      "reason": "该字典存储希腊字母的 Unicode 映射，可能与希腊字母的格式化有关。"
+    },
+    {
+      "path": "sympy/printing/pretty/stringpict.py",
+      "object": "prettyForm.unicode",
+      "lines": "387-392",
+      "reason": "该方法返回 _unicode 属性，可能是生成最终 Unicode 输出的关键。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_upretty_greek",
+      "test_file": "sympy/printing/pretty/tests/test_pretty.py",
+      "why_relevant": "该测试直接验证希腊字母（如 α, β, λ）及其上标/下标的 Unicode 格式化。",
+      "reusable_parts": ["imports", "upretty 函数调用", "assert 风格（字符串相等）"],
+      "possible_gap": "现有测试用例（如 'alpha^+_1'）可能未覆盖到希腊字母与纯数字下标组合时出现的特定格式化错误。"
+    },
+    {
+      "test_name": "test_upretty_sub_super",
+      "test_file": "sympy/printing/pretty/tests/test_pretty.py",
+      "why_relevant": "该测试广泛验证下标和上标的格式化，包括与希腊字母的组合（如 'beta_ax_gamma^i'）。",
+      "reusable_parts": ["imports", "Symbol 对象构造", "upretty 函数调用", "assert 风格（字符串相等）"],
+      "possible_gap": "现有测试用例可能未专门测试希腊字母后紧跟数字下标（如 ω₀）的格式化。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "Symbol('alpha^+_1')，Symbol('beta_1_2')，Symbol('beta_ax_gamma^i')",
+      "target_pattern": "Symbol('omega_0') 或 Symbol('t_0*omega_0') 等包含希腊字母和数字下标的符号。",
+      "reason": "Issue 表明当希腊字母（如 ω）带有数字下标（如 0）时，下标格式化失败。现有测试未明确包含此模式。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "upretty(Symbol('omega_0')) 或 pprint(Symbol('omega_0')) 的返回值。",
+      "reason": "直接观察格式化后的 Unicode 字符串，检查希腊字母 ω 后的下标 0 是否被正确转换为下标字符 ₀。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "格式化后的字符串中，希腊字母后的数字下标应显示为 Unicode 下标字符。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "完整的字符串精确相等断言，因为 Issue 未给出完整精确的预期输出字符串。",
+      "reason": "断言应聚焦于关键特征：下标字符的存在。使用 contains_fragment 检查是否包含 'ω₀' 而非 'ω0'，更稳定且与 Issue 核心对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "可能需要从 sympy 导入 Symbol 和 upretty（或 pprint）。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "缺陷是否只影响 pprint 函数，还是也影响 upretty 函数。",
+    "缺陷是否特定于某些希腊字母（如 ω）或所有希腊字母。",
+    "缺陷是否也影响上标或同时包含上标和下标的情况。",
+    "导致格式化错误的精确代码位置和逻辑。"
+  ]
+}

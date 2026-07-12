@@ -1,0 +1,129 @@
+instance_id: django__django-15731
+
+issue_summary: inspect.signature() 在 Django manager 方法上返回了错误的签名信息。
+
+trigger_condition:
+{
+  "text": "对 Django Model Manager 上的方法（如 bulk_create）调用 inspect.signature()。",
+  "evidence": [
+    "Issue 中示例：`inspect.signature(Person.objects.bulk_create)`",
+    "Issue 描述指出 inspect.signature 在 queryset 方法上返回错误信息。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "inspect.signature() 返回通用签名 `(*args, **kwargs)`，而不是方法实际的签名（如 `(objs, batch_size=None, ignore_conflicts=False)`）。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 中明确给出了实际输出 `(*args, **kwargs)` 和期望输出 `(objs, batch_size=None, ignore_conflicts=False)`。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "inspect.signature() 应返回 Manager 代理的 QuerySet 方法的正确签名。",
+  "evidence": [
+    "Issue 中给出了期望的签名 `(objs, batch_size=None, ignore_conflicts=False)`。",
+    "源码片段 4 显示了 QuerySet.bulk_create 的实际签名。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "inspect.signature",
+    "kind": "function",
+    "source_path": "",
+    "reason": "Issue 的核心是此函数在特定对象上返回了错误结果。"
+  },
+  {
+    "name": "Person.objects.bulk_create",
+    "kind": "method",
+    "source_path": "django/db/models/query.py",
+    "reason": "Issue 中用作示例的具体方法，其签名信息不正确。"
+  },
+  {
+    "name": "django.db.models.manager.BaseManager",
+    "kind": "class",
+    "source_path": "django/db/models/manager.py",
+    "reason": "Issue 指出问题根源在于 manager.py 中复制方法元数据的代码。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "call_chain",
+    "current_pattern": "在测试中调用 Manager 方法并断言其功能结果（如查询结果）。",
+    "target_pattern": "在测试中调用 inspect.signature() 来检查 Manager 方法的签名。",
+    "reason": "Issue 的触发条件是使用 inspect.signature 检查 Manager 方法，而非直接调用其功能。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "测试通常使用已配置的 Model 和 Manager 实例。",
+    "target_pattern": "需要确保测试对象是 Model Manager 的实例（如 Person.objects），并且调用其上的 QuerySet 代理方法（如 bulk_create）。",
+    "reason": "Issue 明确指出问题发生在 `Person.objects.bulk_create` 这样的 Manager 实例方法上。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "inspect.signature(method).parameters 或 str(inspect.signature(method))",
+    "reason": "Issue 的核心错误是 inspect.signature 的返回值不正确，观察其返回的参数字典或字符串表示可以直接验证问题。"
+  },
+  {
+    "kind": "repr",
+    "expression_hint": "repr(inspect.signature(method))",
+    "reason": "Issue 中比较了实际和期望的签名字符串表示，观察 repr 输出可以方便地进行断言。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "inspect.signature 在 Manager 方法上返回的签名应与其底层 QuerySet 方法的签名一致。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言完整的、可能包含内部实现细节的签名字符串。应关注关键参数名称和默认值。",
+    "reason": "Issue 明确给出了期望的签名片段，断言签名相等或包含关键参数是稳定且直接的对齐方式。"
+  },
+  {
+    "assertion_goal": "Manager 方法应具有与 QuerySet 方法相同的参数名称。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "避免断言不稳定的内部参数顺序或完整的默认值 repr。",
+    "reason": "即使默认值的精确 repr 可能因 Python 版本有细微差别，参数名称是稳定的核心信息。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 inspect 模块和 Django 的 models 模块来创建 Model 和调用 inspect.signature。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要继承自 Django 的 TestCase 或 SimpleTestCase 以提供数据库和设置支持。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要定义一个简单的 Django Model（如 Issue 中的 Person）来获取其 Manager。",
+    "source": "issue|retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "Issue 中提到的 manager.py 第84行具体是哪段装饰代码？检索出的源码片段未包含该行。",
+  "除了 bulk_create，是否所有从 QuerySet 复制到 Manager 的方法都存在此问题？",
+  "inspect.signature 返回的签名字符串的精确格式（如空格、默认值表示）在不同 Python 版本下是否一致？"
+]

@@ -1,0 +1,165 @@
+```json
+{
+    "issue_summary": "组合查询（如 union）在多次调用 values()/values_list() 时无法正确更改列列表。",
+    "trigger_condition": {
+        "text": "对一个 QuerySet 执行 union 操作后，多次调用 values_list() 并指定不同的字段列表，然后调用 get() 获取结果。",
+        "evidence": ["Issue 描述：'Composed queries cannot change the list of columns when values()/values_list() is evaluated multiple times'", "Issue 示例代码：qs1.union(qs1).values_list('name', 'order').get() 和 qs1.union(qs1).values_list('order').get()"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "第二次调用 values_list('order') 时，返回的结果仍然是第一次调用 values_list('name', 'order') 的列值，即 ('a', 2)，而不是预期的 ('a',)。",
+        "symptom_type": "wrong_return",
+        "evidence": ["Issue 示例输出：print(qs1.union(qs1).values_list('order').get()) 输出 ('a', 2)"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "对组合查询（如 union）多次调用 values()/values_list() 并指定不同的字段列表时，每次调用都应返回相应字段列表的结果。",
+        "evidence": ["Issue 描述暗示了这是预期行为：'cannot change the list of columns' 表明应该能改变。", "相关测试 1 (test_union_with_values) 展示了 union 后调用 values 和 values_list 能正确获取指定字段。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "QuerySet.union",
+            "kind": "method",
+            "source_path": "django/db/models/query.py",
+            "reason": "Issue 涉及组合查询，union 是核心操作。"
+        },
+        {
+            "name": "QuerySet.values_list",
+            "kind": "method",
+            "source_path": "django/db/models/query.py",
+            "reason": "Issue 直接关于 values_list 方法在组合查询上的行为。"
+        },
+        {
+            "name": "QuerySet.values",
+            "kind": "method",
+            "source_path": "django/db/models/query.py",
+            "reason": "Issue 标题和描述也提到了 values() 方法。"
+        },
+        {
+            "name": "QuerySet.get",
+            "kind": "method",
+            "source_path": "django/db/models/query.py",
+            "reason": "Issue 示例中用于获取最终结果。"
+        },
+        {
+            "name": "ReservedName.objects.create",
+            "kind": "method",
+            "source_path": "django/db/models/query.py",
+            "reason": "Issue 示例和多个相关测试中用于创建测试数据。"
+        },
+        {
+            "name": "QuerySet.all",
+            "kind": "method",
+            "source_path": "django/db/models/query.py",
+            "reason": "Issue 示例中用于获取基础 QuerySet。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/db/models/sql/compiler.py",
+            "object": "",
+            "lines": "428-433",
+            "reason": "Issue 描述中明确指向了 compiler.py 的第 428-433 行。"
+        },
+        {
+            "path": "django/db/models/query.py",
+            "object": "QuerySet._combinator_query",
+            "lines": "",
+            "reason": "union 方法调用了 _combinator_query，可能与组合查询的状态管理有关。"
+        },
+        {
+            "path": "django/db/models/query.py",
+            "object": "QuerySet._values",
+            "lines": "",
+            "reason": "values 和 values_list 方法都调用了 _values 来创建克隆，可能与克隆状态或查询编译有关。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_union_with_values",
+            "test_file": "tests/queries/test_qs_combinators.py",
+            "why_relevant": "该测试直接涉及 union 操作与 values/values_list 的结合使用，并验证了正确结果。",
+            "reusable_parts": ["ReservedName.objects.create 创建数据", "qs1 = ReservedName.objects.all()", "qs1.union(qs1).values_list(...).get() 调用链", "使用 assertEqual 进行结果断言"],
+            "possible_gap": "该测试只验证了单次调用 values_list 并获取正确结果，没有验证对同一组合查询多次调用 values_list 并更改字段列表的场景。"
+        },
+        {
+            "test_name": "test_intersection_with_values",
+            "test_file": "tests/queries/test_qs_combinators.py",
+            "why_relevant": "该测试涉及另一个组合操作 intersection 与 values/values_list 的结合，结构相似。",
+            "reusable_parts": ["测试类 QuerySetSetOperationTests", "@skipUnlessDBFeature('supports_select_union') 装饰器", "ReservedName 模型的使用", "assertEqual 断言风格"],
+            "possible_gap": "测试的是 intersection 而非 union，且同样没有测试多次更改字段列表。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "call_chain",
+            "current_pattern": "相关测试中，对组合查询（union/intersection）只调用一次 values_list 并断言结果。",
+            "target_pattern": "对同一个组合查询对象，连续调用两次 values_list，并指定不同的字段列表（例如第一次 ('name', 'order')，第二次 ('order')），然后分别获取结果。",
+            "reason": "Issue 表明问题出现在多次调用 values_list 并更改字段列表时，第二次调用错误地保留了第一次的列列表。",
+            "confidence": "high"
+        },
+        {
+            "slot": "argument",
+            "current_pattern": "相关测试中 values_list 调用通常包含多个字段（如 'name', 'order', 'id'）。",
+            "target_pattern": "第二次调用 values_list 时，传入与第一次不同数量的字段参数（例如仅 'order'）。",
+            "reason": "Issue 的核心是更改列列表失败，减少字段数量是触发条件。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "return_value",
+            "expression_hint": "第二次调用 qs1.union(qs1).values_list('order').get() 的返回值。",
+            "reason": "Issue 显示返回值错误，观察实际返回值是否与预期（仅包含 'order' 字段的值）一致。"
+        },
+        {
+            "kind": "sql",
+            "expression_hint": "在调用 get() 之前，观察 QuerySet 对象（如 qs1.union(qs1).values_list('order')）生成的 SQL 查询字符串。",
+            "reason": "错误的返回值可能源于 SQL 查询中 SELECT 子句的列列表没有正确更新。"
+        },
+        {
+            "kind": "state",
+            "expression_hint": "在连续调用 values_list 前后，观察 QuerySet 对象内部状态（如 _fields, query）的变化。",
+            "reason": "问题可能与 QuerySet 克隆或查询编译器的状态缓存/复用有关。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "验证第二次调用 values_list('order').get() 返回的元组长度应为 1，且内容仅为 order 字段的值（如 (2,)）。",
+            "preferred_assertion_style": "equals",
+            "avoid": "避免断言完整的 SQL 字符串或依赖于内部 repr 的精确匹配。",
+            "reason": "Issue 的核心是返回错误的列值，直接断言返回的元组内容是最稳定且与问题对齐的方式。"
+        },
+        {
+            "assertion_goal": "验证两次调用 values_list 并指定不同字段列表时，返回的元组长度不同。",
+            "preferred_assertion_style": "before_after_relation",
+            "avoid": "避免断言第一次调用的具体返回值，除非用于对比。",
+            "reason": "这能直接验证“更改列列表”的能力是否生效。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要使用支持 SELECT UNION 的数据库后端（skipUnlessDBFeature('supports_select_union')）。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要使用 ReservedName 模型或类似模型来创建测试数据。",
+            "source": "issue",
+            "confidence": "high"
+        },
+        {
+            "hint": "测试应放在继承自 TestCase 的类中，例如 QuerySetSetOperationTests。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "bug 的确切位置和机制（是 QuerySet 克隆问题、编译器缓存问题，还是 _combinator_query 的特殊处理）？",
+        "除了 union，其他组合操作（intersection, difference）是否也存在同样问题？",
+        "values() 方法是否表现出完全相同的行为？",
+        "是否需要特定的数据库后端或 Django 配置才能复现？"
+    ]
+}
+```

@@ -1,0 +1,454 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+`IndexError: pop from empty list` for empty tuple type annotation
+**Describe the bug**
+Following notation for empty tuple from [this mypy issue](https://github.com/python/mypy/issues/4211) like
+```python
+from typing import Tuple
+
+def foo() -> Tuple[()]:
+	"""Sample text."""
+    return ()
+```
+I get
+```bash
+  File "\path\to\site-packages\sphinx\domains\python.py", line 112, in unparse
+    result.pop()
+IndexError: pop from empty list
+```
+
+**To Reproduce**
+Steps to reproduce the behavior:
+1. Write contents of snippet to module and set it to be explorable by sphinx.
+2. Install dependencies, in my `docs/requirements.txt`:
+```txt
+Sphinx>=2.0.1
+sphinx-rtd-theme>=0.4.3
+```
+2. Build docs.
+
+**Expected behavior**
+Docs are built and there is `foo` with valid type annotations.
+
+**Your project**
+https://github.com/lycantropos/robust/tree/1c7b74e0cc39c1843a89583b8c245f08039a3978
+
+**Environment info**
+- OS: Windows 10, but also reproduces on [readthedocs](https://readthedocs.org/projects/shewchuk/builds/10817256/).
+- Python version: 3.8.0
+- Sphinx version: 3.0.1
+- Sphinx extensions:  `['sphinx.ext.autodoc', 'sphinx.ext.viewcode']`
+
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sphinx/pycode/ast.py
+对象名称：unparse
+节点类型：top-level function
+父节点：ast
+行号范围：61-122
+代码：
+def unparse(node: ast.AST) -> str:
+    """Unparse an AST to string."""
+    if node is None:
+        return None
+    elif isinstance(node, str):
+        return node
+    elif node.__class__ in OPERATORS:
+        return OPERATORS[node.__class__]
+    elif isinstance(node, ast.arg):
+        if node.annotation:
+            return "%s: %s" % (node.arg, unparse(node.annotation))
+        else:
+            return node.arg
+    elif isinstance(node, ast.arguments):
+        return unparse_arguments(node)
+    elif isinstance(node, ast.Attribute):
+        return "%s.%s" % (unparse(node.value), node.attr)
+    elif isinstance(node, ast.BinOp):
+        return " ".join(unparse(e) for e in [node.left, node.op, node.right])
+    elif isinstance(node, ast.BoolOp):
+        op = " %s " % unparse(node.op)
+        return op.join(unparse(e) for e in node.values)
+    elif isinstance(node, ast.Bytes):
+        return repr(node.s)
+    elif isinstance(node, ast.Call):
+        args = ([unparse(e) for e in node.args] +
+                ["%s=%s" % (k.arg, unparse(k.value)) for k in node.keywords])
+        return "%s(%s)" % (unparse(node.func), ", ".join(args))
+    elif isinstance(node, ast.Dict):
+        keys = (unparse(k) for k in node.keys)
+        values = (unparse(v) for v in node.values)
+        items = (k + ": " + v for k, v in zip(keys, values))
+        return "{" + ", ".join(items) + "}"
+    elif isinstance(node, ast.Ellipsis):
+        return "..."
+    elif isinstance(node, ast.Index):
+        return unparse(node.value)
+    elif isinstance(node, ast.Lambda):
+        return "lambda %s: ..." % unparse(node.args)
+    elif isinstance(node, ast.List):
+        return "[" + ", ".join(unparse(e) for e in node.elts) + "]"
+    elif isinstance(node, ast.Name):
+        return node.id
+    elif isinstance(node, ast.NameConstant):
+        return repr(node.value)
+    elif isinstance(node, ast.Num):
+        return repr(node.n)
+    elif isinstance(node, ast.Set):
+        return "{" + ", ".join(unparse(e) for e in node.elts) + "}"
+    elif isinstance(node, ast.Str):
+        return repr(node.s)
+    elif isinstance(node, ast.Subscript):
+        return "%s[%s]" % (unparse(node.value), unparse(node.slice))
+    elif isinstance(node, ast.UnaryOp):
+        return "%s %s" % (unparse(node.op), unparse(node.operand))
+    elif isinstance(node, ast.Tuple):
+        return ", ".join(unparse(e) for e in node.elts)
+    elif sys.version_info > (3, 6) and isinstance(node, ast.Constant):
+        # this branch should be placed at last
+        return repr(node.value)
+    else:
+        raise NotImplementedError('Unable to parse %s object' % type(node).__name__)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/test_domain_py.py
+测试名称：test_parse_annotation
+测试代码：
+def test_parse_annotation():
+    doctree = _parse_annotation("int")
+    assert_node(doctree, ([pending_xref, "int"],))
+    assert_node(doctree[0], pending_xref, refdomain="py", reftype="class", reftarget="int")
+
+    doctree = _parse_annotation("List[int]")
+    assert_node(doctree, ([pending_xref, "List"],
+                          [desc_sig_punctuation, "["],
+                          [pending_xref, "int"],
+                          [desc_sig_punctuation, "]"]))
+
+    doctree = _parse_annotation("Tuple[int, int]")
+    assert_node(doctree, ([pending_xref, "Tuple"],
+                          [desc_sig_punctuation, "["],
+                          [pending_xref, "int"],
+                          [desc_sig_punctuation, ", "],
+                          [pending_xref, "int"],
+                          [desc_sig_punctuation, "]"]))
+
+    doctree = _parse_annotation("Callable[[int, int], int]")
+    assert_node(doctree, ([pending_xref, "Callable"],
+                          [desc_sig_punctuation, "["],
+                          [desc_sig_punctuation, "["],
+                          [pending_xref, "int"],
+                          [desc_sig_punctuation, ", "],
+                          [pending_xref, "int"],
+                          [desc_sig_punctuation, "]"],
+                          [desc_sig_punctuation, ", "],
+                          [pending_xref, "int"],
+                          [desc_sig_punctuation, "]"]))
+
+    # None type makes an object-reference (not a class reference)
+    doctree = _parse_annotation("None")
+    assert_node(doctree, ([pending_xref, "None"],))
+    assert_node(doctree[0], pending_xref, refdomain="py", reftype="obj", reftarget="None")
+
+【相关测试 2】
+测试文件：tests/test_util_inspect.py
+测试名称：test_signature_from_str_complex_annotations
+测试代码：
+def test_signature_from_str_complex_annotations():
+    sig = inspect.signature_from_str('() -> Tuple[str, int, ...]')
+    assert sig.return_annotation == 'Tuple[str, int, ...]'
+
+    sig = inspect.signature_from_str('() -> Callable[[int, int], int]')
+    assert sig.return_annotation == 'Callable[[int, int], int]'
+
+【相关测试 3】
+测试文件：tests/test_util_inspect.py
+测试名称：test_signature_annotations
+测试代码：
+def test_signature_annotations():
+    from typing_test_data import (f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10,
+                                  f11, f12, f13, f14, f15, f16, f17, f18, f19, Node)
+
+    # Class annotations
+    sig = inspect.signature(f0)
+    assert stringify_signature(sig) == '(x: int, y: numbers.Integral) -> None'
+
+    # Generic types with concrete parameters
+    sig = inspect.signature(f1)
+    assert stringify_signature(sig) == '(x: List[int]) -> List[int]'
+
+    # TypeVars and generic types with TypeVars
+    sig = inspect.signature(f2)
+    assert stringify_signature(sig) == '(x: List[T], y: List[T_co], z: T) -> List[T_contra]'
+
+    # Union types
+    sig = inspect.signature(f3)
+    assert stringify_signature(sig) == '(x: Union[str, numbers.Integral]) -> None'
+
+    # Quoted annotations
+    sig = inspect.signature(f4)
+    assert stringify_signature(sig) == '(x: str, y: str) -> None'
+
+    # Keyword-only arguments
+    sig = inspect.signature(f5)
+    assert stringify_signature(sig) == '(x: int, *, y: str, z: str) -> None'
+
+    # Keyword-only arguments with varargs
+    sig = inspect.signature(f6)
+    assert stringify_signature(sig) == '(x: int, *args, y: str, z: str) -> None'
+
+    # Space around '=' for defaults
+    sig = inspect.signature(f7)
+    assert stringify_signature(sig) == '(x: int = None, y: dict = {}) -> None'
+
+    # Callable types
+    sig = inspect.signature(f8)
+    assert stringify_signature(sig) == '(x: Callable[[int, str], int]) -> None'
+
+    sig = inspect.signature(f9)
+    assert stringify_signature(sig) == '(x: Callable) -> None'
+
+    # Tuple types
+    sig = inspect.signature(f10)
+    assert stringify_signature(sig) == '(x: Tuple[int, str], y: Tuple[int, ...]) -> None'
+
+    # Instance annotations
+    sig = inspect.signature(f11)
+    assert stringify_signature(sig) == '(x: CustomAnnotation, y: 123) -> None'
+
+    # tuple with more than two items
+    sig = inspect.signature(f12)
+    assert stringify_signature(sig) == '() -> Tuple[int, str, int]'
+
+    # optional
+    sig = inspect.signature(f13)
+    assert stringify_signature(sig) == '() -> Optional[str]'
+
+    # Any
+    sig = inspect.signature(f14)
+    assert stringify_signature(sig) == '() -> Any'
+
+    # ForwardRef
+    sig = inspect.signature(f15)
+    assert stringify_signature(sig) == '(x: Unknown, y: int) -> Any'
+
+    # keyword only arguments (1)
+    sig = inspect.signature(f16)
+    assert stringify_signature(sig) == '(arg1, arg2, *, arg3=None, arg4=None)'
+
+    # keyword only arguments (2)
+    sig = inspect.signature(f17)
+    assert stringify_signature(sig) == '(*, arg3, arg4)'
+
+    sig = inspect.signature(f18)
+    assert stringify_signature(sig) == '(self, arg1: Union[int, Tuple] = 10) -> List[Dict]'
+
+    # annotations for variadic and keyword parameters
+    sig = inspect.signature(f19)
+    assert stringify_signature(sig) == '(*args: int, **kwargs: str)'
+
+    # type hints by string
+    sig = inspect.signature(Node.children)
+    if (3, 5, 0) <= sys.version_info < (3, 5, 3):
+        assert stringify_signature(sig) == '(self) -> List[Node]'
+    else:
+        assert stringify_signature(sig) == '(self) -> List[typing_test_data.Node]'
+
+    sig = inspect.signature(Node.__init__)
+    assert stringify_signature(sig) == '(self, parent: Optional[Node]) -> None'
+
+    # show_annotation is False
+    sig = inspect.signature(f7)
+    assert stringify_signature(sig, show_annotation=False) == '(x=None, y={})'
+
+    # show_return_annotation is False
+    sig = inspect.signature(f7)
+    assert stringify_signature(sig, show_return_annotation=False) == '(x: int = None, y: dict = {})'
+
+【相关测试 4】
+测试文件：tests/test_domain_py.py
+测试名称：test_pyfunction_signature
+测试代码：
+def test_pyfunction_signature(app):
+    text = ".. py:function:: hello(name: str) -> str"
+    doctree = restructuredtext.parse(app, text)
+    assert_node(doctree, (addnodes.index,
+                          [desc, ([desc_signature, ([desc_name, "hello"],
+                                                    desc_parameterlist,
+                                                    [desc_returns, pending_xref, "str"])],
+                                  desc_content)]))
+    assert_node(doctree[1], addnodes.desc, desctype="function",
+                domain="py", objtype="function", noindex=False)
+    assert_node(doctree[1][0][1],
+                [desc_parameterlist, desc_parameter, ([desc_sig_name, "name"],
+                                                      [desc_sig_punctuation, ":"],
+                                                      " ",
+                                                      [nodes.inline, pending_xref, "str"])])
+
+【相关测试 5】
+测试文件：tests/test_domain_py.py
+测试名称：test_pyfunction_signature_full
+测试代码：
+def test_pyfunction_signature_full(app):
+    text = (".. py:function:: hello(a: str, b = 1, *args: str, "
+            "c: bool = True, **kwargs: str) -> str")
+    doctree = restructuredtext.parse(app, text)
+    assert_node(doctree, (addnodes.index,
+                          [desc, ([desc_signature, ([desc_name, "hello"],
+                                                    desc_parameterlist,
+                                                    [desc_returns, pending_xref, "str"])],
+                                  desc_content)]))
+    assert_node(doctree[1], addnodes.desc, desctype="function",
+                domain="py", objtype="function", noindex=False)
+    assert_node(doctree[1][0][1],
+                [desc_parameterlist, ([desc_parameter, ([desc_sig_name, "a"],
+                                                        [desc_sig_punctuation, ":"],
+                                                        " ",
+                                                        [desc_sig_name, pending_xref, "str"])],
+                                      [desc_parameter, ([desc_sig_name, "b"],
+                                                        [desc_sig_operator, "="],
+                                                        [nodes.inline, "1"])],
+                                      [desc_parameter, ([desc_sig_operator, "*"],
+                                                        [desc_sig_name, "args"],
+                                                        [desc_sig_punctuation, ":"],
+                                                        " ",
+                                                        [desc_sig_name, pending_xref, "str"])],
+                                      [desc_parameter, ([desc_sig_name, "c"],
+                                                        [desc_sig_punctuation, ":"],
+                                                        " ",
+                                                        [desc_sig_name, pending_xref, "bool"],
+                                                        " ",
+                                                        [desc_sig_operator, "="],
+                                                        " ",
+                                                        [nodes.inline, "True"])],
+                                      [desc_parameter, ([desc_sig_operator, "**"],
+                                                        [desc_sig_name, "kwargs"],
+                                                        [desc_sig_punctuation, ":"],
+                                                        " ",
+                                                        [desc_sig_name, pending_xref, "str"])])])
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

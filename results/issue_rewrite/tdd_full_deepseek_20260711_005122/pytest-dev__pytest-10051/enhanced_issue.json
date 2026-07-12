@@ -1,0 +1,343 @@
+{
+  "instance_id": "pytest-dev__pytest-10051",
+  "issue_summary": "调用 caplog.clear() 后，caplog.get_records() 返回的记录列表与 caplog.records 不同步，导致 get_records() 被冻结，既不随 clear() 清空，也不捕获新记录。",
+  "trigger_condition": {
+    "text": "在测试中调用 caplog.clear() 方法后，再调用 caplog.get_records(\"call\")。",
+    "evidence": [
+      "Issue 中的 reproductive example 展示了在 caplog.clear() 后调用 verify_consistency()（内部比较 get_records(\"call\") 和 records）会失败。",
+      "Issue 描述指出 clear() 将 caplog.records 替换而非清除，导致与 get_records() 引用的列表对象分离。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "caplog.get_records(\"call\") 返回的列表不等于 caplog.records（前者包含旧记录，后者为空）。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 中的断言失败：assert [<LogRecord: ...y, 8, \"test\">] == []。",
+      "Issue 描述指出 get_records() 被冻结，不随 clear() 清空，也不获取新记录。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "调用 caplog.clear() 后，caplog.get_records(\"call\") 返回的列表应与 caplog.records 保持一致（都应为空列表），并且后续新日志记录应能同时被两者捕获。",
+    "evidence": [
+      "Issue 中的 verify_consistency() 函数期望两者相等。",
+      "相关测试 test_clear 验证了 clear() 后 caplog.records 为空，暗示 clear() 应重置所有记录捕获状态。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "caplog.get_records",
+      "kind": "method",
+      "source_path": "src/_pytest/logging.py",
+      "reason": "Issue 核心是此方法在 clear() 后行为异常。"
+    },
+    {
+      "name": "caplog.clear",
+      "kind": "method",
+      "source_path": "src/_pytest/logging.py",
+      "reason": "触发缺陷的关键操作。"
+    },
+    {
+      "name": "caplog.records",
+      "kind": "method",
+      "source_path": "src/_pytest/logging.py",
+      "reason": "Issue 中用于与 get_records() 比较的正确基准。"
+    },
+    {
+      "name": "logging.warning",
+      "kind": "function",
+      "source_path": "",
+      "reason": "用于生成日志记录以验证捕获功能。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "src/_pytest/logging.py",
+      "object": "LogCaptureFixture.clear",
+      "lines": "441-443",
+      "reason": "clear() 仅调用 self.handler.reset()，可能未同步更新 self._item.stash[caplog_records_key] 中的列表引用。"
+    },
+    {
+      "path": "src/_pytest/logging.py",
+      "object": "LogCaptureFixture.get_records",
+      "lines": "388-399",
+      "reason": "该方法返回 stash 中的列表，该列表在 clear() 后可能未更新，导致与 handler.records 不同步。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_clear",
+      "test_file": "testing/logging/test_fixture.py",
+      "why_relevant": "它直接测试了 caplog.clear() 对 caplog.records 和 caplog.text 的清除效果。",
+      "reusable_parts": [
+        "caplog fixture 的使用",
+        "logging 导入和 logger 使用",
+        "assert not len(caplog.records) 的断言风格"
+      ],
+      "possible_gap": "它没有测试 caplog.get_records() 在 clear() 后的行为，也没有比较 get_records() 和 records。"
+    },
+    {
+      "test_name": "test_caplog_captures_for_all_stages",
+      "test_file": "testing/logging/test_fixture.py",
+      "why_relevant": "它同时使用了 caplog.records 和 caplog.get_records(\"call\")，并检查了它们的内容。",
+      "reusable_parts": [
+        "同时调用 caplog.records 和 caplog.get_records(\"call\")",
+        "比较两者内容的模式（通过列表推导提取 message）"
+      ],
+      "possible_gap": "它没有在测试中调用 caplog.clear()，因此没有触发缺陷路径。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "call_chain",
+      "current_pattern": "相关测试中通常单独测试 clear() 或单独测试 get_records()，没有在 clear() 后立即检查 get_records()。",
+      "target_pattern": "在 clear() 调用后，立即比较 caplog.get_records(\"call\") 和 caplog.records。",
+      "reason": "Issue 表明 clear() 破坏了 get_records() 和 records 之间的一致性，此调用顺序是触发缺陷的关键。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "测试通常在 clear() 前有日志记录，clear() 后验证 records 为空。",
+      "target_pattern": "在 clear() 前记录日志，clear() 后验证 get_records(\"call\") 也为空，并且后续新日志能同时出现在两者中。",
+      "reason": "需要验证 get_records() 不仅被清空，还能恢复捕获新记录的功能。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "state",
+      "expression_hint": "caplog.get_records(\"call\") is caplog._item.stash[caplog_records_key].get(\"call\")",
+      "reason": "确认 get_records() 返回的是 stash 中的列表对象，观察 clear() 后该对象是否被替换或修改。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "caplog.records is self.handler.records",
+      "reason": "确认 records 属性返回的是 handler 的列表对象，观察 clear() 后该对象是否被重置。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "len(caplog.get_records(\"call\")) 和 len(caplog.records)",
+      "reason": "直接观察两个列表在 clear() 调用前后的长度变化，判断是否同步。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "caplog.get_records(\"call\") == caplog.records",
+      "reason": "直接比较两个列表的内容是否相等，这是 Issue 中失败断言的核心。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "调用 caplog.clear() 后，caplog.get_records(\"call\") 应返回空列表。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的 LogRecord 对象 repr 相等，因为记录对象可能包含动态属性。",
+      "reason": "Issue 的核心是 get_records() 在 clear() 后应被清空，与 records 行为一致。"
+    },
+    {
+      "assertion_goal": "调用 caplog.clear() 后，caplog.get_records(\"call\") 应等于 caplog.records。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免仅断言长度相等，需要验证列表内容完全一致。",
+      "reason": "Issue 中的 verify_consistency() 函数期望两者严格相等，这是修复后应满足的语义。"
+    },
+    {
+      "assertion_goal": "在 caplog.clear() 后记录新日志，新日志应同时出现在 caplog.get_records(\"call\") 和 caplog.records 中。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "避免断言具体的日志消息字符串完全匹配，除非 Issue 明确给出。",
+      "reason": "验证 clear() 后 get_records() 的捕获功能恢复正常，而不仅仅是被清空。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 caplog fixture。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要导入 logging 模块并获取 logger。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试函数应接受 caplog 作为参数，类似于现有测试。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "caplog._item.stash[caplog_records_key] 的内部结构以及 clear() 应该如何正确更新它。",
+    "除了 \"call\" 阶段，其他阶段（如 \"setup\"、\"teardown\"）的 get_records 是否受同样影响。",
+    "clear() 是否应该完全重置 stash 字典，还是只更新其中的列表引用。"
+  ],
+  "raw": {
+    "issue_summary": "调用 caplog.clear() 后，caplog.get_records() 返回的记录列表与 caplog.records 不同步，导致 get_records() 被冻结，既不随 clear() 清空，也不捕获新记录。",
+    "trigger_condition": {
+      "text": "在测试中调用 caplog.clear() 方法后，再调用 caplog.get_records(\"call\")。",
+      "evidence": [
+        "Issue 中的 reproductive example 展示了在 caplog.clear() 后调用 verify_consistency()（内部比较 get_records(\"call\") 和 records）会失败。",
+        "Issue 描述指出 clear() 将 caplog.records 替换而非清除，导致与 get_records() 引用的列表对象分离。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "caplog.get_records(\"call\") 返回的列表不等于 caplog.records（前者包含旧记录，后者为空）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的断言失败：assert [<LogRecord: ...y, 8, \"test\">] == []。",
+        "Issue 描述指出 get_records() 被冻结，不随 clear() 清空，也不获取新记录。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "调用 caplog.clear() 后，caplog.get_records(\"call\") 返回的列表应与 caplog.records 保持一致（都应为空列表），并且后续新日志记录应能同时被两者捕获。",
+      "evidence": [
+        "Issue 中的 verify_consistency() 函数期望两者相等。",
+        "相关测试 test_clear 验证了 clear() 后 caplog.records 为空，暗示 clear() 应重置所有记录捕获状态。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "caplog.get_records",
+        "kind": "method",
+        "source_path": "src/_pytest/logging.py",
+        "reason": "Issue 核心是此方法在 clear() 后行为异常。"
+      },
+      {
+        "name": "caplog.clear",
+        "kind": "method",
+        "source_path": "src/_pytest/logging.py",
+        "reason": "触发缺陷的关键操作。"
+      },
+      {
+        "name": "caplog.records",
+        "kind": "method",
+        "source_path": "src/_pytest/logging.py",
+        "reason": "Issue 中用于与 get_records() 比较的正确基准。"
+      },
+      {
+        "name": "logging.warning",
+        "kind": "function",
+        "source_path": "",
+        "reason": "用于生成日志记录以验证捕获功能。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/logging.py",
+        "object": "LogCaptureFixture.clear",
+        "lines": "441-443",
+        "reason": "clear() 仅调用 self.handler.reset()，可能未同步更新 self._item.stash[caplog_records_key] 中的列表引用。"
+      },
+      {
+        "path": "src/_pytest/logging.py",
+        "object": "LogCaptureFixture.get_records",
+        "lines": "388-399",
+        "reason": "该方法返回 stash 中的列表，该列表在 clear() 后可能未更新，导致与 handler.records 不同步。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_clear",
+        "test_file": "testing/logging/test_fixture.py",
+        "why_relevant": "它直接测试了 caplog.clear() 对 caplog.records 和 caplog.text 的清除效果。",
+        "reusable_parts": [
+          "caplog fixture 的使用",
+          "logging 导入和 logger 使用",
+          "assert not len(caplog.records) 的断言风格"
+        ],
+        "possible_gap": "它没有测试 caplog.get_records() 在 clear() 后的行为，也没有比较 get_records() 和 records。"
+      },
+      {
+        "test_name": "test_caplog_captures_for_all_stages",
+        "test_file": "testing/logging/test_fixture.py",
+        "why_relevant": "它同时使用了 caplog.records 和 caplog.get_records(\"call\")，并检查了它们的内容。",
+        "reusable_parts": [
+          "同时调用 caplog.records 和 caplog.get_records(\"call\")",
+          "比较两者内容的模式（通过列表推导提取 message）"
+        ],
+        "possible_gap": "它没有在测试中调用 caplog.clear()，因此没有触发缺陷路径。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试中通常单独测试 clear() 或单独测试 get_records()，没有在 clear() 后立即检查 get_records()。",
+        "target_pattern": "在 clear() 调用后，立即比较 caplog.get_records(\"call\") 和 caplog.records。",
+        "reason": "Issue 表明 clear() 破坏了 get_records() 和 records 之间的一致性，此调用顺序是触发缺陷的关键。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试通常在 clear() 前有日志记录，clear() 后验证 records 为空。",
+        "target_pattern": "在 clear() 前记录日志，clear() 后验证 get_records(\"call\") 也为空，并且后续新日志能同时出现在两者中。",
+        "reason": "需要验证 get_records() 不仅被清空，还能恢复捕获新记录的功能。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "caplog.get_records(\"call\") is caplog._item.stash[caplog_records_key].get(\"call\")",
+        "reason": "确认 get_records() 返回的是 stash 中的列表对象，观察 clear() 后该对象是否被替换或修改。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "caplog.records is self.handler.records",
+        "reason": "确认 records 属性返回的是 handler 的列表对象，观察 clear() 后该对象是否被重置。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "len(caplog.get_records(\"call\")) 和 len(caplog.records)",
+        "reason": "直接观察两个列表在 clear() 调用前后的长度变化，判断是否同步。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "caplog.get_records(\"call\") == caplog.records",
+        "reason": "直接比较两个列表的内容是否相等，这是 Issue 中失败断言的核心。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "调用 caplog.clear() 后，caplog.get_records(\"call\") 应返回空列表。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 LogRecord 对象 repr 相等，因为记录对象可能包含动态属性。",
+        "reason": "Issue 的核心是 get_records() 在 clear() 后应被清空，与 records 行为一致。"
+      },
+      {
+        "assertion_goal": "调用 caplog.clear() 后，caplog.get_records(\"call\") 应等于 caplog.records。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免仅断言长度相等，需要验证列表内容完全一致。",
+        "reason": "Issue 中的 verify_consistency() 函数期望两者严格相等，这是修复后应满足的语义。"
+      },
+      {
+        "assertion_goal": "在 caplog.clear() 后记录新日志，新日志应同时出现在 caplog.get_records(\"call\") 和 caplog.records 中。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言具体的日志消息字符串完全匹配，除非 Issue 明确给出。",
+        "reason": "验证 clear() 后 get_records() 的捕获功能恢复正常，而不仅仅是被清空。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 caplog fixture。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 logging 模块并获取 logger。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试函数应接受 caplog 作为参数，类似于现有测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "caplog._item.stash[caplog_records_key] 的内部结构以及 clear() 应该如何正确更新它。",
+      "除了 \"call\" 阶段，其他阶段（如 \"setup\"、\"teardown\"）的 get_records 是否受同样影响。",
+      "clear() 是否应该完全重置 stash 字典，还是只更新其中的列表引用。"
+    ]
+  }
+}

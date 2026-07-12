@@ -1,0 +1,262 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Add joblib in show_versions
+joblib should be added to the dependencies listed in show_versions or added to the issue template when sklearn version is > 0.20.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sklearn/utils/_show_versions.py
+对象名称：show_versions
+节点类型：top-level function
+父节点：_show_versions
+行号范围：100-117
+代码：
+def show_versions():
+    "Print useful debugging information"
+
+    sys_info = _get_sys_info()
+    deps_info = _get_deps_info()
+    blas_info = _get_blas_info()
+
+    print('\nSystem:')
+    for k, stat in sys_info.items():
+        print("{k:>10}: {stat}".format(k=k, stat=stat))
+
+    print('\nBLAS:')
+    for k, stat in blas_info.items():
+        print("{k:>10}: {stat}".format(k=k, stat=stat))
+
+    print('\nPython deps:')
+    for k, stat in deps_info.items():
+        print("{k:>10}: {stat}".format(k=k, stat=stat))
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sklearn/utils/tests/test_show_versions.py
+测试名称：test_get_deps_info
+测试代码：
+def test_get_deps_info():
+    deps_info = _get_deps_info()
+
+    assert 'pip' in deps_info
+    assert 'setuptools' in deps_info
+    assert 'sklearn' in deps_info
+    assert 'numpy' in deps_info
+    assert 'scipy' in deps_info
+    assert 'Cython' in deps_info
+    assert 'pandas' in deps_info
+    assert 'matplotlib' in deps_info
+
+【相关测试 2】
+测试文件：sklearn/utils/tests/test_show_versions.py
+测试名称：test_show_versions_with_blas
+测试代码：
+def test_show_versions_with_blas(capsys):
+    show_versions()
+    out, err = capsys.readouterr()
+    assert 'python' in out
+    assert 'numpy' in out
+    assert 'BLAS' in out
+
+【相关测试 3】
+测试文件：sklearn/utils/tests/test_utils.py
+测试名称：test_deprecation_joblib_api
+测试代码：
+def test_deprecation_joblib_api(tmpdir):
+    def check_warning(*args, **kw):
+        return assert_warns_message(
+            DeprecationWarning, "deprecated in version 0.20.1", *args, **kw)
+
+    # Ensure that the joblib API is deprecated in sklearn.util
+    from sklearn.utils import Parallel, Memory, delayed
+    from sklearn.utils import cpu_count, hash, effective_n_jobs
+    check_warning(Memory, str(tmpdir))
+    check_warning(hash, 1)
+    check_warning(Parallel)
+    check_warning(cpu_count)
+    check_warning(effective_n_jobs, 1)
+    check_warning(delayed, dummy_func)
+
+    # Only parallel_backend and register_parallel_backend are not deprecated in
+    # sklearn.utils
+    from sklearn.utils import parallel_backend, register_parallel_backend
+    assert_no_warnings(parallel_backend, 'loky', None)
+    assert_no_warnings(register_parallel_backend, 'failing', None)
+
+    # Ensure that the deprecation have no side effect in sklearn.utils._joblib
+    from sklearn.utils._joblib import Parallel, Memory, delayed
+    from sklearn.utils._joblib import cpu_count, hash, effective_n_jobs
+    from sklearn.utils._joblib import parallel_backend
+    from sklearn.utils._joblib import register_parallel_backend
+    assert_no_warnings(Memory, str(tmpdir))
+    assert_no_warnings(hash, 1)
+    assert_no_warnings(Parallel)
+    assert_no_warnings(cpu_count)
+    assert_no_warnings(effective_n_jobs, 1)
+    assert_no_warnings(delayed, dummy_func)
+    assert_no_warnings(parallel_backend, 'loky', None)
+    assert_no_warnings(register_parallel_backend, 'failing', None)
+
+    from sklearn.utils._joblib import joblib
+    del joblib.parallel.BACKENDS['failing']
+
+【相关测试 4】
+测试文件：sklearn/tests/test_site_joblib.py
+测试名称：test_old_pickle
+测试代码：
+def test_old_pickle(tmpdir):
+    import joblib
+
+    # Check that a pickle that references sklearn.external.joblib can load
+    f = tmpdir.join('foo.pkl')
+    f.write(b'\x80\x02csklearn.externals.joblib.numpy_pickle\nNumpyArrayWrappe'
+            b'r\nq\x00)\x81q\x01}q\x02(U\x05dtypeq\x03cnumpy\ndtype\nq\x04U'
+            b'\x02i8q\x05K\x00K\x01\x87q\x06Rq\x07(K\x03U\x01<q\x08NNNJ\xff'
+            b'\xff\xff\xffJ\xff\xff\xff\xffK\x00tq\tbU\x05shapeq\nK\x01\x85q'
+            b'\x0bU\x05orderq\x0cU\x01Cq\rU\x08subclassq\x0ecnumpy\nndarray\nq'
+            b'\x0fU\nallow_mmapq\x10\x88ub\x01\x00\x00\x00\x00\x00\x00\x00.',
+            mode='wb')
+
+    joblib.load(str(f))
+
+【相关测试 5】
+测试文件：sklearn/tests/test_pipeline.py
+测试名称：test_pipeline_wrong_memory
+测试代码：
+def test_pipeline_wrong_memory():
+    # Test that an error is raised when memory is not a string or a Memory
+    # instance
+    iris = load_iris()
+    X = iris.data
+    y = iris.target
+    # Define memory as an integer
+    memory = 1
+    cached_pipe = Pipeline([('transf', DummyTransf()),
+                            ('svc', SVC())], memory=memory)
+    assert_raises_regex(ValueError, "'memory' should be None, a string or"
+                        " have the same interface as joblib.Memory."
+                        " Got memory='1' instead.", cached_pipe.fit, X, y)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

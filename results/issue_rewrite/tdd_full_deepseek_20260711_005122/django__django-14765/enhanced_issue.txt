@@ -1,0 +1,117 @@
+instance_id: django__django-14765
+
+issue_summary: ProjectState.__init__() 的 real_apps 参数现在可以假定为集合，但当前代码仍包含类型检查和转换逻辑。
+
+trigger_condition:
+{
+  "text": "调用 ProjectState.__init__(real_apps=...) 时，传入一个非 None 且不是 set 类型的参数。",
+  "evidence": [
+    "Issue 提到 PR #14760 已确保所有调用都传递 set，但 __init__ 仍包含 isinstance 检查和转换。",
+    "源码片段 2 显示 __init__ 中有 `real_apps if isinstance(real_apps, set) else set(real_apps)`。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "当前代码不会抛出错误，但根据 Issue，修复后应断言 real_apps 是集合（当非 None 时），否则应引发异常。",
+  "symptom_type": "unknown",
+  "evidence": [
+    "Issue 建议 `it can just assert that it's a set when non-None`，暗示当前缺少断言。"
+  ],
+  "confidence": "medium"
+}
+
+expected_behavior:
+{
+  "text": "当 real_apps 参数非 None 时，ProjectState.__init__() 应断言其为 set 类型，否则引发异常；不应进行隐式转换。",
+  "evidence": [
+    "Issue 明确建议 `assert that it's a set when non-None`。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "ProjectState.__init__",
+    "kind": "method",
+    "source_path": "django/db/migrations/state.py",
+    "reason": "Issue 直接针对此方法的 real_apps 参数处理逻辑。"
+  },
+  {
+    "name": "ProjectState",
+    "kind": "class",
+    "source_path": "django/db/migrations/state.py",
+    "reason": "缺陷所在的类。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "相似测试中调用 ProjectState(real_apps={'contenttypes'}) 或 ProjectState()（默认 None）。",
+    "target_pattern": "调用 ProjectState(real_apps=非集合的可迭代对象，如列表 ['app'] 或元组 ('app',))。",
+    "reason": "Issue 暗示所有调用现在都应传递集合，但当前代码仍处理非集合输入。变异后可能触发缺失的断言或暴露隐式转换问题。",
+    "confidence": "high"
+  },
+  {
+    "slot": "argument",
+    "current_pattern": "相似测试中 real_apps 为 None 或集合。",
+    "target_pattern": "调用 ProjectState(real_apps=非 None 非集合对象，如字符串 'app')。",
+    "reason": "测试极端输入类型，以验证 __init__ 是否按 Issue 建议进行断言。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用 ProjectState.__init__(real_apps=非集合) 时是否引发 AssertionError 或 TypeError。",
+    "reason": "Issue 建议添加断言，观察异常可判断当前行为是否符合预期。"
+  },
+  {
+    "kind": "type",
+    "expression_hint": "ProjectState 实例的 self.real_apps 属性类型。",
+    "reason": "检查 real_apps 是否被隐式转换为 set，或是否保持原类型（修复后应断言失败）。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当 real_apps 非 None 且不是 set 时，应引发异常（如 AssertionError）。",
+    "preferred_assertion_style": "raises",
+    "avoid": "避免断言完整的异常消息字符串，因为 Issue 未指定。",
+    "reason": "Issue 核心是参数类型约束，断言异常发生即可验证行为。"
+  },
+  {
+    "assertion_goal": "当 real_apps 为 None 时，self.real_apps 应为空集合。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言内部实现细节。",
+    "reason": "现有行为应保持不变，确保向后兼容。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "使用 SimpleTestCase 或类似测试基类，可能需要定义临时模型。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要导入 ProjectState 和可能的相关模型类。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "Issue 未明确指定断言失败时应引发的具体异常类型（AssertionError 还是 TypeError）。",
+  "是否所有内部调用都已确保传递集合，需要验证。",
+  "real_apps 为 None 时的行为是否应保持不变。"
+]

@@ -1,0 +1,112 @@
+instance_id: django__django-11099
+
+issue_summary: ASCIIUsernameValidator 和 UnicodeUsernameValidator 的正则表达式允许用户名以换行符结尾，导致验证不严格。
+
+trigger_condition:
+{
+  "text": "输入一个以换行符结尾的字符串作为用户名，例如 'glenn\\n'。",
+  "evidence": [
+    "Issue 描述指出正则表达式 r'^[\\w.@+-]+$' 中的 $ 会匹配尾随换行符。",
+    "源码片段 1 和 2 显示两个验证器都使用了该正则表达式。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "用户名验证器接受了本应无效的、以换行符结尾的用户名，没有抛出 ValidationError。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 描述指出验证器会接受以换行符结尾的用户名。",
+    "相关测试 1 和 2 展示了验证器对无效输入应抛出 ValidationError。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "用户名验证器应拒绝以换行符结尾的字符串，并抛出 ValidationError。",
+  "evidence": [
+    "Issue 描述建议将正则表达式改为 r'\\A[\\w.@+-]+\\Z' 以拒绝尾随换行符。",
+    "相关测试 1 和 2 的无效输入列表表明验证器应对不符合模式的输入抛出异常。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "ASCIIUsernameValidator",
+    "kind": "class",
+    "source_path": "django/contrib/auth/validators.py",
+    "reason": "Issue 明确指出该类使用的正则表达式存在缺陷，需要测试其验证行为。"
+  },
+  {
+    "name": "UnicodeUsernameValidator",
+    "kind": "class",
+    "source_path": "django/contrib/auth/validators.py",
+    "reason": "Issue 明确指出该类使用的正则表达式存在缺陷，需要测试其验证行为。"
+  },
+  {
+    "name": "validators.RegexValidator",
+    "kind": "class",
+    "source_path": "",
+    "reason": "两个验证器都继承自 RegexValidator，其正则匹配逻辑是缺陷核心。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "测试中使用的无效用户名列表，如 \"o'connell\", 'Éric'。",
+    "target_pattern": "在无效用户名列表中添加以换行符结尾的字符串，如 'glenn\\n'。",
+    "reason": "Issue 表明当前正则表达式会错误地接受此类输入，而修复后应拒绝。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用验证器 v(username) 时是否抛出 ValidationError。",
+    "reason": "缺陷表现为对无效输入未抛出异常，观测异常抛出情况可直接判断验证是否严格。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "调用验证器 v(username) 的返回值（应为 None）。",
+    "reason": "验证器在输入有效时应静默返回 None，观测返回值可辅助判断，但主要依据是异常。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "对于以换行符结尾的用户名输入，验证器应抛出 ValidationError。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言完整的异常消息字符串，因为消息可能本地化或更改。",
+    "reason": "Issue 的核心是验证器应拒绝特定输入，assertRaises(ValidationError) 能稳定捕获此语义。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "使用 SimpleTestCase 作为测试基类，并导入 validators 模块。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要构造 ASCIIUsernameValidator 和 UnicodeUsernameValidator 的实例。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "Issue 中提到的修复方案（使用 \\A 和 \\Z）是否已被采纳或存在其他变通方法。",
+  "除了尾随换行符，正则表达式 r'^[\\w.@+-]+$' 是否还存在其他边界匹配问题（如字符串开头）。",
+  "在 Django 的其他表单或模型字段中使用这些验证器时，是否会产生级联影响。"
+]

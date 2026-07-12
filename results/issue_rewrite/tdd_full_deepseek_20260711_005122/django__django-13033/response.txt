@@ -1,0 +1,176 @@
+{
+  "issue_summary": "当通过自引用外键的 '_id' 字段进行排序时，Django 会生成错误的 SQL 查询，包含不必要的额外 JOIN 和错误的排序方向。",
+  "trigger_condition": {
+    "text": "对包含自引用外键（ForeignKey to self）的模型进行查询，使用 `filter` 和 `order_by('related_model__self_fk_id')` 或 `order_by('related_model__self_fk')`。",
+    "evidence": ["Issue 中描述了使用 `TwoModel.objects.filter(record__oneval__in=[1,2,3]).order_by(\"record__root_id\")` 会触发问题。", "Issue 指出当 `root` 是外键指向另一个模型时，问题不会出现，说明自引用是关键。", "相关测试 `test_recursive_fk` 和 `test_recursive_fk_reverse` 涉及自引用外键。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "生成的 SQL 查询包含一个不必要的额外 LEFT OUTER JOIN，并且 ORDER BY 子句的排序方向（DESC）错误地继承了相关模型的默认排序（ordering = (\"-id\",)），而不是遵循 `order_by` 指定的顺序。",
+    "symptom_type": "wrong_sql",
+    "evidence": ["Issue 中打印的 SQL 显示：`ORDER BY T3.\"id\" DESC` 和 `LEFT OUTER JOIN \"orion_onemodel\" T3 ON (\"orion_onemodel\".\"root_id\" = T3.\"id\")`。", "Issue 指出 `order_by(\"record__root_id\")` 和 `order_by(\"record__root\")` 产生相同的错误 SQL。", "Issue 提到使用 `order_by(\"-record__root_id\")` 会产生 ASC 排序，表明排序方向被反转了。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "`order_by` 子句应完全覆盖相关模型的默认排序，并且对于通过 `_id` 后缀访问的自引用外键字段，查询应生成最优化的 SQL，不包含不必要的 JOIN，且排序方向与 `order_by` 参数一致。",
+    "evidence": ["Issue 中描述了预期行为：`order_by(\"record__root__id\")` 生成了正确的 SQL（单 INNER JOIN 和 ASC 排序）。", "Issue 中提到使用 `annotate` 和 `F` 表达式的工作方法产生了预期的 SQL。", "相关测试 `test_order_by_fk_attname` 表明按外键属性名排序应防止查询继承相关模型的排序选项。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "django.db.models.query.QuerySet.filter",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 中触发查询的起点。"
+    },
+    {
+      "name": "django.db.models.query.QuerySet.order_by",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 的核心是 `order_by` 行为异常。"
+    },
+    {
+      "name": "django.db.models.F",
+      "kind": "class",
+      "source_path": "django/db/models/expressions.py",
+      "reason": "Issue 中提到使用 `F(\"record__root_id\")` 作为变通方法。"
+    },
+    {
+      "name": "django.db.models.ForeignKey",
+      "kind": "class",
+      "source_path": "django/db/models/fields/related.py",
+      "reason": "问题涉及自引用外键字段。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/query.py",
+      "object": "QuerySet.order_by",
+      "lines": "1129-1136",
+      "reason": "该方法负责处理排序逻辑，可能未正确处理自引用外键 `_id` 字段的排序覆盖和 JOIN 生成。"
+    },
+    {
+      "path": "django/db/models/sql/query.py",
+      "object": "Query.add_ordering",
+      "lines": "",
+      "reason": "排序字段的解析和 JOIN 的添加可能在此发生，特别是处理 `related_model__self_fk_id` 这种路径时。"
+    },
+    {
+      "path": "django/db/models/fields/related.py",
+      "object": "ForeignKey",
+      "lines": "767-1020",
+      "reason": "自引用外键的特殊性可能导致在构建查询时生成额外的 JOIN。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "OrderingTests.test_order_by_fk_attname",
+      "test_file": "tests/ordering/tests.py",
+      "why_relevant": "该测试直接验证了按外键属性名（如 `author_id`）排序时，查询不应继承相关模型的默认排序。这与 Issue 中按 `record__root_id` 排序的预期行为一致。",
+      "reusable_parts": ["使用 `order_by('author_id')` 的调用模式", "使用 `assertQuerysetEqual` 进行结果断言", "涉及 `Author` 和 `Article` 模型的外键关系设置"],
+      "possible_gap": "该测试不涉及自引用外键，且其外键指向的是另一个不同的模型。Issue 中的 bug 特定于自引用外键。"
+    },
+    {
+      "test_name": "ToFieldTests.test_recursive_fk",
+      "test_file": "tests/queries/tests.py",
+      "why_relevant": "该测试涉及自引用外键（`Node` 模型的 `parent` 字段），展示了自引用外键的基本过滤操作。",
+      "reusable_parts": ["自引用外键模型的创建（`Node.objects.create`）", "使用 `filter(parent=...)` 进行查询"],
+      "possible_gap": "该测试不涉及 `order_by` 操作，也没有检查生成的 SQL 或排序方向。"
+    },
+    {
+      "test_name": "Queries1Tests.test_tickets_2076_7256",
+      "test_file": "tests/queries/tests.py",
+      "why_relevant": "该测试讨论了相关模型的默认排序如何影响查询，并检查了 JOIN 的数量，与 Issue 中关于默认排序和多余 JOIN 的问题相关。",
+      "reusable_parts": ["使用 `order_by` 跨模型排序", "使用 `assertQuerysetEqual` 断言顺序", "检查 `qs.query.alias_map` 长度以验证 JOIN 数量"],
+      "possible_gap": "该测试不涉及自引用外键，且其“默认排序”场景是预期的正确行为，而 Issue 中描述的是错误行为。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试 `test_order_by_fk_attname` 中使用 `order_by('author_id')`，其中 `author` 是外键指向另一个模型。",
+      "target_pattern": "将外键关系改为自引用，并使用 `order_by('record__root_id')`，其中 `root` 是模型指向自身的外键。",
+      "reason": "Issue 表明问题仅出现在自引用外键场景下，变异此输入可能触发缺陷路径。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试中相关模型（如 `Author`）可能没有设置默认排序（`ordering`）。",
+      "target_pattern": "使自引用模型（如 `OneModel`）具有默认排序 `ordering = (\"-id\",)`。",
+      "reason": "Issue 指出错误的 DESC 排序方向来源于相关模型的默认排序，设置此状态是触发条件的一部分。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "相似测试可能只使用 `order_by`，或结合简单的 `filter`。",
+      "target_pattern": "在 `filter` 中使用跨越自引用外键的查找（如 `record__oneval__in=[...]`），然后再应用 `order_by('record__root_id')`。",
+      "reason": "Issue 中的错误 SQL 是在 `filter` 和 `order_by` 组合下观察到的，并且 `filter` 条件可能影响 JOIN 的生成。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "sql",
+      "expression_hint": "`str(qs.query)` 或 `qs.query.sql_with_params()`",
+      "reason": "Issue 的核心错误体现在生成的 SQL 字符串中：多余的 JOIN 和错误的 ORDER BY 方向。"
+    },
+    {
+      "kind": "order",
+      "expression_hint": "查询结果集的实际顺序（例如 `list(qs)` 或 `qs.values_list('id', flat=True)`）",
+      "reason": "错误的 SQL 应导致错误的排序结果，与预期顺序（例如按 `root_id` 升序）进行比较。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "`qs.query.alias_map` 的长度或内容",
+      "reason": "可以观察查询中生成的 JOIN 数量，Issue 中错误查询有两个 JOIN，而预期只有一个。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "生成的 SQL 查询不应包含与自引用外键相关的额外 LEFT OUTER JOIN。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "断言完整的 SQL 字符串相等，因为表别名（如 T3）可能变化。",
+      "reason": "Issue 的关键症状是不必要的 JOIN。检查 SQL 中是否出现 `LEFT OUTER JOIN` 和自引用表名的第二次出现是稳定的判断方式。"
+    },
+    {
+      "assertion_goal": "ORDER BY 子句的排序方向应与 `order_by` 参数明确指定的方向一致（例如，`order_by('record__root_id')` 应为 ASC），不应被相关模型的默认排序覆盖。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的 ORDER BY 字符串，因为列别名可能变化。",
+      "reason": "Issue 中错误的 DESC 排序是核心问题。可以检查 SQL 中是否包含 `ASC` 或 `DESC` 关键字。"
+    },
+    {
+      "assertion_goal": "查询结果应按指定字段正确排序。",
+      "preferred_assertion_style": "order_equals",
+      "avoid": "依赖对象的完整 `repr` 进行相等比较。",
+      "reason": "最终用户可见的错误是结果顺序错误。比较结果 ID 列表的顺序是稳定且与 Issue 语义对齐的断言。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要创建 Django 测试数据库并定义 Issue 中描述的 `OneModel` 和 `TwoModel` 模型，或使用功能上等效的模型。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试应继承自 `django.test.TestCase` 以利用事务回滚和数据库设置。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要在 `OneModel.Meta` 中设置 `ordering = (\"-id\",)`。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要创建一些测试数据，使 `filter(record__oneval__in=[...])` 能返回结果。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "错误是否只发生在 `_id` 后缀的字段上，还是也发生在 `order_by('record__root')` 上？Issue 指出两者产生相同 SQL，但根本原因可能不同。",
+    "生成额外 JOIN 的确切条件是什么？是否总是发生在自引用外键且通过 `_id` 访问时？",
+    "排序方向反转的逻辑细节：`order_by(\"-record__root_id\")` 产生 ASC 是否是与默认排序 `-id` 相互作用的结果？",
+    "Bug 的确切位置是在 `add_ordering`、JOIN 生成逻辑还是字段解析逻辑中？"
+  ]
+}

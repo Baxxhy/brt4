@@ -1,0 +1,373 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Allow ModelForm meta to specify formfield_callback.
+Description
+	 
+		(last modified by Klaas-Jan Gorter)
+	 
+The function django.forms.modelform_factory returns a form class based on the class it recieves as form argument. As an additional argument it accepts a formfield_callback function. When no callback is provided the class uses no callback instead of the formfield_callback of the base form provided.
+Example:
+from django import forms
+form django.db import models
+class MyModel(forms.Model):
+	active = models.BooleanField()
+	name = models.CharField(max_length=64, blank=True, null=True)
+	
+def all_required(field, **kwargs):
+	formfield = field.formfield(**kwargs)
+	formfield.required = True
+	return formfield
+class MyForm(forms.ModelForm):
+	formfield_callback = all_required
+	class Meta:
+		model = MyModel
+		formfield_callback = all_required
+		fields = ['active', 'name']
+FactoryForm = forms.modelform_factory(MyModel, form=MyForm)
+The expected behavior would be that the FactoryForm uses the formfield_callback specified in the Meta attribute of MyForm and that therefore the fields would be required in both the FactoryForm and MyForm. However, under the current behavior of modelform_factory the formfield_callback is overwritten (with the default argument None) before the new class is constructed and in FactoryForm the fields are not required.
+I believe this is a bug, because this behavior has been observed before in Ticket #18573 in Django 1.3. The test that was proposed there was incorrect, because under the expected behavior the callback should have been called four times not two times as was asserted. (I believe this test has been removed from version 2, because I find no equivalent test in tests/model_formsets_regress.)
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/forms/models.py
+对象名称：modelform_factory
+节点类型：top-level function
+父节点：models
+行号范围：563-648
+代码：
+def modelform_factory(
+    model,
+    form=ModelForm,
+    fields=None,
+    exclude=None,
+    formfield_callback=None,
+    widgets=None,
+    localized_fields=None,
+    labels=None,
+    help_texts=None,
+    error_messages=None,
+    field_classes=None,
+):
+    """
+    Return a ModelForm containing form fields for the given model. You can
+    optionally pass a `form` argument to use as a starting point for
+    constructing the ModelForm.
+
+    ``fields`` is an optional list of field names. If provided, include only
+    the named fields in the returned fields. If omitted or '__all__', use all
+    fields.
+
+    ``exclude`` is an optional list of field names. If provided, exclude the
+    named fields from the returned fields, even if they are listed in the
+    ``fields`` argument.
+
+    ``widgets`` is a dictionary of model field names mapped to a widget.
+
+    ``localized_fields`` is a list of names of fields which should be localized.
+
+    ``formfield_callback`` is a callable that takes a model field and returns
+    a form field.
+
+    ``labels`` is a dictionary of model field names mapped to a label.
+
+    ``help_texts`` is a dictionary of model field names mapped to a help text.
+
+    ``error_messages`` is a dictionary of model field names mapped to a
+    dictionary of error messages.
+
+    ``field_classes`` is a dictionary of model field names mapped to a form
+    field class.
+    """
+    # Create the inner Meta class. FIXME: ideally, we should be able to
+    # construct a ModelForm without creating and passing in a temporary
+    # inner class.
+
+    # Build up a list of attributes that the Meta object will have.
+    attrs = {"model": model}
+    if fields is not None:
+        attrs["fields"] = fields
+    if exclude is not None:
+        attrs["exclude"] = exclude
+    if widgets is not None:
+        attrs["widgets"] = widgets
+    if localized_fields is not None:
+        attrs["localized_fields"] = localized_fields
+    if labels is not None:
+        attrs["labels"] = labels
+    if help_texts is not None:
+        attrs["help_texts"] = help_texts
+    if error_messages is not None:
+        attrs["error_messages"] = error_messages
+    if field_classes is not None:
+        attrs["field_classes"] = field_classes
+
+    # If parent form class already has an inner Meta, the Meta we're
+    # creating needs to inherit from the parent's inner meta.
+    bases = (form.Meta,) if hasattr(form, "Meta") else ()
+    Meta = type("Meta", bases, attrs)
+    if formfield_callback:
+        Meta.formfield_callback = staticmethod(formfield_callback)
+    # Give this new form class a reasonable name.
+    class_name = model.__name__ + "Form"
+
+    # Class attributes for the new form class.
+    form_class_attrs = {"Meta": Meta, "formfield_callback": formfield_callback}
+
+    if getattr(Meta, "fields", None) is None and getattr(Meta, "exclude", None) is None:
+        raise ImproperlyConfigured(
+            "Calling modelform_factory without defining 'fields' or "
+            "'exclude' explicitly is prohibited."
+        )
+
+    # Instantiate type(form) in order to use the same metaclass as form.
+    return type(form)(class_name, (form,), form_class_attrs)
+
+
+【源码片段 2】
+文件路径：django/forms/models.py
+对象名称：ModelForm
+节点类型：class
+父节点：models
+行号范围：559-560
+代码：
+class ModelForm(BaseModelForm, metaclass=ModelFormMetaclass):
+
+
+【源码片段 3】
+文件路径：django/contrib/auth/models.py
+对象名称：Meta
+节点类型：class
+父节点：models
+行号范围：72-76
+代码：
+    class Meta:
+        verbose_name = _("permission")
+        verbose_name_plural = _("permissions")
+        unique_together = [["content_type", "codename"]]
+        ordering = ["content_type__app_label", "content_type__model", "codename"]
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/model_forms/tests.py
+测试名称：FormFieldCallbackTests.test_custom_callback
+测试代码：
+class FormFieldCallbackTests(SimpleTestCase):
+    def test_custom_callback(self):
+        """A custom formfield_callback is used if provided"""
+        callback_args = []
+
+        def callback(db_field, **kwargs):
+            callback_args.append((db_field, kwargs))
+            return db_field.formfield(**kwargs)
+
+        widget = forms.Textarea()
+
+        class BaseForm(forms.ModelForm):
+            class Meta:
+                model = Person
+                widgets = {"name": widget}
+                fields = "__all__"
+
+        modelform_factory(Person, form=BaseForm, formfield_callback=callback)
+        id_field, name_field = Person._meta.fields
+
+        self.assertEqual(
+            callback_args, [(id_field, {}), (name_field, {"widget": widget})]
+        )
+
+【相关测试 2】
+测试文件：tests/model_forms/tests.py
+测试名称：FormFieldCallbackTests.test_inherit_after_custom_callback
+测试代码：
+class FormFieldCallbackTests(SimpleTestCase):
+    def test_inherit_after_custom_callback(self):
+        def callback(db_field, **kwargs):
+            if isinstance(db_field, models.CharField):
+                return forms.CharField(widget=forms.Textarea)
+            return db_field.formfield(**kwargs)
+
+        class BaseForm(forms.ModelForm):
+            class Meta:
+                model = Person
+                fields = "__all__"
+
+        NewForm = modelform_factory(Person, form=BaseForm, formfield_callback=callback)
+
+        class InheritedForm(NewForm):
+            pass
+
+        for name in NewForm.base_fields:
+            self.assertEqual(
+                type(InheritedForm.base_fields[name].widget),
+                type(NewForm.base_fields[name].widget),
+            )
+
+【相关测试 3】
+测试文件：tests/model_forms/tests.py
+测试名称：FormFieldCallbackTests.test_baseform_with_widgets_in_meta
+测试代码：
+class FormFieldCallbackTests(SimpleTestCase):
+    def test_baseform_with_widgets_in_meta(self):
+        """
+        Using base forms with widgets defined in Meta should not raise errors.
+        """
+        widget = forms.Textarea()
+
+        class BaseForm(forms.ModelForm):
+            class Meta:
+                model = Person
+                widgets = {"name": widget}
+                fields = "__all__"
+
+        Form = modelform_factory(Person, form=BaseForm)
+        self.assertIsInstance(Form.base_fields["name"].widget, forms.Textarea)
+
+【相关测试 4】
+测试文件：tests/model_formsets_regress/tests.py
+测试名称：FormfieldCallbackTests.test_modelformset_custom_callback
+测试代码：
+class FormfieldCallbackTests(TestCase):
+    def test_modelformset_custom_callback(self):
+        callback = Callback()
+        modelformset_factory(UserSite, form=UserSiteForm, formfield_callback=callback)
+        self.assertCallbackCalled(callback)
+
+【相关测试 5】
+测试文件：tests/model_formsets_regress/tests.py
+测试名称：FormfieldCallbackTests.test_inlineformset_custom_callback
+测试代码：
+class FormfieldCallbackTests(TestCase):
+    def test_inlineformset_custom_callback(self):
+        callback = Callback()
+        inlineformset_factory(
+            User,
+            UserSite,
+            form=UserSiteForm,
+            formfield_callback=callback,
+            fields="__all__",
+        )
+        self.assertCallbackCalled(callback)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

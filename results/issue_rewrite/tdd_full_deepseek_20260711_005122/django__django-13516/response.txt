@@ -1,0 +1,158 @@
+{
+  "issue_summary": "管理命令中 self.stdout/stderr 的 flush() 方法在长时间迁移过程中无法实时输出信息。",
+  "trigger_condition": {
+    "text": "运行一个长时间的管理命令（如 migrate），该命令在内部调用了 self.stdout/stderr 的 flush() 方法。",
+    "evidence": ["Issue 描述中提到 flush() 在 migrate 命令中被调用，但长时间迁移过程中没有实时输出。", "Issue 中描述了迁移命令的输出行为：先打印部分信息，然后长时间无输出，最后在迁移结束时才一次性输出剩余信息。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "在长时间迁移过程中，标准输出/错误流中的信息没有实时刷新，导致用户无法看到迁移的实时进度信息。",
+    "symptom_type": "wrong_order",
+    "evidence": ["Issue 中描述了实际行为：'Operations to perform:... Running migrations:' 之后长时间无输出，直到迁移结束才输出 'Applying myapp.0002_auto_20200817_1030... OK'。", "Issue 中明确说明 'flush() on self.stdout/stderr management commands doesn't work.'"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "在长时间迁移过程中，标准输出/错误流中的信息应该能够实时刷新，让用户看到迁移的实时进度信息。",
+    "evidence": ["Issue 中描述了期望行为：'Operations to perform:... Running migrations: Applying myapp.0002_auto_20200817_1030... then work then OK'，暗示 'Applying...' 信息应在工作开始前输出。", "Issue 标题和描述表明 flush() 方法应该工作，即输出应该被实时刷新。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "BaseCommand.stdout",
+      "kind": "method",
+      "source_path": "",
+      "reason": "Issue 直接提到了 self.stdout/stderr 的 flush() 方法，BaseCommand 是管理命令的基类。"
+    },
+    {
+      "name": "BaseCommand.stderr",
+      "kind": "method",
+      "source_path": "",
+      "reason": "Issue 直接提到了 self.stdout/stderr 的 flush() 方法，BaseCommand 是管理命令的基类。"
+    },
+    {
+      "name": "call_command",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试中广泛使用 call_command 来调用管理命令，这是触发命令执行的常见方式。"
+    },
+    {
+      "name": "migrate",
+      "kind": "command",
+      "source_path": "",
+      "reason": "Issue 以 migrate 命令作为具体例子，说明 flush() 问题。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/migrations/executor.py",
+      "object": "MigrationExecutor.migrate",
+      "lines": "82-125",
+      "reason": "Issue 提到 flush() 在 migrate 命令中被调用，此方法是迁移执行的核心逻辑所在。"
+    },
+    {
+      "path": "",
+      "object": "BaseCommand 或其子类中与 stdout/stderr 处理相关的代码",
+      "lines": "",
+      "reason": "Issue 明确指出是管理命令中 self.stdout/stderr 的 flush() 方法不工作，问题可能在于 BaseCommand 对输出流的包装或处理。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "MigrateTests.test_migrate",
+      "test_file": "tests/migrations/test_commands.py",
+      "why_relevant": "直接测试 migrate 命令，涉及命令执行、输出捕获和断言，与 Issue 场景高度相关。",
+      "reusable_parts": ["imports (io, call_command)", "使用 StringIO 捕获 stdout", "使用 call_command 调用 migrate", "使用 assertIn 检查输出片段", "override_settings 配置迁移模块"],
+      "possible_gap": "当前测试可能没有模拟长时间迁移过程，也没有显式测试 flush() 的行为或输出实时性。"
+    },
+    {
+      "test_name": "CommandTypes.test_custom_stdout",
+      "test_file": "tests/admin_scripts/tests.py",
+      "why_relevant": "测试自定义命令的 stdout 输出行为，展示了如何构造命令、传递自定义 stdout 流并断言输出。",
+      "reusable_parts": ["自定义 BaseCommand 子类", "使用 StringIO 作为 stdout", "call_command 调用方式", "断言输出内容"],
+      "possible_gap": "没有测试 flush() 方法，输出是立即完成的，没有模拟需要刷新的长时间操作。"
+    },
+    {
+      "test_name": "CommandTypes.test_custom_stderr",
+      "test_file": "tests/admin_scripts/tests.py",
+      "why_relevant": "测试自定义命令的 stderr 输出行为，与 stdout 测试类似，覆盖了错误流。",
+      "reusable_parts": ["自定义 BaseCommand 子类", "使用 StringIO 作为 stderr", "call_command 调用方式", "断言输出内容"],
+      "possible_gap": "没有测试 flush() 方法，输出是立即完成的，没有模拟需要刷新的长时间操作。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "call_chain",
+      "current_pattern": "测试中命令执行通常是快速、瞬时的。",
+      "target_pattern": "在命令的 handle 方法中，在执行长时间工作（如循环、睡眠、大量数据库操作）前后，穿插调用 self.stdout.write() 和 self.stdout.flush()。",
+      "reason": "Issue 表明 flush() 在长时间操作期间不工作，需要模拟这种场景来触发缺陷。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "测试中使用普通的 StringIO 对象作为 stdout/stderr。",
+      "target_pattern": "使用一个包装了 StringIO 的流对象，该对象可以记录 flush() 被调用的次数和时间点。",
+      "reason": "为了观测 flush() 是否被调用以及调用时机，需要能够监控 flush 操作的流。",
+      "confidence": "medium"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "测试通常使用默认或简化的设置。",
+      "target_pattern": "可能需要配置一个包含长时间迁移的迁移模块。",
+      "reason": "Issue 使用 migrate 命令作为例子，要复现可能需要一个实际执行时间较长的迁移。",
+      "confidence": "low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "order",
+      "expression_hint": "stdout.getvalue() 在不同时间点（如长时间操作开始前、进行中、结束后）的内容。",
+      "reason": "Issue 的核心是输出顺序和实时性：期望 'Applying...' 信息在长时间工作开始前出现，而不是结束后才出现。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "自定义流对象中记录 flush() 调用时间戳的列表。",
+      "reason": "直接验证 flush() 方法是否被调用以及调用时机，与 write() 的调用顺序。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "self.stdout.flush() 的返回值（应为 None）或可能抛出的异常。",
+      "reason": "Issue 说 flush() 'doesn't work'，可能表现为无效果或抛出异常。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "在长时间操作开始前，输出流中应已包含表示操作开始的信息（如 'Applying...'）。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的、固定的输出字符串，因为具体信息可能因迁移而异。",
+      "reason": "Issue 期望实时看到进度信息，关键是在工作开始前有输出，而不是输出的完整内容。"
+    },
+    {
+      "assertion_goal": "flush() 方法被调用后，之前写入流的内容应对 getvalue() 可见。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "依赖于系统时间或线程调度的精确计时断言。",
+      "reason": "flush() 的核心语义是使缓冲数据立即可读，这是验证其是否工作的直接方式。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用一个自定义的管理命令，在其 handle 方法中模拟长时间工作并穿插 write 和 flush 调用。",
+      "source": "inference",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 override_settings 来配置一个测试专用的迁移模块或应用。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    },
+    {
+      "hint": "测试可能需要继承自合适的 TestCase，如 SimpleTestCase 或 TransactionTestCase，取决于是否涉及数据库。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "flush() 方法不工作的具体原因：是 BaseCommand 的 stdout/stderr 属性包装不当，还是底层流对象的问题？",
+    "是否所有管理命令都有此问题，还是仅特定场景（如 migrate）？",
+    "修复后的确切输出格式和时机，Issue 中的期望描述是否完整？"
+  ]
+}

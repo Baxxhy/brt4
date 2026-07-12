@@ -1,0 +1,122 @@
+instance_id: django__django-12050
+
+issue_summary: Query.resolve_lookup_value 将输入的 list 类型强制转换为 tuple，破坏了依赖输入类型匹配的精确查询。
+
+trigger_condition:
+{
+  "text": "调用 Query.resolve_lookup_value 时，传入一个 list 类型的 value 参数。",
+  "evidence": [
+    "Issue 描述：'Query.resolve_lookup_value coerces value of type list to tuple'",
+    "源码片段 1 第 1064-1075 行：当 value 是 list 或 tuple 时，最终返回 tuple(resolved_values)。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "输入的 list 被强制转换为 tuple，导致依赖输入类型匹配的查询（如 PickledField）行为异常。",
+  "symptom_type": "wrong_type",
+  "evidence": [
+    "Issue 描述：'breaking exact value queries. This affects ORM field types that are dependent on matching input types such as PickledField.'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "resolve_lookup_value 返回的可迭代类型应与输入的可迭代类型保持一致。",
+  "evidence": [
+    "Issue 描述：'The expected iterable return type should match input iterable type.'"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "Query.resolve_lookup_value",
+    "kind": "method",
+    "source_path": "django/db/models/sql/query.py",
+    "reason": "Issue 直接指出该方法存在类型强制转换问题。"
+  },
+  {
+    "name": "PickledField",
+    "kind": "class",
+    "source_path": "",
+    "reason": "Issue 提到 PickledField 是受影响的字段类型之一。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中 __in 查找的输入通常是列表字面量（如 [] 或 ['a1', ...]）。",
+    "target_pattern": "传入一个 list 作为 __in 查找的值，并在过滤后检查返回值的类型或行为是否与 list 输入一致。",
+    "reason": "Issue 指出 list 输入被强制转换，因此需要变异输入类型来触发缺陷。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "相似测试使用常规字段（如 id, slug, data）。",
+    "target_pattern": "使用对输入类型敏感的字段，如 PickledField 或类似 BinaryField。",
+    "reason": "Issue 提到 PickledField 等字段类型依赖输入类型匹配，使用这类字段可能更容易暴露问题。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "type",
+    "expression_hint": "type(value) 在传入 resolve_lookup_value 之前和之后。",
+    "reason": "直接观察输入值的类型是否被改变。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "Query.resolve_lookup_value 的返回值。",
+    "reason": "检查返回的可迭代对象类型是否与输入匹配。"
+  },
+  {
+    "kind": "sql",
+    "expression_hint": "生成的 SQL 查询字符串。",
+    "reason": "类型转换可能影响 SQL 生成，进而影响查询结果。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证 resolve_lookup_value 返回的可迭代类型与输入的可迭代类型相同。",
+    "preferred_assertion_style": "isinstance",
+    "avoid": "断言完整的 SQL 字符串或完整的 repr 字符串相等。",
+    "reason": "Issue 的核心是类型匹配，而非具体的值或 SQL 格式。"
+  },
+  {
+    "assertion_goal": "验证使用 list 输入进行 __in 查找时，查询结果正确。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言查询结果的数量或顺序，除非它们因类型转换而错误。",
+    "reason": "类型不匹配可能导致查询结果错误，应验证结果是否符合预期。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "可能需要一个包含 PickledField 或 BinaryField 的测试模型。",
+    "source": "inference",
+    "confidence": "medium"
+  },
+  {
+    "hint": "使用 TestCase 类并设置数据库。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "PickledField 的具体实现和它对输入类型的依赖程度。",
+  "除了 PickledField，还有哪些字段类型会受此影响。",
+  "类型转换是否在所有情况下都会导致查询错误，还是仅在特定条件下。"
+]

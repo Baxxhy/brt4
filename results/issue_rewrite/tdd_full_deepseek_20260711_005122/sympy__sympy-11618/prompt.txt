@@ -1,0 +1,605 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+distance calculation wrong
+``` python
+>>> Point(2,0).distance(Point(1,0,2))
+1
+```
+
+The 3rd dimension is being ignored when the Points are zipped together to calculate the distance so `sqrt((2-1)**2 + (0-0)**2)` is being computed instead of `sqrt(5)`.
+
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/geometry/point.py
+对象名称：Point
+节点类型：class
+父节点：point
+行号范围：28-475
+代码：
+class Point(GeometryEntity):
+    """A point in a n-dimensional Euclidean space.
+
+    Parameters
+    ==========
+
+    coords : sequence of n-coordinate values. In the special
+    case where n=2 or 3, a Point2D or Point3D will be created
+    as appropriate.
+
+    Attributes
+    ==========
+
+    length
+    origin: A `Point` representing the origin of the
+        appropriately-dimensioned space.
+
+    Raises
+    ======
+
+    TypeError
+        When trying to add or subtract points with different dimensions.
+        When `intersection` is called with object other than a Point.
+
+    See Also
+    ========
+
+    sympy.geometry.line.Segment : Connects two Points
+
+    Examples
+    ========
+
+    >>> from sympy.geometry import Point
+    >>> from sympy.abc import x
+    >>> Point(1, 2, 3)
+    Point3D(1, 2, 3)
+    >>> Point([1, 2])
+    Point2D(1, 2)
+    >>> Point(0, x)
+    Point2D(0, x)
+
+    Floats are automatically converted to Rational unless the
+    evaluate flag is False:
+
+    >>> Point(0.5, 0.25)
+    Point2D(1/2, 1/4)
+    >>> Point(0.5, 0.25, evaluate=False)
+    Point2D(0.5, 0.25)
+
+    """
+    def __new__(cls, *args, **kwargs):
+    is_Point = True
+    def __contains__(self, item):
+    def is_concyclic(*args):
+    def is_collinear(*args):
+    def is_scalar_multiple(p1, p2):
+    @property
+    def length(self):
+    @property
+    def origin(self):
+    @property
+    def is_zero(self):
+    @property
+    def ambient_dimension(self):
+    def distance(self, p):
+    def taxicab_distance(self, p):
+    def midpoint(self, p):
+    def evalf(self, prec=None, **options):
+    n = evalf
+    def intersection(self, o):
+    def dot(self, p2):
+    def equals(self, other):
+    def __len__(self):
+    def __iter__(self):
+    def __eq__(self, other):
+    def __hash__(self):
+    def __getitem__(self, key):
+    def __add__(self, other):
+    def __sub__(self, other):
+    def __mul__(self, factor):
+    def __div__(self, divisor):
+    __truediv__ = __div__
+    def __neg__(self):
+    def __abs__(self):
+
+
+【源码片段 2】
+文件路径：sympy/geometry/point.py
+对象名称：distance
+节点类型：class_function
+父节点：Point
+行号范围：237-270
+代码：
+    def distance(self, p):
+        """The Euclidean distance from self to point p.
+
+        Parameters
+        ==========
+
+        p : Point
+
+        Returns
+        =======
+
+        distance : number or symbolic expression.
+
+        See Also
+        ========
+
+        sympy.geometry.line.Segment.length
+
+        Examples
+        ========
+
+        >>> from sympy.geometry import Point
+        >>> p1, p2 = Point(1, 1), Point(4, 5)
+        >>> p1.distance(p2)
+        5
+
+        >>> from sympy.abc import x, y
+        >>> p3 = Point(x, y)
+        >>> p3.distance(Point(0, 0))
+        sqrt(x**2 + y**2)
+
+        """
+        return sqrt(sum([(a - b)**2 for a, b in zip(
+            self.args, p.args if isinstance(p, Point) else p)]))
+
+
+【源码片段 3】
+文件路径：sympy/functions/elementary/miscellaneous.py
+对象名称：sqrt
+节点类型：top-level function
+父节点：miscellaneous
+行号范围：50-115
+代码：
+def sqrt(arg):
+    """The square root function
+
+    sqrt(x) -> Returns the principal square root of x.
+
+    Examples
+    ========
+
+    >>> from sympy import sqrt, Symbol
+    >>> x = Symbol('x')
+
+    >>> sqrt(x)
+    sqrt(x)
+
+    >>> sqrt(x)**2
+    x
+
+    Note that sqrt(x**2) does not simplify to x.
+
+    >>> sqrt(x**2)
+    sqrt(x**2)
+
+    This is because the two are not equal to each other in general.
+    For example, consider x == -1:
+
+    >>> from sympy import Eq
+    >>> Eq(sqrt(x**2), x).subs(x, -1)
+    False
+
+    This is because sqrt computes the principal square root, so the square may
+    put the argument in a different branch.  This identity does hold if x is
+    positive:
+
+    >>> y = Symbol('y', positive=True)
+    >>> sqrt(y**2)
+    y
+
+    You can force this simplification by using the powdenest() function with
+    the force option set to True:
+
+    >>> from sympy import powdenest
+    >>> sqrt(x**2)
+    sqrt(x**2)
+    >>> powdenest(sqrt(x**2), force=True)
+    x
+
+    To get both branches of the square root you can use the rootof function:
+
+    >>> from sympy import rootof
+
+    >>> [rootof(x**2-3,i) for i in (0,1)]
+    [-sqrt(3), sqrt(3)]
+
+    See Also
+    ========
+
+    sympy.polys.rootoftools.rootof, root, real_root
+
+    References
+    ==========
+
+    .. [1] http://en.wikipedia.org/wiki/Square_root
+    .. [2] http://en.wikipedia.org/wiki/Principal_value
+    """
+    # arg = sympify(arg) is handled by Pow
+    return Pow(arg, S.Half)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/geometry/tests/test_point.py
+测试名称：test_point3D
+测试代码：
+def test_point3D():
+    x = Symbol('x', real=True)
+    y = Symbol('y', real=True)
+    x1 = Symbol('x1', real=True)
+    x2 = Symbol('x2', real=True)
+    x3 = Symbol('x3', real=True)
+    y1 = Symbol('y1', real=True)
+    y2 = Symbol('y2', real=True)
+    y3 = Symbol('y3', real=True)
+    half = Rational(1, 2)
+    p1 = Point3D(x1, x2, x3)
+    p2 = Point3D(y1, y2, y3)
+    p3 = Point3D(0, 0, 0)
+    p4 = Point3D(1, 1, 1)
+    p5 = Point3D(0, 1, 2)
+
+    assert p1 in p1
+    assert p1 not in p2
+    assert p2.y == y2
+    assert (p3 + p4) == p4
+    assert (p2 - p1) == Point3D(y1 - x1, y2 - x2, y3 - x3)
+    assert p4*5 == Point3D(5, 5, 5)
+    assert -p2 == Point3D(-y1, -y2, -y3)
+
+    assert Point(34.05, sqrt(3)) == Point(Rational(681, 20), sqrt(3))
+    assert Point3D.midpoint(p3, p4) == Point3D(half, half, half)
+    assert Point3D.midpoint(p1, p4) == Point3D(half + half*x1, half + half*x2,
+                                         half + half*x3)
+    assert Point3D.midpoint(p2, p2) == p2
+    assert p2.midpoint(p2) == p2
+
+    assert Point3D.distance(p3, p4) == sqrt(3)
+    assert Point3D.distance(p1, p1) == 0
+    assert Point3D.distance(p3, p2) == sqrt(p2.x**2 + p2.y**2 + p2.z**2)
+
+    p1_1 = Point3D(x1, x1, x1)
+    p1_2 = Point3D(y2, y2, y2)
+    p1_3 = Point3D(x1 + 1, x1, x1)
+    # according to the description in the docs, points are collinear
+    # if they like on a single line.  Thus a single point should always
+    # be collinear
+    assert Point3D.are_collinear(p3)
+    assert Point3D.are_collinear(p3, p4)
+    assert Point3D.are_collinear(p3, p4, p1_1, p1_2)
+    assert Point3D.are_collinear(p3, p4, p1_1, p1_3) is False
+    assert Point3D.are_collinear(p3, p3, p4, p5) is False
+
+    assert p3.intersection(Point3D(0, 0, 0)) == [p3]
+    assert p3.intersection(p4) == []
+
+
+    assert p4 * 5 == Point3D(5, 5, 5)
+    assert p4 / 5 == Point3D(0.2, 0.2, 0.2)
+
+    raises(ValueError, lambda: Point3D(0, 0, 0) + 10)
+
+    # Point differences should be simplified
+    assert Point3D(x*(x - 1), y, 2) - Point3D(x**2 - x, y + 1, 1) == \
+        Point3D(0, -1, 1)
+
+    a, b = Rational(1, 2), Rational(1, 3)
+    assert Point(a, b).evalf(2) == \
+        Point(a.n(2), b.n(2))
+    raises(ValueError, lambda: Point(1, 2) + 1)
+
+    # test transformations
+    p = Point3D(1, 1, 1)
+    assert p.scale(2, 3) == Point3D(2, 3, 1)
+    assert p.translate(1, 2) == Point3D(2, 3, 1)
+    assert p.translate(1) == Point3D(2, 1, 1)
+    assert p.translate(z=1) == Point3D(1, 1, 2)
+    assert p.translate(*p.args) == Point3D(2, 2, 2)
+
+    # Test __new__
+    assert Point3D(Point3D(1, 2, 3), 4, 5, evaluate=False) ==  Point3D(1, 2, 3)
+
+
+    # Test length property returns correctly
+    assert p.length == 0
+    assert p1_1.length == 0
+    assert p1_2.length == 0
+
+    # Test are_colinear type error
+    raises(TypeError, lambda: Point3D.are_collinear(p, x))
+
+    # Test are_coplanar
+    planar2 = Point3D(1, -1, 1)
+    planar3 = Point3D(-1, 1, 1)
+    assert Point3D.are_coplanar(p, planar2, planar3) == True
+    assert Point3D.are_coplanar(p, planar2, planar3, p3) == False
+    raises(ValueError, lambda: Point3D.are_coplanar(p, planar2))
+    planar2 = Point3D(1, 1, 2)
+    planar3 = Point3D(1, 1, 3)
+    raises(ValueError, lambda: Point3D.are_coplanar(p, planar2, planar3))
+
+    # Test Intersection
+    assert planar2.intersection(Line3D(p, planar3)) == [Point3D(1, 1, 2)]
+
+    # Test Scale
+    assert planar2.scale(1, 1, 1) == planar2
+    assert planar2.scale(2, 2, 2, planar3) == Point3D(1, 1, 1)
+    assert planar2.scale(1, 1, 1, p3) == planar2
+
+    # Test Transform
+    identity = Matrix([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+    assert p.transform(identity) == p
+    trans = Matrix([[1, 0, 0, 1], [0, 1, 0, 1], [0, 0, 1, 1], [0, 0, 0, 1]])
+    assert p.transform(trans) == Point3D(2, 2, 2)
+    raises(ValueError, lambda: p.transform(p))
+    raises(ValueError, lambda: p.transform(Matrix([[1, 0], [0, 1]])))
+
+    # Test Equals
+    assert p.equals(x1) == False
+
+    # Test __sub__
+    p_2d = Point(0, 0)
+    raises(ValueError, lambda: (p - p_2d))
+
+【相关测试 2】
+测试文件：sympy/geometry/tests/test_point.py
+测试名称：test_point
+测试代码：
+def test_point():
+    x = Symbol('x', real=True)
+    y = Symbol('y', real=True)
+    x1 = Symbol('x1', real=True)
+    x2 = Symbol('x2', real=True)
+    y1 = Symbol('y1', real=True)
+    y2 = Symbol('y2', real=True)
+    half = Rational(1, 2)
+    p1 = Point(x1, x2)
+    p2 = Point(y1, y2)
+    p3 = Point(0, 0)
+    p4 = Point(1, 1)
+    p5 = Point(0, 1)
+
+    assert p1 in p1
+    assert p1 not in p2
+    assert p2.y == y2
+    assert (p3 + p4) == p4
+    assert (p2 - p1) == Point(y1 - x1, y2 - x2)
+    assert p4*5 == Point(5, 5)
+    assert -p2 == Point(-y1, -y2)
+    raises(ValueError, lambda: Point(3, I))
+    raises(ValueError, lambda: Point(2*I, I))
+    raises(ValueError, lambda: Point(3 + I, I))
+
+    assert Point(34.05, sqrt(3)) == Point(Rational(681, 20), sqrt(3))
+    assert Point.midpoint(p3, p4) == Point(half, half)
+    assert Point.midpoint(p1, p4) == Point(half + half*x1, half + half*x2)
+    assert Point.midpoint(p2, p2) == p2
+    assert p2.midpoint(p2) == p2
+
+    assert Point.distance(p3, p4) == sqrt(2)
+    assert Point.distance(p1, p1) == 0
+    assert Point.distance(p3, p2) == sqrt(p2.x**2 + p2.y**2)
+
+    assert Point.taxicab_distance(p4, p3) == 2
+
+    p1_1 = Point(x1, x1)
+    p1_2 = Point(y2, y2)
+    p1_3 = Point(x1 + 1, x1)
+    assert Point.is_collinear(p3)
+    assert Point.is_collinear(p3, p4)
+    assert Point.is_collinear(p3, p4, p1_1, p1_2)
+    assert Point.is_collinear(p3, p4, p1_1, p1_3) is False
+    assert Point.is_collinear(p3, p3, p4, p5) is False
+    line = Line(Point(1,0), slope = 1)
+    raises(TypeError, lambda: Point.is_collinear(line))
+    raises(TypeError, lambda: p1_1.is_collinear(line))
+
+    assert p3.intersection(Point(0, 0)) == [p3]
+    assert p3.intersection(p4) == []
+
+    x_pos = Symbol('x', real=True, positive=True)
+    p2_1 = Point(x_pos, 0)
+    p2_2 = Point(0, x_pos)
+    p2_3 = Point(-x_pos, 0)
+    p2_4 = Point(0, -x_pos)
+    p2_5 = Point(x_pos, 5)
+    assert Point.is_concyclic(p2_1)
+    assert Point.is_concyclic(p2_1, p2_2)
+    assert Point.is_concyclic(p2_1, p2_2, p2_3, p2_4)
+    assert Point.is_concyclic(p2_1, p2_2, p2_3, p2_5) is False
+    assert Point.is_concyclic(p4, p4 * 2, p4 * 3) is False
+
+    assert p4.scale(2, 3) == Point(2, 3)
+    assert p3.scale(2, 3) == p3
+
+    assert p4.rotate(pi, Point(0.5, 0.5)) == p3
+    assert p1.__radd__(p2) == p1.midpoint(p2).scale(2, 2)
+    assert (-p3).__rsub__(p4) == p3.midpoint(p4).scale(2, 2)
+
+    assert p4 * 5 == Point(5, 5)
+    assert p4 / 5 == Point(0.2, 0.2)
+
+    raises(ValueError, lambda: Point(0, 0) + 10)
+
+    # Point differences should be simplified
+    assert Point(x*(x - 1), y) - Point(x**2 - x, y + 1) == Point(0, -1)
+
+    a, b = Rational(1, 2), Rational(1, 3)
+    assert Point(a, b).evalf(2) == \
+        Point(a.n(2), b.n(2))
+    raises(ValueError, lambda: Point(1, 2) + 1)
+
+    # test transformations
+    p = Point(1, 0)
+    assert p.rotate(pi/2) == Point(0, 1)
+    assert p.rotate(pi/2, p) == p
+    p = Point(1, 1)
+    assert p.scale(2, 3) == Point(2, 3)
+    assert p.translate(1, 2) == Point(2, 3)
+    assert p.translate(1) == Point(2, 1)
+    assert p.translate(y=1) == Point(1, 2)
+    assert p.translate(*p.args) == Point(2, 2)
+
+    # Check invalid input for transform
+    raises(ValueError, lambda: p3.transform(p3))
+    raises(ValueError, lambda: p.transform(Matrix([[1, 0], [0, 1]])))
+
+【相关测试 3】
+测试文件：sympy/geometry/tests/test_point.py
+测试名称：test_Point2D
+测试代码：
+def test_Point2D():
+
+    # Test Distance
+    p1 = Point2D(1, 5)
+    p2 = Point2D(4, 2.5)
+    p3 = (6, 3)
+    assert p1.distance(p2) == sqrt(61)/2
+    assert p2.distance(p3) == sqrt(17)/2
+
+【相关测试 4】
+测试文件：sympy/geometry/tests/test_point.py
+测试名称：test_issue_9214
+测试代码：
+def test_issue_9214():
+    p1 = Point3D(4, -2, 6)
+    p2 = Point3D(1, 2, 3)
+    p3 = Point3D(7, 2, 3)
+
+    assert Point3D.are_collinear(p1, p2, p3) is False
+
+【相关测试 5】
+测试文件：sympy/geometry/tests/test_point.py
+测试名称：test_concyclic_doctest_bug
+测试代码：
+def test_concyclic_doctest_bug():
+    p1, p2 = Point(-1, 0), Point(1, 0)
+    p3, p4 = Point(0, 1), Point(-1, 2)
+    assert Point.is_concyclic(p1, p2, p3)
+    assert not Point.is_concyclic(p1, p2, p3, p4)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

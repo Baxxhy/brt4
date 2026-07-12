@@ -1,0 +1,189 @@
+```json
+{
+    "issue_summary": "使用自然键的模型在非默认数据库上执行 loaddata 命令时，因外键依赖解析失败而抛出 DoesNotExist 异常。",
+    "trigger_condition": {
+        "text": "使用带有自然键和外键关系的模型，通过 loaddata 命令向非默认数据库加载包含自然键引用的 fixture 数据。",
+        "evidence": ["Issue 描述：'loaddata fails on non-default database when natural keys uses foreign keys.'", "Issue 中操作步骤：'cat books.json | ./manage.py loaddata --database other --format json -'", "相关测试 3 展示了在多数据库环境下加载 fixture 的场景。"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "在解析自然键时，尝试访问外键关联的 Author 对象失败，抛出 testbug.models.DoesNotExist: Author matching query does not exist. 异常。",
+        "symptom_type": "exception",
+        "evidence": ["Issue 中的错误堆栈：'testbug.models.DoesNotExist: Author matching query does not exist.'", "Issue 中错误堆栈显示异常发生在 Book.natural_key() 方法调用 self.author.natural_key() 时。"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "loaddata 命令在使用自然键和外键时，应能在非默认数据库上正确解析依赖关系并成功加载数据，行为应与在默认数据库上一致。",
+        "evidence": ["Issue 描述：'I wouldn't expect things to work differently in the default DB and others ?'", "相关测试 1 和 2 展示了在单数据库环境下使用自然键成功加载 fixture 的场景。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "django.core.management.commands.loaddata.Command.handle",
+            "kind": "method",
+            "source_path": "django/core/management/commands/loaddata.py",
+            "reason": "这是 loaddata 命令的入口点，负责协调整个数据加载流程。"
+        },
+        {
+            "name": "django.core.serializers.base.build_instance",
+            "kind": "function",
+            "source_path": "django/core/serializers/base.py",
+            "reason": "Issue 堆栈显示异常发生在 build_instance 函数内部，该函数负责构建模型实例并处理自然键查找。"
+        },
+        {
+            "name": "Model.natural_key",
+            "kind": "method",
+            "source_path": "",
+            "reason": "Issue 中 Book 和 Author 模型都定义了 natural_key 方法，这是自然键功能的核心。"
+        },
+        {
+            "name": "ModelManager.get_by_natural_key",
+            "kind": "method",
+            "source_path": "",
+            "reason": "Issue 中 BookManager 和 AuthorManager 定义了 get_by_natural_key，用于通过自然键查找对象。"
+        },
+        {
+            "name": "django.core.serializers.base.Deserializer",
+            "kind": "class",
+            "source_path": "django/core/serializers/base.py",
+            "reason": "负责反序列化数据流，是 loaddata 命令的核心组件。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/core/serializers/base.py",
+            "object": "build_instance",
+            "lines": "325-346",
+            "reason": "Issue 堆栈显示异常发生在 build_instance 函数中。该函数在尝试通过自然键查找对象时，使用了 default_manager.db_manager(db)，但可能在处理外键依赖的自然键解析时，没有正确地将数据库上下文传递给相关模型的查询。"
+        },
+        {
+            "path": "django/core/serializers/python.py",
+            "object": "Deserializer",
+            "lines": "",
+            "reason": "Issue 堆栈显示异常发生在 django.core.serializers.python.Deserializer 中，它调用了 build_instance。可能是在反序列化过程中，数据库上下文（using）没有正确传递给所有涉及自然键解析的步骤。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "NaturalKeyFixtureTests.test_nk_on_serialize",
+            "test_file": "tests/fixtures_regress/tests.py",
+            "why_relevant": "该测试涉及使用自然键序列化和反序列化模型，并调用了 loaddata 和 dumpdata 命令，与 Issue 的核心功能（自然键、fixture 加载）高度相关。",
+            "reusable_parts": ["使用 management.call_command 调用 loaddata", "使用 use_natural_foreign_keys 和 use_natural_primary_keys 参数", "涉及具有外键关系的模型（Book, Author, Store）的自然键处理"],
+            "possible_gap": "该测试只在单数据库（默认数据库）环境下运行，没有测试多数据库场景。"
+        },
+        {
+            "test_name": "ForwardReferenceTests.test_forward_reference_fk_natural_key",
+            "test_file": "tests/fixtures/tests.py",
+            "why_relevant": "该测试专门针对使用自然键的外键前向引用进行 fixture 加载，与 Issue 中描述的自然键外键依赖问题直接相关。",
+            "reusable_parts": ["使用 loaddata 加载包含自然键引用的 fixture", "验证加载后模型间的关系", "使用 natural_foreign_keys 参数"],
+            "possible_gap": "该测试同样只在单数据库环境下运行，没有指定或使用非默认数据库。"
+        },
+        {
+            "test_name": "FixtureTestCase.test_fixture_loading",
+            "test_file": "tests/multiple_database/tests.py",
+            "why_relevant": "该测试明确在多数据库环境下验证 fixture 加载，并检查不同数据库中的数据存在性，与 Issue 的多数据库场景匹配。",
+            "reusable_parts": ["使用 .using('other') 指定数据库", "使用 assertRaises 检查 DoesNotExist 异常", "涉及 Book 模型在不同数据库中的状态"],
+            "possible_gap": "该测试没有使用自然键，而是直接使用主键或唯一字段进行查询。"
+        },
+        {
+            "test_name": "LoadDataWithNaturalKeysAndMultipleDatabasesTestCase.test_load_data_with_user_permissions",
+            "test_file": "tests/auth_tests/test_models.py",
+            "why_relevant": "该测试结合了自然键和多数据库，验证了 Permission 模型（其 natural_key 包含外键到 ContentType）在多数据库下的加载和查询。",
+            "reusable_parts": ["使用 .db_manager('other') 为管理器指定数据库", "使用 get_by_natural_key 方法", "涉及具有外键依赖的自然键模型"],
+            "possible_gap": "该测试是手动创建对象并查询，而不是通过 loaddata 命令从 fixture 文件加载数据。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "config",
+            "current_pattern": "相似测试通常在单数据库（默认）配置下运行。",
+            "target_pattern": "配置多数据库环境，并指定使用非默认数据库（如 'other'）执行 loaddata 命令。",
+            "reason": "Issue 明确指出问题只在非默认数据库上出现。",
+            "confidence": "high"
+        },
+        {
+            "slot": "call_chain",
+            "current_pattern": "相似测试调用 loaddata 时可能不指定 database 参数，或使用 database='default'。",
+            "target_pattern": "调用 loaddata 时显式指定 database='other' 参数。",
+            "reason": "Issue 中使用了 --database other 参数来触发 bug。",
+            "confidence": "high"
+        },
+        {
+            "slot": "input",
+            "current_pattern": "相似测试使用的 fixture 数据可能不涉及跨模型的外键自然键依赖，或者依赖项已存在于目标数据库。",
+            "target_pattern": "使用包含自然键外键引用的 fixture 数据（如 Issue 中的 books.json），并且确保依赖对象（如 Author）在目标数据库（'other'）中不存在。",
+            "reason": "Issue 描述问题在数据未预先存在于目标数据库时出现，且 fixture 中 Book 通过自然键 ['JR Tolkien'] 引用 Author。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "exception",
+            "expression_hint": "在调用 management.call_command('loaddata', ...) 时捕获的异常及其类型、消息和堆栈。",
+            "reason": "Issue 的核心现象是抛出 DoesNotExist 异常。观测是否抛出此异常是判断缺陷是否触发的直接方式。"
+        },
+        {
+            "kind": "state",
+            "expression_hint": "loaddata 命令执行前后，在指定数据库（如 'other'）中 Book 和 Author 模型的记录数量或具体对象。",
+            "reason": "可以验证数据是否成功加载，或者是否因为异常而部分加载失败。"
+        },
+        {
+            "kind": "cache",
+            "expression_hint": "在 build_instance 函数执行过程中，Model(**data).natural_key() 调用时，self.author 的缓存状态（instance._state.fields_cache）。",
+            "reason": "Issue 错误堆栈始于 KeyError: 'author'，表明相关对象缓存缺失，随后尝试从数据库获取失败。"
+        },
+        {
+            "kind": "sql",
+            "expression_hint": "在自然键解析过程中，由 get_by_natural_key 触发的 SQL 查询，特别是查询所使用的数据库连接。",
+            "reason": "可以确认查询是否发往了正确的数据库（'other'），而不是错误地发往了默认数据库。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "验证在非默认数据库上使用包含自然键外键的 fixture 执行 loaddata 不会抛出 DoesNotExist 异常。",
+            "preferred_assertion_style": "raises",
+            "avoid": "断言完整的异常消息字符串，因为消息可能因 Django 版本或模型名称而微调。",
+            "reason": "Issue 的核心是异常被触发。修复后，该操作应顺利完成。因此，断言不引发异常（或使用 assertNotRaises 模式）是稳定的目标。"
+        },
+        {
+            "assertion_goal": "验证数据已成功加载到指定的非默认数据库中。",
+            "preferred_assertion_style": "equals",
+            "avoid": "断言具体的自动生成主键 ID 值。",
+            "reason": "可以断言加载后模型对象的数量或特定字段的值，以确认加载成功，这比依赖内部状态或缓存更稳定。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要配置多数据库的 Django settings，至少包含 'default' 和 'other' 两个数据库连接。",
+            "source": "issue",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要定义使用自然键和外键的模型（如 Book 和 Author），并实现相应的 natural_key 和 get_by_natural_key 方法。",
+            "source": "issue",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要准备包含自然键引用的 JSON fixture 文件（类似于 Issue 中的 books.json）。",
+            "source": "issue",
+            "confidence": "high"
+        },
+        {
+            "hint": "测试类应继承自 django.test.TestCase 或其子类，以利用 Django 的测试数据库隔离和清理功能。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "可能需要使用 override_settings 装饰器来动态设置数据库路由或多数据库配置。",
+            "source": "retrieved_test",
+            "confidence": "medium"
+        }
+    ],
+    "uncertainties": [
+        "build_instance 函数中，当 Model(**data).natural_key() 被调用时，用于实例化 Model 的数据库上下文是如何确定的？是否与传入的 db 参数一致？",
+        "在自然键解析的依赖链中（如 Book.natural_key() 调用 self.author.natural_key()），数据库上下文是如何在模型管理器（default_manager.db_manager(db)）和关系描述符之间传递的？",
+        "是否所有涉及自然键解析的查询（包括依赖模型的查询）都正确地使用了 db_manager(db) 或 .using(db)？",
+        "除了 loaddata，其他涉及自然键反序列化的场景（如调用序列化器 API 直接反序列化）是否也存在同样的多数据库问题？"
+    ]
+}
+```

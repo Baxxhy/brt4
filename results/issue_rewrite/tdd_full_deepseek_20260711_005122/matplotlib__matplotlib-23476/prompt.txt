@@ -1,0 +1,547 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+[Bug]: DPI of a figure is doubled after unpickling on M1 Mac
+### Bug summary
+
+When a figure is unpickled, it's dpi is doubled. This behaviour happens every time and if done in a loop it can cause an `OverflowError`.
+
+### Code for reproduction
+
+```python
+import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+import pickle
+import platform
+
+print(matplotlib.get_backend())
+print('Matplotlib ver:', matplotlib.__version__)
+print('Platform:', platform.platform())
+print('System:', platform.system())
+print('Release:', platform.release())
+print('Python ver:', platform.python_version())
+
+
+def dump_load_get_dpi(fig):
+    with open('sinus.pickle','wb') as file:
+        pickle.dump(fig, file)
+
+    with open('sinus.pickle', 'rb') as blob:
+        fig2 = pickle.load(blob)
+    return fig2, fig2.dpi
+
+
+def run():
+    fig = plt.figure()
+    x = np.linspace(0,2*np.pi)
+    y = np.sin(x)
+
+    for i in range(32):
+        print(f'{i}: {fig.dpi}')
+        fig, dpi = dump_load_get_dpi(fig)
+
+
+if __name__ == '__main__':
+    run()
+```
+
+
+### Actual outcome
+
+```
+MacOSX
+Matplotlib ver: 3.5.2
+Platform: macOS-12.4-arm64-arm-64bit
+System: Darwin
+Release: 21.5.0
+Python ver: 3.9.12
+0: 200.0
+1: 400.0
+2: 800.0
+3: 1600.0
+4: 3200.0
+5: 6400.0
+6: 12800.0
+7: 25600.0
+8: 51200.0
+9: 102400.0
+10: 204800.0
+11: 409600.0
+12: 819200.0
+13: 1638400.0
+14: 3276800.0
+15: 6553600.0
+16: 13107200.0
+17: 26214400.0
+18: 52428800.0
+19: 104857600.0
+20: 209715200.0
+21: 419430400.0
+Traceback (most recent call last):
+  File "/Users/wsykala/projects/matplotlib/example.py", line 34, in <module>
+    run()
+  File "/Users/wsykala/projects/matplotlib/example.py", line 30, in run
+    fig, dpi = dump_load_get_dpi(fig)
+  File "/Users/wsykala/projects/matplotlib/example.py", line 20, in dump_load_get_dpi
+    fig2 = pickle.load(blob)
+  File "/Users/wsykala/miniconda3/envs/playground/lib/python3.9/site-packages/matplotlib/figure.py", line 2911, in __setstate__
+    mgr = plt._backend_mod.new_figure_manager_given_figure(num, self)
+  File "/Users/wsykala/miniconda3/envs/playground/lib/python3.9/site-packages/matplotlib/backend_bases.py", line 3499, in new_figure_manager_given_figure
+    canvas = cls.FigureCanvas(figure)
+  File "/Users/wsykala/miniconda3/envs/playground/lib/python3.9/site-packages/matplotlib/backends/backend_macosx.py", line 32, in __init__
+    _macosx.FigureCanvas.__init__(self, width, height)
+OverflowError: signed integer is greater than maximum
+```
+
+### Expected outcome
+
+```
+MacOSX
+Matplotlib ver: 3.5.2
+Platform: macOS-12.4-arm64-arm-64bit
+System: Darwin
+Release: 21.5.0
+Python ver: 3.9.12
+0: 200.0
+1: 200.0
+2: 200.0
+3: 200.0
+4: 200.0
+5: 200.0
+6: 200.0
+7: 200.0
+8: 200.0
+9: 200.0
+10: 200.0
+11: 200.0
+12: 200.0
+13: 200.0
+14: 200.0
+15: 200.0
+16: 200.0
+17: 200.0
+18: 200.0
+19: 200.0
+20: 200.0
+21: 200.0
+22: 200.0
+```
+
+### Additional information
+
+This seems to happen only on M1 MacBooks and the version of python doesn't matter.
+
+### Operating system
+
+OS/X
+
+### Matplotlib Version
+
+3.5.2
+
+### Matplotlib Backend
+
+MacOSX
+
+### Python version
+
+3.9.12
+
+### Jupyter version
+
+_No response_
+
+### Installation
+
+pip
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：lib/matplotlib/figure.py
+对象名称：Figure
+节点类型：class
+父节点：figure
+行号范围：2213-3363
+代码：
+class Figure(FigureBase):
+    """
+    The top level container for all the plot elements.
+
+    Attributes
+    ----------
+    patch
+        The `.Rectangle` instance representing the figure background patch.
+
+    suppressComposite
+        For multiple images, the figure will make composite images
+        depending on the renderer option_image_nocomposite function.  If
+        *suppressComposite* is a boolean, this will override the renderer.
+    """
+    callbacks = _api.deprecated(
+        "3.6", alternative=("the 'resize_event' signal in "
+                            "Figure.canvas.callbacks")
+        )(property(lambda self: self._fig_callbacks))
+    def __str__(self):
+    def __repr__(self):
+    @_api.make_keyword_only("3.6", "facecolor")
+    def __init__(self,
+                 figsize=None,
+                 dpi=None,
+                 facecolor=None,
+                 edgecolor=None,
+                 linewidth=0.0,
+                 frameon=None,
+                 subplotpars=None,  # rc figure.subplot.*
+                 tight_layout=None,  # rc figure.autolayout
+                 constrained_layout=None,  # rc figure.constrained_layout.use
+                 *,
+                 layout=None,
+                 **kwargs
+                 ):
+    def pick(self, mouseevent):
+    def _check_layout_engines_compat(self, old, new):
+    def set_layout_engine(self, layout=None, **kwargs):
+    def get_layout_engine(self):
+    def _repr_html_(self):
+    def show(self, warn=True):
+    @property
+    def axes(self):
+    get_axes = axes.fget
+    def _get_renderer(self):
+    def _get_dpi(self):
+    def _set_dpi(self, dpi, forward=True):
+    dpi = property(_get_dpi, _set_dpi, doc="The resolution in dots per inch.")
+    def get_tight_layout(self):
+    @_api.deprecated("3.6", alternative="set_layout_engine",
+                     pending=True)
+    def set_tight_layout(self, tight):
+    def get_constrained_layout(self):
+    @_api.deprecated("3.6", alternative="set_layout_engine('constrained')",
+                     pending=True)
+    def set_constrained_layout(self, constrained):
+    @_api.deprecated(
+         "3.6", alternative="figure.get_layout_engine().set()",
+         pending=True)
+    def set_constrained_layout_pads(self, **kwargs):
+    @_api.deprecated("3.6", alternative="fig.get_layout_engine().get()",
+                     pending=True)
+    def get_constrained_layout_pads(self, relative=False):
+    def set_canvas(self, canvas):
+    @_docstring.interpd
+    def figimage(self, X, xo=0, yo=0, alpha=None, norm=None, cmap=None,
+                 vmin=None, vmax=None, origin=None, resize=False, **kwargs):
+    def set_size_inches(self, w, h=None, forward=True):
+    def get_size_inches(self):
+    def get_figwidth(self):
+    def get_figheight(self):
+    def get_dpi(self):
+    def set_dpi(self, val):
+    def set_figwidth(self, val, forward=True):
+    def set_figheight(self, val, forward=True):
+    def clear(self, keep_observers=False):
+    @_finalize_rasterization
+    @allow_rasterization
+    def draw(self, renderer):
+    def draw_without_rendering(self):
+    def draw_artist(self, a):
+    def __getstate__(self):
+    def __setstate__(self, state):
+    def add_axobserver(self, func):
+    def savefig(self, fname, *, transparent=None, **kwargs):
+    def ginput(self, n=1, timeout=30, show_clicks=True,
+               mouse_add=MouseButton.LEFT,
+               mouse_pop=MouseButton.RIGHT,
+               mouse_stop=MouseButton.MIDDLE):
+    def waitforbuttonpress(self, timeout=-1):
+    @_api.deprecated("3.6", alternative="figure.get_layout_engine().execute()")
+    def execute_constrained_layout(self, renderer=None):
+    def tight_layout(self, *, pad=1.08, h_pad=None, w_pad=None, rect=None):
+
+
+【源码片段 2】
+文件路径：lib/matplotlib/figure.py
+对象名称：dpi
+节点类型：class_function
+父节点：SubFigure
+行号范围：2090-2091
+代码：
+    def dpi(self):
+        return self._parent.dpi
+
+
+【源码片段 3】
+文件路径：lib/matplotlib/figure.py
+对象名称：__setstate__
+节点类型：class_function
+父节点：Figure
+行号范围：3035-3059
+代码：
+    def __setstate__(self, state):
+        version = state.pop('__mpl_version__')
+        restore_to_pylab = state.pop('_restore_to_pylab', False)
+
+        if version != mpl.__version__:
+            _api.warn_external(
+                f"This figure was saved with matplotlib version {version} and "
+                f"is unlikely to function correctly.")
+
+        self.__dict__ = state
+
+        # re-initialise some of the unstored state information
+        FigureCanvasBase(self)  # Set self.canvas.
+
+        if restore_to_pylab:
+            # lazy import to avoid circularity
+            import matplotlib.pyplot as plt
+            import matplotlib._pylab_helpers as pylab_helpers
+            allnums = plt.get_fignums()
+            num = max(allnums) + 1 if allnums else 1
+            mgr = plt._backend_mod.new_figure_manager_given_figure(num, self)
+            pylab_helpers.Gcf._set_new_active_manager(mgr)
+            plt.draw_if_interactive()
+
+        self.stale = True
+
+
+【源码片段 4】
+文件路径：lib/matplotlib/backend_bases.py
+对象名称：new_figure_manager_given_figure
+节点类型：class_function
+父节点：_Backend
+行号范围：3510-3512
+代码：
+    def new_figure_manager_given_figure(cls, num, figure):
+        """Create a new figure manager instance for the given figure."""
+        return cls.FigureCanvas.new_manager(figure, num)
+
+
+【源码片段 5】
+文件路径：lib/matplotlib/backends/backend_template.py
+对象名称：FigureCanvas
+节点类型：global_var
+父节点：backend_template
+行号范围：223-223
+代码：
+FigureCanvas = FigureCanvasTemplate
+
+
+【源码片段 6】
+文件路径：lib/matplotlib/backends/backend_macosx.py
+对象名称：backend_macosx
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：lib/matplotlib/tests/test_pickle.py
+测试名称：test_simple
+测试代码：
+def test_simple():
+    fig = plt.figure()
+    pickle.dump(fig, BytesIO(), pickle.HIGHEST_PROTOCOL)
+
+    ax = plt.subplot(121)
+    pickle.dump(ax, BytesIO(), pickle.HIGHEST_PROTOCOL)
+
+    ax = plt.axes(projection='polar')
+    plt.plot(np.arange(10), label='foobar')
+    plt.legend()
+
+    pickle.dump(ax, BytesIO(), pickle.HIGHEST_PROTOCOL)
+
+#    ax = plt.subplot(121, projection='hammer')
+#    pickle.dump(ax, BytesIO(), pickle.HIGHEST_PROTOCOL)
+
+    plt.figure()
+    plt.bar(x=np.arange(10), height=np.arange(10))
+    pickle.dump(plt.gca(), BytesIO(), pickle.HIGHEST_PROTOCOL)
+
+    fig = plt.figure()
+    ax = plt.axes()
+    plt.plot(np.arange(10))
+    ax.set_yscale('log')
+    pickle.dump(fig, BytesIO(), pickle.HIGHEST_PROTOCOL)
+
+【相关测试 2】
+测试文件：lib/matplotlib/tests/test_pickle.py
+测试名称：test_gcf
+测试代码：
+def test_gcf():
+    fig = plt.figure("a label")
+    buf = BytesIO()
+    pickle.dump(fig, buf, pickle.HIGHEST_PROTOCOL)
+    plt.close("all")
+    assert plt._pylab_helpers.Gcf.figs == {}  # No figures must be left.
+    fig = pickle.loads(buf.getbuffer())
+    assert plt._pylab_helpers.Gcf.figs != {}  # A manager is there again.
+    assert fig.get_label() == "a label"
+
+【相关测试 3】
+测试文件：lib/matplotlib/tests/test_pickle.py
+测试名称：test_unpickle_canvas
+测试代码：
+def test_unpickle_canvas():
+    fig = mfigure.Figure()
+    assert fig.canvas is not None
+    out = BytesIO()
+    pickle.dump(fig, out)
+    out.seek(0)
+    fig2 = pickle.load(out)
+    assert fig2.canvas is not None
+
+【相关测试 4】
+测试文件：lib/matplotlib/tests/test_figure.py
+测试名称：test_change_dpi
+测试代码：
+@mpl.style.context('default')
+def test_change_dpi():
+    fig = plt.figure(figsize=(4, 4))
+    fig.draw_without_rendering()
+    assert fig.canvas.renderer.height == 400
+    assert fig.canvas.renderer.width == 400
+    fig.dpi = 50
+    fig.draw_without_rendering()
+    assert fig.canvas.renderer.height == 200
+    assert fig.canvas.renderer.width == 200
+
+【相关测试 5】
+测试文件：lib/matplotlib/tests/test_backend_macosx.py
+测试名称：test_cached_renderer
+测试代码：
+@pytest.mark.backend('macosx')
+def test_cached_renderer():
+    # Make sure that figures have an associated renderer after
+    # a fig.canvas.draw() call
+    fig = plt.figure(1)
+    fig.canvas.draw()
+    assert fig._cachedRenderer is not None
+
+    fig = plt.figure(2)
+    fig.draw_without_rendering()
+    assert fig._cachedRenderer is not None
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

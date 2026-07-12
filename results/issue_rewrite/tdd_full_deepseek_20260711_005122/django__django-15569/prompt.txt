@@ -1,0 +1,313 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+RegisterLookupMixin._unregister_lookup() should clear the lookup cache.
+Description
+	 
+		(last modified by Himanshu Balasamanta)
+	 
+In current source code, in the _unregister_lookup method, ​https://github.com/django/django/blame/main/django/db/models/query_utils.py#L212, the cache is not cleared, which should be done, as it is done in register_lookup, ​https://github.com/django/django/blame/main/django/db/models/query_utils.py#L202. Corresponding to this change, minor changes need to be brought in the schema.tests.SchemaTests.test_func_unique_constraint_lookups test.
+The PR generated is ​https://github.com/django/django/pull/15569
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/db/models/query_utils.py
+对象名称：RegisterLookupMixin
+节点类型：class
+父节点：query_utils
+行号范围：152-219
+代码：
+class RegisterLookupMixin:
+    @classmethod
+    @classmethod
+    def _get_lookup(cls, lookup_name):
+    @classmethod
+    @functools.lru_cache(maxsize=None)
+    def get_lookups(cls):
+    def get_lookup(self, lookup_name):
+    def get_transform(self, lookup_name):
+    @staticmethod
+    def merge_dicts(dicts):
+    @classmethod
+    def _clear_cached_lookups(cls):
+    @classmethod
+    def register_lookup(cls, lookup, lookup_name=None):
+    @classmethod
+    def _unregister_lookup(cls, lookup, lookup_name=None):
+
+
+【源码片段 2】
+文件路径：django/db/models/query_utils.py
+对象名称：_unregister_lookup
+节点类型：class_function
+父节点：RegisterLookupMixin
+行号范围：212-219
+代码：
+    def _unregister_lookup(cls, lookup, lookup_name=None):
+        """
+        Remove given lookup from cls lookups. For use in tests only as it's
+        not thread-safe.
+        """
+        if lookup_name is None:
+            lookup_name = lookup.lookup_name
+        del cls.class_lookups[lookup_name]
+
+
+【源码片段 3】
+文件路径：django/db/models/query_utils.py
+对象名称：register_lookup
+节点类型：class_function
+父节点：RegisterLookupMixin
+行号范围：202-209
+代码：
+    def register_lookup(cls, lookup, lookup_name=None):
+        if lookup_name is None:
+            lookup_name = lookup.lookup_name
+        if "class_lookups" not in cls.__dict__:
+            cls.class_lookups = {}
+        cls.class_lookups[lookup_name] = lookup
+        cls._clear_cached_lookups()
+        return lookup
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/schema/tests.py
+测试名称：test_func_unique_constraint_lookups
+测试代码：
+class SchemaTests(TransactionTestCase):
+    @skipUnlessDBFeature("supports_expression_indexes")
+    def test_func_unique_constraint_lookups(self):
+        with connection.schema_editor() as editor:
+            editor.create_model(Author)
+        with register_lookup(CharField, Lower), register_lookup(IntegerField, Abs):
+            constraint = UniqueConstraint(
+                F("name__lower"),
+                F("weight__abs"),
+                name="func_lower_abs_lookup_uq",
+            )
+            # Add constraint.
+            with connection.schema_editor() as editor:
+                editor.add_constraint(Author, constraint)
+                sql = constraint.create_sql(Author, editor)
+        table = Author._meta.db_table
+        constraints = self.get_constraints(table)
+        self.assertIn(constraint.name, constraints)
+        self.assertIs(constraints[constraint.name]["unique"], True)
+        # SQL contains columns.
+        self.assertIs(sql.references_column(table, "name"), True)
+        self.assertIs(sql.references_column(table, "weight"), True)
+        # Remove constraint.
+        with connection.schema_editor() as editor:
+            editor.remove_constraint(Author, constraint)
+        self.assertNotIn(constraint.name, self.get_constraints(table))
+
+【相关测试 2】
+测试文件：tests/custom_lookups/tests.py
+测试名称：test_lookups_caching
+测试代码：
+class LookupTests(TestCase):
+    def test_lookups_caching(self):
+        field = Article._meta.get_field("author")
+
+        # clear and re-cache
+        field.get_lookups.cache_clear()
+        self.assertNotIn("exactly", field.get_lookups())
+
+        # registration should bust the cache
+        with register_lookup(models.ForeignObject, Exactly):
+            # getting the lookups again should re-cache
+            self.assertIn("exactly", field.get_lookups())
+
+【相关测试 3】
+测试文件：tests/custom_lookups/tests.py
+测试名称：test_foreignobject_lookup_registration
+测试代码：
+class LookupTests(TestCase):
+    def test_foreignobject_lookup_registration(self):
+        field = Article._meta.get_field("author")
+
+        with register_lookup(models.ForeignObject, Exactly):
+            self.assertIs(field.get_lookup("exactly"), Exactly)
+
+        # ForeignObject should ignore regular Field lookups
+        with register_lookup(models.Field, Exactly):
+            self.assertIsNone(field.get_lookup("exactly"))
+
+【相关测试 4】
+测试文件：tests/custom_lookups/tests.py
+测试名称：test_custom_exact_lookup_none_rhs
+测试代码：
+class LookupTests(TestCase):
+    def test_custom_exact_lookup_none_rhs(self):
+        """
+        __exact=None is transformed to __isnull=True if a custom lookup class
+        with lookup_name != 'exact' is registered as the `exact` lookup.
+        """
+        field = Author._meta.get_field("birthdate")
+        OldExactLookup = field.get_lookup("exact")
+        author = Author.objects.create(name="author", birthdate=None)
+        try:
+            field.register_lookup(Exactly, "exact")
+            self.assertEqual(Author.objects.get(birthdate__exact=None), author)
+        finally:
+            field.register_lookup(OldExactLookup, "exact")
+
+【相关测试 5】
+测试文件：tests/contenttypes_tests/test_models.py
+测试名称：test_lookup_cache
+测试代码：
+class ContentTypesTests(TestCase):
+    def test_lookup_cache(self):
+        """
+        The content type cache (see ContentTypeManager) works correctly.
+        Lookups for a particular content type -- by model, ID, or natural key
+        -- should hit the database only on the first lookup.
+        """
+        # At this point, a lookup for a ContentType should hit the DB
+        with self.assertNumQueries(1):
+            ContentType.objects.get_for_model(ContentType)
+
+        # A second hit, though, won't hit the DB, nor will a lookup by ID
+        # or natural key
+        with self.assertNumQueries(0):
+            ct = ContentType.objects.get_for_model(ContentType)
+        with self.assertNumQueries(0):
+            ContentType.objects.get_for_id(ct.id)
+        with self.assertNumQueries(0):
+            ContentType.objects.get_by_natural_key("contenttypes", "contenttype")
+
+        # Once we clear the cache, another lookup will again hit the DB
+        ContentType.objects.clear_cache()
+        with self.assertNumQueries(1):
+            ContentType.objects.get_for_model(ContentType)
+
+        # The same should happen with a lookup by natural key
+        ContentType.objects.clear_cache()
+        with self.assertNumQueries(1):
+            ContentType.objects.get_by_natural_key("contenttypes", "contenttype")
+        # And a second hit shouldn't hit the DB
+        with self.assertNumQueries(0):
+            ContentType.objects.get_by_natural_key("contenttypes", "contenttype")
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

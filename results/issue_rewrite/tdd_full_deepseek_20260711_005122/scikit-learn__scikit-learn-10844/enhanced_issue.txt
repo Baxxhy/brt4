@@ -1,0 +1,118 @@
+instance_id: scikit-learn__scikit-learn-10844
+
+issue_summary: fowlkes_mallows_score 在 pk * qk 超过 2**32 时产生 RuntimeWarning 并返回 nan。
+
+trigger_condition:
+{
+  "text": "调用 fowlkes_mallows_score 时，输入标签使得计算出的 pk 和 qk 的乘积非常大（超过 2**32），导致整数溢出。",
+  "evidence": [
+    "Issue 描述：'when (pk * qk) is bigger than 2**32, thus bypassing the int32 limit'",
+    "源码片段 1 第 859 行：'return tk / np.sqrt(pk * qk) if tk != 0. else 0.'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "函数返回 nan 并产生 RuntimeWarning: overflow encountered in int_scalars。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 的 Actual Results：'it returns 'nan' instead.'",
+    "Issue 描述：'This line produces RuntimeWarning: overflow encountered in int_scalars'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "函数应正确计算 tk / np.sqrt(pk * qk) 并返回一个浮点数，即使 pk 和 qk 很大也不应溢出或返回 nan。",
+  "evidence": [
+    "Issue 的 Expected Results：'Be able to calculate tk / np.sqrt(pk * qk) and return a float.'",
+    "Issue 的 Fix 部分建议使用数学等价形式避免溢出。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "fowlkes_mallows_score",
+    "kind": "function",
+    "source_path": "sklearn/metrics/cluster/supervised.py",
+    "reason": "Issue 直接报告此函数在特定输入下产生溢出和错误返回值。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相关测试中使用的小规模标签数组（如长度 6）。",
+    "target_pattern": "构造非常大的标签数组，使得计算出的 pk 和 qk 值巨大，其乘积超过 2**32。",
+    "reason": "Issue 指出当 pk * qk 超过 2**32 时会触发溢出。需要大规模数据来产生大的 pk 和 qk。",
+    "confidence": "high"
+  },
+  {
+    "slot": "boundary_value",
+    "current_pattern": "测试用例中的 pk 和 qk 值在正常范围内。",
+    "target_pattern": "使 pk 和 qk 的值足够大，使得它们的乘积刚好超过 2**32（即 4294967296）。",
+    "reason": "整数溢出发生在乘积超过 int32 限制时。需要瞄准这个边界。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "warning",
+    "expression_hint": "warnings.catch_warnings 记录 RuntimeWarning",
+    "reason": "Issue 明确提到会产生 RuntimeWarning: overflow encountered in int_scalars。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "fowlkes_mallows_score 的返回值（应为浮点数，非 nan）",
+    "reason": "Issue 指出实际结果是返回 nan，而期望是返回一个浮点数。"
+  },
+  {
+    "kind": "type",
+    "expression_hint": "type(result) 和 np.isnan(result)",
+    "reason": "需要确认返回值类型是浮点型且不是 nan。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "函数返回值是一个有限浮点数（非 nan 且非无穷大）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言与某个固定小数值完全相等，因为计算结果可能因实现而异。",
+    "reason": "Issue 期望能正确计算并返回一个浮点数，核心是避免溢出导致的 nan。"
+  },
+  {
+    "assertion_goal": "函数执行时不产生 RuntimeWarning（溢出警告）。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言完整的警告消息字符串，因为警告文本可能因环境略有不同。",
+    "reason": "Issue 描述溢出会导致 RuntimeWarning，修复后应消除此警告。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 fowlkes_mallows_score、numpy 和 warnings 模块。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要使用 numpy 生成大规模标签数组。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "导致 pk * qk 超过 2**32 所需的具体最小标签数组大小和结构尚不确定。",
+  "Issue 中建议的修复公式 'np.sqrt(tk / pk) * np.sqrt(tk / qk)' 在数学上是否完全等价于原公式，以及是否在所有情况下都避免溢出，需要验证。",
+  "除了溢出警告和返回 nan，是否还有其他副作用（如性能下降）未提及。"
+]

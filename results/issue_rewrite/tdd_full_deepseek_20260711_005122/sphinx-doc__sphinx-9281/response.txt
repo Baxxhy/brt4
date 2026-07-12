@@ -1,0 +1,124 @@
+```json
+{
+    "issue_summary": "Sphinx 在渲染函数签名时，对 Enum 默认值的字符串表示（repr）处理不当，导致显示不美观。",
+    "trigger_condition": {
+        "text": "使用 Sphinx autodoc 为包含 Enum 类型默认参数的函数生成文档。",
+        "evidence": ["Issue 描述：Python Enum values (used to show default values in function signatures) are rendered ugly.", "Issue 中的示例：函数 `ugly_enum_func(e: ugly_enum.MyEnum = MyEnum.ValueA)` 被渲染为 `ugly_enum_func(e: ugly_enum.MyEnum = <MyEnum.ValueA: 10>)`。"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "函数签名中 Enum 默认值的显示使用了其 `repr()` 形式（如 `<MyEnum.ValueA: 10>`），而非更简洁美观的表示（如 `MyEnum.ValueA`）。",
+        "symptom_type": "wrong_return",
+        "evidence": ["Issue 中 Expected behavior 期望显示 `MyEnum.ValueA`，但实际显示 `<MyEnum.ValueA: 10>`。"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "函数签名中 Enum 默认值应被渲染为其简洁的表示形式（如 `MyEnum.ValueA`），而不是完整的 repr 字符串。",
+        "evidence": ["Issue 中 Expected behavior 描述：`ugly_enum_func(e: ugly_enum.MyEnum = MyEnum.ValueA) → None`。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "format_signature",
+            "kind": "method",
+            "source_path": "",
+            "reason": "相关测试 test_format_signature 直接测试了签名格式化逻辑，这是生成函数签名字符串的核心方法。"
+        },
+        {
+            "name": "autodoc",
+            "kind": "module",
+            "source_path": "",
+            "reason": "Issue 涉及 Sphinx 的 autodoc 扩展，用于自动生成文档。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "",
+            "object": "处理默认值（特别是 Enum 类型）的签名格式化逻辑",
+            "lines": "",
+            "reason": "Issue 表明在生成函数签名字符串时，对 Enum 默认值的字符串转换可能直接使用了 `repr()` 而非更合适的表示。相关测试 test_format_signature 是测试签名格式化的主要场所。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_format_signature",
+            "test_file": "tests/test_ext_autodoc.py",
+            "why_relevant": "该测试直接验证 `format_signature` 方法对各种对象（函数、类、方法）签名格式化的输出，是处理签名生成的核心测试。",
+            "reusable_parts": ["测试结构（app/directive 设置）、`formatsig` 辅助函数、对不同对象类型签名的断言模式。"],
+            "possible_gap": "当前测试用例没有包含使用 Enum 作为函数默认参数的场景。"
+        },
+        {
+            "test_name": "test_preserve_defaults",
+            "test_file": "tests/test_ext_autodoc_preserve_defaults.py",
+            "why_relevant": "该测试专门针对 `autodoc_preserve_defaults` 配置，验证函数签名中默认值的保留和渲染，与 Issue 中默认值渲染问题直接相关。",
+            "reusable_parts": ["使用 `do_autodoc` 辅助函数、配置 `autodoc_preserve_defaults`、断言生成的文档字符串。"],
+            "possible_gap": "测试用例使用的是常量、哨兵值和 datetime 对象作为默认值，没有测试 Enum 类型。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "argument",
+            "current_pattern": "相似测试中使用普通常量（如 `CONSTANT`）、哨兵对象或 datetime 对象作为函数默认参数。",
+            "target_pattern": "使用 Enum 成员（如 `MyEnum.ValueA`）作为函数默认参数。",
+            "reason": "Issue 表明缺陷在 Enum 默认值的渲染上，将测试输入变异为 Enum 类型可能触发缺陷路径。",
+            "confidence": "high"
+        },
+        {
+            "slot": "config",
+            "current_pattern": "测试中可能使用默认配置或 `autodoc_preserve_defaults=True`。",
+            "target_pattern": "保持配置与 Issue 环境一致（Sphinx 4.0.2，可能涉及相关扩展的默认行为）。",
+            "reason": "签名渲染行为可能受配置影响，确保配置一致有助于复现。",
+            "confidence": "medium"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "repr",
+            "expression_hint": "生成的函数签名字符串（即 `format_signature` 的返回值或 `do_autodoc` 输出的文档字符串中签名部分）。",
+            "reason": "Issue 的核心错误现象体现在最终渲染的签名字符串中 Enum 默认值的表示上。"
+        },
+        {
+            "kind": "type",
+            "expression_hint": "函数默认参数对象的类型（是否为 Enum 成员）及其 `repr()` 和 `str()` 输出。",
+            "reason": "需要确认输入是 Enum 类型，并对比其不同字符串表示与最终签名中的表示。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "生成的函数签名字符串中，Enum 默认值的表示不应包含尖括号和内部值（如 `: 10`），而应更简洁。",
+            "preferred_assertion_style": "not_contains_fragment",
+            "avoid": "断言完整的签名字符串完全相等，因为 Issue 未给出修复后的精确完整输出，且可能受其他因素影响。",
+            "reason": "Issue 明确指出不期望看到 `<MyEnum.ValueA: 10>` 这种形式，断言不包含其特征片段（如 `<` 和 `:`）更稳定且与问题对齐。"
+        },
+        {
+            "assertion_goal": "生成的函数签名字符串中应包含 Enum 成员的名称（如 `ValueA`）。",
+            "preferred_assertion_style": "contains_fragment",
+            "avoid": "断言 Enum 成员名称的精确位置或完整限定名（如 `MyEnum.ValueA`），因为 Issue 期望的表示可能只是 `ValueA`。",
+            "reason": "Issue 期望的表示包含了成员名称，断言包含该名称片段是合理的正向目标。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要创建包含 Enum 类型和以该 Enum 成员为默认参数的函数的模块，作为 autodoc 的文档目标。",
+            "source": "issue",
+            "confidence": "high"
+        },
+        {
+            "hint": "使用 `sphinx.testing.fixtures` 中的 `app` fixture 来构建 Sphinx 测试应用。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "可能需要配置 `autodoc` 扩展和相关的设置（如 `autodoc_preserve_defaults`）。",
+            "source": "retrieved_test",
+            "confidence": "medium"
+        }
+    ],
+    "uncertainties": [
+        "缺陷的确切代码位置（具体在哪个文件、哪个函数中处理默认值的字符串转换）。",
+        "修复后 Enum 默认值在签名中的精确预期输出格式（是 `MyEnum.ValueA` 还是 `ValueA` 或其他形式）。",
+        "该缺陷是否与 `autodoc_preserve_defaults` 配置有关。",
+        "除了函数签名，该缺陷是否也影响方法、类构造器等其他情况的签名渲染。"
+    ]
+}
+```

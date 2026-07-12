@@ -1,0 +1,374 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Custom template tags raise TemplateSyntaxError when keyword-only arguments with defaults are provided.
+Description
+	 
+		(last modified by P-Seebauer)
+	 
+When creating simple tags without variable keyword args, but an keyword argument with a default value. It's not possible to supply any other variable.
+@register.simple_tag
+def hello(*, greeting='hello'):
+	return f'{greeting} world'
+{% hello greeting='hi' %}
+Raises “'hello' received unexpected keyword argument 'greeting'”
+Also supplying a keyword argument a second time raises the wrong error message:
+#tag
+@register.simple_tag
+def hi(*, greeting):
+	return f'{greeting} world'
+{% hi greeting='hi' greeting='hello' %}
+Raises “'hi' received unexpected keyword argument 'greeting'”
+instead of "'hi' received multiple values for keyword argument 'greeting'"
+Same goes for inclusion tags (is the same code) I already have a fix ready, will push it after creating the ticket (that I have a ticket# for the commit).
+Is actually for all versions since the offending line is from 2.0…
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/template/library.py
+对象名称：simple_tag
+节点类型：class_function
+父节点：Library
+行号范围：100-134
+代码：
+    def simple_tag(self, func=None, takes_context=None, name=None):
+        """
+        Register a callable as a compiled template tag. Example:
+
+        @register.simple_tag
+        def hello(*args, **kwargs):
+            return 'world'
+        """
+        def dec(func):
+            params, varargs, varkw, defaults, kwonly, kwonly_defaults, _ = getfullargspec(unwrap(func))
+            function_name = (name or getattr(func, '_decorated_function', func).__name__)
+
+            @functools.wraps(func)
+            def compile_func(parser, token):
+                bits = token.split_contents()[1:]
+                target_var = None
+                if len(bits) >= 2 and bits[-2] == 'as':
+                    target_var = bits[-1]
+                    bits = bits[:-2]
+                args, kwargs = parse_bits(
+                    parser, bits, params, varargs, varkw, defaults,
+                    kwonly, kwonly_defaults, takes_context, function_name,
+                )
+                return SimpleNode(func, takes_context, args, kwargs, target_var)
+            self.tag(function_name, compile_func)
+            return func
+
+        if func is None:
+            # @register.simple_tag(...)
+            return dec
+        elif callable(func):
+            # @register.simple_tag
+            return dec(func)
+        else:
+            raise ValueError("Invalid arguments provided to simple_tag")
+
+
+【源码片段 2】
+文件路径：tests/asgi/urls.py
+对象名称：hello
+节点类型：top-level function
+父节点：urls
+行号范围：5-7
+代码：
+def hello(request):
+    name = request.GET.get('name') or 'World'
+    return HttpResponse('Hello %s!' % name)
+
+
+【源码片段 3】
+文件路径：django/template/library.py
+对象名称：tag
+节点类型：class_function
+父节点：Library
+行号范围：27-48
+代码：
+    def tag(self, name=None, compile_function=None):
+        if name is None and compile_function is None:
+            # @register.tag()
+            return self.tag_function
+        elif name is not None and compile_function is None:
+            if callable(name):
+                # @register.tag
+                return self.tag_function(name)
+            else:
+                # @register.tag('somename') or @register.tag(name='somename')
+                def dec(func):
+                    return self.tag(name, func)
+                return dec
+        elif name is not None and compile_function is not None:
+            # register.tag('somename', somefunc)
+            self.tags[name] = compile_function
+            return compile_function
+        else:
+            raise ValueError(
+                "Unsupported arguments to Library.tag: (%r, %r)" %
+                (name, compile_function),
+            )
+
+
+【源码片段 4】
+文件路径：django/template/exceptions.py
+对象名称：TemplateSyntaxError
+节点类型：class
+父节点：exceptions
+行号范围：38-42
+代码：
+class TemplateSyntaxError(Exception):
+    """
+    The exception used for syntax errors during parsing or rendering.
+    """
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/template_tests/test_custom.py
+测试名称：test_simple_tag_errors
+测试代码：
+class SimpleTagTests(TagTestCase):
+    def test_simple_tag_errors(self):
+        errors = [
+            ("'simple_one_default' received unexpected keyword argument 'three'",
+                '{% load custom %}{% simple_one_default 99 two="hello" three="foo" %}'),
+            ("'simple_two_params' received too many positional arguments",
+                '{% load custom %}{% simple_two_params 37 42 56 %}'),
+            ("'simple_one_default' received too many positional arguments",
+                '{% load custom %}{% simple_one_default 37 42 56 %}'),
+            ("'simple_keyword_only_param' did not receive value(s) for the argument(s): 'kwarg'",
+                '{% load custom %}{% simple_keyword_only_param %}'),
+            ("'simple_unlimited_args_kwargs' received some positional argument(s) after some keyword argument(s)",
+                '{% load custom %}{% simple_unlimited_args_kwargs 37 40|add:2 eggs="scrambled" 56 four=1|add:3 %}'),
+            ("'simple_unlimited_args_kwargs' received multiple values for keyword argument 'eggs'",
+                '{% load custom %}{% simple_unlimited_args_kwargs 37 eggs="scrambled" eggs="scrambled" %}'),
+        ]
+
+        for entry in errors:
+            with self.assertRaisesMessage(TemplateSyntaxError, entry[0]):
+                self.engine.from_string(entry[1])
+
+        for entry in errors:
+            with self.assertRaisesMessage(TemplateSyntaxError, entry[0]):
+                self.engine.from_string("%s as var %%}" % entry[1][0:-2])
+
+【相关测试 2】
+测试文件：tests/template_tests/test_custom.py
+测试名称：test_simple_tags
+测试代码：
+class SimpleTagTests(TagTestCase):
+    def test_simple_tags(self):
+        c = Context({'value': 42})
+
+        templates = [
+            ('{% load custom %}{% no_params %}', 'no_params - Expected result'),
+            ('{% load custom %}{% one_param 37 %}', 'one_param - Expected result: 37'),
+            ('{% load custom %}{% explicit_no_context 37 %}', 'explicit_no_context - Expected result: 37'),
+            ('{% load custom %}{% no_params_with_context %}',
+                'no_params_with_context - Expected result (context value: 42)'),
+            ('{% load custom %}{% params_and_context 37 %}',
+                'params_and_context - Expected result (context value: 42): 37'),
+            ('{% load custom %}{% simple_two_params 37 42 %}', 'simple_two_params - Expected result: 37, 42'),
+            ('{% load custom %}{% simple_keyword_only_param kwarg=37 %}',
+                'simple_keyword_only_param - Expected result: 37'),
+            ('{% load custom %}{% simple_keyword_only_default %}',
+                'simple_keyword_only_default - Expected result: 42'),
+            ('{% load custom %}{% simple_one_default 37 %}', 'simple_one_default - Expected result: 37, hi'),
+            ('{% load custom %}{% simple_one_default 37 two="hello" %}',
+                'simple_one_default - Expected result: 37, hello'),
+            ('{% load custom %}{% simple_one_default one=99 two="hello" %}',
+                'simple_one_default - Expected result: 99, hello'),
+            ('{% load custom %}{% simple_one_default 37 42 %}',
+                'simple_one_default - Expected result: 37, 42'),
+            ('{% load custom %}{% simple_unlimited_args 37 %}', 'simple_unlimited_args - Expected result: 37, hi'),
+            ('{% load custom %}{% simple_unlimited_args 37 42 56 89 %}',
+                'simple_unlimited_args - Expected result: 37, 42, 56, 89'),
+            ('{% load custom %}{% simple_only_unlimited_args %}', 'simple_only_unlimited_args - Expected result: '),
+            ('{% load custom %}{% simple_only_unlimited_args 37 42 56 89 %}',
+                'simple_only_unlimited_args - Expected result: 37, 42, 56, 89'),
+            ('{% load custom %}{% simple_unlimited_args_kwargs 37 40|add:2 56 eggs="scrambled" four=1|add:3 %}',
+                'simple_unlimited_args_kwargs - Expected result: 37, 42, 56 / eggs=scrambled, four=4'),
+        ]
+
+        for entry in templates:
+            t = self.engine.from_string(entry[0])
+            self.assertEqual(t.render(c), entry[1])
+
+        for entry in templates:
+            t = self.engine.from_string("%s as var %%}Result: {{ var }}" % entry[0][0:-2])
+            self.assertEqual(t.render(c), "Result: %s" % entry[1])
+
+【相关测试 3】
+测试文件：tests/template_tests/test_custom.py
+测试名称：test_inclusion_tag_errors
+测试代码：
+class InclusionTagTests(TagTestCase):
+    def test_inclusion_tag_errors(self):
+        errors = [
+            ("'inclusion_one_default' received unexpected keyword argument 'three'",
+                '{% load inclusion %}{% inclusion_one_default 99 two="hello" three="foo" %}'),
+            ("'inclusion_two_params' received too many positional arguments",
+                '{% load inclusion %}{% inclusion_two_params 37 42 56 %}'),
+            ("'inclusion_one_default' received too many positional arguments",
+                '{% load inclusion %}{% inclusion_one_default 37 42 56 %}'),
+            ("'inclusion_one_default' did not receive value(s) for the argument(s): 'one'",
+                '{% load inclusion %}{% inclusion_one_default %}'),
+            ("'inclusion_unlimited_args' did not receive value(s) for the argument(s): 'one'",
+                '{% load inclusion %}{% inclusion_unlimited_args %}'),
+            (
+                "'inclusion_unlimited_args_kwargs' received some positional argument(s) "
+                "after some keyword argument(s)",
+                '{% load inclusion %}{% inclusion_unlimited_args_kwargs 37 40|add:2 eggs="boiled" 56 four=1|add:3 %}',
+            ),
+            ("'inclusion_unlimited_args_kwargs' received multiple values for keyword argument 'eggs'",
+                '{% load inclusion %}{% inclusion_unlimited_args_kwargs 37 eggs="scrambled" eggs="scrambled" %}'),
+        ]
+
+        for entry in errors:
+            with self.assertRaisesMessage(TemplateSyntaxError, entry[0]):
+                self.engine.from_string(entry[1])
+
+【相关测试 4】
+测试文件：tests/template_tests/test_library.py
+测试名称：test_simple_tag
+测试代码：
+class SimpleTagRegistrationTests(SimpleTestCase):
+    def test_simple_tag(self):
+        @self.library.simple_tag
+        def func():
+            return ''
+        self.assertIn('func', self.library.tags)
+
+【相关测试 5】
+测试文件：tests/template_tests/test_library.py
+测试名称：test_simple_tag_invalid
+测试代码：
+class SimpleTagRegistrationTests(SimpleTestCase):
+    def test_simple_tag_invalid(self):
+        msg = "Invalid arguments provided to simple_tag"
+        with self.assertRaisesMessage(ValueError, msg):
+            self.library.simple_tag('invalid')
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

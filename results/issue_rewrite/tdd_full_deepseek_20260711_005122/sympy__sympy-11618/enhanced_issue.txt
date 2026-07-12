@@ -1,0 +1,119 @@
+instance_id: sympy__sympy-11618
+
+issue_summary: Point.distance 方法在计算不同维度点之间的距离时，会忽略较高维度的坐标，导致计算结果错误。
+
+trigger_condition:
+{
+  "text": "调用 Point.distance 方法，传入一个维度不同的 Point 对象。例如，一个二维点 Point(2,0) 与一个三维点 Point(1,0,2) 计算距离。",
+  "evidence": [
+    "Issue 中的示例代码：`Point(2,0).distance(Point(1,0,2))`",
+    "源码片段 2 中 distance 方法的实现使用了 `zip(self.args, p.args)`"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "计算出的距离值错误。对于 Point(2,0) 和 Point(1,0,2)，返回 1，而期望值应为 sqrt(5)。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 描述：`distance calculation wrong` 和 `The 3rd dimension is being ignored`",
+    "Issue 中的计算结果：`1` 与期望的 `sqrt(5)` 不符"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "Point.distance 方法应正确处理不同维度点之间的距离计算，考虑所有维度的坐标差。对于不同维度的点，应抛出异常或进行适当的处理（如补零对齐），但根据 Issue 上下文，期望是计算正确的欧几里得距离。",
+  "evidence": [
+    "Issue 中隐含的期望是计算 `sqrt((2-1)**2 + (0-0)**2 + (0-2)**2)` 即 `sqrt(5)`",
+    "源码片段 2 的文档字符串描述为“The Euclidean distance from self to point p.”"
+  ],
+  "confidence": "medium"
+}
+
+target_apis:
+[
+  {
+    "name": "Point.distance",
+    "kind": "method",
+    "source_path": "sympy/geometry/point.py",
+    "reason": "这是 Issue 中直接触发缺陷的 API 调用。"
+  },
+  {
+    "name": "Point",
+    "kind": "class",
+    "source_path": "sympy/geometry/point.py",
+    "reason": "缺陷涉及 Point 类的构造和 distance 方法。"
+  },
+  {
+    "name": "sqrt",
+    "kind": "function",
+    "source_path": "sympy/functions/elementary/miscellaneous.py",
+    "reason": "distance 方法的返回值使用了 sqrt 函数。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中，distance 方法的参数是与调用点维度相同的 Point 对象（如三维点对三维点，二维点对二维点）。",
+    "target_pattern": "distance 方法的参数是与调用点维度不同的 Point 对象（如二维点对三维点，三维点对二维点）。",
+    "reason": "Issue 表明当两个 Point 对象维度不同时，zip 操作会截断，导致高维坐标被忽略。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "相似测试中构造的 Point 对象具有明确的、一致的维度（通过传入的参数数量确定）。",
+    "target_pattern": "构造一个二维 Point 对象和一个三维 Point 对象。",
+    "reason": "触发缺陷需要两个维度不同的 Point 实例。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "distance 方法的返回值，以及计算该返回值所涉及的中间数据，如 `list(zip(self.args, p.args))` 的结果。",
+    "reason": "直接观察返回值可以判断距离计算是否正确。观察 zip 的结果可以确认是否所有维度都被配对。"
+  },
+  {
+    "kind": "repr",
+    "expression_hint": "两个 Point 对象的 repr（或 args 属性），以确认它们的维度。",
+    "reason": "确认测试中构造的点的维度是否符合预期（二维 vs 三维）。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证 distance 方法在不同维度点之间计算时，返回的距离值是正确的欧几里得距离（或抛出适当的异常）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免直接断言一个固定的浮点数，因为 sqrt(5) 可能以符号形式或浮点形式表示。应使用近似相等或符号相等。",
+    "reason": "Issue 的核心是数值结果错误，需要断言计算出的距离等于期望的数学表达式（如 sqrt(5)）。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要从 sympy.geometry 导入 Point 和 sqrt。可能还需要导入 Rational、Symbol 等用于构造点。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试环境应支持符号计算和精确有理数运算。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "修复后的预期行为是抛出维度不匹配的异常，还是自动补零（或截断）以计算距离？Issue 中期望计算 sqrt(5)，暗示了补零（将二维点视为 (2,0,0)）的策略，但这需要从项目规范或后续修复中确认。",
+  "除了二维和三维点的组合，更高维度或一维点是否也存在此问题？",
+  "Point 类的其他方法（如 taxicab_distance, midpoint）是否也存在类似的维度忽略问题？"
+]

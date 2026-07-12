@@ -1,0 +1,313 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+JSONField are not properly displayed in admin when they are readonly.
+Description
+	
+JSONField values are displayed as dict when readonly in the admin.
+For example, {"foo": "bar"} would be displayed as {'foo': 'bar'}, which is not valid JSON.
+I believe the fix would be to add a special case in django.contrib.admin.utils.display_for_field to call the prepare_value of the JSONField (not calling json.dumps directly to take care of the InvalidJSONInput case).
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/forms/fields.py
+对象名称：JSONField
+节点类型：class
+父节点：fields
+行号范围：1226-1278
+代码：
+class JSONField(CharField):
+    default_error_messages = {
+        'invalid': _('Enter a valid JSON.'),
+    }
+    widget = Textarea
+    def __init__(self, encoder=None, decoder=None, **kwargs):
+    def to_python(self, value):
+    def bound_data(self, data, initial):
+    def prepare_value(self, value):
+    def has_changed(self, initial, data):
+
+
+【源码片段 2】
+文件路径：django/contrib/admin/utils.py
+对象名称：display_for_field
+节点类型：top-level function
+父节点：utils
+行号范围：380-402
+代码：
+def display_for_field(value, field, empty_value_display):
+    from django.contrib.admin.templatetags.admin_list import _boolean_icon
+
+    if getattr(field, 'flatchoices', None):
+        return dict(field.flatchoices).get(value, empty_value_display)
+    # BooleanField needs special-case null-handling, so it comes before the
+    # general null test.
+    elif isinstance(field, models.BooleanField):
+        return _boolean_icon(value)
+    elif value is None:
+        return empty_value_display
+    elif isinstance(field, models.DateTimeField):
+        return formats.localize(timezone.template_localtime(value))
+    elif isinstance(field, (models.DateField, models.TimeField)):
+        return formats.localize(value)
+    elif isinstance(field, models.DecimalField):
+        return formats.number_format(value, field.decimal_places)
+    elif isinstance(field, (models.IntegerField, models.FloatField)):
+        return formats.number_format(value)
+    elif isinstance(field, models.FileField) and value:
+        return format_html('<a href="{}">{}</a>', value.url, value)
+    else:
+        return display_for_value(value, empty_value_display)
+
+
+【源码片段 3】
+文件路径：django/forms/fields.py
+对象名称：prepare_value
+节点类型：class_function
+父节点：JSONField
+行号范围：1265-1268
+代码：
+    def prepare_value(self, value):
+        if isinstance(value, InvalidJSONInput):
+            return value
+        return json.dumps(value, cls=self.encoder)
+
+
+【源码片段 4】
+文件路径：django/forms/fields.py
+对象名称：InvalidJSONInput
+节点类型：class
+父节点：fields
+行号范围：1218-1219
+代码：
+class InvalidJSONInput(str):
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/admin_utils/tests.py
+测试名称：UtilsTests.test_null_display_for_field
+测试代码：
+class UtilsTests(SimpleTestCase):
+    def test_null_display_for_field(self):
+        """
+        Regression test for #12550: display_for_field should handle None
+        value.
+        """
+        display_value = display_for_field(None, models.CharField(), self.empty_value)
+        self.assertEqual(display_value, self.empty_value)
+
+        display_value = display_for_field(None, models.CharField(
+            choices=(
+                (None, "test_none"),
+            )
+        ), self.empty_value)
+        self.assertEqual(display_value, "test_none")
+
+        display_value = display_for_field(None, models.DateField(), self.empty_value)
+        self.assertEqual(display_value, self.empty_value)
+
+        display_value = display_for_field(None, models.TimeField(), self.empty_value)
+        self.assertEqual(display_value, self.empty_value)
+
+        # Regression test for #13071: NullBooleanField has special
+        # handling.
+        display_value = display_for_field(None, models.NullBooleanField(), self.empty_value)
+        expected = '<img src="%sadmin/img/icon-unknown.svg" alt="None">' % settings.STATIC_URL
+        self.assertHTMLEqual(display_value, expected)
+
+        display_value = display_for_field(None, models.BooleanField(null=True), self.empty_value)
+        expected = '<img src="%sadmin/img/icon-unknown.svg" alt="None" />' % settings.STATIC_URL
+        self.assertHTMLEqual(display_value, expected)
+
+        display_value = display_for_field(None, models.DecimalField(), self.empty_value)
+        self.assertEqual(display_value, self.empty_value)
+
+        display_value = display_for_field(None, models.FloatField(), self.empty_value)
+        self.assertEqual(display_value, self.empty_value)
+
+【相关测试 2】
+测试文件：tests/admin_utils/tests.py
+测试名称：UtilsTests.test_number_formats_display_for_field
+测试代码：
+class UtilsTests(SimpleTestCase):
+    def test_number_formats_display_for_field(self):
+        display_value = display_for_field(12345.6789, models.FloatField(), self.empty_value)
+        self.assertEqual(display_value, '12345.6789')
+
+        display_value = display_for_field(Decimal('12345.6789'), models.DecimalField(), self.empty_value)
+        self.assertEqual(display_value, '12345.6789')
+
+        display_value = display_for_field(12345, models.IntegerField(), self.empty_value)
+        self.assertEqual(display_value, '12345')
+
+【相关测试 3】
+测试文件：tests/admin_utils/tests.py
+测试名称：UtilsTests.test_number_formats_with_thousand_separator_display_for_field
+测试代码：
+class UtilsTests(SimpleTestCase):
+    @override_settings(USE_L10N=True, USE_THOUSAND_SEPARATOR=True)
+    def test_number_formats_with_thousand_separator_display_for_field(self):
+        display_value = display_for_field(12345.6789, models.FloatField(), self.empty_value)
+        self.assertEqual(display_value, '12,345.6789')
+
+        display_value = display_for_field(Decimal('12345.6789'), models.DecimalField(), self.empty_value)
+        self.assertEqual(display_value, '12,345.6789')
+
+        display_value = display_for_field(12345, models.IntegerField(), self.empty_value)
+        self.assertEqual(display_value, '12,345')
+
+【相关测试 4】
+测试文件：tests/admin_utils/tests.py
+测试名称：UtilsTests.test_list_display_for_value
+测试代码：
+class UtilsTests(SimpleTestCase):
+    def test_list_display_for_value(self):
+        display_value = display_for_value([1, 2, 3], self.empty_value)
+        self.assertEqual(display_value, '1, 2, 3')
+
+        display_value = display_for_value([1, 2, 'buckle', 'my', 'shoe'], self.empty_value)
+        self.assertEqual(display_value, '1, 2, buckle, my, shoe')
+
+【相关测试 5】
+测试文件：tests/admin_views/tests.py
+测试名称：ReadonlyTest.test_readonly_text_field
+测试代码：
+@override_settings(ROOT_URLCONF='admin_views.urls')
+class ReadonlyTest(AdminFieldExtractionMixin, TestCase):
+    def test_readonly_text_field(self):
+        p = Post.objects.create(
+            title="Readonly test", content="test",
+            readonly_content='test\r\n\r\ntest\r\n\r\ntest\r\n\r\ntest',
+        )
+        Link.objects.create(
+            url="http://www.djangoproject.com", post=p,
+            readonly_link_content="test\r\nlink",
+        )
+        response = self.client.get(reverse('admin:admin_views_post_change', args=(p.pk,)))
+        # Checking readonly field.
+        self.assertContains(response, 'test<br><br>test<br><br>test<br><br>test')
+        # Checking readonly field in inline.
+        self.assertContains(response, 'test<br>link')
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

@@ -1,0 +1,124 @@
+instance_id: django__django-13837
+
+issue_summary: django.utils.autoreload.get_child_arguments 无法正确检测通过 `python -m pkg_other_than_django` 启动的情况，导致自动重载失败。
+
+trigger_condition:
+{
+  "text": "使用 `python -m <package>` 启动 Django 的 runserver 命令，其中 `<package>` 不是 `django`（例如，一个自定义的 Django 命令行工具包）。",
+  "evidence": [
+    "Issue 描述中提到“Allow autoreloading of `python -m pkg_other_than_django runserver`”，并指出当前代码只检测 `-m django`。",
+    "源码片段 1 中 `get_child_arguments` 函数通过比较 `py_script` 和 `django_main_path` 来判断是否以 `-m django` 启动。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "当以 `python -m <other_package>` 启动时，自动重载器可能无法正确重启子进程，因为 `get_child_arguments` 返回的参数列表不正确。",
+  "symptom_type": "state_not_updated",
+  "evidence": [
+    "Issue 描述指出这是“one impediment to creating Django-based command-line utilities...”，暗示功能缺失或行为不正确。",
+    "相关测试 1 和 2 专门测试 `-m django` 的情况，暗示其他 `-m` 情况未被覆盖。"
+  ],
+  "confidence": "medium"
+}
+
+expected_behavior:
+{
+  "text": "`get_child_arguments` 函数应能正确检测 Python 是否通过 `-m <any_package>` 启动，并返回包含 `-m <that_package>` 的正确参数列表，以支持基于 Django 的自定义命令行工具的自动重载。",
+  "evidence": [
+    "Issue 描述中提出了修复方案：“Therefore Python was started with -m pkg if and only if __main__.__spec__.parent == \"pkg\".”",
+    "Issue 标题“Allow autoreloading of `python -m pkg_other_than_django runserver`”明确了期望支持的行为。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "django.utils.autoreload.get_child_arguments",
+    "kind": "function",
+    "source_path": "django/utils/autoreload.py",
+    "reason": "这是 Issue 直接讨论和需要修复的核心函数，负责生成子进程重启参数。"
+  },
+  {
+    "name": "django.utils.autoreload.restart_with_reloader",
+    "kind": "function",
+    "source_path": "django/utils/autoreload.py",
+    "reason": "相关测试 2 测试了此函数，它内部会调用 `get_child_arguments`，是自动重载流程的一部分。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "mock",
+    "current_pattern": "在测试中通过 `@mock.patch('sys.argv', [django.__main__.__file__, 'runserver'])` 模拟以 `-m django` 启动。",
+    "target_pattern": "模拟以 `-m <other_package>` 启动，例如通过设置 `sys.argv[0]` 为其他值，并可能设置 `__main__.__spec__` 相关属性。",
+    "reason": "Issue 的核心是当前代码无法处理 `-m` 后跟非 `django` 包名的情况，改变模拟的启动方式是触发缺陷路径的关键。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "相关测试 1 和 2 依赖于 `django.__main__.__file__` 的存在和特定值。",
+    "target_pattern": "需要构造 `__main__.__spec__` 对象，并设置其 `parent` 属性为某个非 `django` 的包名（如 `\"myapp\"`），以模拟 `-m myapp` 的启动环境。",
+    "reason": "Issue 提出的修复方案基于 `__main__.__spec__.parent` 来判断 `-m` 参数，当前测试未覆盖此状态。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "`autoreload.get_child_arguments()` 的返回值，特别是其中是否包含 `['-m', '<expected_package>']` 片段。",
+    "reason": "该函数的返回值直接用于重启子进程。如果未能正确包含 `-m <package>`，则会导致自动重载失败。这是判断 Issue 是否被触发的直接依据。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "`__main__.__spec__` 和 `__main__.__spec__.parent` 在测试环境中的值。",
+    "reason": "Issue 指出新的检测逻辑应基于这些属性。观察它们有助于理解当前测试环境是否模拟了正确的触发条件。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当以 `python -m myapp` 启动并调用 `runserver` 时，`get_child_arguments()` 返回的列表应包含 `['-m', 'myapp']` 片段。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "断言完整的、硬编码的返回值列表，因为 `sys.executable` 和 `sys.warnoptions` 可能变化。",
+    "reason": "Issue 的核心是支持 `-m <other_package>`，因此断言返回值包含正确的 `-m` 参数包名对是关键且稳定的验证点。"
+  },
+  {
+    "assertion_goal": "`get_child_arguments()` 的返回值应能用于正确重启进程（即，列表格式正确，第一个元素是可执行文件）。",
+    "preferred_assertion_style": "isinstance",
+    "avoid": "断言返回值中不包含 `-m django`，因为这过于具体且可能不是唯一问题。",
+    "reason": "除了 `-m` 参数，函数还需保证返回的是一个有效的命令行参数列表。这是一个更基础的保障。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 `unittest.mock` 来模拟 `sys.argv`、`sys.warnoptions`，并可能模拟 `__main__` 模块的属性（如 `__spec__`）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试应继承自 `SimpleTestCase`，类似于现有的 `TestChildArguments` 类。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要临时创建或模拟一个非 `django` 的包结构，以完全模拟 `-m <other_package>` 的启动环境。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "在 `__file__` 未设置的 Python 环境中（如某些嵌入式环境），当前代码的确切行为以及新逻辑（基于 `__spec__`）是否完全覆盖所有情况。",
+  "当 `-m` 后面跟的是一个目录或 zip 文件（`__main__.__spec__.parent` 为空字符串）时，期望的行为和 `get_child_arguments` 应返回什么。",
+  "除了 `runserver`，这个缺陷是否影响其他 Django 管理命令的自动重载。"
+]

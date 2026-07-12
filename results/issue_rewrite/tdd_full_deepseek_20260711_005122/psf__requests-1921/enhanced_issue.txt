@@ -1,0 +1,122 @@
+instance_id: psf__requests-1921
+
+issue_summary: 将 Session 的默认 header 值设为 None 时，None 会被作为字符串发送，而不是移除该 header。
+
+trigger_condition:
+{
+  "text": "创建一个 requests.Session 对象，然后将其 headers 字典中的某个键（例如 'Accept-Encoding'）的值设置为 None。",
+  "evidence": [
+    "Issue 中的代码示例：session.headers['Accept-Encoding'] = None"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "值为 None 的 header 被作为字符串 'None' 发送，例如 'Accept-Encoding: None'。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 描述：'What happens is that \"None\" gets sent as the value of header.'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "将 Session 的默认 header 值设为 None 应该导致该 header 不被发送。",
+  "evidence": [
+    "Issue 中引用的文档和 IRC 讨论表明这是预期行为，且 Issue 提到使用 `del` 可以正确移除 header。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "requests.Session",
+    "kind": "class",
+    "source_path": "requests/sessions.py",
+    "reason": "Issue 的核心是关于 Session 对象的默认 headers 处理。"
+  },
+  {
+    "name": "Session.headers",
+    "kind": "attribute",
+    "source_path": "requests/sessions.py",
+    "reason": "Issue 涉及修改 Session 实例的 headers 字典属性。"
+  },
+  {
+    "name": "Session.request",
+    "kind": "method",
+    "source_path": "requests/sessions.py",
+    "reason": "发送请求并处理 headers 的主要方法。"
+  },
+  {
+    "name": "Session.prepare_request",
+    "kind": "method",
+    "source_path": "requests/sessions.py",
+    "reason": "负责准备请求，可能涉及 headers 的合并与清理。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "在请求调用时通过 `headers` 参数传递 `{'FOO': None}`。",
+    "target_pattern": "在 Session 对象创建后，直接修改其 `session.headers['Accept-Encoding'] = None`。",
+    "reason": "Issue 明确指出问题发生在会话级别的默认 headers 上，而非单个请求的参数。",
+    "confidence": "high"
+  },
+  {
+    "slot": "input",
+    "current_pattern": "测试使用一个自定义的 header（如 'foo'）。",
+    "target_pattern": "使用一个常见的默认 header，如 'Accept-Encoding' 或 'User-Agent'。",
+    "reason": "Issue 示例使用了 'Accept-Encoding'，且某些 header 可能有特殊处理逻辑。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "最终发送的请求对象（如 prepared request）的 headers 字典。",
+    "reason": "可以直接检查 'Accept-Encoding' 键是否存在，或其值是否为 'None' 字符串。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "Session 对象的 headers 属性在赋值 None 前后的状态。",
+    "reason": "观察 None 值是否被正确存储，还是在存储时就被转换。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证在发送请求时，值为 None 的 session header 键不会出现在最终请求的 headers 中。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言完整的 headers 字典相等，或断言 header 值等于 'None' 字符串。",
+    "reason": "Issue 的预期是 header 被移除，而不是发送 'None'。断言键不存在更稳定且直接对应预期。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 unittest.TestCase 或 pytest 框架。需要一个可访问的测试服务器端点（如 httpbin）来发送请求并检查发送的 headers。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要模拟或拦截网络请求以直接检查准备发出的请求对象，而不依赖外部服务器。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "bug 的确切位置是在 headers 字典赋值时、请求准备时还是发送时。",
+  "是否所有类型的 header（如大小写敏感、默认 header 与自定义 header）都受此影响。",
+  "修复后的行为是彻底删除该键，还是将其值设为空字符串或其他占位符。"
+]

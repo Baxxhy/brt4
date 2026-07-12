@@ -1,0 +1,118 @@
+instance_id: django__django-15467
+
+issue_summary: 当 ModelAdmin 的 radio_fields 包含某个外键字段时，formfield_for_foreignkey 方法中设置的 custom empty_label 会被覆盖。
+
+trigger_condition:
+{
+  "text": "定义一个继承自 ModelAdmin 的类，设置 radio_fields 包含一个外键字段，并在 formfield_for_foreignkey 方法中为该字段设置自定义的 empty_label。",
+  "evidence": [
+    "Issue 中的示例代码：`radio_fields = 'myfield',` 和 `kwargs['empty_label'] = \"I WANT TO SET MY OWN EMPTY LABEL\"`",
+    "源码片段 2 显示当字段在 radio_fields 中时，会设置 `kwargs['empty_label'] = _(\"None\") if db_field.blank else None`"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "自定义的 empty_label 不生效，被默认的 'None' 或 None 覆盖。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 描述：'You get never the \"I WANT TO SET MY OWN EMPTY LABEL\"'",
+    "相关测试 1 显示，对于 blank=True 的外键字段，当使用 radio_fields 时，choices 列表包含 ('', 'None') 作为空标签。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当用户在 formfield_for_foreignkey 中为 radio_fields 中的外键字段设置自定义 empty_label 时，该设置应被保留，不应被默认值覆盖。",
+  "evidence": [
+    "Issue 中建议的修复：`kwargs['empty_label'] = (kwargs.get('empty_label') or _('None')) if db_field.blank else None`",
+    "相关测试 2 显示，对于非 blank 的外键字段，empty_label 预期为 None。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "django.contrib.admin.options.ModelAdmin.formfield_for_foreignkey",
+    "kind": "method",
+    "source_path": "django/contrib/admin/options.py",
+    "reason": "这是 Issue 中描述的问题发生的方法，也是用户尝试覆盖 empty_label 的地方。"
+  },
+  {
+    "name": "django.contrib.admin.options.ModelAdmin",
+    "kind": "class",
+    "source_path": "django/contrib/admin/options.py",
+    "reason": "用户自定义的 ModelAdmin 继承自此类，并设置 radio_fields。"
+  },
+  {
+    "name": "django.forms.models.ModelForm",
+    "kind": "class",
+    "source_path": "",
+    "reason": "测试中通过 ModelAdmin.get_form 获取表单，其基础字段的 widget 和 choices 是观测点。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "测试中直接定义 radio_fields 字典，没有覆盖 formfield_for_foreignkey 方法。",
+    "target_pattern": "定义一个继承 ModelAdmin 的类，设置 radio_fields，并覆盖 formfield_for_foreignkey 方法，在其中为特定字段设置自定义 empty_label。",
+    "reason": "Issue 的核心是用户自定义的 empty_label 在 radio_fields 存在时被覆盖。需要变异测试以包含这种覆盖行为。",
+    "confidence": "high"
+  },
+  {
+    "slot": "argument",
+    "current_pattern": "相关测试中检查的 empty_label 是默认值（'' 对应 'None' 或 None）。",
+    "target_pattern": "检查 empty_label 是否等于用户设置的自定义字符串（例如 \"I WANT TO SET MY OWN EMPTY LABEL\"）。",
+    "reason": "为了验证 bug，需要断言自定义的 empty_label 是否生效，而不是被默认值覆盖。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "formfield_for_foreignkey 返回的 form field 的 empty_label 属性，或最终表单字段 widget.choices 列表的第一个元素的标签。",
+    "reason": "Issue 是关于 empty_label 的值，直接观察这个属性或 choices 可以判断用户设置是否被保留。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "在 formfield_for_foreignkey 方法内部，设置 kwargs['empty_label'] 前后，kwargs 字典中 'empty_label' 键的值。",
+    "reason": "可以插桩以确认用户传入的值是否在方法中被无条件覆盖。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "表单字段的 empty_label 或 choices 列表中的第一个空选项的标签应等于用户设置的自定义字符串。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言完整的 choices 列表，因为其他选项可能因数据库状态而变化。",
+    "reason": "直接比较 empty_label 的值或空选项的标签是稳定且与 Issue 核心对齐的断言。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要一个 Django TestCase，设置测试数据库，并创建包含外键字段的模型实例。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要模拟 HTTP 请求对象（request）传递给 ModelAdmin.get_form。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "当 db_field.blank 为 False 时，empty_label 的预期行为是什么？Issue 中的修复建议似乎只处理了 db_field.blank 为 True 的情况。",
+  "自定义 empty_label 是否也适用于非外键但有 choices 的字段，当它们被包含在 radio_fields 中时？Issue 只提到了外键。"
+]

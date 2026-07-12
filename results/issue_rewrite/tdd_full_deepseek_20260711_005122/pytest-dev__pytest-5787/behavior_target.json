@@ -1,0 +1,281 @@
+{
+  "instance_id": "pytest-dev__pytest-5787",
+  "issue_summary": "使用 pytest-xdist 并行执行时，链式异常（chained exceptions）的序列化/反序列化丢失了中间异常信息，只显示最后一个异常。",
+  "trigger_condition": {
+    "text": "使用 pytest-xdist 插件（例如通过 `-n auto` 参数）运行包含链式异常（使用 `raise ... from ...` 或嵌套 try-except 块）的测试。",
+    "evidence": [
+      "Issue 中描述了运行两个测试函数 `test_chained_exception_with_from` 和 `test_chained_exception_without_from`，在不使用 xdist 和使用 xdist 时输出不同。",
+      "Issue 标题和描述明确指出问题与 xdist 相关。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "当使用 xdist 运行时，测试失败报告只显示链式异常中的最后一个异常（例如 `ValueError: 13`），而缺失了前面的异常链（例如 `ValueError: 11` 和 `ValueError: 12`）及其关联信息（如 'The above exception was the direct cause of...'）。",
+    "symptom_type": "serialization_error",
+    "evidence": [
+      "Issue 中对比了两种运行方式的输出：不使用 xdist 时显示了完整的异常链，使用 xdist 时只显示了最后一个异常。",
+      "Issue 标题 'exception serialization should include chained exceptions' 直接指出了序列化问题。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "在使用 pytest-xdist 并行执行时，测试失败报告应能正确序列化、传输并反序列化完整的链式异常信息，包括所有中间异常及其因果关系（'direct cause' 或 'during handling' 等上下文）。",
+    "evidence": [
+      "Issue 中展示了不使用 xdist 时的完整输出，这代表了期望的正确行为。",
+      "Issue 标题和描述暗示了序列化应包含链式异常。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "TestReport._to_json",
+      "kind": "method",
+      "source_path": "",
+      "reason": "相关测试代码中多次使用此方法将测试报告序列化为 JSON，这是异常信息在 xdist 节点间传输的关键步骤。"
+    },
+    {
+      "name": "TestReport._from_json",
+      "kind": "method",
+      "source_path": "",
+      "reason": "相关测试代码中多次使用此方法从 JSON 反序列化测试报告，这是异常信息在 xdist 主节点重建的关键步骤。"
+    },
+    {
+      "name": "rep.longrepr",
+      "kind": "unknown",
+      "source_path": "",
+      "reason": "相关测试代码中检查了 `rep.longrepr` 的属性（如 `reprtraceback`, `reprentries`, `sections`），它包含了异常的长表示信息，是序列化的核心对象。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "",
+      "object": "TestReport 序列化/反序列化逻辑",
+      "lines": "",
+      "reason": "Issue 与 xdist 下的异常报告序列化相关，而相关测试代码都围绕 `TestReport._to_json` 和 `_from_json` 方法，检查 `longrepr` 的各个部分（`reprtraceback`, `reprentries`, `sections`）。链式异常信息可能存储在 `longrepr` 的某个未被正确序列化的部分。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "TestReportSerialization.test_xdist_report_longrepr_reprcrash_130",
+      "test_file": "testing/test_reports.py",
+      "why_relevant": "该测试直接处理 xdist 相关的报告序列化（issue pytest-xdist#130），检查 `longrepr` 的序列化/反序列化，包括 `sections` 属性。",
+      "reusable_parts": [
+        "使用 `testdir.inline_runsource` 运行失败测试",
+        "获取 `pytest_runtest_logreport` 报告",
+        "使用 `rep._to_json()` 和 `TestReport._from_json()`",
+        "比较序列化前后 `longrepr` 的各种属性（`reprcrash`, `reprtraceback`, `sections`）"
+      ],
+      "possible_gap": "该测试只检查了一个简单的 `assert False` 失败，没有涉及链式异常。其 `longrepr` 结构可能不包含链式异常信息。"
+    },
+    {
+      "test_name": "TestReportSerialization.test_reprentries_serialization_170",
+      "test_file": "testing/test_reports.py",
+      "why_relevant": "该测试检查 `reprentries`（回溯条目）的序列化（issue pytest-xdist#170），这是异常回溯的一部分，可能与链式异常的回溯表示相关。",
+      "reusable_parts": [
+        "使用 `testdir.inline_runsource` 并带 `--showlocals` 参数",
+        "获取报告并序列化/反序列化",
+        "比较 `reprentries` 中的 `lines`, `reprfileloc`, `reprfuncargs`, `reprlocals` 等属性"
+      ],
+      "possible_gap": "该测试关注单个异常的回溯条目，没有检查多个异常（链）如何表示和序列化。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中使用 `assert False` 或 `assert x`（x=0）触发一个简单的异常。",
+      "target_pattern": "使用 Issue 中提供的测试代码模式，触发嵌套的链式异常（使用 `raise ... from ...` 或嵌套 try-except）。",
+      "reason": "链式异常的结构更复杂，可能包含 `__cause__` 或 `__context__` 属性，这些可能在当前序列化逻辑中被遗漏。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "相似测试通常在不使用 xdist 的默认配置下运行。",
+      "target_pattern": "在测试设置中启用 xdist 插件或模拟其序列化/反序列化流程。",
+      "reason": "Issue 明确指出 bug 只在启用 xdist 时出现，因此测试必须触发报告在进程间传输的路径。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "serialization",
+      "expression_hint": "序列化前后 `rep.longrepr` 对象的完整结构，特别是与链式异常相关的属性（如 `chain` 或 `reprentries` 的数量和内容）。",
+      "reason": "需要确认链式异常信息在 `_to_json()` 后是否丢失，或在 `_from_json()` 后未能正确重建。"
+    },
+    {
+      "kind": "repr",
+      "expression_hint": "序列化/反序列化后 `rep.longrepr` 的字符串表示（`str(rep.longrepr)` 或相关部分），与不使用 xdist 时的完整输出进行比较。",
+      "reason": "Issue 的核心症状是最终输出的异常信息不完整，观测字符串表示可以直接验证问题。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证在模拟 xdist 序列化/反序列化后，报告中的异常链信息（如多个异常消息和因果关系提示）仍然存在。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免断言完整的、格式化的输出字符串完全相等，因为格式可能变化。",
+      "reason": "Issue 关注的是信息的存在性（例如包含 'ValueError: 11' 和 'The above exception was the direct cause' 等片段），而不是精确的排版。"
+    },
+    {
+      "assertion_goal": "验证序列化前后 `longrepr` 中代表异常链的结构（如 `reprentries` 列表的长度或特定属性）保持一致。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言与链式异常无关的属性，如本地变量行。",
+      "reason": "链式异常可能表现为多个回溯条目或特定的 sections，比较这些核心结构可以稳定地检测信息丢失。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 `testdir` fixture 来创建和运行测试代码。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要模拟 xdist 环境，或者直接调用 `TestReport._to_json` 和 `_from_json` 方法来测试序列化逻辑，而不实际启动多进程。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "链式异常在 `longrepr` 对象内部的具体表示形式（例如，是存储在 `reprtraceback.chain` 还是额外的 `sections` 中）尚不明确。",
+    "导致信息丢失的确切步骤是在 `_to_json` 序列化时，还是在 `_from_json` 反序列化时，亦或是在 xdist 的传输过程中。",
+    "除了 `raise ... from ...` 显式链，嵌套 try-except 隐式链（`__context__`）的序列化是否也有同样问题。"
+  ],
+  "raw": {
+    "issue_summary": "使用 pytest-xdist 并行执行时，链式异常（chained exceptions）的序列化/反序列化丢失了中间异常信息，只显示最后一个异常。",
+    "trigger_condition": {
+      "text": "使用 pytest-xdist 插件（例如通过 `-n auto` 参数）运行包含链式异常（使用 `raise ... from ...` 或嵌套 try-except 块）的测试。",
+      "evidence": [
+        "Issue 中描述了运行两个测试函数 `test_chained_exception_with_from` 和 `test_chained_exception_without_from`，在不使用 xdist 和使用 xdist 时输出不同。",
+        "Issue 标题和描述明确指出问题与 xdist 相关。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当使用 xdist 运行时，测试失败报告只显示链式异常中的最后一个异常（例如 `ValueError: 13`），而缺失了前面的异常链（例如 `ValueError: 11` 和 `ValueError: 12`）及其关联信息（如 'The above exception was the direct cause of...'）。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 中对比了两种运行方式的输出：不使用 xdist 时显示了完整的异常链，使用 xdist 时只显示了最后一个异常。",
+        "Issue 标题 'exception serialization should include chained exceptions' 直接指出了序列化问题。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在使用 pytest-xdist 并行执行时，测试失败报告应能正确序列化、传输并反序列化完整的链式异常信息，包括所有中间异常及其因果关系（'direct cause' 或 'during handling' 等上下文）。",
+      "evidence": [
+        "Issue 中展示了不使用 xdist 时的完整输出，这代表了期望的正确行为。",
+        "Issue 标题和描述暗示了序列化应包含链式异常。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "TestReport._to_json",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试代码中多次使用此方法将测试报告序列化为 JSON，这是异常信息在 xdist 节点间传输的关键步骤。"
+      },
+      {
+        "name": "TestReport._from_json",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试代码中多次使用此方法从 JSON 反序列化测试报告，这是异常信息在 xdist 主节点重建的关键步骤。"
+      },
+      {
+        "name": "rep.longrepr",
+        "kind": "unknown",
+        "source_path": "",
+        "reason": "相关测试代码中检查了 `rep.longrepr` 的属性（如 `reprtraceback`, `reprentries`, `sections`），它包含了异常的长表示信息，是序列化的核心对象。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "TestReport 序列化/反序列化逻辑",
+        "lines": "",
+        "reason": "Issue 与 xdist 下的异常报告序列化相关，而相关测试代码都围绕 `TestReport._to_json` 和 `_from_json` 方法，检查 `longrepr` 的各个部分（`reprtraceback`, `reprentries`, `sections`）。链式异常信息可能存储在 `longrepr` 的某个未被正确序列化的部分。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestReportSerialization.test_xdist_report_longrepr_reprcrash_130",
+        "test_file": "testing/test_reports.py",
+        "why_relevant": "该测试直接处理 xdist 相关的报告序列化（issue pytest-xdist#130），检查 `longrepr` 的序列化/反序列化，包括 `sections` 属性。",
+        "reusable_parts": [
+          "使用 `testdir.inline_runsource` 运行失败测试",
+          "获取 `pytest_runtest_logreport` 报告",
+          "使用 `rep._to_json()` 和 `TestReport._from_json()`",
+          "比较序列化前后 `longrepr` 的各种属性（`reprcrash`, `reprtraceback`, `sections`）"
+        ],
+        "possible_gap": "该测试只检查了一个简单的 `assert False` 失败，没有涉及链式异常。其 `longrepr` 结构可能不包含链式异常信息。"
+      },
+      {
+        "test_name": "TestReportSerialization.test_reprentries_serialization_170",
+        "test_file": "testing/test_reports.py",
+        "why_relevant": "该测试检查 `reprentries`（回溯条目）的序列化（issue pytest-xdist#170），这是异常回溯的一部分，可能与链式异常的回溯表示相关。",
+        "reusable_parts": [
+          "使用 `testdir.inline_runsource` 并带 `--showlocals` 参数",
+          "获取报告并序列化/反序列化",
+          "比较 `reprentries` 中的 `lines`, `reprfileloc`, `reprfuncargs`, `reprlocals` 等属性"
+        ],
+        "possible_gap": "该测试关注单个异常的回溯条目，没有检查多个异常（链）如何表示和序列化。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用 `assert False` 或 `assert x`（x=0）触发一个简单的异常。",
+        "target_pattern": "使用 Issue 中提供的测试代码模式，触发嵌套的链式异常（使用 `raise ... from ...` 或嵌套 try-except）。",
+        "reason": "链式异常的结构更复杂，可能包含 `__cause__` 或 `__context__` 属性，这些可能在当前序列化逻辑中被遗漏。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试通常在不使用 xdist 的默认配置下运行。",
+        "target_pattern": "在测试设置中启用 xdist 插件或模拟其序列化/反序列化流程。",
+        "reason": "Issue 明确指出 bug 只在启用 xdist 时出现，因此测试必须触发报告在进程间传输的路径。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "serialization",
+        "expression_hint": "序列化前后 `rep.longrepr` 对象的完整结构，特别是与链式异常相关的属性（如 `chain` 或 `reprentries` 的数量和内容）。",
+        "reason": "需要确认链式异常信息在 `_to_json()` 后是否丢失，或在 `_from_json()` 后未能正确重建。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "序列化/反序列化后 `rep.longrepr` 的字符串表示（`str(rep.longrepr)` 或相关部分），与不使用 xdist 时的完整输出进行比较。",
+        "reason": "Issue 的核心症状是最终输出的异常信息不完整，观测字符串表示可以直接验证问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在模拟 xdist 序列化/反序列化后，报告中的异常链信息（如多个异常消息和因果关系提示）仍然存在。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、格式化的输出字符串完全相等，因为格式可能变化。",
+        "reason": "Issue 关注的是信息的存在性（例如包含 'ValueError: 11' 和 'The above exception was the direct cause' 等片段），而不是精确的排版。"
+      },
+      {
+        "assertion_goal": "验证序列化前后 `longrepr` 中代表异常链的结构（如 `reprentries` 列表的长度或特定属性）保持一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言与链式异常无关的属性，如本地变量行。",
+        "reason": "链式异常可能表现为多个回溯条目或特定的 sections，比较这些核心结构可以稳定地检测信息丢失。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 `testdir` fixture 来创建和运行测试代码。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟 xdist 环境，或者直接调用 `TestReport._to_json` 和 `_from_json` 方法来测试序列化逻辑，而不实际启动多进程。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "链式异常在 `longrepr` 对象内部的具体表示形式（例如，是存储在 `reprtraceback.chain` 还是额外的 `sections` 中）尚不明确。",
+      "导致信息丢失的确切步骤是在 `_to_json` 序列化时，还是在 `_from_json` 反序列化时，亦或是在 xdist 的传输过程中。",
+      "除了 `raise ... from ...` 显式链，嵌套 try-except 隐式链（`__context__`）的序列化是否也有同样问题。"
+    ]
+  }
+}

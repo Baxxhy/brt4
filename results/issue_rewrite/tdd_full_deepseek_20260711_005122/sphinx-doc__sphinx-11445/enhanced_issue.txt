@@ -1,0 +1,142 @@
+instance_id: sphinx-doc__sphinx-11445
+
+issue_summary: 当 rst_prolog 被设置时，包含域指令（如 :mod:）作为第一级标题的文档无法正确渲染标题，且标题不会出现在 toctree 中。
+
+trigger_condition:
+{
+  "text": "配置文件中设置了 rst_prolog，并且一个 reStructuredText 文档的第一个标题是一个域指令（例如 :mod:`mypackage2`）。",
+  "evidence": [
+    "Issue 描述：'If rst_prolog is set, then any documents that contain a domain directive as the first heading (eg :mod:) do not render the heading correctly or include the heading in the toctree.'",
+    "Issue 中的重现步骤：创建了包含 :mod:`mypackage2` 标题的 mypackage.rst 文件，并在 conf.py 中设置了 rst_prolog。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "标题显示不正确，并且标题未包含在生成的 HTML 的 toctree 中（例如，在 index.html 中搜索 'mypackage2' 找不到）。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 描述：'do not render the heading correctly or include the heading in the toctree.'",
+    "Issue 中的重现步骤：运行 `grep 'mypackage2' docs/_build/index.html` 预期会找到标题，但在 bug 情况下找不到。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "即使设置了 rst_prolog，包含域指令作为第一级标题的文档也应正确渲染标题，并且标题应出现在生成的 toctree 中。",
+  "evidence": [
+    "Issue 描述：'if the heading of docs/mypackage.rst were mypackage2 instead of :mod:mypackage2 then the heading displays correctly. Similarly, if you do not set rst_prolog then the heading will display correctly.' 这表明在正常条件下标题应正确显示。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "prepend_prolog",
+    "kind": "function",
+    "source_path": "sphinx/util/rst.py",
+    "reason": "相关测试 test_prepend_prolog 涉及此函数，它负责处理 rst_prolog 内容，可能与标题解析问题有关。"
+  },
+  {
+    "name": "toctree",
+    "kind": "class",
+    "source_path": "sphinx/addnodes.py",
+    "reason": "检索到的源码片段 2 显示了 toctree 节点类，Issue 涉及 toctree 未包含标题。"
+  },
+  {
+    "name": "rst",
+    "kind": "module",
+    "source_path": "sphinx/domains/rst.py",
+    "reason": "检索到的源码片段 1 指向 rst 域，Issue 涉及域指令（如 :mod:）的处理。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "相关测试（如 test_rst_prolog）可能使用一个简单的 rst_prolog 或默认配置。",
+    "target_pattern": "设置一个非空的 rst_prolog（如 Issue 中的示例）。",
+    "reason": "Issue 表明仅当设置了 rst_prolog 时 bug 才会触发。",
+    "confidence": "high"
+  },
+  {
+    "slot": "input",
+    "current_pattern": "测试文档内容可能使用普通标题（如 'Title'）。",
+    "target_pattern": "文档的第一个标题使用域指令（如 ':mod:`mypackage2`'）。",
+    "reason": "Issue 表明当第一级标题是域指令时会出现问题。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "测试可能直接调用解析器或使用简单的构建。",
+    "target_pattern": "确保测试流程包括完整的 Sphinx 构建（sphinx-build）和 toctree 生成。",
+    "reason": "错误症状涉及 toctree 的最终输出，而不仅仅是中间解析树。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "file_output",
+    "expression_hint": "生成的 HTML 文件（如 index.html）的内容，特别是 toctree 部分。",
+    "reason": "Issue 通过 grep 检查生成的 HTML 中是否包含标题文本，这是直接的症状。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "解析后文档树（doctree）中标题节点的结构、类型和属性。",
+    "reason": "可以检查标题节点是否正确生成，以及它是否被识别为 section 或 domain 节点。"
+  },
+  {
+    "kind": "config",
+    "expression_hint": "app.config.rst_prolog 的值。",
+    "reason": "需要确认配置已正确加载并应用。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "生成的 HTML toctree 应包含指向目标文档的链接，且链接文本应正确反映标题（例如包含 'mypackage2'）。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "避免对完整的 HTML 字符串进行精确相等断言，因为 HTML 结构可能变化。",
+    "reason": "Issue 的核心是标题缺失于 toctree，检查是否存在相关文本片段是稳定且直接的方法。"
+  },
+  {
+    "assertion_goal": "解析后的文档树中，第一个标题应被正确解析为一个包含预期文本的 section 节点。",
+    "preferred_assertion_style": "isinstance",
+    "avoid": "避免断言完整的节点层次结构，除非确定其稳定性。",
+    "reason": "这有助于定位问题是发生在解析阶段还是后续的渲染/toctree 生成阶段。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "使用 @pytest.mark.sphinx fixture 来创建一个临时的 Sphinx 应用（app）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要创建一个临时的 conf.py 文件并设置 rst_prolog，以及创建包含域指令标题的 .rst 文件。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "使用 tmp_path fixture 来管理临时构建目录。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "bug 的确切代码位置（例如，是在 prepend_prolog、标题解析器、域指令处理还是 toctree 收集器中）。",
+  "rst_prolog 的内容是否必须包含特定内容（如替换指令）才能触发 bug，还是任何非空值即可。",
+  "除了 :mod: 之外，其他域指令（如 :class:）是否也会触发相同问题。",
+  "标题层级（如 = 的数量）是否会影响 bug 的触发。"
+]

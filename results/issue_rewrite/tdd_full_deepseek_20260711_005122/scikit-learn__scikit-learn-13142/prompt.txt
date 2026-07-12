@@ -1,0 +1,578 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+GaussianMixture predict and fit_predict disagree when n_init>1
+#### Description
+When `n_init` is specified in GaussianMixture, the results of fit_predict(X) and predict(X) are often different.  The `test_gaussian_mixture_fit_predict` unit test doesn't catch this because it does not set `n_init`.
+
+#### Steps/Code to Reproduce
+```
+python
+from sklearn.mixture import GaussianMixture
+from sklearn.utils.testing import assert_array_equal
+import numpy
+X = numpy.random.randn(1000,5)
+print 'no n_init'
+gm = GaussianMixture(n_components=5)
+c1 = gm.fit_predict(X)
+c2 = gm.predict(X)
+assert_array_equal(c1,c2)
+print 'n_init=5'
+gm = GaussianMixture(n_components=5, n_init=5)
+c1 = gm.fit_predict(X)
+c2 = gm.predict(X)
+assert_array_equal(c1,c2)
+```
+
+#### Expected Results
+```
+no n_init
+n_init=5
+```
+No exceptions.
+
+#### Actual Results
+```
+no n_init
+n_init=5
+Traceback (most recent call last):
+  File "test_gm.py", line 17, in <module>
+    assert_array_equal(c1,c2)
+  File "/home/scott/.local/lib/python2.7/site-packages/numpy/testing/_private/utils.py", line 872, in assert_array_equal
+    verbose=verbose, header='Arrays are not equal')
+  File "/home/scott/.local/lib/python2.7/site-packages/numpy/testing/_private/utils.py", line 796, in assert_array_compare
+    raise AssertionError(msg)
+AssertionError: 
+Arrays are not equal
+
+(mismatch 88.6%)
+ x: array([4, 0, 1, 1, 1, 3, 3, 4, 4, 2, 0, 0, 1, 2, 0, 2, 0, 1, 3, 1, 1, 3,
+       2, 1, 0, 2, 1, 0, 2, 0, 3, 1, 2, 3, 3, 1, 0, 2, 2, 0, 3, 0, 2, 0,
+       4, 2, 3, 0, 4, 2, 4, 1, 0, 2, 2, 1, 3, 2, 1, 4, 0, 2, 2, 1, 1, 2,...
+ y: array([4, 1, 0, 2, 2, 1, 1, 4, 4, 0, 4, 1, 0, 3, 1, 0, 2, 2, 1, 2, 0, 0,
+       1, 0, 4, 1, 0, 4, 0, 1, 1, 2, 3, 1, 4, 0, 1, 4, 4, 4, 0, 1, 0, 2,
+       4, 1, 1, 2, 4, 3, 4, 0, 2, 3, 2, 3, 0, 0, 2, 3, 3, 3, 3, 0, 3, 2,...
+```
+
+#### Versions
+```
+System:
+    python: 2.7.15rc1 (default, Nov 12 2018, 14:31:15)  [GCC 7.3.0]
+   machine: Linux-4.15.0-43-generic-x86_64-with-Ubuntu-18.04-bionic
+executable: /usr/bin/python
+
+BLAS:
+    macros: HAVE_CBLAS=None, NO_ATLAS_INFO=-1
+cblas_libs: cblas
+  lib_dirs: /usr/lib/x86_64-linux-gnu
+
+Python deps:
+    Cython: 0.28.5
+     scipy: 1.2.0
+setuptools: 39.0.1
+       pip: 19.0.1
+     numpy: 1.16.0
+    pandas: 0.23.1
+   sklearn: 0.20.2
+```
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sklearn/mixture/gaussian_mixture.py
+对象名称：GaussianMixture
+节点类型：class
+父节点：gaussian_mixture
+行号范围：434-755
+代码：
+class GaussianMixture(BaseMixture):
+    """Gaussian Mixture.
+
+    Representation of a Gaussian mixture model probability distribution.
+    This class allows to estimate the parameters of a Gaussian mixture
+    distribution.
+
+    Read more in the :ref:`User Guide <gmm>`.
+
+    .. versionadded:: 0.18
+
+    Parameters
+    ----------
+    n_components : int, defaults to 1.
+        The number of mixture components.
+
+    covariance_type : {'full' (default), 'tied', 'diag', 'spherical'}
+        String describing the type of covariance parameters to use.
+        Must be one of:
+
+        'full'
+            each component has its own general covariance matrix
+        'tied'
+            all components share the same general covariance matrix
+        'diag'
+            each component has its own diagonal covariance matrix
+        'spherical'
+            each component has its own single variance
+
+    tol : float, defaults to 1e-3.
+        The convergence threshold. EM iterations will stop when the
+        lower bound average gain is below this threshold.
+
+    reg_covar : float, defaults to 1e-6.
+        Non-negative regularization added to the diagonal of covariance.
+        Allows to assure that the covariance matrices are all positive.
+
+    max_iter : int, defaults to 100.
+        The number of EM iterations to perform.
+
+    n_init : int, defaults to 1.
+        The number of initializations to perform. The best results are kept.
+
+    init_params : {'kmeans', 'random'}, defaults to 'kmeans'.
+        The method used to initialize the weights, the means and the
+        precisions.
+        Must be one of::
+
+            'kmeans' : responsibilities are initialized using kmeans.
+            'random' : responsibilities are initialized randomly.
+
+    weights_init : array-like, shape (n_components, ), optional
+        The user-provided initial weights, defaults to None.
+        If it None, weights are initialized using the `init_params` method.
+
+    means_init : array-like, shape (n_components, n_features), optional
+        The user-provided initial means, defaults to None,
+        If it None, means are initialized using the `init_params` method.
+
+    precisions_init : array-like, optional.
+        The user-provided initial precisions (inverse of the covariance
+        matrices), defaults to None.
+        If it None, precisions are initialized using the 'init_params' method.
+        The shape depends on 'covariance_type'::
+
+            (n_components,)                        if 'spherical',
+            (n_features, n_features)               if 'tied',
+            (n_components, n_features)             if 'diag',
+            (n_components, n_features, n_features) if 'full'
+
+    random_state : int, RandomState instance or None, optional (default=None)
+        If int, random_state is the seed used by the random number generator;
+        If RandomState instance, random_state is the random number generator;
+        If None, the random number generator is the RandomState instance used
+        by `np.random`.
+
+    warm_start : bool, default to False.
+        If 'warm_start' is True, the solution of the last fitting is used as
+        initialization for the next call of fit(). This can speed up
+        convergence when fit is called several times on similar problems.
+        In that case, 'n_init' is ignored and only a single initialization
+        occurs upon the first call.
+        See :term:`the Glossary <warm_start>`.
+
+    verbose : int, default to 0.
+        Enable verbose output. If 1 then it prints the current
+        initialization and each iteration step. If greater than 1 then
+        it prints also the log probability and the time needed
+        for each step.
+
+    verbose_interval : int, default to 10.
+        Number of iteration done before the next print.
+
+    Attributes
+    ----------
+    weights_ : array-like, shape (n_components,)
+        The weights of each mixture components.
+
+    means_ : array-like, shape (n_components, n_features)
+        The mean of each mixture component.
+
+    covariances_ : array-like
+        The covariance of each mixture component.
+        The shape depends on `covariance_type`::
+
+            (n_components,)                        if 'spherical',
+            (n_features, n_features)               if 'tied',
+            (n_components, n_features)             if 'diag',
+            (n_components, n_features, n_features) if 'full'
+
+    precisions_ : array-like
+        The precision matrices for each component in the mixture. A precision
+        matrix is the inverse of a covariance matrix. A covariance matrix is
+        symmetric positive definite so the mixture of Gaussian can be
+        equivalently parameterized by the precision matrices. Storing the
+        precision matrices instead of the covariance matrices makes it more
+        efficient to compute the log-likelihood of new samples at test time.
+        The shape depends on `covariance_type`::
+
+            (n_components,)                        if 'spherical',
+            (n_features, n_features)               if 'tied',
+            (n_components, n_features)             if 'diag',
+            (n_components, n_features, n_features) if 'full'
+
+    precisions_cholesky_ : array-like
+        The cholesky decomposition of the precision matrices of each mixture
+        component. A precision matrix is the inverse of a covariance matrix.
+        A covariance matrix is symmetric positive definite so the mixture of
+        Gaussian can be equivalently parameterized by the precision matrices.
+        Storing the precision matrices instead of the covariance matrices makes
+        it more efficient to compute the log-likelihood of new samples at test
+        time. The shape depends on `covariance_type`::
+
+            (n_components,)                        if 'spherical',
+            (n_features, n_features)               if 'tied',
+            (n_components, n_features)             if 'diag',
+            (n_components, n_features, n_features) if 'full'
+
+    converged_ : bool
+        True when convergence was reached in fit(), False otherwise.
+
+    n_iter_ : int
+        Number of step used by the best fit of EM to reach the convergence.
+
+    lower_bound_ : float
+        Lower bound value on the log-likelihood (of the training data with
+        respect to the model) of the best fit of EM.
+
+    See Also
+    --------
+    BayesianGaussianMixture : Gaussian mixture model fit with a variational
+        inference.
+    """
+    def __init__(self, n_components=1, covariance_type='full', tol=1e-3,
+                 reg_covar=1e-6, max_iter=100, n_init=1, init_params='kmeans',
+                 weights_init=None, means_init=None, precisions_init=None,
+                 random_state=None, warm_start=False,
+                 verbose=0, verbose_interval=10):
+    def _check_parameters(self, X):
+    def _initialize(self, X, resp):
+    def _m_step(self, X, log_resp):
+    def _estimate_log_prob(self, X):
+    def _estimate_log_weights(self):
+    def _compute_lower_bound(self, _, log_prob_norm):
+    def _check_is_fitted(self):
+    def _get_parameters(self):
+    def _set_parameters(self, params):
+    def _n_parameters(self):
+    def bic(self, X):
+    def aic(self, X):
+
+
+【源码片段 2】
+文件路径：sklearn/tests/test_pipeline.py
+对象名称：predict
+节点类型：class_function
+父节点：Mult
+行号范围：103-104
+代码：
+    def predict(self, X):
+        return (np.asarray(X) * self.mult).sum(axis=1)
+
+
+【源码片段 3】
+文件路径：sklearn/base.py
+对象名称：fit_predict
+节点类型：class_function
+父节点：ClusterMixin
+行号范围：338-357
+代码：
+    def fit_predict(self, X, y=None):
+        """Performs clustering on X and returns cluster labels.
+
+        Parameters
+        ----------
+        X : ndarray, shape (n_samples, n_features)
+            Input data.
+
+        y : Ignored
+            not used, present for API consistency by convention.
+
+        Returns
+        -------
+        labels : ndarray, shape (n_samples,)
+            cluster labels
+        """
+        # non-optimized default implementation; override when a better
+        # method is possible for a given clustering algorithm
+        self.fit(X)
+        return self.labels_
+
+
+【源码片段 4】
+文件路径：sklearn/mixture/tests/test_gaussian_mixture.py
+对象名称：test_gaussian_mixture_fit_predict
+节点类型：top-level function
+父节点：test_gaussian_mixture
+行号范围：580-598
+代码：
+def test_gaussian_mixture_fit_predict(seed, max_iter, tol):
+    rng = np.random.RandomState(seed)
+    rand_data = RandomData(rng)
+    for covar_type in COVARIANCE_TYPE:
+        X = rand_data.X[covar_type]
+        Y = rand_data.Y
+        g = GaussianMixture(n_components=rand_data.n_components,
+                            random_state=rng, weights_init=rand_data.weights,
+                            means_init=rand_data.means,
+                            precisions_init=rand_data.precisions[covar_type],
+                            covariance_type=covar_type,
+                            max_iter=max_iter, tol=tol)
+
+        # check if fit_predict(X) is equivalent to fit(X).predict(X)
+        f = copy.deepcopy(g)
+        Y_pred1 = f.fit(X).predict(X)
+        Y_pred2 = g.fit_predict(X)
+        assert_array_equal(Y_pred1, Y_pred2)
+        assert_greater(adjusted_rand_score(Y, Y_pred2), .95)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sklearn/mixture/tests/test_gaussian_mixture.py
+测试名称：test_gaussian_mixture_fit_predict
+测试代码：
+@pytest.mark.filterwarnings("ignore:.*did not converge.*")
+@pytest.mark.parametrize('seed, max_iter, tol', [
+    (0, 2, 1e-7),    # strict non-convergence
+    (1, 2, 1e-1),    # loose non-convergence
+    (3, 300, 1e-7),  # strict convergence
+    (4, 300, 1e-1),  # loose convergence
+])
+def test_gaussian_mixture_fit_predict(seed, max_iter, tol):
+    rng = np.random.RandomState(seed)
+    rand_data = RandomData(rng)
+    for covar_type in COVARIANCE_TYPE:
+        X = rand_data.X[covar_type]
+        Y = rand_data.Y
+        g = GaussianMixture(n_components=rand_data.n_components,
+                            random_state=rng, weights_init=rand_data.weights,
+                            means_init=rand_data.means,
+                            precisions_init=rand_data.precisions[covar_type],
+                            covariance_type=covar_type,
+                            max_iter=max_iter, tol=tol)
+
+        # check if fit_predict(X) is equivalent to fit(X).predict(X)
+        f = copy.deepcopy(g)
+        Y_pred1 = f.fit(X).predict(X)
+        Y_pred2 = g.fit_predict(X)
+        assert_array_equal(Y_pred1, Y_pred2)
+        assert_greater(adjusted_rand_score(Y, Y_pred2), .95)
+
+【相关测试 2】
+测试文件：sklearn/mixture/tests/test_gaussian_mixture.py
+测试名称：test_gaussian_mixture_fit_best_params
+测试代码：
+def test_gaussian_mixture_fit_best_params():
+    rng = np.random.RandomState(0)
+    rand_data = RandomData(rng)
+    n_components = rand_data.n_components
+    n_init = 10
+    for covar_type in COVARIANCE_TYPE:
+        X = rand_data.X[covar_type]
+        g = GaussianMixture(n_components=n_components, n_init=1, reg_covar=0,
+                            random_state=rng, covariance_type=covar_type)
+        ll = []
+        for _ in range(n_init):
+            g.fit(X)
+            ll.append(g.score(X))
+        ll = np.array(ll)
+        g_best = GaussianMixture(n_components=n_components,
+                                 n_init=n_init, reg_covar=0, random_state=rng,
+                                 covariance_type=covar_type)
+        g_best.fit(X)
+        assert_almost_equal(ll.min(), g_best.score(X))
+
+【相关测试 3】
+测试文件：sklearn/mixture/tests/test_gaussian_mixture.py
+测试名称：test_multiple_init
+测试代码：
+def test_multiple_init():
+    # Test that multiple inits does not much worse than a single one
+    rng = np.random.RandomState(0)
+    n_samples, n_features, n_components = 50, 5, 2
+    X = rng.randn(n_samples, n_features)
+    for cv_type in COVARIANCE_TYPE:
+        train1 = GaussianMixture(n_components=n_components,
+                                 covariance_type=cv_type,
+                                 random_state=0).fit(X).score(X)
+        train2 = GaussianMixture(n_components=n_components,
+                                 covariance_type=cv_type,
+                                 random_state=0, n_init=5).fit(X).score(X)
+        assert_greater_equal(train2, train1)
+
+【相关测试 4】
+测试文件：sklearn/mixture/tests/test_gaussian_mixture.py
+测试名称：test_gaussian_mixture_predict_predict_proba
+测试代码：
+def test_gaussian_mixture_predict_predict_proba():
+    rng = np.random.RandomState(0)
+    rand_data = RandomData(rng)
+    for covar_type in COVARIANCE_TYPE:
+        X = rand_data.X[covar_type]
+        Y = rand_data.Y
+        g = GaussianMixture(n_components=rand_data.n_components,
+                            random_state=rng, weights_init=rand_data.weights,
+                            means_init=rand_data.means,
+                            precisions_init=rand_data.precisions[covar_type],
+                            covariance_type=covar_type)
+
+        # Check a warning message arrive if we don't do fit
+        assert_raise_message(NotFittedError,
+                             "This GaussianMixture instance is not fitted "
+                             "yet. Call 'fit' with appropriate arguments "
+                             "before using this method.", g.predict, X)
+
+        g.fit(X)
+        Y_pred = g.predict(X)
+        Y_pred_proba = g.predict_proba(X).argmax(axis=1)
+        assert_array_equal(Y_pred, Y_pred_proba)
+        assert_greater(adjusted_rand_score(Y, Y_pred), .95)
+
+【相关测试 5】
+测试文件：sklearn/tests/test_pipeline.py
+测试名称：test_fit_predict_on_pipeline
+测试代码：
+def test_fit_predict_on_pipeline():
+    # test that the fit_predict method is implemented on a pipeline
+    # test that the fit_predict on pipeline yields same results as applying
+    # transform and clustering steps separately
+    iris = load_iris()
+    scaler = StandardScaler()
+    km = KMeans(random_state=0)
+    # As pipeline doesn't clone estimators on construction,
+    # it must have its own estimators
+    scaler_for_pipeline = StandardScaler()
+    km_for_pipeline = KMeans(random_state=0)
+
+    # first compute the transform and clustering step separately
+    scaled = scaler.fit_transform(iris.data)
+    separate_pred = km.fit_predict(scaled)
+
+    # use a pipeline to do the transform and clustering in one step
+    pipe = Pipeline([
+        ('scaler', scaler_for_pipeline),
+        ('Kmeans', km_for_pipeline)
+    ])
+    pipeline_pred = pipe.fit_predict(iris.data)
+
+    assert_array_almost_equal(pipeline_pred, separate_pred)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

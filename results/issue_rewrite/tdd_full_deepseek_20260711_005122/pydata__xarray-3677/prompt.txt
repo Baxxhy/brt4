@@ -1,0 +1,837 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Merging dataArray into dataset using dataset method fails
+While it's possible to merge a dataset and a dataarray object using the top-level `merge()` function, if you try the same thing with the `ds.merge()` method it fails.
+
+```python
+import xarray as xr
+
+ds = xr.Dataset({'a': 0})
+da = xr.DataArray(1, name='b')
+
+expected = xr.merge([ds, da])  # works fine
+print(expected)
+
+ds.merge(da)  # fails
+```
+
+Output:
+```
+<xarray.Dataset>
+Dimensions:  ()
+Data variables:
+    a        int64 0
+    b        int64 1
+
+Traceback (most recent call last):
+  File "mwe.py", line 6, in <module>
+    actual = ds.merge(da)
+  File "/home/tegn500/Documents/Work/Code/xarray/xarray/core/dataset.py", line 3591, in merge
+    fill_value=fill_value,
+  File "/home/tegn500/Documents/Work/Code/xarray/xarray/core/merge.py", line 835, in dataset_merge_method
+    objs, compat, join, priority_arg=priority_arg, fill_value=fill_value
+  File "/home/tegn500/Documents/Work/Code/xarray/xarray/core/merge.py", line 548, in merge_core
+    coerced = coerce_pandas_values(objects)
+  File "/home/tegn500/Documents/Work/Code/xarray/xarray/core/merge.py", line 394, in coerce_pandas_values
+    for k, v in obj.items():
+  File "/home/tegn500/Documents/Work/Code/xarray/xarray/core/common.py", line 233, in __getattr__
+    "{!r} object has no attribute {!r}".format(type(self).__name__, name)
+AttributeError: 'DataArray' object has no attribute 'items'
+```
+
+
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：xarray/core/dataset.py
+对象名称：Dataset
+节点类型：class
+父节点：dataset
+行号范围：421-5697
+代码：
+class Dataset(Mapping, ImplementsDatasetReduce, DataWithCoords):
+    """A multi-dimensional, in memory, array database.
+
+    A dataset resembles an in-memory representation of a NetCDF file, and
+    consists of variables, coordinates and attributes which together form a
+    self describing dataset.
+
+    Dataset implements the mapping interface with keys given by variable names
+    and values given by DataArray objects for each variable name.
+
+    One dimensional variables with name equal to their dimension are index
+    coordinates used for label based indexing.
+    """
+    __slots__ = (
+        "_attrs",
+        "_cache",
+        "_coord_names",
+        "_dims",
+        "_encoding",
+        "_file_obj",
+        "_indexes",
+        "_variables",
+        "__weakref__",
+    )
+    _groupby_cls = groupby.DatasetGroupBy
+    _rolling_cls = rolling.DatasetRolling
+    _coarsen_cls = rolling.DatasetCoarsen
+    _resample_cls = resample.DatasetResample
+    def __init__(
+        self,
+        data_vars: Mapping[Hashable, Any] = None,
+        coords: Mapping[Hashable, Any] = None,
+        attrs: Mapping[Hashable, Any] = None,
+        compat=None,
+    ):
+    @classmethod
+    def load_store(cls, store, decoder=None) -> "Dataset":
+    @property
+    def variables(self) -> Mapping[Hashable, Variable]:
+    @property
+    def attrs(self) -> Dict[Hashable, Any]:
+    @attrs.setter
+    def attrs(self, value: Mapping[Hashable, Any]) -> None:
+    @property
+    def encoding(self) -> Dict:
+    @encoding.setter
+    def encoding(self, value: Mapping) -> None:
+    @property
+    def dims(self) -> Mapping[Hashable, int]:
+    @property
+    def sizes(self) -> Mapping[Hashable, int]:
+    def load(self, **kwargs) -> "Dataset":
+    def __dask_tokenize__(self):
+    def __dask_graph__(self):
+    def __dask_keys__(self):
+    def __dask_layers__(self):
+    @property
+    def __dask_optimize__(self):
+    @property
+    def __dask_scheduler__(self):
+    def __dask_postcompute__(self):
+    def __dask_postpersist__(self):
+    @staticmethod
+    def _dask_postcompute(results, info, *args):
+    @staticmethod
+    def _dask_postpersist(dsk, info, *args):
+    def compute(self, **kwargs) -> "Dataset":
+    def _persist_inplace(self, **kwargs) -> "Dataset":
+    def persist(self, **kwargs) -> "Dataset":
+    @classmethod
+    def _construct_direct(
+        cls,
+        variables,
+        coord_names,
+        dims=None,
+        attrs=None,
+        indexes=None,
+        encoding=None,
+        file_obj=None,
+    ):
+    def _replace(
+        self,
+        variables: Dict[Hashable, Variable] = None,
+        coord_names: Set[Hashable] = None,
+        dims: Dict[Any, int] = None,
+        attrs: Union[Dict[Hashable, Any], None, Default] = _default,
+        indexes: Union[Dict[Any, pd.Index], None, Default] = _default,
+        encoding: Union[dict, None, Default] = _default,
+        inplace: bool = False,
+    ) -> "Dataset":
+    def _replace_with_new_dims(
+        self,
+        variables: Dict[Hashable, Variable],
+        coord_names: set = None,
+        attrs: Union[Dict[Hashable, Any], None, Default] = _default,
+        indexes: Union[Dict[Hashable, pd.Index], None, Default] = _default,
+        inplace: bool = False,
+    ) -> "Dataset":
+    def _replace_vars_and_dims(
+        self,
+        variables: Dict[Hashable, Variable],
+        coord_names: set = None,
+        dims: Dict[Hashable, int] = None,
+        attrs: Union[Dict[Hashable, Any], None, Default] = _default,
+        inplace: bool = False,
+    ) -> "Dataset":
+    def _overwrite_indexes(self, indexes: Mapping[Any, pd.Index]) -> "Dataset":
+    def copy(self, deep: bool = False, data: Mapping = None) -> "Dataset":
+    @property
+    def _level_coords(self) -> Dict[str, Hashable]:
+    def _copy_listed(self, names: Iterable[Hashable]) -> "Dataset":
+    def _construct_dataarray(self, name: Hashable) -> "DataArray":
+    def __copy__(self) -> "Dataset":
+    def __deepcopy__(self, memo=None) -> "Dataset":
+    @property
+    def _attr_sources(self) -> List[Mapping[Hashable, Any]]:
+    @property
+    def _item_sources(self) -> List[Mapping[Hashable, Any]]:
+    def __contains__(self, key: object) -> bool:
+    def __len__(self) -> int:
+    def __bool__(self) -> bool:
+    def __iter__(self) -> Iterator[Hashable]:
+    def __array__(self, dtype=None):
+    @property
+    def nbytes(self) -> int:
+    @property
+    def loc(self) -> _LocIndexer:
+    def __getitem__(self, key: Any) -> "Union[DataArray, Dataset]":
+    def __setitem__(self, key: Hashable, value) -> None:
+    def __delitem__(self, key: Hashable) -> None:
+    __hash__ = None  # type: ignore
+    def _all_compat(self, other: "Dataset", compat_str: str) -> bool:
+    def broadcast_equals(self, other: "Dataset") -> bool:
+    def equals(self, other: "Dataset") -> bool:
+    def identical(self, other: "Dataset") -> bool:
+    @property
+    def indexes(self) -> Indexes:
+    @property
+    def coords(self) -> DatasetCoordinates:
+    @property
+    def data_vars(self) -> DataVariables:
+    def set_coords(
+        self, names: "Union[Hashable, Iterable[Hashable]]", inplace: bool = None
+    ) -> "Dataset":
+    def reset_coords(
+        self,
+        names: "Union[Hashable, Iterable[Hashable], None]" = None,
+        drop: bool = False,
+        inplace: bool = None,
+    ) -> "Dataset":
+    def dump_to_store(self, store: "AbstractDataStore", **kwargs) -> None:
+    def to_netcdf(
+        self,
+        path=None,
+        mode: str = "w",
+        format: str = None,
+        group: str = None,
+        engine: str = None,
+        encoding: Mapping = None,
+        unlimited_dims: Iterable[Hashable] = None,
+        compute: bool = True,
+        invalid_netcdf: bool = False,
+    ) -> Union[bytes, "Delayed", None]:
+    def to_zarr(
+        self,
+        store: Union[MutableMapping, str, Path] = None,
+        mode: str = None,
+        synchronizer=None,
+        group: str = None,
+        encoding: Mapping = None,
+        compute: bool = True,
+        consolidated: bool = False,
+        append_dim: Hashable = None,
+    ) -> "ZarrStore":
+    def __repr__(self) -> str:
+    def _repr_html_(self):
+    def info(self, buf=None) -> None:
+    @property
+    def chunks(self) -> Mapping[Hashable, Tuple[int, ...]]:
+    def chunk(
+        self,
+        chunks: Union[
+            None, Number, Mapping[Hashable, Union[None, Number, Tuple[Number, ...]]]
+        ] = None,
+        name_prefix: str = "xarray-",
+        token: str = None,
+        lock: bool = False,
+    ) -> "Dataset":
+    def _validate_indexers(
+        self, indexers: Mapping[Hashable, Any]
+    ) -> Iterator[Tuple[Hashable, Union[int, slice, np.ndarray, Variable]]]:
+    def _validate_interp_indexers(
+        self, indexers: Mapping[Hashable, Any]
+    ) -> Iterator[Tuple[Hashable, Variable]]:
+    def _get_indexers_coords_and_indexes(self, indexers):
+    def isel(
+        self,
+        indexers: Mapping[Hashable, Any] = None,
+        drop: bool = False,
+        **indexers_kwargs: Any,
+    ) -> "Dataset":
+    def _isel_fancy(self, indexers: Mapping[Hashable, Any], *, drop: bool) -> "Dataset":
+    def sel(
+        self,
+        indexers: Mapping[Hashable, Any] = None,
+        method: str = None,
+        tolerance: Number = None,
+        drop: bool = False,
+        **indexers_kwargs: Any,
+    ) -> "Dataset":
+    def head(
+        self,
+        indexers: Union[Mapping[Hashable, int], int] = None,
+        **indexers_kwargs: Any,
+    ) -> "Dataset":
+    def tail(
+        self,
+        indexers: Union[Mapping[Hashable, int], int] = None,
+        **indexers_kwargs: Any,
+    ) -> "Dataset":
+    def thin(
+        self,
+        indexers: Union[Mapping[Hashable, int], int] = None,
+        **indexers_kwargs: Any,
+    ) -> "Dataset":
+    def broadcast_like(
+        self, other: Union["Dataset", "DataArray"], exclude: Iterable[Hashable] = None
+    ) -> "Dataset":
+    def reindex_like(
+        self,
+        other: Union["Dataset", "DataArray"],
+        method: str = None,
+        tolerance: Number = None,
+        copy: bool = True,
+        fill_value: Any = dtypes.NA,
+    ) -> "Dataset":
+    def reindex(
+        self,
+        indexers: Mapping[Hashable, Any] = None,
+        method: str = None,
+        tolerance: Number = None,
+        copy: bool = True,
+        fill_value: Any = dtypes.NA,
+        **indexers_kwargs: Any,
+    ) -> "Dataset":
+    def _reindex(
+        self,
+        indexers: Mapping[Hashable, Any] = None,
+        method: str = None,
+        tolerance: Number = None,
+        copy: bool = True,
+        fill_value: Any = dtypes.NA,
+        sparse: bool = False,
+        **indexers_kwargs: Any,
+    ) -> "Dataset":
+    def interp(
+        self,
+        coords: Mapping[Hashable, Any] = None,
+        method: str = "linear",
+        assume_sorted: bool = False,
+        kwargs: Mapping[str, Any] = None,
+        **coords_kwargs: Any,
+    ) -> "Dataset":
+    def interp_like(
+        self,
+        other: 
+...[TRUNCATED]...
+ int, Sequence[int]] = None,
+        keep_attrs: bool = None,
+        keepdims: bool = False,
+        **kwargs: Any,
+    ) -> "DataArray":
+    def to_pandas(self) -> Union["DataArray", pd.Series, pd.DataFrame]:
+    def to_dataframe(self, name: Hashable = None) -> pd.DataFrame:
+    def to_series(self) -> pd.Series:
+    def to_masked_array(self, copy: bool = True) -> np.ma.MaskedArray:
+    def to_netcdf(self, *args, **kwargs) -> Union[bytes, "Delayed", None]:
+    def to_dict(self, data: bool = True) -> dict:
+    @classmethod
+    def from_dict(cls, d: dict) -> "DataArray":
+    @classmethod
+    def from_series(cls, series: pd.Series, sparse: bool = False) -> "DataArray":
+    def to_cdms2(self) -> "cdms2_Variable":
+    @classmethod
+    def from_cdms2(cls, variable: "cdms2_Variable") -> "DataArray":
+    def to_iris(self) -> "iris_Cube":
+    @classmethod
+    def from_iris(cls, cube: "iris_Cube") -> "DataArray":
+    def _all_compat(self, other: "DataArray", compat_str: str) -> bool:
+    def broadcast_equals(self, other: "DataArray") -> bool:
+    def equals(self, other: "DataArray") -> bool:
+    def identical(self, other: "DataArray") -> bool:
+    def _result_name(self, other: Any = None) -> Optional[Hashable]:
+    def __array_wrap__(self, obj, context=None) -> "DataArray":
+    def __matmul__(self, obj):
+    def __rmatmul__(self, other):
+    @staticmethod
+    def _unary_op(f: Callable[..., Any]) -> Callable[..., "DataArray"]:
+        @functools.wraps(f)
+    @staticmethod
+    def _binary_op(
+        f: Callable[..., Any],
+        reflexive: bool = False,
+        join: str = None,  # see xarray.align
+        **ignored_kwargs,
+    ) -> Callable[..., "DataArray"]:
+        @functools.wraps(f)
+    @staticmethod
+    def _inplace_binary_op(f: Callable) -> Callable[..., "DataArray"]:
+        @functools.wraps(f)
+    def _copy_attrs_from(self, other: Union["DataArray", Dataset, Variable]) -> None:
+    @property
+    def plot(self) -> _PlotMethods:
+    def _title_for_slice(self, truncate: int = 50) -> str:
+    def diff(self, dim: Hashable, n: int = 1, label: Hashable = "upper") -> "DataArray":
+    def shift(
+        self,
+        shifts: Mapping[Hashable, int] = None,
+        fill_value: Any = dtypes.NA,
+        **shifts_kwargs: int,
+    ) -> "DataArray":
+    def roll(
+        self,
+        shifts: Mapping[Hashable, int] = None,
+        roll_coords: bool = None,
+        **shifts_kwargs: int,
+    ) -> "DataArray":
+    @property
+    def real(self) -> "DataArray":
+    @property
+    def imag(self) -> "DataArray":
+    def dot(
+        self, other: "DataArray", dims: Union[Hashable, Sequence[Hashable], None] = None
+    ) -> "DataArray":
+    def sortby(
+        self,
+        variables: Union[Hashable, "DataArray", Sequence[Union[Hashable, "DataArray"]]],
+        ascending: bool = True,
+    ) -> "DataArray":
+    def quantile(
+        self,
+        q: Any,
+        dim: Union[Hashable, Sequence[Hashable], None] = None,
+        interpolation: str = "linear",
+        keep_attrs: bool = None,
+    ) -> "DataArray":
+    def rank(
+        self, dim: Hashable, pct: bool = False, keep_attrs: bool = None
+    ) -> "DataArray":
+    def differentiate(
+        self, coord: Hashable, edge_order: int = 1, datetime_unit: str = None
+    ) -> "DataArray":
+    def integrate(
+        self, dim: Union[Hashable, Sequence[Hashable]], datetime_unit: str = None
+    ) -> "DataArray":
+    def unify_chunks(self) -> "DataArray":
+    def map_blocks(
+        self,
+        func: "Callable[..., T_DSorDA]",
+        args: Sequence[Any] = (),
+        kwargs: Mapping[str, Any] = None,
+    ) -> "T_DSorDA":
+    str = property(StringAccessor)
+
+
+【源码片段 4】
+文件路径：xarray/core/merge.py
+对象名称：dataset_merge_method
+节点类型：top-level function
+父节点：merge
+行号范围：798-836
+代码：
+def dataset_merge_method(
+    dataset: "Dataset",
+    other: "CoercibleMapping",
+    overwrite_vars: Union[Hashable, Iterable[Hashable]],
+    compat: str,
+    join: str,
+    fill_value: Any,
+) -> _MergeResult:
+    """Guts of the Dataset.merge method.
+    """
+    # we are locked into supporting overwrite_vars for the Dataset.merge
+    # method due for backwards compatibility
+    # TODO: consider deprecating it?
+
+    if isinstance(overwrite_vars, Iterable) and not isinstance(overwrite_vars, str):
+        overwrite_vars = set(overwrite_vars)
+    else:
+        overwrite_vars = {overwrite_vars}
+
+    if not overwrite_vars:
+        objs = [dataset, other]
+        priority_arg = None
+    elif overwrite_vars == set(other):
+        objs = [dataset, other]
+        priority_arg = 1
+    else:
+        other_overwrite: Dict[Hashable, CoercibleValue] = {}
+        other_no_overwrite: Dict[Hashable, CoercibleValue] = {}
+        for k, v in other.items():
+            if k in overwrite_vars:
+                other_overwrite[k] = v
+            else:
+                other_no_overwrite[k] = v
+        objs = [dataset, other_no_overwrite, other_overwrite]
+        priority_arg = 2
+
+    return merge_core(
+        objs, compat, join, priority_arg=priority_arg, fill_value=fill_value
+    )
+
+
+【源码片段 5】
+文件路径：xarray/core/merge.py
+对象名称：merge_core
+节点类型：top-level function
+父节点：merge
+行号范围：501-574
+代码：
+def merge_core(
+    objects: Iterable["CoercibleMapping"],
+    compat: str = "broadcast_equals",
+    join: str = "outer",
+    priority_arg: Optional[int] = None,
+    explicit_coords: Optional[Sequence] = None,
+    indexes: Optional[Mapping[Hashable, pd.Index]] = None,
+    fill_value: object = dtypes.NA,
+) -> _MergeResult:
+    """Core logic for merging labeled objects.
+
+    This is not public API.
+
+    Parameters
+    ----------
+    objects : list of mappings
+        All values must be convertable to labeled arrays.
+    compat : {'identical', 'equals', 'broadcast_equals', 'no_conflicts', 'override'}, optional
+        Compatibility checks to use when merging variables.
+    join : {'outer', 'inner', 'left', 'right'}, optional
+        How to combine objects with different indexes.
+    priority_arg : integer, optional
+        Optional argument in `objects` that takes precedence over the others.
+    explicit_coords : set, optional
+        An explicit list of variables from `objects` that are coordinates.
+    indexes : dict, optional
+        Dictionary with values given by pandas.Index objects.
+    fill_value : scalar, optional
+        Value to use for newly missing values
+
+    Returns
+    -------
+    variables : dict
+        Dictionary of Variable objects.
+    coord_names : set
+        Set of coordinate names.
+    dims : dict
+        Dictionary mapping from dimension names to sizes.
+
+    Raises
+    ------
+    MergeError if the merge cannot be done successfully.
+    """
+    from .dataset import calculate_dimensions
+
+    _assert_compat_valid(compat)
+
+    coerced = coerce_pandas_values(objects)
+    aligned = deep_align(
+        coerced, join=join, copy=False, indexes=indexes, fill_value=fill_value
+    )
+    collected = collect_variables_and_indexes(aligned)
+
+    prioritized = _get_priority_vars_and_indexes(aligned, priority_arg, compat=compat)
+    variables, out_indexes = merge_collected(collected, prioritized, compat=compat)
+    assert_unique_multiindex_level_names(variables)
+
+    dims = calculate_dimensions(variables)
+
+    coord_names, noncoord_names = determine_coords(coerced)
+    if explicit_coords is not None:
+        assert_valid_explicit_coords(variables, dims, explicit_coords)
+        coord_names.update(explicit_coords)
+    for dim, size in dims.items():
+        if dim in variables:
+            coord_names.add(dim)
+    ambiguous_coords = coord_names.intersection(noncoord_names)
+    if ambiguous_coords:
+        raise MergeError(
+            "unable to determine if these variables should be "
+            "coordinates or not in the merged result: %s" % ambiguous_coords
+        )
+
+    return _MergeResult(variables, coord_names, dims, out_indexes)
+
+
+【源码片段 6】
+文件路径：xarray/core/merge.py
+对象名称：coerce_pandas_values
+节点类型：top-level function
+父节点：merge
+行号范围：369-399
+代码：
+def coerce_pandas_values(objects: Iterable["CoercibleMapping"]) -> List["DatasetLike"]:
+    """Convert pandas values found in a list of labeled objects.
+
+    Parameters
+    ----------
+    objects : list of Dataset or mappings
+        The mappings may contain any sort of objects coercible to
+        xarray.Variables as keys, including pandas objects.
+
+    Returns
+    -------
+    List of Dataset or dictionary objects. Any inputs or values in the inputs
+    that were pandas objects have been converted into native xarray objects.
+    """
+    from .dataarray import DataArray
+    from .dataset import Dataset
+
+    out = []
+    for obj in objects:
+        if isinstance(obj, Dataset):
+            variables: "DatasetLike" = obj
+        else:
+            variables = {}
+            if isinstance(obj, PANDAS_TYPES):
+                obj = dict(obj.iteritems())
+            for k, v in obj.items():
+                if isinstance(v, PANDAS_TYPES):
+                    v = DataArray(v)
+                variables[k] = v
+        out.append(variables)
+    return out
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：xarray/tests/test_merge.py
+测试名称：TestMergeMethod.test_merge
+测试代码：
+class TestMergeMethod:
+    def test_merge(self):
+        data = create_test_data()
+        ds1 = data[["var1"]]
+        ds2 = data[["var3"]]
+        expected = data[["var1", "var3"]]
+        actual = ds1.merge(ds2)
+        assert expected.identical(actual)
+
+        actual = ds2.merge(ds1)
+        assert expected.identical(actual)
+
+        actual = data.merge(data)
+        assert data.identical(actual)
+        actual = data.reset_coords(drop=True).merge(data)
+        assert data.identical(actual)
+        actual = data.merge(data.reset_coords(drop=True))
+        assert data.identical(actual)
+
+        with pytest.raises(ValueError):
+            ds1.merge(ds2.rename({"var3": "var1"}))
+        with raises_regex(ValueError, "should be coordinates or not"):
+            data.reset_coords().merge(data)
+        with raises_regex(ValueError, "should be coordinates or not"):
+            data.merge(data.reset_coords())
+
+【相关测试 2】
+测试文件：xarray/tests/test_merge.py
+测试名称：TestMergeMethod.test_merge_auto_align
+测试代码：
+class TestMergeMethod:
+    def test_merge_auto_align(self):
+        ds1 = xr.Dataset({"a": ("x", [1, 2]), "x": [0, 1]})
+        ds2 = xr.Dataset({"b": ("x", [3, 4]), "x": [1, 2]})
+        expected = xr.Dataset(
+            {"a": ("x", [1, 2, np.nan]), "b": ("x", [np.nan, 3, 4])}, {"x": [0, 1, 2]}
+        )
+        assert expected.identical(ds1.merge(ds2))
+        assert expected.identical(ds2.merge(ds1))
+
+        expected = expected.isel(x=slice(2))
+        assert expected.identical(ds1.merge(ds2, join="left"))
+        assert expected.identical(ds2.merge(ds1, join="right"))
+
+        expected = expected.isel(x=slice(1, 2))
+        assert expected.identical(ds1.merge(ds2, join="inner"))
+        assert expected.identical(ds2.merge(ds1, join="inner"))
+
+【相关测试 3】
+测试文件：xarray/tests/test_merge.py
+测试名称：TestMergeMethod.test_merge_fill_value
+测试代码：
+class TestMergeMethod:
+    @pytest.mark.parametrize("fill_value", [dtypes.NA, 2, 2.0])
+    def test_merge_fill_value(self, fill_value):
+        ds1 = xr.Dataset({"a": ("x", [1, 2]), "x": [0, 1]})
+        ds2 = xr.Dataset({"b": ("x", [3, 4]), "x": [1, 2]})
+        if fill_value == dtypes.NA:
+            # if we supply the default, we expect the missing value for a
+            # float array
+            fill_value = np.nan
+        expected = xr.Dataset(
+            {"a": ("x", [1, 2, fill_value]), "b": ("x", [fill_value, 3, 4])},
+            {"x": [0, 1, 2]},
+        )
+        assert expected.identical(ds1.merge(ds2, fill_value=fill_value))
+        assert expected.identical(ds2.merge(ds1, fill_value=fill_value))
+        assert expected.identical(xr.merge([ds1, ds2], fill_value=fill_value))
+
+【相关测试 4】
+测试文件：xarray/tests/test_merge.py
+测试名称：TestMergeMethod.test_merge_no_conflicts
+测试代码：
+class TestMergeMethod:
+    def test_merge_no_conflicts(self):
+        ds1 = xr.Dataset({"a": ("x", [1, 2]), "x": [0, 1]})
+        ds2 = xr.Dataset({"a": ("x", [2, 3]), "x": [1, 2]})
+        expected = xr.Dataset({"a": ("x", [1, 2, 3]), "x": [0, 1, 2]})
+
+        assert expected.identical(ds1.merge(ds2, compat="no_conflicts"))
+        assert expected.identical(ds2.merge(ds1, compat="no_conflicts"))
+
+        assert ds1.identical(ds1.merge(ds2, compat="no_conflicts", join="left"))
+
+        assert ds2.identical(ds1.merge(ds2, compat="no_conflicts", join="right"))
+
+        expected2 = xr.Dataset({"a": ("x", [2]), "x": [1]})
+        assert expected2.identical(ds1.merge(ds2, compat="no_conflicts", join="inner"))
+
+        with pytest.raises(xr.MergeError):
+            ds3 = xr.Dataset({"a": ("x", [99, 3]), "x": [1, 2]})
+            ds1.merge(ds3, compat="no_conflicts")
+
+        with pytest.raises(xr.MergeError):
+            ds3 = xr.Dataset({"a": ("y", [2, 3]), "y": [1, 2]})
+            ds1.merge(ds3, compat="no_conflicts")
+
+【相关测试 5】
+测试文件：xarray/tests/test_merge.py
+测试名称：TestMergeMethod.test_merge_compat
+测试代码：
+class TestMergeMethod:
+    def test_merge_compat(self):
+        ds1 = xr.Dataset({"x": 0})
+        ds2 = xr.Dataset({"x": 1})
+        for compat in ["broadcast_equals", "equals", "identical", "no_conflicts"]:
+            with pytest.raises(xr.MergeError):
+                ds1.merge(ds2, compat=compat)
+
+        ds2 = xr.Dataset({"x": [0, 0]})
+        for compat in ["equals", "identical"]:
+            with raises_regex(ValueError, "should be coordinates or not"):
+                ds1.merge(ds2, compat=compat)
+
+        ds2 = xr.Dataset({"x": ((), 0, {"foo": "bar"})})
+        with pytest.raises(xr.MergeError):
+            ds1.merge(ds2, compat="identical")
+
+        with raises_regex(ValueError, "compat=.* invalid"):
+            ds1.merge(ds2, compat="foobar")
+
+        assert ds1.identical(ds1.merge(ds2, compat="override"))
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

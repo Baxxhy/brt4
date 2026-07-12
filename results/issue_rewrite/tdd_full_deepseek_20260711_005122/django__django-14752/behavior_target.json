@@ -1,0 +1,287 @@
+{
+  "instance_id": "django__django-14752",
+  "issue_summary": "AutocompleteJsonView 缺少可扩展的序列化方法，导致自定义字段需要完全重写 get() 方法，维护成本高。",
+  "trigger_condition": {
+    "text": "用户尝试通过继承 AutocompleteJsonView 并重写 get() 方法来为自动完成响应添加额外字段。",
+    "evidence": [
+      "Issue 描述中提到：'adding new attributes to autocomplete field results currently requires extending contrib.admin.views.autocomplete.AutocompleteJsonView and fully overriding the AutocompleteJsonView.get() method'",
+      "Issue 中提供了 CustomAutocompleteJsonView 的示例代码，其中重写了 get() 方法。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "没有错误或异常，但存在设计缺陷：为了添加额外字段，必须完全重写 get() 方法，这导致维护成本高，因为需要与上游的 AutocompleteJsonView.get() 方法保持同步。",
+    "symptom_type": "unknown",
+    "evidence": [
+      "Issue 描述中提到：'The problem with this is that as AutocompleteJsonView.get() keeps evolving, there's quite a lot of maintenance overhead required to catch up.'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "AutocompleteJsonView 应提供一个可重写的 serialize_result 方法，允许子类通过重写此方法轻松地向结果字典中添加额外字段，而无需重写整个 get() 方法。",
+    "evidence": [
+      "Issue 描述中提出的解决方案：'adding a result customization extension point to get() by moving the lines that construct the results inside JsonResponse constructor to a separate method'",
+      "Issue 中展示了期望的代码模式：在 get() 中调用 self.serialize_result(obj, to_field_name)，并定义默认的 serialize_result 方法。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "django.contrib.admin.views.autocomplete.AutocompleteJsonView",
+      "kind": "class",
+      "source_path": "django/contrib/admin/views/autocomplete.py",
+      "reason": "Issue 的核心是关于扩展这个类以支持自定义字段。"
+    },
+    {
+      "name": "AutocompleteJsonView.get",
+      "kind": "method",
+      "source_path": "django/contrib/admin/views/autocomplete.py",
+      "reason": "Issue 指出当前需要完全重写此方法来添加字段，期望将其重构以调用一个可重写的方法。"
+    },
+    {
+      "name": "AutocompleteJsonView.serialize_result",
+      "kind": "method",
+      "source_path": "",
+      "reason": "这是 Issue 提议添加的新方法，用于将对象序列化为结果字典，是期望的可扩展点。"
+    },
+    {
+      "name": "django.http.response.JsonResponse",
+      "kind": "class",
+      "source_path": "django/http/response.py",
+      "reason": "AutocompleteJsonView.get() 返回一个 JsonResponse，其数据结构是 Issue 关注的焦点。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/contrib/admin/views/autocomplete.py",
+      "object": "AutocompleteJsonView.get",
+      "lines": "12-33",
+      "reason": "当前 get() 方法直接内联构建了结果字典，缺乏一个可重写的序列化方法，导致扩展性差。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "AutocompleteJsonViewTests.test_success",
+      "test_file": "tests/admin_views/test_autocomplete_view.py",
+      "why_relevant": "它测试了 AutocompleteJsonView 的基本成功场景，包括请求构造、视图调用和响应验证，是理解正常行为的良好起点。",
+      "reusable_parts": [
+        "测试类结构 (AdminViewBasicTestCase)",
+        "请求构造 (self.factory.get)",
+        "视图调用模式 (AutocompleteJsonView.as_view)",
+        "响应状态码和 JSON 内容断言"
+      ],
+      "possible_gap": "它只测试了默认行为，没有涉及任何自定义字段或扩展 AutocompleteJsonView 的场景。"
+    },
+    {
+      "test_name": "AutocompleteJsonViewTests.test_custom_to_field",
+      "test_file": "tests/admin_views/test_autocomplete_view.py",
+      "why_relevant": "它测试了使用自定义 to_field 的情况，展示了如何通过请求参数改变返回的 'id' 字段值，这与改变结果字典结构有一定相关性。",
+      "reusable_parts": [
+        "请求参数构造 (field_name: 'question_with_to_field')",
+        "断言返回的 'id' 字段值 (str(q.uuid))"
+      ],
+      "possible_gap": "它仍然依赖于默认的 get() 方法，没有测试通过继承和重写来添加新字段。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "call_chain",
+      "current_pattern": "直接调用 AutocompleteJsonView.as_view() 并断言其返回的标准 JSON 结构。",
+      "target_pattern": "创建一个继承自 AutocompleteJsonView 的自定义视图类，重写其方法（例如，如果存在 serialize_result 则重写它，否则重写 get），然后调用这个自定义视图。",
+      "reason": "Issue 的核心是扩展 AutocompleteJsonView 的能力。要触发“维护成本高”的问题或验证“易于扩展”的解决方案，需要测试一个自定义子类。",
+      "confidence": "high"
+    },
+    {
+      "slot": "return_value",
+      "current_pattern": "断言返回的 JSON 数据中的 'results' 列表只包含 'id' 和 'text' 键。",
+      "target_pattern": "断言返回的 JSON 数据中的 'results' 列表除了 'id' 和 'text' 外，还包含自定义的额外字段（例如 'notes'）。",
+      "reason": "Issue 的目标是能够向结果中添加额外字段。测试需要验证自定义视图能否产生包含这些字段的响应。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "response.content 解码后的 JSON 字典，特别是 'results' 列表中的字典键。",
+      "reason": "Issue 的焦点是响应 JSON 的结构。观察结果字典的键可以判断是否成功添加了自定义字段。"
+    },
+    {
+      "kind": "serialization",
+      "expression_hint": "在自定义视图类中，构建结果字典的代码路径（例如，重写的 get() 或 serialize_result() 方法内部）。",
+      "reason": "需要确认自定义逻辑是否被正确执行，以及是否与基类方法正确交互（例如调用 super()）。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证自定义 AutocompleteJsonView 子类返回的 JSON 结果中包含预期的额外字段。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的、固定的 JSON 字符串相等，因为分页或对象顺序可能变化。避免断言不相关的字段值。",
+      "reason": "Issue 关注的是结果字典中额外字段的存在性，而不是所有字段的精确值或顺序。contains_fragment 风格（如检查键是否存在、值类型正确）更稳定。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要一个 Django 测试环境，包含至少一个具有搜索字段的模型，并已注册到 AdminSite。可能需要创建模型实例。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要模拟或使用具有适当权限的用户 (superuser) 来通过权限检查。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要导入相关的视图类和测试工具（如 RequestFactory）。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "当前代码库中是否已经存在一个 serialize_result 方法？Issue 是提议添加它，所以很可能没有。但需要确认。",
+    "如果重写 get() 方法，具体哪些部分需要与父类保持同步？Issue 提到了维护开销，但未列出所有可能变化的细节。",
+    "除了添加字段，自定义序列化是否还有其他约束或副作用（如对 to_field_name 的处理、权限检查的影响）？"
+  ],
+  "raw": {
+    "issue_summary": "AutocompleteJsonView 缺少可扩展的序列化方法，导致自定义字段需要完全重写 get() 方法，维护成本高。",
+    "trigger_condition": {
+      "text": "用户尝试通过继承 AutocompleteJsonView 并重写 get() 方法来为自动完成响应添加额外字段。",
+      "evidence": [
+        "Issue 描述中提到：'adding new attributes to autocomplete field results currently requires extending contrib.admin.views.autocomplete.AutocompleteJsonView and fully overriding the AutocompleteJsonView.get() method'",
+        "Issue 中提供了 CustomAutocompleteJsonView 的示例代码，其中重写了 get() 方法。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "没有错误或异常，但存在设计缺陷：为了添加额外字段，必须完全重写 get() 方法，这导致维护成本高，因为需要与上游的 AutocompleteJsonView.get() 方法保持同步。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述中提到：'The problem with this is that as AutocompleteJsonView.get() keeps evolving, there's quite a lot of maintenance overhead required to catch up.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "AutocompleteJsonView 应提供一个可重写的 serialize_result 方法，允许子类通过重写此方法轻松地向结果字典中添加额外字段，而无需重写整个 get() 方法。",
+      "evidence": [
+        "Issue 描述中提出的解决方案：'adding a result customization extension point to get() by moving the lines that construct the results inside JsonResponse constructor to a separate method'",
+        "Issue 中展示了期望的代码模式：在 get() 中调用 self.serialize_result(obj, to_field_name)，并定义默认的 serialize_result 方法。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.contrib.admin.views.autocomplete.AutocompleteJsonView",
+        "kind": "class",
+        "source_path": "django/contrib/admin/views/autocomplete.py",
+        "reason": "Issue 的核心是关于扩展这个类以支持自定义字段。"
+      },
+      {
+        "name": "AutocompleteJsonView.get",
+        "kind": "method",
+        "source_path": "django/contrib/admin/views/autocomplete.py",
+        "reason": "Issue 指出当前需要完全重写此方法来添加字段，期望将其重构以调用一个可重写的方法。"
+      },
+      {
+        "name": "AutocompleteJsonView.serialize_result",
+        "kind": "method",
+        "source_path": "",
+        "reason": "这是 Issue 提议添加的新方法，用于将对象序列化为结果字典，是期望的可扩展点。"
+      },
+      {
+        "name": "django.http.response.JsonResponse",
+        "kind": "class",
+        "source_path": "django/http/response.py",
+        "reason": "AutocompleteJsonView.get() 返回一个 JsonResponse，其数据结构是 Issue 关注的焦点。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/views/autocomplete.py",
+        "object": "AutocompleteJsonView.get",
+        "lines": "12-33",
+        "reason": "当前 get() 方法直接内联构建了结果字典，缺乏一个可重写的序列化方法，导致扩展性差。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AutocompleteJsonViewTests.test_success",
+        "test_file": "tests/admin_views/test_autocomplete_view.py",
+        "why_relevant": "它测试了 AutocompleteJsonView 的基本成功场景，包括请求构造、视图调用和响应验证，是理解正常行为的良好起点。",
+        "reusable_parts": [
+          "测试类结构 (AdminViewBasicTestCase)",
+          "请求构造 (self.factory.get)",
+          "视图调用模式 (AutocompleteJsonView.as_view)",
+          "响应状态码和 JSON 内容断言"
+        ],
+        "possible_gap": "它只测试了默认行为，没有涉及任何自定义字段或扩展 AutocompleteJsonView 的场景。"
+      },
+      {
+        "test_name": "AutocompleteJsonViewTests.test_custom_to_field",
+        "test_file": "tests/admin_views/test_autocomplete_view.py",
+        "why_relevant": "它测试了使用自定义 to_field 的情况，展示了如何通过请求参数改变返回的 'id' 字段值，这与改变结果字典结构有一定相关性。",
+        "reusable_parts": [
+          "请求参数构造 (field_name: 'question_with_to_field')",
+          "断言返回的 'id' 字段值 (str(q.uuid))"
+        ],
+        "possible_gap": "它仍然依赖于默认的 get() 方法，没有测试通过继承和重写来添加新字段。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "直接调用 AutocompleteJsonView.as_view() 并断言其返回的标准 JSON 结构。",
+        "target_pattern": "创建一个继承自 AutocompleteJsonView 的自定义视图类，重写其方法（例如，如果存在 serialize_result 则重写它，否则重写 get），然后调用这个自定义视图。",
+        "reason": "Issue 的核心是扩展 AutocompleteJsonView 的能力。要触发“维护成本高”的问题或验证“易于扩展”的解决方案，需要测试一个自定义子类。",
+        "confidence": "high"
+      },
+      {
+        "slot": "return_value",
+        "current_pattern": "断言返回的 JSON 数据中的 'results' 列表只包含 'id' 和 'text' 键。",
+        "target_pattern": "断言返回的 JSON 数据中的 'results' 列表除了 'id' 和 'text' 外，还包含自定义的额外字段（例如 'notes'）。",
+        "reason": "Issue 的目标是能够向结果中添加额外字段。测试需要验证自定义视图能否产生包含这些字段的响应。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "response.content 解码后的 JSON 字典，特别是 'results' 列表中的字典键。",
+        "reason": "Issue 的焦点是响应 JSON 的结构。观察结果字典的键可以判断是否成功添加了自定义字段。"
+      },
+      {
+        "kind": "serialization",
+        "expression_hint": "在自定义视图类中，构建结果字典的代码路径（例如，重写的 get() 或 serialize_result() 方法内部）。",
+        "reason": "需要确认自定义逻辑是否被正确执行，以及是否与基类方法正确交互（例如调用 super()）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证自定义 AutocompleteJsonView 子类返回的 JSON 结果中包含预期的额外字段。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、固定的 JSON 字符串相等，因为分页或对象顺序可能变化。避免断言不相关的字段值。",
+        "reason": "Issue 关注的是结果字典中额外字段的存在性，而不是所有字段的精确值或顺序。contains_fragment 风格（如检查键是否存在、值类型正确）更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django 测试环境，包含至少一个具有搜索字段的模型，并已注册到 AdminSite。可能需要创建模型实例。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟或使用具有适当权限的用户 (superuser) 来通过权限检查。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入相关的视图类和测试工具（如 RequestFactory）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "当前代码库中是否已经存在一个 serialize_result 方法？Issue 是提议添加它，所以很可能没有。但需要确认。",
+      "如果重写 get() 方法，具体哪些部分需要与父类保持同步？Issue 提到了维护开销，但未列出所有可能变化的细节。",
+      "除了添加字段，自定义序列化是否还有其他约束或副作用（如对 to_field_name 的处理、权限检查的影响）？"
+    ]
+  }
+}

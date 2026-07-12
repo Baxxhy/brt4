@@ -1,0 +1,137 @@
+instance_id: sympy__sympy-12419
+
+issue_summary: 对正交矩阵假设下得到的符号化单位矩阵进行元素求和时，结果错误地返回0而不是矩阵维度n。
+
+trigger_condition:
+{
+  "text": "在假设矩阵M正交的条件下，对 refine((M.T * M).doit()) 得到的符号化单位矩阵进行双重求和 Sum(Sum(e[i, j], (i, 0, n-1)), (j, 0, n-1)).doit()。",
+  "evidence": [
+    "Issue 中的代码展示了在 with assuming(Query.orthogonal(M)): 上下文中计算 e = refine((M.T * M).doit())，然后对 e 进行双重求和。",
+    "Issue 描述：'Total sum of the elements is expected to be 'n' but the answer is 0!'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "对符号化单位矩阵所有元素求和的结果是0，而期望结果是矩阵维度n。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 中最后一行代码的输出结果是0，而用户期望是 'n'。",
+    "Issue 描述：'However, when I attempt to evaluate the total sum of the elements the result was 0 while 'n' is expected.'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "对符号化单位矩阵所有元素求和的结果应该等于矩阵的维度n。",
+  "evidence": [
+    "Issue 中用户明确期望：'Total sum of the elements is expected to be 'n'。",
+    "单位矩阵的定义：对角线元素为1，非对角线元素为0，n x n 单位矩阵的元素总和应为n。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "Sum",
+    "kind": "class",
+    "source_path": "sympy/concrete/summations.py",
+    "reason": "Issue 中使用了 Sum 类进行求和计算，并且相关源码片段4和5展示了 Sum 类的定义和 doit 方法。"
+  },
+  {
+    "name": "Sum.doit",
+    "kind": "method",
+    "source_path": "sympy/concrete/summations.py",
+    "reason": "Issue 中调用了 .doit() 来求值求和表达式，相关源码片段5展示了 doit 方法的实现，其中包含对矩阵求和的特殊处理。"
+  },
+  {
+    "name": "refine",
+    "kind": "function",
+    "source_path": "",
+    "reason": "Issue 中使用了 refine 函数在正交假设下简化矩阵表达式。"
+  },
+  {
+    "name": "assuming",
+    "kind": "function",
+    "source_path": "",
+    "reason": "Issue 中使用了 with assuming(...): 来创建假设上下文。"
+  },
+  {
+    "name": "Query.orthogonal",
+    "kind": "method",
+    "source_path": "sympy/assumptions/ask.py",
+    "reason": "Issue 中使用了 Query.orthogonal 作为假设条件，相关源码片段6展示了其定义。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "test_matrix_sum 中使用具体的数值矩阵 Matrix([[0,1],[n,0]]) 进行求和。",
+    "target_pattern": "使用在正交假设下通过 refine 得到的符号化单位矩阵（可能是 Identity(n) 或类似表达式）进行求和。",
+    "reason": "Issue 的触发条件依赖于符号化矩阵和假设上下文，而现有测试使用具体矩阵。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "test_Sum_doit 中直接对函数（如 KroneckerDelta）进行求和。",
+    "target_pattern": "对 refine((M.T * M).doit()) 的结果（一个矩阵表达式）进行双重求和。",
+    "reason": "Issue 中的错误发生在对矩阵表达式求和时，而现有测试大多对标量函数求和。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "Sum(Sum(e[i, j], (i, 0, n-1)), (j, 0, n-1)).doit() 的返回值。",
+    "reason": "直接观察求和结果是否为0（错误）或n（正确）。"
+  },
+  {
+    "kind": "type",
+    "expression_hint": "refine((M.T * M).doit()) 的结果类型，例如是否为 Identity 或 MatrixSymbol。",
+    "reason": "了解被求和对象的类型有助于理解求和计算过程。"
+  },
+  {
+    "kind": "repr",
+    "expression_hint": "e（即 refine 结果）的字符串表示。",
+    "reason": "确认 refine 是否成功识别出单位矩阵。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "对符号化单位矩阵所有元素求和的结果应等于符号 n。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言具体的完整字符串表示，因为符号化简可能变化。",
+    "reason": "Issue 的核心是求和结果应为 n，而不是0。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 sympy 的 MatrixSymbol, symbols, assuming, refine, Q, Sum 等模块。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要创建整数正符号 n 和矩阵符号 M，并使用 assuming 上下文。",
+    "source": "issue",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "refine((M.T * M).doit()) 在正交假设下返回的具体对象类型和内部表示是什么？",
+  "Sum.doit() 方法中处理矩阵求和的内部逻辑细节是什么？",
+  "错误是否只发生在双重求和，还是单重求和（如对角线求和）也有问题？Issue 中显示对角线求和正确。",
+  "除了正交假设，是否还有其他假设或矩阵类型会导致类似问题？"
+]

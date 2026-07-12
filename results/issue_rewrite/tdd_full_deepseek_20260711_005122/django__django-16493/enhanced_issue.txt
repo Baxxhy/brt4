@@ -1,0 +1,112 @@
+instance_id: django__django-16493
+
+issue_summary: 当 FileField 的 storage 参数设置为返回 default_storage 的可调用对象时，deconstruct 方法错误地省略了 storage 参数。
+
+trigger_condition:
+{
+  "text": "定义一个模型，其 FileField 的 storage 参数设置为一个可调用对象（例如函数），该可调用对象返回 default_storage。然后对该模型运行 makemigrations 命令。",
+  "evidence": [
+    "Issue 中给出的模型定义示例：`my_file = models.FileField(storage=get_storage)`，其中 `get_storage()` 可能返回 `default_storage`。",
+    "Issue 描述：'repeatedly running makemigrations will randomly generate a migration that alternately includes or omits storage=myapp.models.get_storage'。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "deconstruct 方法生成的 kwargs 中缺少 `storage` 参数，导致迁移文件随机地包含或省略 storage 定义。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 描述：'it is omitted from the deconstructed form of the field, rather than being included as a reference to the callable as expected.'",
+    "源码片段 3 显示 deconstruct 方法中 `if self.storage is not default_storage:` 的判断逻辑。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "deconstruct 方法应将返回 default_storage 的可调用对象作为 storage 参数包含在 kwargs 中，以便迁移文件能稳定地引用该可调用对象。",
+  "evidence": [
+    "Issue 描述：'rather than being included as a reference to the callable as expected.'",
+    "相关测试 1 的文档字符串：'Deconstructing gives the original callable, not the evaluated value.'"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "FileField.deconstruct",
+    "kind": "method",
+    "source_path": "django/db/models/fields/files.py",
+    "reason": "这是 Issue 中明确指出的有缺陷的方法，负责解构字段以生成迁移参数。"
+  },
+  {
+    "name": "FileField.__init__",
+    "kind": "method",
+    "source_path": "django/db/models/fields/files.py",
+    "reason": "用于构造 FileField 对象，设置 storage 参数。"
+  },
+  {
+    "name": "default_storage",
+    "kind": "function",
+    "source_path": "django/core/files/storage/__init__.py",
+    "reason": "Issue 的核心涉及与 default_storage 的比较。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "相似测试中，可调用 storage 参数返回一个非 default_storage 的 storage 对象（例如自定义的 FileSystemStorage）。",
+    "target_pattern": "可调用 storage 参数返回 default_storage。",
+    "reason": "Issue 表明只有当可调用对象返回 default_storage 时，deconstruct 方法才会错误地省略 storage 参数。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "`deconstruct()` 方法返回的 kwargs 字典中是否包含 'storage' 键，以及其值（是原始可调用对象还是求值后的 storage 对象）。",
+    "reason": "Issue 的核心错误是 kwargs 中缺少 storage 参数，或参数值不正确。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "FileField 实例的 `self.storage` 属性在初始化后和 deconstruct 调用时的值（是函数对象还是 storage 实例）。",
+    "reason": "Issue 指出问题在于 deconstruct 方法中 `self.storage` 是已求值的结果，而不是原始可调用对象。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证 deconstruct 返回的 kwargs 字典中包含 'storage' 键，且其值为原始可调用对象（例如一个函数），而不是 default_storage 实例。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言 kwargs 字典的完整顺序或包含无关键值。避免直接断言 `self.storage is default_storage`，因为这是有缺陷的逻辑。",
+    "reason": "Issue 的期望行为是 storage 参数应被包含为对可调用对象的引用。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 django.core.files.storage.default_storage, django.db.models.FileField，并可能定义一个返回 default_storage 的函数。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可以继承自 SimpleTestCase，因为不涉及数据库操作。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "FileField 内部属性 `_storage_callable` 的确切用途和设置时机，以及它是否在 deconstruct 中被正确使用。",
+  "当 storage 参数是返回 default_storage 的类（而不仅仅是函数）时，行为是否相同。",
+  "makemigrations 命令内部处理 deconstruct 输出的具体流程，以及如何最好地模拟其行为进行单元测试。"
+]

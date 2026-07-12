@@ -1,0 +1,148 @@
+instance_id: django__django-15380
+
+issue_summary: Migration autodetector 在同时重命名模型和字段时崩溃。
+
+trigger_condition:
+{
+  "text": "运行 `makemigrations` 命令，并在单步操作中同时重命名一个模型及其一个字段。",
+  "evidence": [
+    "Issue 描述：'Migration autodetector crashes when renaming a model and field in a single step'，并给出了命令行交互和回溯。",
+    "源码片段 5 显示 `_detect_changes` 方法中调用了 `generate_renamed_fields`。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "抛出 KeyError: ('test_one', 'mymodel') 异常。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中的回溯信息：'KeyError: (\\'test_one\\', \\'mymodel\\')'，位于 `generate_renamed_fields` 方法中。",
+    "源码片段 6 的第 823 行包含 `new_model_state = self.to_state.models[app_label, old_model_name]`，这可能是抛出 KeyError 的位置。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "Migration autodetector 应能正确处理同时重命名模型和字段的情况，并生成相应的迁移操作，而不应崩溃。",
+  "evidence": [
+    "Issue 标题和描述暗示这是一个缺陷，修复后应能正常工作。",
+    "相关测试 1 (`test_rename_model_with_renamed_rel_field`) 展示了模型和关联字段同时重名的检测场景，表明这是预期支持的功能。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "MigrationAutodetector.changes",
+    "kind": "method",
+    "source_path": "django/db/migrations/autodetector.py",
+    "reason": "Issue 回溯中调用的入口方法，用于生成迁移变化。"
+  },
+  {
+    "name": "MigrationAutodetector._detect_changes",
+    "kind": "method",
+    "source_path": "django/db/migrations/autodetector.py",
+    "reason": "`changes` 方法调用的核心方法，负责检测变化。"
+  },
+  {
+    "name": "MigrationAutodetector.generate_renamed_fields",
+    "kind": "method",
+    "source_path": "django/db/migrations/autodetector.py",
+    "reason": "回溯中直接抛出异常的方法，负责检测重命名字段。"
+  },
+  {
+    "name": "makemigrations",
+    "kind": "function",
+    "source_path": "django/core/management/commands/makemigrations.py",
+    "reason": "Issue 中执行的命令行命令。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中，模型重命名和字段重命名通常是分开的或发生在不同模型/应用。",
+    "target_pattern": "构造一个测试场景，其中同一个模型在从 `from_state` 到 `to_state` 的变化中，模型名称和该模型内的一个字段名称同时被更改。",
+    "reason": "Issue 表明这种组合操作触发了 `generate_renamed_fields` 方法中的 KeyError。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "测试通常使用 `ModelState` 对象列表来定义前后状态。",
+    "target_pattern": "在 `before` 状态中定义一个模型（如 `MyModel`）及其字段（如 `myfield`），在 `after` 状态中将模型重命名为 `MyModel2`，字段重命名为 `myfield2`。",
+    "reason": "模拟 Issue 中描述的单步重命名操作。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "`MigrationQuestioner` 通常配置为对重命名操作返回 True。",
+    "target_pattern": "配置 `MigrationQuestioner` 使其对 `ask_rename_model` 和 `ask_rename` 都返回 True。",
+    "reason": "Issue 中用户对重命名模型提示回答了 'y'，且字段重命名也需要确认。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用 `self.get_changes(before, after, questioner)` 时是否抛出 `KeyError`。",
+    "reason": "Issue 的核心错误现象是 KeyError，观测此异常可直接判断缺陷是否触发。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "在 `generate_renamed_fields` 方法内部，观察 `self.renamed_models` 字典的内容以及 `old_model_name` 变量的值。",
+    "reason": "KeyError 可能源于 `old_model_name` 使用了旧的模型名，而 `self.to_state.models` 中已不存在该键。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "`self.get_changes` 返回的 `changes` 字典的结构和内容。",
+    "reason": "修复后应能生成包含 `RenameModel` 和 `RenameField` 操作的迁移计划，而非崩溃。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证在同时重命名模型和字段的场景下，迁移检测过程不会抛出 KeyError 异常。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言完整的迁移操作列表或顺序，因为修复前可能无法生成。",
+    "reason": "Issue 的核心是崩溃，因此首要断言是操作不引发特定异常。修复后，可以进一步断言生成了正确的操作。"
+  },
+  {
+    "assertion_goal": "验证成功生成的迁移变化中包含了预期的重命名操作。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "断言完整的、硬编码的迁移字典结构。",
+    "reason": "修复后，应能检测到模型和字段的重命名，并生成相应的 `RenameModel` 和 `RenameField` 操作。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要继承 `AutodetectorTests` 测试类，并使用其 `self.get_changes` 方法。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要使用 `ModelState` 来构建模型的前后状态。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要配置 `MigrationQuestioner` 来模拟用户对重命名提示的确认。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "KeyError 的确切触发条件是否仅限于模型和字段在同一操作中重命名，还是其他组合也会触发。",
+  "`self.renamed_models` 字典在 `generate_renamed_fields` 被调用时的具体状态和映射关系。",
+  "修复后的正确行为下，生成的迁移操作的确切顺序和依赖关系。"
+]

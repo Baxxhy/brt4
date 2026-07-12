@@ -1,0 +1,124 @@
+```json
+{
+    "issue_summary": "RST writer 不支持 header_rows 参数，导致调用时抛出 TypeError 异常。",
+    "trigger_condition": {
+        "text": "使用 astropy.io.ascii.write 函数，指定 format='ascii.rst' 或 Writer=ascii.RST，并传入 header_rows 参数。",
+        "evidence": ["Issue 中代码示例：`tbl.write(sys.stdout, format=\"ascii.rst\", header_rows=[\"name\", \"unit\"])` 导致错误。", "源码片段 1 显示 RST.__init__ 方法没有接受 header_rows 参数。"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "抛出 TypeError: RST.__init__() got an unexpected keyword argument 'header_rows'。",
+        "symptom_type": "exception",
+        "evidence": ["Issue 中完整的 traceback 显示此异常。", "源码片段 4 中 _get_writer 函数调用 `writer = Writer(**writer_kwargs)`，其中 writer_kwargs 包含 header_rows。"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "RST writer 应能接受 header_rows 参数，并像 fixed_width writer 一样，在输出中包含多行表头信息。",
+        "evidence": ["Issue 描述中用户期望 RST 输出支持 header_rows，并类比了 fixed_width 格式的成功调用。", "相关测试 1 和 2 展示了 fixed_width 和 fixed_width_two_line 格式成功使用 header_rows 参数进行读写。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "astropy.io.ascii.write",
+            "kind": "function",
+            "source_path": "astropy/io/ascii/ui.py",
+            "reason": "Issue 中触发 bug 的入口函数。"
+        },
+        {
+            "name": "astropy.io.ascii.RST",
+            "kind": "class",
+            "source_path": "astropy/io/ascii/rst.py",
+            "reason": "抛出异常的直接来源，其 __init__ 方法不支持 header_rows 参数。"
+        },
+        {
+            "name": "astropy.io.ascii.core._get_writer",
+            "kind": "function",
+            "source_path": "astropy/io/ascii/core.py",
+            "reason": "负责初始化 writer 并传递 kwargs，是异常传播路径中的关键函数。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "astropy/io/ascii/rst.py",
+            "object": "RST.__init__",
+            "lines": "60-61",
+            "reason": "该 __init__ 方法没有定义接受 header_rows 参数，导致从 _get_writer 传递 kwargs 时失败。"
+        },
+        {
+            "path": "astropy/io/ascii/core.py",
+            "object": "_get_writer",
+            "lines": "1793-1854",
+            "reason": "该函数将 kwargs 传递给 Writer 构造函数，但 RST 类无法处理 header_rows。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_fixed_width_header_rows",
+            "test_file": "astropy/io/ascii/tests/test_fixedwidth.py",
+            "why_relevant": "该测试展示了 fixed_width 格式成功使用 header_rows 参数进行读写，是期望行为的参考。",
+            "reusable_parts": ["使用 ascii.write 和 ascii.read 的调用模式", "使用 StringIO 捕获输出", "使用 assert 比较输出行"],
+            "possible_gap": "该测试针对 fixed_width 格式，而非 RST 格式。RST writer 的初始化逻辑可能不同。"
+        },
+        {
+            "test_name": "test_write_normal",
+            "test_file": "astropy/io/ascii/tests/test_rst.py",
+            "why_relevant": "该测试展示了 RST writer 的基本写入功能，是生成 RST 格式测试的起点。",
+            "reusable_parts": ["导入 ascii 和 StringIO", "使用 ascii.write 并指定 Writer=ascii.RST", "使用 assert_equal_splitlines 进行断言"],
+            "possible_gap": "该测试没有使用 header_rows 参数，因此不会触发 bug。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "argument",
+            "current_pattern": "test_write_normal 中调用 ascii.write 时仅传递 Writer=ascii.RST。",
+            "target_pattern": "调用 ascii.write 时，除了 Writer=ascii.RST，额外传递 header_rows 参数（例如 header_rows=[\"name\", \"unit\"]）。",
+            "reason": "根据 Issue，传递 header_rows 参数是触发 TypeError 的直接原因。",
+            "confidence": "high"
+        },
+        {
+            "slot": "input",
+            "current_pattern": "test_write_normal 中使用的是一个简单的 Table 对象（dat）。",
+            "target_pattern": "使用一个带有单位（units）的 QTable 对象，如 Issue 示例所示。",
+            "reason": "Issue 示例使用了 QTable 和单位，这可能影响 header_rows 的预期输出内容，但核心触发条件是参数本身。",
+            "confidence": "medium"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "exception",
+            "expression_hint": "调用 ascii.write(..., header_rows=...) 时是否抛出 TypeError。",
+            "reason": "Issue 的核心错误现象是抛出 TypeError，这是判断 bug 是否被触发的直接标志。"
+        },
+        {
+            "kind": "return_value",
+            "expression_hint": "如果调用成功，观察输出字符串是否包含预期的多行表头（如列名和单位行）。",
+            "reason": "修复后，header_rows 参数应影响输出格式，生成类似 fixed_width 的多行表头。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "验证使用 header_rows 参数调用 RST writer 不会抛出 TypeError。",
+            "preferred_assertion_style": "raises",
+            "avoid": "断言完整的输出字符串完全等于某个特定字符串，因为 Issue 未给出精确的 patched 输出。",
+            "reason": "当前 bug 表现为异常，因此初始复现测试应断言异常被抛出。修复后，断言应改为不抛出异常或输出包含表头信息。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要导入 astropy.table.QTable, astropy.units.u, astropy.io.ascii, sys, io.StringIO。",
+            "source": "issue|retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "使用 StringIO 对象来捕获 write 的输出，以便进行断言。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "RST writer 在支持 header_rows 后，具体的输出格式（如分隔线、对齐方式）应该如何？Issue 中只给出了期望，没有精确的 patched 输出示例。",
+        "除了 __init__ 方法，RST 类的 write 方法或其他部分是否需要修改才能正确处理 header_rows 参数？",
+        "header_rows 参数是否应该被 RST writer 的父类处理，还是需要在 RST 类中实现特殊逻辑？"
+    ]
+}
+```

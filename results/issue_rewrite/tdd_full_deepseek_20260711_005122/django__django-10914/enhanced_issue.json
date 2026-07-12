@@ -1,0 +1,359 @@
+{
+  "instance_id": "django__django-10914",
+  "issue_summary": "上传文件时，未显式配置 FILE_UPLOAD_PERMISSIONS 可能导致最终文件权限不一致，在某些系统上为 0o0600。",
+  "trigger_condition": {
+    "text": "使用 FileSystemStorage 保存上传文件，且未显式设置 FILE_UPLOAD_PERMISSIONS 配置，上传数据大小可能触发使用 TemporaryUploadedFile 处理。",
+    "evidence": [
+      "Issue 提到“in absence of explicitly configured FILE_UPLOAD_PERMISSIONS”",
+      "Issue 提到“with the default FILE_UPLOAD_HANDLERS, in turn depends on the uploaded data size”",
+      "源码 global_settings.py 显示 FILE_UPLOAD_PERMISSIONS 默认值为 None",
+      "源码 global_settings.py 显示默认 FILE_UPLOAD_HANDLERS 包含 TemporaryFileUploadHandler"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "最终保存到文件系统的文件权限在某些系统上为 0o0600，而不是预期的默认权限（如 0o644）。",
+    "symptom_type": "unknown",
+    "evidence": [
+      "Issue 提到“the permissions for a file uploaded to FileSystemStorage might not be consistent”",
+      "Issue 提到“causes the resulting file permissions to be 0o0600 on some systems”"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当 FILE_UPLOAD_PERMISSIONS 未显式配置时，上传文件保存到 FileSystemStorage 后应具有一致且合理的默认文件权限（例如 0o644），不受临时文件处理方式（MemoryUploadedFile 或 TemporaryUploadedFile）影响。",
+    "evidence": [
+      "Issue 标题“Set default FILE_UPLOAD_PERMISSION to 0o644.”暗示期望的默认行为",
+      "Issue 描述暗示期望权限应一致且合理，而非因临时文件处理方式不同而不同"
+    ],
+    "confidence": "medium"
+  },
+  "target_apis": [
+    {
+      "name": "FileSystemStorage._save",
+      "kind": "method",
+      "source_path": "django/core/files/storage.py",
+      "reason": "这是保存文件到存储系统的核心方法，可能涉及文件权限的设置。"
+    },
+    {
+      "name": "TemporaryUploadedFile",
+      "kind": "class",
+      "source_path": "django/core/files/uploadedfile.py",
+      "reason": "Issue 指出当上传数据较大时，会使用 TemporaryUploadedFile，其临时文件权限可能影响最终文件权限。"
+    },
+    {
+      "name": "FileSystemStorage.file_permissions_mode",
+      "kind": "property",
+      "source_path": "django/core/files/storage.py",
+      "reason": "该属性可能控制保存文件时的权限模式。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/core/files/storage.py",
+      "object": "FileSystemStorage._save",
+      "lines": "",
+      "reason": "文件保存逻辑在此方法中，可能未正确处理从 TemporaryUploadedFile 移动文件时的权限继承或设置。"
+    },
+    {
+      "path": "django/conf/global_settings.py",
+      "object": "FILE_UPLOAD_PERMISSIONS",
+      "lines": "307-307",
+      "reason": "该全局设置的默认值为 None，可能导致后续逻辑使用不一致的默认值或未设置权限。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_collect_static_files_default_permissions",
+      "test_file": "tests/staticfiles_tests/test_storage.py",
+      "why_relevant": "它测试了 FILE_UPLOAD_PERMISSIONS 为 None 时的默认文件权限行为，并检查了生成的文件模式。",
+      "reusable_parts": [
+        "@override_settings 装饰器用法",
+        "os.stat 获取文件模式的方法",
+        "权限掩码 (~self.umask) 的处理",
+        "assertEqual 断言风格"
+      ],
+      "possible_gap": "该测试针对静态文件收集（collectstatic），而非直接的文件上传和 FileSystemStorage._save 过程。"
+    },
+    {
+      "test_name": "test_move_temporary_file",
+      "test_file": "tests/model_fields/test_filefield.py",
+      "why_relevant": "它直接使用了 TemporaryUploadedFile 并测试其移动行为，与 Issue 中提到的 TemporaryUploadedFile 场景相关。",
+      "reusable_parts": [
+        "TemporaryUploadedFile 对象的构造",
+        "with 语句用法",
+        "os.path.exists 检查文件是否存在",
+        "assertFalse 断言风格"
+      ],
+      "possible_gap": "该测试主要关注临时文件是否被移动（存在性），并未检查移动后目标文件的权限。"
+    },
+    {
+      "test_name": "test_file_save_with_path",
+      "test_file": "tests/file_storage/tests.py",
+      "why_relevant": "它测试了 FileSystemStorage.save 方法，这是触发缺陷的核心 API 调用。",
+      "reusable_parts": [
+        "FileStorageTests 测试类结构",
+        "self.storage.save 的调用方式",
+        "ContentFile 的使用",
+        "文件存在性检查"
+      ],
+      "possible_gap": "该测试未涉及文件权限的检查，也未使用 TemporaryUploadedFile 或配置 FILE_UPLOAD_PERMISSIONS。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "测试中可能未设置或显式设置 FILE_UPLOAD_PERMISSIONS 为特定值。",
+      "target_pattern": "确保 FILE_UPLOAD_PERMISSIONS 设置为 None（或根本不设置，使用默认值）。",
+      "reason": "Issue 触发条件是在未显式配置 FILE_UPLOAD_PERMISSIONS 的情况下。",
+      "confidence": "high"
+    },
+    {
+      "slot": "input",
+      "current_pattern": "相似测试可能使用 ContentFile（内存内容）作为输入。",
+      "target_pattern": "使用 TemporaryUploadedFile 作为输入，模拟大文件上传场景。",
+      "reason": "Issue 指出缺陷与使用 TemporaryUploadedFile 进行临时存储相关。",
+      "confidence": "medium"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "测试可能直接调用 storage.save。",
+      "target_pattern": "通过上传处理器链，确保文件通过 TemporaryFileUploadHandler 处理，生成 TemporaryUploadedFile。",
+      "reason": "缺陷与默认 FILE_UPLOAD_HANDLERS 和上传数据大小触发的处理路径有关。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "file_output",
+      "expression_hint": "os.stat(saved_file_path).st_mode & 0o777",
+      "reason": "直接观测保存后文件的权限位，这是 Issue 描述的核心错误现象。"
+    },
+    {
+      "kind": "config",
+      "expression_hint": "settings.FILE_UPLOAD_PERMISSIONS",
+      "reason": "确认测试运行时该配置的值，确保处于触发条件（None 或未设置）。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "type(content) 在 FileSystemStorage._save 被调用时",
+      "reason": "确认上传内容是否是 TemporaryUploadedFile 实例，以区分缺陷路径。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "保存的文件权限应为一致且合理的值（例如 0o644），或与 umask 计算后的预期值相等。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言权限恰好等于某个硬编码值而不考虑 umask，或断言完整的 os.stat 结果。",
+      "reason": "Issue 关注权限不一致和过低问题，应断言权限位是否符合预期模式。"
+    },
+    {
+      "assertion_goal": "无论使用 MemoryUploadedFile 还是 TemporaryUploadedFile，最终文件权限应相同。",
+      "preferred_assertion_style": "equals",
+      "avoid": "仅断言一种情况下的权限。",
+      "reason": "Issue 指出权限不一致取决于临时存储类型，修复后应一致。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 override_settings 来控制 FILE_UPLOAD_PERMISSIONS 和可能的 FILE_UPLOAD_HANDLERS。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要一个临时目录用于存储上传的文件，类似 FileStorageTests 中的 self.temp_dir。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要模拟或创建足够大的上传数据以触发 TemporaryFileUploadHandler。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "在 FILE_UPLOAD_PERMISSIONS 为 None 时，当前代码预期的‘默认’文件权限具体是什么（是 0o666 & ~umask 还是其他）？",
+    "缺陷的确切触发路径：是 TemporaryUploadedFile 的临时文件权限（0o600）被直接保留，还是 FileSystemStorage._save 中的某些逻辑未正确应用权限？",
+    "哪些操作系统和 Python 版本会表现出 0o0600 的行为？",
+    "修复后的预期默认权限 0o644 是绝对标准，还是需要与 umask 进行计算？"
+  ],
+  "raw": {
+    "issue_summary": "上传文件时，未显式配置 FILE_UPLOAD_PERMISSIONS 可能导致最终文件权限不一致，在某些系统上为 0o0600。",
+    "trigger_condition": {
+      "text": "使用 FileSystemStorage 保存上传文件，且未显式设置 FILE_UPLOAD_PERMISSIONS 配置，上传数据大小可能触发使用 TemporaryUploadedFile 处理。",
+      "evidence": [
+        "Issue 提到“in absence of explicitly configured FILE_UPLOAD_PERMISSIONS”",
+        "Issue 提到“with the default FILE_UPLOAD_HANDLERS, in turn depends on the uploaded data size”",
+        "源码 global_settings.py 显示 FILE_UPLOAD_PERMISSIONS 默认值为 None",
+        "源码 global_settings.py 显示默认 FILE_UPLOAD_HANDLERS 包含 TemporaryFileUploadHandler"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "最终保存到文件系统的文件权限在某些系统上为 0o0600，而不是预期的默认权限（如 0o644）。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 提到“the permissions for a file uploaded to FileSystemStorage might not be consistent”",
+        "Issue 提到“causes the resulting file permissions to be 0o0600 on some systems”"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 FILE_UPLOAD_PERMISSIONS 未显式配置时，上传文件保存到 FileSystemStorage 后应具有一致且合理的默认文件权限（例如 0o644），不受临时文件处理方式（MemoryUploadedFile 或 TemporaryUploadedFile）影响。",
+      "evidence": [
+        "Issue 标题“Set default FILE_UPLOAD_PERMISSION to 0o644.”暗示期望的默认行为",
+        "Issue 描述暗示期望权限应一致且合理，而非因临时文件处理方式不同而不同"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "FileSystemStorage._save",
+        "kind": "method",
+        "source_path": "django/core/files/storage.py",
+        "reason": "这是保存文件到存储系统的核心方法，可能涉及文件权限的设置。"
+      },
+      {
+        "name": "TemporaryUploadedFile",
+        "kind": "class",
+        "source_path": "django/core/files/uploadedfile.py",
+        "reason": "Issue 指出当上传数据较大时，会使用 TemporaryUploadedFile，其临时文件权限可能影响最终文件权限。"
+      },
+      {
+        "name": "FileSystemStorage.file_permissions_mode",
+        "kind": "property",
+        "source_path": "django/core/files/storage.py",
+        "reason": "该属性可能控制保存文件时的权限模式。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/files/storage.py",
+        "object": "FileSystemStorage._save",
+        "lines": "",
+        "reason": "文件保存逻辑在此方法中，可能未正确处理从 TemporaryUploadedFile 移动文件时的权限继承或设置。"
+      },
+      {
+        "path": "django/conf/global_settings.py",
+        "object": "FILE_UPLOAD_PERMISSIONS",
+        "lines": "307-307",
+        "reason": "该全局设置的默认值为 None，可能导致后续逻辑使用不一致的默认值或未设置权限。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_collect_static_files_default_permissions",
+        "test_file": "tests/staticfiles_tests/test_storage.py",
+        "why_relevant": "它测试了 FILE_UPLOAD_PERMISSIONS 为 None 时的默认文件权限行为，并检查了生成的文件模式。",
+        "reusable_parts": [
+          "@override_settings 装饰器用法",
+          "os.stat 获取文件模式的方法",
+          "权限掩码 (~self.umask) 的处理",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试针对静态文件收集（collectstatic），而非直接的文件上传和 FileSystemStorage._save 过程。"
+      },
+      {
+        "test_name": "test_move_temporary_file",
+        "test_file": "tests/model_fields/test_filefield.py",
+        "why_relevant": "它直接使用了 TemporaryUploadedFile 并测试其移动行为，与 Issue 中提到的 TemporaryUploadedFile 场景相关。",
+        "reusable_parts": [
+          "TemporaryUploadedFile 对象的构造",
+          "with 语句用法",
+          "os.path.exists 检查文件是否存在",
+          "assertFalse 断言风格"
+        ],
+        "possible_gap": "该测试主要关注临时文件是否被移动（存在性），并未检查移动后目标文件的权限。"
+      },
+      {
+        "test_name": "test_file_save_with_path",
+        "test_file": "tests/file_storage/tests.py",
+        "why_relevant": "它测试了 FileSystemStorage.save 方法，这是触发缺陷的核心 API 调用。",
+        "reusable_parts": [
+          "FileStorageTests 测试类结构",
+          "self.storage.save 的调用方式",
+          "ContentFile 的使用",
+          "文件存在性检查"
+        ],
+        "possible_gap": "该测试未涉及文件权限的检查，也未使用 TemporaryUploadedFile 或配置 FILE_UPLOAD_PERMISSIONS。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试中可能未设置或显式设置 FILE_UPLOAD_PERMISSIONS 为特定值。",
+        "target_pattern": "确保 FILE_UPLOAD_PERMISSIONS 设置为 None（或根本不设置，使用默认值）。",
+        "reason": "Issue 触发条件是在未显式配置 FILE_UPLOAD_PERMISSIONS 的情况下。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试可能使用 ContentFile（内存内容）作为输入。",
+        "target_pattern": "使用 TemporaryUploadedFile 作为输入，模拟大文件上传场景。",
+        "reason": "Issue 指出缺陷与使用 TemporaryUploadedFile 进行临时存储相关。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试可能直接调用 storage.save。",
+        "target_pattern": "通过上传处理器链，确保文件通过 TemporaryFileUploadHandler 处理，生成 TemporaryUploadedFile。",
+        "reason": "缺陷与默认 FILE_UPLOAD_HANDLERS 和上传数据大小触发的处理路径有关。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "os.stat(saved_file_path).st_mode & 0o777",
+        "reason": "直接观测保存后文件的权限位，这是 Issue 描述的核心错误现象。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "settings.FILE_UPLOAD_PERMISSIONS",
+        "reason": "确认测试运行时该配置的值，确保处于触发条件（None 或未设置）。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(content) 在 FileSystemStorage._save 被调用时",
+        "reason": "确认上传内容是否是 TemporaryUploadedFile 实例，以区分缺陷路径。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "保存的文件权限应为一致且合理的值（例如 0o644），或与 umask 计算后的预期值相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言权限恰好等于某个硬编码值而不考虑 umask，或断言完整的 os.stat 结果。",
+        "reason": "Issue 关注权限不一致和过低问题，应断言权限位是否符合预期模式。"
+      },
+      {
+        "assertion_goal": "无论使用 MemoryUploadedFile 还是 TemporaryUploadedFile，最终文件权限应相同。",
+        "preferred_assertion_style": "equals",
+        "avoid": "仅断言一种情况下的权限。",
+        "reason": "Issue 指出权限不一致取决于临时存储类型，修复后应一致。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 override_settings 来控制 FILE_UPLOAD_PERMISSIONS 和可能的 FILE_UPLOAD_HANDLERS。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要一个临时目录用于存储上传的文件，类似 FileStorageTests 中的 self.temp_dir。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟或创建足够大的上传数据以触发 TemporaryFileUploadHandler。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "在 FILE_UPLOAD_PERMISSIONS 为 None 时，当前代码预期的‘默认’文件权限具体是什么（是 0o666 & ~umask 还是其他）？",
+      "缺陷的确切触发路径：是 TemporaryUploadedFile 的临时文件权限（0o600）被直接保留，还是 FileSystemStorage._save 中的某些逻辑未正确应用权限？",
+      "哪些操作系统和 Python 版本会表现出 0o0600 的行为？",
+      "修复后的预期默认权限 0o644 是绝对标准，还是需要与 umask 进行计算？"
+    ]
+  }
+}

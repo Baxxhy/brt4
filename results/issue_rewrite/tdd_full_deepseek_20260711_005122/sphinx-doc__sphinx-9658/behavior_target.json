@@ -1,0 +1,269 @@
+{
+  "instance_id": "sphinx-doc__sphinx-9658",
+  "issue_summary": "当被模拟的类被子类继承时，Sphinx 文档生成中基类（Bases）部分显示不完整。",
+  "trigger_condition": {
+    "text": "使用 Sphinx >= 3.4.2 版本，配置 autodoc_mock_imports 模拟某些模块，然后为继承自被模拟类的子类生成文档。",
+    "evidence": [
+      "Issue 描述：'Inherited classes not correctly documented when mocked'",
+      "Issue 描述：'sphinx>=3.4.2: The previously missing classes are now documented, but there is a problem with the \"Bases\" section in the docs.'",
+      "相关测试 1 使用了 'autodoc_mock_imports' 配置。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "生成的文档中，子类的“Bases”部分显示不完整，例如显示为 'torch.nn.' 而不是完整的 'torch.nn.Module'。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 描述：'the base class is listed as \"Bases: `torch.nn.`\" instead of \"Bases: `torch.nn.Module`\"'",
+      "Issue 截图显示了不完整的 'Bases' 输出。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "生成的文档中，子类的“Bases”部分应正确、完整地显示其基类名称。",
+    "evidence": [
+      "Issue 描述：'The \"Bases\" section should report `torch.nn.Module` not `torch.nn.`'",
+      "Issue 提供了正确行为的参考链接。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "sphinx.ext.autodoc",
+      "kind": "module",
+      "source_path": "",
+      "reason": "Issue 涉及 Sphinx 的 autodoc 扩展在生成文档时处理被模拟类的问题。"
+    },
+    {
+      "name": "autodoc_mock_imports",
+      "kind": "config",
+      "source_path": "",
+      "reason": "Issue 和检索到的测试都表明，此配置用于模拟缺失的模块，是触发条件的关键部分。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "",
+      "object": "",
+      "lines": "",
+      "reason": "Issue 未提供具体源码位置，但指向了 Sphinx 的另一个 Issue #8164，暗示问题可能在 Sphinx 处理被模拟类的基类名称解析逻辑中。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_subclass_of_mocked_object",
+      "test_file": "tests/test_ext_autodoc_automodule.py",
+      "why_relevant": "该测试直接验证了继承自被模拟对象的子类是否能被正确生成文档，与当前 Issue 的核心场景高度相似。",
+      "reusable_parts": [
+        "@pytest.mark.sphinx 装饰器",
+        "confoverrides 设置 autodoc_mock_imports",
+        "do_autodoc 函数调用",
+        "assert 检查输出字符串片段"
+      ],
+      "possible_gap": "该测试只断言了类定义行 '.. py:class:: Inherited' 的存在，没有检查生成的 'Bases' 部分的内容是否完整，而这正是当前 Issue 的问题所在。"
+    },
+    {
+      "test_name": "test_mocked_module_imports",
+      "test_file": "tests/test_ext_autodoc_configs.py",
+      "why_relevant": "该测试展示了配置 autodoc_mock_imports 后，对包含被模拟对象的模块进行文档生成，并验证输出。",
+      "reusable_parts": [
+        "使用 app.config.autodoc_mock_imports",
+        "do_autodoc 函数调用",
+        "assert 检查完整的文档输出列表"
+      ],
+      "possible_gap": "该测试检查的是普通类和函数的文档生成，没有涉及继承自被模拟类的场景。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "mock",
+      "current_pattern": "相关测试 1 中，被模拟的模块是 'missing_module' 等通用名称。",
+      "target_pattern": "模拟一个具有层次结构的模块（如 'torch.nn'），并创建一个继承自该模块下某个类（如 'torch.nn.Module'）的子类。",
+      "reason": "Issue 中的示例表明，当基类来自一个被模拟的、具有点号路径的模块时，'Bases' 部分的显示会被截断。",
+      "confidence": "medium"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "相关测试 1 和 3 中，Sphinx 应用配置了 autodoc_mock_imports。",
+      "target_pattern": "将 Sphinx 版本设置为 >= 3.4.2（如 4.2），这是 Issue 中明确的问题版本范围。",
+      "reason": "Issue 表明问题与 Sphinx 版本强相关，仅在特定版本范围内出现。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "do_autodoc 函数调用返回的文档字符串（RST 格式）。",
+      "reason": "Issue 的错误现象直接体现在生成的文档字符串内容中，特别是 'Bases:' 后面的部分。"
+    },
+    {
+      "kind": "repr",
+      "expression_hint": "被模拟的基类对象的 __repr__ 或 __name__ 属性。",
+      "reason": "'Bases' 部分的内容可能依赖于如何获取和表示被模拟基类的名称。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证生成的文档中，子类的 'Bases' 部分包含完整、正确的基类名称。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免断言完整的、可能因 Sphinx 版本或格式而变化的 RST 输出字符串。",
+      "reason": "Issue 的核心是基类名称显示不完整，因此断言输出中包含完整的基类名称片段（如 'Module'）是稳定且目标明确的。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 @pytest.mark.sphinx 装饰器创建 Sphinx 测试应用，并配置 autodoc_mock_imports。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要创建或导入一个测试模块，其中包含一个继承自被模拟模块中某个类的子类。",
+      "source": "inference",
+      "confidence": "medium"
+    },
+    {
+      "hint": "需要确保测试在 Sphinx >= 3.4.2 的环境下运行。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "导致 'Bases' 部分截断的具体代码逻辑位置和原因尚不确定。",
+    "除了 'torch.nn.Module'，其他具有类似层次结构的被模拟模块是否也会触发此问题？",
+    "Sphinx 内部处理被模拟类名称的哪个环节导致了字符串截断？"
+  ],
+  "raw": {
+    "issue_summary": "当被模拟的类被子类继承时，Sphinx 文档生成中基类（Bases）部分显示不完整。",
+    "trigger_condition": {
+      "text": "使用 Sphinx >= 3.4.2 版本，配置 autodoc_mock_imports 模拟某些模块，然后为继承自被模拟类的子类生成文档。",
+      "evidence": [
+        "Issue 描述：'Inherited classes not correctly documented when mocked'",
+        "Issue 描述：'sphinx>=3.4.2: The previously missing classes are now documented, but there is a problem with the \"Bases\" section in the docs.'",
+        "相关测试 1 使用了 'autodoc_mock_imports' 配置。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的文档中，子类的“Bases”部分显示不完整，例如显示为 'torch.nn.' 而不是完整的 'torch.nn.Module'。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'the base class is listed as \"Bases: `torch.nn.`\" instead of \"Bases: `torch.nn.Module`\"'",
+        "Issue 截图显示了不完整的 'Bases' 输出。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "生成的文档中，子类的“Bases”部分应正确、完整地显示其基类名称。",
+      "evidence": [
+        "Issue 描述：'The \"Bases\" section should report `torch.nn.Module` not `torch.nn.`'",
+        "Issue 提供了正确行为的参考链接。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sphinx.ext.autodoc",
+        "kind": "module",
+        "source_path": "",
+        "reason": "Issue 涉及 Sphinx 的 autodoc 扩展在生成文档时处理被模拟类的问题。"
+      },
+      {
+        "name": "autodoc_mock_imports",
+        "kind": "config",
+        "source_path": "",
+        "reason": "Issue 和检索到的测试都表明，此配置用于模拟缺失的模块，是触发条件的关键部分。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 未提供具体源码位置，但指向了 Sphinx 的另一个 Issue #8164，暗示问题可能在 Sphinx 处理被模拟类的基类名称解析逻辑中。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_subclass_of_mocked_object",
+        "test_file": "tests/test_ext_autodoc_automodule.py",
+        "why_relevant": "该测试直接验证了继承自被模拟对象的子类是否能被正确生成文档，与当前 Issue 的核心场景高度相似。",
+        "reusable_parts": [
+          "@pytest.mark.sphinx 装饰器",
+          "confoverrides 设置 autodoc_mock_imports",
+          "do_autodoc 函数调用",
+          "assert 检查输出字符串片段"
+        ],
+        "possible_gap": "该测试只断言了类定义行 '.. py:class:: Inherited' 的存在，没有检查生成的 'Bases' 部分的内容是否完整，而这正是当前 Issue 的问题所在。"
+      },
+      {
+        "test_name": "test_mocked_module_imports",
+        "test_file": "tests/test_ext_autodoc_configs.py",
+        "why_relevant": "该测试展示了配置 autodoc_mock_imports 后，对包含被模拟对象的模块进行文档生成，并验证输出。",
+        "reusable_parts": [
+          "使用 app.config.autodoc_mock_imports",
+          "do_autodoc 函数调用",
+          "assert 检查完整的文档输出列表"
+        ],
+        "possible_gap": "该测试检查的是普通类和函数的文档生成，没有涉及继承自被模拟类的场景。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "mock",
+        "current_pattern": "相关测试 1 中，被模拟的模块是 'missing_module' 等通用名称。",
+        "target_pattern": "模拟一个具有层次结构的模块（如 'torch.nn'），并创建一个继承自该模块下某个类（如 'torch.nn.Module'）的子类。",
+        "reason": "Issue 中的示例表明，当基类来自一个被模拟的、具有点号路径的模块时，'Bases' 部分的显示会被截断。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 和 3 中，Sphinx 应用配置了 autodoc_mock_imports。",
+        "target_pattern": "将 Sphinx 版本设置为 >= 3.4.2（如 4.2），这是 Issue 中明确的问题版本范围。",
+        "reason": "Issue 表明问题与 Sphinx 版本强相关，仅在特定版本范围内出现。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "do_autodoc 函数调用返回的文档字符串（RST 格式）。",
+        "reason": "Issue 的错误现象直接体现在生成的文档字符串内容中，特别是 'Bases:' 后面的部分。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "被模拟的基类对象的 __repr__ 或 __name__ 属性。",
+        "reason": "'Bases' 部分的内容可能依赖于如何获取和表示被模拟基类的名称。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证生成的文档中，子类的 'Bases' 部分包含完整、正确的基类名称。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、可能因 Sphinx 版本或格式而变化的 RST 输出字符串。",
+        "reason": "Issue 的核心是基类名称显示不完整，因此断言输出中包含完整的基类名称片段（如 'Module'）是稳定且目标明确的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 @pytest.mark.sphinx 装饰器创建 Sphinx 测试应用，并配置 autodoc_mock_imports。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建或导入一个测试模块，其中包含一个继承自被模拟模块中某个类的子类。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要确保测试在 Sphinx >= 3.4.2 的环境下运行。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "导致 'Bases' 部分截断的具体代码逻辑位置和原因尚不确定。",
+      "除了 'torch.nn.Module'，其他具有类似层次结构的被模拟模块是否也会触发此问题？",
+      "Sphinx 内部处理被模拟类名称的哪个环节导致了字符串截断？"
+    ]
+  }
+}

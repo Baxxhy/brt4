@@ -1,0 +1,343 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Resetting primary key for a child model doesn't work.
+Description
+	
+In the attached example code setting the primary key to None does not work (so that the existing object is overwritten on save()).
+The most important code fragments of the bug example:
+from django.db import models
+class Item(models.Model):
+	# uid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+	uid = models.AutoField(primary_key=True, editable=False)
+	f = models.BooleanField(default=False)
+	def reset(self):
+		self.uid = None
+		self.f = False
+class Derived(Item):
+	pass
+class SaveTestCase(TestCase):
+	def setUp(self):
+		self.derived = Derived.objects.create(f=True) # create the first object
+		item = Item.objects.get(pk=self.derived.pk)
+		obj1 = item.derived
+		obj1.reset()
+		obj1.save() # the first object is overwritten
+	def test_f_true(self):
+		obj = Item.objects.get(pk=self.derived.pk)
+		self.assertTrue(obj.f)
+Django 2.1.2
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：tests/invalid_models_tests/test_ordinary_fields.py
+对象名称：Model
+节点类型：class
+父节点：test_ordinary_fields
+行号范围：17-18
+代码：
+        class Model(models.Model):
+            id = models.AutoField(primary_key=True)
+
+
+【源码片段 2】
+文件路径：tests/defer_regress/models.py
+对象名称：Item
+节点类型：class
+父节点：models
+行号范围：8-15
+代码：
+class Item(models.Model):
+    name = models.CharField(max_length=15)
+    text = models.TextField(default="xyzzy")
+    value = models.IntegerField()
+    other_value = models.IntegerField(default=0)
+    def __str__(self):
+
+
+【源码片段 3】
+文件路径：tests/defer_regress/models.py
+对象名称：Derived
+节点类型：class
+父节点：models
+行号范围：101-102
+代码：
+class Derived(Base):
+    other_text = models.TextField()
+
+
+【源码片段 4】
+文件路径：django/test/testcases.py
+对象名称：TestCase
+节点类型：class
+父节点：testcases
+行号范围：1065-1162
+代码：
+class TestCase(TransactionTestCase):
+    """
+    Similar to TransactionTestCase, but use `transaction.atomic()` to achieve
+    test isolation.
+
+    In most situations, TestCase should be preferred to TransactionTestCase as
+    it allows faster execution. However, there are some situations where using
+    TransactionTestCase might be necessary (e.g. testing some transactional
+    behavior).
+
+    On database backends with no transaction support, TestCase behaves as
+    TransactionTestCase.
+    """
+    @classmethod
+    def _enter_atomics(cls):
+    @classmethod
+    def _rollback_atomics(cls, atomics):
+    @classmethod
+    def _databases_support_transactions(cls):
+    @classmethod
+    def setUpClass(cls):
+    @classmethod
+    def tearDownClass(cls):
+    @classmethod
+    def setUpTestData(cls):
+    def _should_reload_connections(self):
+    def _fixture_setup(self):
+    def _fixture_teardown(self):
+    def _should_check_constraints(self, connection):
+
+
+【源码片段 5】
+文件路径：django/db/models/fields/related_descriptors.py
+对象名称：create
+节点类型：class_function
+父节点：RelatedManager
+行号范围：674-677
+代码：
+        def create(self, **kwargs):
+            kwargs[self.field.name] = self.instance
+            db = router.db_for_write(self.model, instance=self.instance)
+            return super(RelatedManager, self.db_manager(db)).create(**kwargs)
+
+
+【源码片段 6】
+文件路径：django/contrib/sessions/backends/base.py
+对象名称：get
+节点类型：class_function
+父节点：SessionBase
+行号范围：74-75
+代码：
+    def get(self, key, default=None):
+        return self._session.get(key, default)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/model_inheritance/tests.py
+测试名称：ModelInheritanceDataTests.test_parent_child_one_to_one_link
+测试代码：
+class ModelInheritanceDataTests(TestCase):
+    def test_parent_child_one_to_one_link(self):
+        # Since the parent and child are linked by an automatically created
+        # OneToOneField, you can get from the parent to the child by using the
+        # child's name.
+        self.assertEqual(
+            Place.objects.get(name="Demon Dogs").restaurant,
+            Restaurant.objects.get(name="Demon Dogs")
+        )
+        self.assertEqual(
+            Place.objects.get(name="Ristorante Miron").restaurant.italianrestaurant,
+            ItalianRestaurant.objects.get(name="Ristorante Miron")
+        )
+        self.assertEqual(
+            Restaurant.objects.get(name="Ristorante Miron").italianrestaurant,
+            ItalianRestaurant.objects.get(name="Ristorante Miron")
+        )
+
+【相关测试 2】
+测试文件：tests/model_inheritance/tests.py
+测试名称：ModelInheritanceDataTests.test_update_works_on_parent_and_child_models_at_once
+测试代码：
+class ModelInheritanceDataTests(TestCase):
+    def test_update_works_on_parent_and_child_models_at_once(self):
+        # The update() command can update fields in parent and child classes at
+        # once (although it executed multiple SQL queries to do so).
+        rows = Restaurant.objects.filter(
+            serves_hot_dogs=True, name__contains="D"
+        ).update(
+            name="Demon Puppies", serves_hot_dogs=False
+        )
+        self.assertEqual(rows, 1)
+
+        r1 = Restaurant.objects.get(pk=self.restaurant.pk)
+        self.assertFalse(r1.serves_hot_dogs)
+        self.assertEqual(r1.name, "Demon Puppies")
+
+【相关测试 3】
+测试文件：tests/model_fields/test_uuid.py
+测试名称：TestAsPrimaryKey.test_uuid_pk_on_save
+测试代码：
+class TestAsPrimaryKey(TestCase):
+    def test_uuid_pk_on_save(self):
+        saved = PrimaryKeyUUIDModel.objects.create(id=None)
+        loaded = PrimaryKeyUUIDModel.objects.get()
+        self.assertIsNotNone(loaded.id, None)
+        self.assertEqual(loaded.id, saved.id)
+
+【相关测试 4】
+测试文件：tests/basic/tests.py
+测试名称：ModelTest.test_manually_specify_primary_key
+测试代码：
+class ModelTest(TestCase):
+    def test_manually_specify_primary_key(self):
+        # You can manually specify the primary key when creating a new object.
+        a101 = Article(
+            id=101,
+            headline='Article 101',
+            pub_date=datetime(2005, 7, 31, 12, 30, 45),
+        )
+        a101.save()
+        a101 = Article.objects.get(pk=101)
+        self.assertEqual(a101.headline, 'Article 101')
+
+【相关测试 5】
+测试文件：tests/model_inheritance/tests.py
+测试名称：ModelInheritanceTests.test_create_child_no_update
+测试代码：
+class ModelInheritanceTests(TestCase):
+    def test_create_child_no_update(self):
+        """Creating a child with non-abstract parents only issues INSERTs."""
+        def a():
+            GrandChild.objects.create(
+                email='grand_parent@example.com',
+                first_name='grand',
+                last_name='parent',
+            )
+
+        def b():
+            GrandChild().save()
+        for i, test in enumerate([a, b]):
+            with self.subTest(i=i), self.assertNumQueries(4), CaptureQueriesContext(connection) as queries:
+                test()
+                for query in queries:
+                    sql = query['sql']
+                    self.assertIn('INSERT INTO', sql, sql)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

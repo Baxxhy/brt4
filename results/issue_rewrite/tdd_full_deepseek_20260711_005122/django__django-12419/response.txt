@@ -1,0 +1,127 @@
+{
+  "issue_summary": "SECURE_REFERRER_POLICY 的默认值为 None，导致 Django 应用默认不会添加 Referrer-Policy 头，可能向第三方站点泄露信息。",
+  "trigger_condition": {
+    "text": "当 SECURE_REFERRER_POLICY 设置为 None（默认值）时，使用 SecurityMiddleware 处理请求。",
+    "evidence": ["Issue 提到默认值不是 'same-origin'，希望改变默认值。", "源码片段 1 显示 SECURE_REFERRER_POLICY = None。", "相关测试 2 测试了 SECURE_REFERRER_POLICY=None 时中间件不添加头。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "HTTP 响应中缺少 Referrer-Policy 头，或者其值不是更安全的默认值（如 'same-origin'）。",
+    "symptom_type": "warning",
+    "evidence": ["Issue 提到当前默认设置会使 Django 应用向第三方站点泄露更多信息。", "相关测试 2 验证了当 SECURE_REFERRER_POLICY=None 时，响应中不包含 'Referrer-Policy' 头。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当 SECURE_REFERRER_POLICY 使用新的安全默认值（例如 'same-origin'）时，SecurityMiddleware 应在响应中添加相应的 Referrer-Policy 头。",
+    "evidence": ["Issue 提议将默认值改为 'same-origin' 以减少信息泄露。", "相关测试 1 展示了当 SECURE_REFERRER_POLICY 设置为有效值时，中间件会添加正确的头。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "SecurityMiddleware",
+      "kind": "class",
+      "source_path": "django/middleware/security.py",
+      "reason": "该中间件负责处理安全相关的 HTTP 头，包括 Referrer-Policy。"
+    },
+    {
+      "name": "SECURE_REFERRER_POLICY",
+      "kind": "global_var",
+      "source_path": "django/conf/global_settings.py",
+      "reason": "这是控制 Referrer-Policy 头行为的配置设置。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/conf/global_settings.py",
+      "object": "SECURE_REFERRER_POLICY",
+      "lines": "640-640",
+      "reason": "该变量的默认值为 None，根据 Issue，这被认为是不安全的默认行为。"
+    },
+    {
+      "path": "django/middleware/security.py",
+      "object": "SecurityMiddleware",
+      "lines": "8-55",
+      "reason": "该中间件读取 SECURE_REFERRER_POLICY 设置并决定是否添加 Referrer-Policy 头。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "SecurityMiddlewareTest.test_referrer_policy_off",
+      "test_file": "tests/middleware/test_security.py",
+      "why_relevant": "它直接测试了 SECURE_REFERRER_POLICY=None 的默认行为，这正是 Issue 描述的问题场景。",
+      "reusable_parts": ["测试类结构", "使用 override_settings", "调用 self.process_response()", "使用 assertNotIn 检查响应头缺失"],
+      "possible_gap": "它断言头不存在，而 Issue 期望的是头存在且具有一个安全的默认值。"
+    },
+    {
+      "test_name": "SecurityMiddlewareTest.test_referrer_policy_on",
+      "test_file": "tests/middleware/test_security.py",
+      "why_relevant": "它测试了当 SECURE_REFERRER_POLICY 设置为有效值时，中间件正确添加头的行为。",
+      "reusable_parts": ["测试类结构", "使用 override_settings 和 subTest", "调用 self.process_response()", "使用 assertEqual 检查响应头值"],
+      "possible_gap": "它测试的是显式设置值的情况，而不是默认值的行为。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "在测试中使用 override_settings(SECURE_REFERRER_POLICY=None) 或完全不设置（依赖默认值）。",
+      "target_pattern": "在测试中不覆盖 SECURE_REFERRER_POLICY 设置，让其保持为全局默认值 None（即当前有问题的默认值）。",
+      "reason": "Issue 的核心是默认值不安全。不覆盖设置可以测试系统在默认配置下的实际行为。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "测试中 SECURE_REFERRER_POLICY 被显式设置为一个非 None 的有效值（如 'strict-origin'）。",
+      "target_pattern": "将 SECURE_REFERRER_POLICY 的值改为 'same-origin'（Issue 提议的新默认值）。",
+      "reason": "这可以验证如果默认值被改为 'same-origin'，中间件是否会按预期添加头。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "response['Referrer-Policy'] 或 'Referrer-Policy' in response",
+      "reason": "直接观察响应中是否存在 Referrer-Policy 头及其值，这是 Issue 关注的焦点。"
+    },
+    {
+      "kind": "config",
+      "expression_hint": "settings.SECURE_REFERRER_POLICY",
+      "reason": "观察测试运行时该配置的实际值，以确认是否处于默认（有问题的）状态。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证在默认配置（SECURE_REFERRER_POLICY 为 None）下，响应中不包含 Referrer-Policy 头（当前有问题的行为）。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "断言完整的响应对象相等或断言头值为某个特定字符串（因为当前行为是缺失）。",
+      "reason": "这直接对应 Issue 描述的当前不安全状态：头缺失。"
+    },
+    {
+      "assertion_goal": "验证如果将 SECURE_REFERRER_POLICY 设置为 'same-origin'，响应中包含值为 'same-origin' 的 Referrer-Policy 头（期望的修复后行为）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的响应对象相等或断言头值包含不稳定的额外字符。",
+      "reason": "这直接对应 Issue 提议的修复目标：添加一个安全的默认头。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 SimpleTestCase 或类似的测试基类，并可能导入 SecurityMiddleware。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要使用 override_settings 来修改 SECURE_REFERRER_POLICY 配置，或者故意不修改以测试默认值。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要构造一个请求并通过 SecurityMiddleware 的 process_response 方法（或类似方法）获取响应对象。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "SecurityMiddleware 内部处理 SECURE_REFERRER_POLICY 为 None 时的确切逻辑（是跳过添加头，还是添加一个空值头）。",
+    "如果响应中已经存在 Referrer-Policy 头，中间件是否会覆盖它（相关测试 3 提示不会，但这与默认值场景的关系不确定）。",
+    "Issue 提议的 'same-origin' 是否是最终会被采纳的默认值，或者只是建议之一。"
+  ]
+}

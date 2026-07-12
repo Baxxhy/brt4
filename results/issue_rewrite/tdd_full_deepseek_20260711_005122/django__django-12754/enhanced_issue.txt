@@ -1,0 +1,141 @@
+instance_id: django__django-12754
+
+issue_summary: 在将字段迁移到新的模型子类时，由于迁移操作顺序不当，导致 migrate 命令抛出 FieldError 异常。
+
+trigger_condition:
+{
+  "text": "创建一个模型子类，并将一个字段从基类移动到该子类，然后运行 makemigrations 和 migrate。",
+  "evidence": [
+    "Issue 描述：'If creating a model subclass and moving a field onto it in the same step, makemigrations works but migrate dies with django.core.exceptions.FieldError'",
+    "Issue 中的代码示例展示了从 Readable 模型移动到 Book 子类的字段 'title'。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "运行 migrate 时抛出 django.core.exceptions.FieldError: Local field 'title' in class 'Book' clashes with field of the same name from base class 'Readable'。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中明确给出了异常信息：'django.core.exceptions.FieldError: Local field 'title' in class 'Book' clashes with field of the same name from base class 'Readable'。'",
+    "相关源码片段 5 定义了 FieldError 异常类。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "迁移应成功执行，字段应被正确地从基类移动到子类，而不引发 FieldError。",
+  "evidence": [
+    "Issue 中提到：'Reversing the order of the migration operations makes it pass. The auto-detector should be able to use this order.'",
+    "相关测试 4 展示了在删除模型前先删除外键字段的正确顺序。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "makemigrations",
+    "kind": "function",
+    "source_path": "django/core/management/commands/makemigrations.py",
+    "reason": "Issue 中提到了 makemigrations 命令，它是生成迁移文件的关键。"
+  },
+  {
+    "name": "migrate",
+    "kind": "method",
+    "source_path": "django/db/migrations/executor.py",
+    "reason": "Issue 中提到了 migrate 命令失败，相关源码片段 4 包含了 migrate 方法的实现。"
+  },
+  {
+    "name": "CreateModel",
+    "kind": "class",
+    "source_path": "tests/custom_migration_operations/operations.py",
+    "reason": "Issue 提到迁移生成了 CreateModel 操作，相关测试 2 也使用了 CreateModel。"
+  },
+  {
+    "name": "RemoveField",
+    "kind": "class",
+    "source_path": "",
+    "reason": "Issue 提到迁移生成了 RemoveField 操作，相关测试 3 测试了 RemoveField。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "call_chain",
+    "current_pattern": "相关测试通常独立测试单个操作（如 CreateModel 或 RemoveField），或测试特定顺序（如先删除外键再删除模型）。",
+    "target_pattern": "创建一个测试，其中迁移操作序列是：先为子类创建模型（包含从基类移动过来的字段），然后从基类中移除该字段。",
+    "reason": "Issue 表明，当迁移操作按此顺序（CreateModel 然后 RemoveField）生成时，会触发错误。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "测试通常从定义好的模型状态开始和结束。",
+    "target_pattern": "初始状态：基类模型包含一个字段。结束状态：基类模型为空，子类模型包含该字段。",
+    "reason": "Issue 中的代码示例展示了这种模型状态的变化，这是触发缺陷的条件。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "在调用 migrate 或执行迁移操作时捕获的 django.core.exceptions.FieldError。",
+    "reason": "Issue 的核心错误现象是抛出 FieldError 异常。"
+  },
+  {
+    "kind": "order",
+    "expression_hint": "生成的迁移计划中操作（CreateModel 和 RemoveField）的顺序。",
+    "reason": "Issue 指出反转操作顺序可以使迁移通过，因此操作顺序是关键观测点。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "迁移前后项目状态（ProjectState）中模型和字段的定义。",
+    "reason": "可以观察字段是否成功从基类移动到子类，以及中间状态是否存在冲突。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "迁移应成功执行，不抛出 FieldError 异常。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言完整的异常消息字符串，因为具体措辞可能变化。",
+    "reason": "Issue 的核心是迁移失败并抛出异常，修复后应不再抛出。"
+  },
+  {
+    "assertion_goal": "迁移操作的正确顺序（例如，先创建子类字段，再移除基类字段）应被自动检测器采用。",
+    "preferred_assertion_style": "order_equals",
+    "avoid": "断言完整的迁移文件内容。",
+    "reason": "Issue 明确指出操作顺序是问题的关键，修复后自动检测器应生成正确的顺序。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 Django 的 TestCase 和迁移测试工具（如 MigrationTestBase 或 OperationTestBase）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要设置数据库连接，因为迁移操作会修改数据库模式。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要定义模型状态（ModelState）来表示迁移前后的模型结构。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "自动检测器（MigrationAutodetector）内部决定操作顺序的确切逻辑和位置。",
+  "除了操作顺序外，是否还有其他因素（如字段类型、约束）会影响此错误。",
+  "修复后，迁移操作的确切顺序（CreateModel 然后 RemoveField）是否总是正确，或者是否有其他有效顺序。"
+]

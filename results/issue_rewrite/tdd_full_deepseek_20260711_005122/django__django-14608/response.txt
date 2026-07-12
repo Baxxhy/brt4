@@ -1,0 +1,159 @@
+```json
+{
+    "issue_summary": "FormSets 的非表单错误在渲染时缺少 'nonform' CSS 类，而 Forms 的非字段错误有 'nonfield' 类。",
+    "trigger_condition": {
+        "text": "创建一个 FormSet，使其产生非表单错误（例如通过 FormSet.clean() 抛出 ValidationError），然后渲染该 FormSet 的错误信息（例如调用 non_form_errors() 并转换为 HTML）。",
+        "evidence": ["Issue 描述中提到 FormSets 的非表单错误应添加 'nonform' CSS 类。", "相关测试 1 和 3 展示了如何创建具有非表单错误的 FormSet。"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "FormSet 的非表单错误在渲染为 HTML（例如通过 as_ul()、as_p()、as_table() 或直接调用 str()）时，其错误列表的 <ul> 标签缺少 'nonform' CSS 类。",
+        "symptom_type": "wrong_return",
+        "evidence": ["Issue 描述指出 FormSets 的 non form errors 缺少 'nonform' CSS 类，而 Forms 的 non field errors 有 'nonfield' 类。", "相关测试 2 展示了 Form 的非字段错误正确包含 'nonfield' 类的断言。"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "FormSet 的非表单错误在渲染为 HTML 时，其错误列表的 <ul> 标签应包含 'nonform' CSS 类，以便与表单字段错误和 Forms 的非字段错误区分。",
+        "evidence": ["Issue 描述明确建议添加 'nonform' CSS 类并记录它供开发者使用。", "Issue 提到 Forms 的 'nonfield' 类是已记录的功能，FormSets 应类似。"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "ErrorList",
+            "kind": "class",
+            "source_path": "django/forms/utils.py",
+            "reason": "Issue 涉及 FormSet 非表单错误的渲染，这些错误存储在 ErrorList 实例中。"
+        },
+        {
+            "name": "BaseFormSet.non_form_errors",
+            "kind": "method",
+            "source_path": "",
+            "reason": "Issue 的核心是 FormSet 的非表单错误处理，此方法返回 ErrorList。"
+        },
+        {
+            "name": "ErrorList.as_ul",
+            "kind": "method",
+            "source_path": "django/forms/utils.py",
+            "reason": "渲染错误为无序列表的方法，是添加 CSS 类的关键位置。"
+        },
+        {
+            "name": "formset_factory",
+            "kind": "function",
+            "source_path": "",
+            "reason": "相关测试中用于创建自定义 FormSet 以产生非表单错误。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/forms/utils.py",
+            "object": "ErrorList.as_ul",
+            "lines": "",
+            "reason": "Issue 涉及错误列表的 HTML 渲染，as_ul() 方法负责生成包含 CSS 类的 <ul> 标签。Form 的非字段错误能正确添加 'nonfield' 类，FormSet 的非表单错误可能缺少类似逻辑。"
+        },
+        {
+            "path": "django/forms/formsets.py",
+            "object": "BaseFormSet.non_form_errors",
+            "lines": "",
+            "reason": "该方法返回 FormSet 的非表单错误 ErrorList。Issue 可能涉及此方法返回的 ErrorList 实例在初始化或渲染时未配置正确的 CSS 类。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_error_list_with_non_field_errors_has_correct_class",
+            "test_file": "tests/forms_tests/tests/test_forms.py",
+            "why_relevant": "它测试了 Form 的非字段错误正确包含 'nonfield' CSS 类，与当前 Issue 关于 FormSet 非表单错误缺少 'nonform' 类的问题高度相似，都是验证错误列表的 HTML 类属性。",
+            "reusable_parts": ["Form 和 ValidationError 的使用模式", "assertHTMLEqual 断言风格", "对错误列表 HTML 输出的验证方法"],
+            "possible_gap": "该测试针对 Form 而非 FormSet，且验证的是 'nonfield' 类而非 'nonform' 类。需要将测试对象从 Form 切换到 FormSet，并调整错误触发方式（Form.clean vs FormSet.clean）。"
+        },
+        {
+            "test_name": "test_non_form_errors",
+            "test_file": "tests/forms_tests/tests/test_formsets.py",
+            "why_relevant": "它直接测试 FormSet 的非表单错误，展示了如何创建具有非表单错误的 FormSet 并获取错误列表。",
+            "reusable_parts": ["FormSet 数据构造", "formset.is_valid() 和 formset.non_form_errors() 的调用模式", "对非表单错误内容的断言"],
+            "possible_gap": "它只断言了错误消息内容，没有检查错误列表渲染后的 HTML 结构或 CSS 类。需要扩展以检查 HTML 输出中的类属性。"
+        },
+        {
+            "test_name": "test_non_form_errors_run_full_clean",
+            "test_file": "tests/forms_tests/tests/test_formsets.py",
+            "why_relevant": "它展示了如何通过自定义 FormSet.clean() 方法产生非表单错误，并验证 non_form_errors() 返回 ErrorList 实例。",
+            "reusable_parts": ["自定义 BaseFormSet 以覆盖 clean() 方法", "formset_factory 的使用", "对 ErrorList 类型的检查"],
+            "possible_gap": "它没有检查错误列表的渲染输出或 CSS 类。需要添加对渲染后 HTML 的断言。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "object_state",
+            "current_pattern": "相关测试 2 中，Form 的 non_field_errors() 返回的 ErrorList 在渲染时自动获得 'nonfield' 类。",
+            "target_pattern": "FormSet 的 non_form_errors() 返回的 ErrorList 在渲染时应获得 'nonform' 类。",
+            "reason": "Issue 指出 FormSets 应模仿 Forms 的行为，为特定类型的错误添加专用 CSS 类。当前 FormSet 的非表单错误可能缺少此逻辑。",
+            "confidence": "high"
+        },
+        {
+            "slot": "call_chain",
+            "current_pattern": "相似测试主要调用 non_form_errors() 并检查错误消息列表或 ErrorList 类型。",
+            "target_pattern": "需要调用 non_form_errors() 并将其结果转换为 HTML（如 str() 或 as_ul()），然后检查生成的 HTML 字符串是否包含 'nonform' CSS 类。",
+            "reason": "Issue 的症状在于渲染输出，而非原始错误数据。必须检查渲染后的 HTML 才能发现缺少的 CSS 类。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "str",
+            "expression_hint": "str(formset.non_form_errors()) 或 formset.non_form_errors().as_ul() 的返回值。",
+            "reason": "Issue 涉及错误列表的 HTML 字符串表示，观察其输出可以检查是否包含 'class=\"errorlist nonform\"' 片段。"
+        },
+        {
+            "kind": "type",
+            "expression_hint": "type(formset.non_form_errors())",
+            "reason": "确认返回的对象是 ErrorList 实例，这是渲染行为的基础。"
+        },
+        {
+            "kind": "return_value",
+            "expression_hint": "formset.non_form_errors() 返回的 ErrorList 实例的 error_class 属性或初始化参数。",
+            "reason": "ErrorList 可能通过 error_class 参数或属性控制渲染时的 CSS 类，观察其值可能揭示问题根源。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "FormSet 非表单错误渲染后的 HTML 包含 'nonform' CSS 类（例如在 <ul class=\"errorlist nonform\"> 中）。",
+            "preferred_assertion_style": "contains_fragment",
+            "avoid": "断言完整的、字面量匹配的 HTML 字符串，因为具体标签结构（如 <li> 内容）可能变化。",
+            "reason": "Issue 的核心是存在 'nonform' 类，而不是 HTML 的每个细节。contains_fragment 对标签格式的微小变化更稳健。"
+        },
+        {
+            "assertion_goal": "FormSet 非表单错误的渲染输出在 CSS 类方面与 Form 非字段错误的渲染输出具有对等性（即都有专用类：nonfield vs nonform）。",
+            "preferred_assertion_style": "before_after_relation",
+            "avoid": "直接比较 Form 和 FormSet 的完整 HTML 输出是否相等。",
+            "reason": "Issue 期望 FormSet 模仿 Form 的模式，但错误消息内容不同。比较模式（专用类的存在）而非具体内容更稳定。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要使用 SimpleTestCase 或类似的 Django 测试基类。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要导入 forms、formsets 相关模块，如 Form, CharField, ValidationError, formset_factory, BaseFormSet 等。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要构造一个能产生非表单错误的 FormSet，可以通过自定义 FormSet 并覆盖 clean() 方法抛出 ValidationError，或使用现有逻辑（如重复项检查）。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "测试可能涉及构造特定的 POST 数据字典来初始化 FormSet。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        }
+    ],
+    "uncertainties": [
+        "ErrorList 的 'nonfield' 类是如何被添加的？是通过初始化参数、某个属性，还是 as_ul() 等方法内部的硬编码逻辑？这会影响修复位置。",
+        "FormSet 的非表单错误 ErrorList 实例在创建时是否与 Form 的非字段错误 ErrorList 有相同的初始化参数或状态？",
+        "除了 as_ul()，其他渲染方法如 as_p()、as_table() 或直接 __str__() 是否也需要修改以包含 'nonform' 类？Issue 提到 'rendering form error messages' 部分，可能涉及多种输出格式。",
+        "当前代码中是否已存在添加 'nonform' 类的逻辑但未生效，还是完全缺失？"
+    ]
+}
+```

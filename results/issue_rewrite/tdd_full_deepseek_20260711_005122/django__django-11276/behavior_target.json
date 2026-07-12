@@ -1,0 +1,271 @@
+{
+  "instance_id": "django__django-11276",
+  "issue_summary": "Django 的 django.utils.html.escape() 函数与 Python 标准库 html.escape() 功能重复，且性能较差，但两者在转义单引号时输出不同。",
+  "trigger_condition": {
+    "text": "调用 django.utils.html.escape() 函数，输入包含单引号字符 ' 的文本。",
+    "evidence": [
+      "Issue 中提到：'One small concern, html.escape() converts \\' to &#x27 rather than &#39'",
+      "相关测试 1 的 items 中包含 (\"'\", '&#39;') 的测试用例。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "使用 Python 标准库 html.escape() 替换 Django 的实现后，单引号 ' 的转义输出从 &#39; 变为 &#x27;。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 中明确说明：'html.escape() converts \\' to &#x27 rather than &#39'",
+      "相关测试 1 中期望输出为 '&#39;'。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "替换实现后，django.utils.html.escape() 应保持与之前版本相同的转义语义，即对单引号 ' 输出 &#39;。",
+    "evidence": [
+      "Issue 中提到：'These values are functionally equivalent HTML, but I'll mention it as a backwards incompatible change as the literal text has changed'，暗示期望保持向后兼容性。",
+      "相关测试 1 中明确断言单引号转义为 '&#39;'。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "django.utils.html.escape",
+      "kind": "function",
+      "source_path": "django/utils/html.py",
+      "reason": "这是 Issue 讨论的核心函数，需要被测试其行为。"
+    },
+    {
+      "name": "html.escape",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 提议用此标准库函数替换 Django 的实现，其行为差异是关键。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/utils/html.py",
+      "object": "escape",
+      "lines": "37-46",
+      "reason": "这是当前有问题的函数实现，其内部使用的 _html_escapes 映射可能未包含与标准库完全一致的转义规则。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "TestUtilsHtml.test_escape",
+      "test_file": "tests/utils_tests/test_html.py",
+      "why_relevant": "它直接测试 django.utils.html.escape 函数，覆盖了包括单引号在内的多个字符的转义。",
+      "reusable_parts": [
+        "测试类结构",
+        "items 测试数据定义",
+        "check_output 调用模式",
+        "对 escape 函数的直接调用"
+      ],
+      "possible_gap": "它测试的是当前 Django 实现的行为，如果直接替换为 html.escape()，单引号测试用例会失败。"
+    },
+    {
+      "test_name": "EscapeTests.test_escape01",
+      "test_file": "tests/template_tests/filter_tests/test_escape.py",
+      "why_relevant": "它测试模板过滤器 |escape 的行为，该过滤器底层调用 django.utils.html.escape。",
+      "reusable_parts": [
+        "使用 SimpleTestCase",
+        "使用 @setup 装饰器定义模板",
+        "使用 engine.render_to_string",
+        "使用 mark_safe"
+      ],
+      "possible_gap": "它测试的是模板上下文中的集成行为，而非直接测试 escape 函数的输出细节。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试 1 中使用 pattern % value 构造输入，其中 value 来自 items，包括单引号。",
+      "target_pattern": "直接输入包含单引号的字符串，例如 \"'\" 或 \"it's\"。",
+      "reason": "Issue 的核心差异在于单引号转义，直接使用该输入可以触发行为差异。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "在测试中直接调用 django.utils.html.escape。",
+      "target_pattern": "在测试中同时调用 django.utils.html.escape 和 html.escape，并比较结果。",
+      "reason": "Issue 的核心是比较两个函数的行为差异，特别是对单引号的转义。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "escape(\"'\") 的返回值。",
+      "reason": "Issue 明确指出单引号转义输出从 &#39; 变为 &#x27;，观察返回值可以直接验证此差异。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "escape(\"&lt;&amp;\") 或 escape(\"<&\") 的返回值。",
+      "reason": "相关测试 1 验证了不会双重转义 &，这也是 escape 函数的重要语义，需要确保替换实现后保持。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "django.utils.html.escape 对单引号 ' 的转义结果应为 &#39;。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的、可能因实现细节改变的 HTML 实体名称（如 &#x27;）。",
+      "reason": "Issue 强调这是向后不兼容的文本变化，测试应断言保持原有输出以维持兼容性。"
+    },
+    {
+      "assertion_goal": "django.utils.html.escape 不应双重转义 & 符号。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的、复杂的 HTML 字符串，聚焦于关键字符的转义。",
+      "reason": "相关测试 1 验证了此行为，这是 escape 函数正确性的核心要求之一。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 SimpleTestCase 或其子类作为测试基类。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要导入 django.utils.html.escape 和 html.escape 函数。",
+      "source": "inference",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "Issue 中提到的性能提升是否在所有输入情况下都成立？",
+    "除了单引号，Python 的 html.escape() 与 Django 的 escape() 在其他字符转义上是否完全一致？",
+    "替换实现后，对 mark_safe 包装的输入的处理逻辑是否保持不变？"
+  ],
+  "raw": {
+    "issue_summary": "Django 的 django.utils.html.escape() 函数与 Python 标准库 html.escape() 功能重复，且性能较差，但两者在转义单引号时输出不同。",
+    "trigger_condition": {
+      "text": "调用 django.utils.html.escape() 函数，输入包含单引号字符 ' 的文本。",
+      "evidence": [
+        "Issue 中提到：'One small concern, html.escape() converts \\' to &#x27 rather than &#39'",
+        "相关测试 1 的 items 中包含 (\"'\", '&#39;') 的测试用例。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "使用 Python 标准库 html.escape() 替换 Django 的实现后，单引号 ' 的转义输出从 &#39; 变为 &#x27;。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中明确说明：'html.escape() converts \\' to &#x27 rather than &#39'",
+        "相关测试 1 中期望输出为 '&#39;'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "替换实现后，django.utils.html.escape() 应保持与之前版本相同的转义语义，即对单引号 ' 输出 &#39;。",
+      "evidence": [
+        "Issue 中提到：'These values are functionally equivalent HTML, but I'll mention it as a backwards incompatible change as the literal text has changed'，暗示期望保持向后兼容性。",
+        "相关测试 1 中明确断言单引号转义为 '&#39;'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.utils.html.escape",
+        "kind": "function",
+        "source_path": "django/utils/html.py",
+        "reason": "这是 Issue 讨论的核心函数，需要被测试其行为。"
+      },
+      {
+        "name": "html.escape",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 提议用此标准库函数替换 Django 的实现，其行为差异是关键。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/html.py",
+        "object": "escape",
+        "lines": "37-46",
+        "reason": "这是当前有问题的函数实现，其内部使用的 _html_escapes 映射可能未包含与标准库完全一致的转义规则。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestUtilsHtml.test_escape",
+        "test_file": "tests/utils_tests/test_html.py",
+        "why_relevant": "它直接测试 django.utils.html.escape 函数，覆盖了包括单引号在内的多个字符的转义。",
+        "reusable_parts": [
+          "测试类结构",
+          "items 测试数据定义",
+          "check_output 调用模式",
+          "对 escape 函数的直接调用"
+        ],
+        "possible_gap": "它测试的是当前 Django 实现的行为，如果直接替换为 html.escape()，单引号测试用例会失败。"
+      },
+      {
+        "test_name": "EscapeTests.test_escape01",
+        "test_file": "tests/template_tests/filter_tests/test_escape.py",
+        "why_relevant": "它测试模板过滤器 |escape 的行为，该过滤器底层调用 django.utils.html.escape。",
+        "reusable_parts": [
+          "使用 SimpleTestCase",
+          "使用 @setup 装饰器定义模板",
+          "使用 engine.render_to_string",
+          "使用 mark_safe"
+        ],
+        "possible_gap": "它测试的是模板上下文中的集成行为，而非直接测试 escape 函数的输出细节。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中使用 pattern % value 构造输入，其中 value 来自 items，包括单引号。",
+        "target_pattern": "直接输入包含单引号的字符串，例如 \"'\" 或 \"it's\"。",
+        "reason": "Issue 的核心差异在于单引号转义，直接使用该输入可以触发行为差异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "在测试中直接调用 django.utils.html.escape。",
+        "target_pattern": "在测试中同时调用 django.utils.html.escape 和 html.escape，并比较结果。",
+        "reason": "Issue 的核心是比较两个函数的行为差异，特别是对单引号的转义。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "escape(\"'\") 的返回值。",
+        "reason": "Issue 明确指出单引号转义输出从 &#39; 变为 &#x27;，观察返回值可以直接验证此差异。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "escape(\"&lt;&amp;\") 或 escape(\"<&\") 的返回值。",
+        "reason": "相关测试 1 验证了不会双重转义 &，这也是 escape 函数的重要语义，需要确保替换实现后保持。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "django.utils.html.escape 对单引号 ' 的转义结果应为 &#39;。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、可能因实现细节改变的 HTML 实体名称（如 &#x27;）。",
+        "reason": "Issue 强调这是向后不兼容的文本变化，测试应断言保持原有输出以维持兼容性。"
+      },
+      {
+        "assertion_goal": "django.utils.html.escape 不应双重转义 & 符号。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、复杂的 HTML 字符串，聚焦于关键字符的转义。",
+        "reason": "相关测试 1 验证了此行为，这是 escape 函数正确性的核心要求之一。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或其子类作为测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 django.utils.html.escape 和 html.escape 函数。",
+        "source": "inference",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到的性能提升是否在所有输入情况下都成立？",
+      "除了单引号，Python 的 html.escape() 与 Django 的 escape() 在其他字符转义上是否完全一致？",
+      "替换实现后，对 mark_safe 包装的输入的处理逻辑是否保持不变？"
+    ]
+  }
+}

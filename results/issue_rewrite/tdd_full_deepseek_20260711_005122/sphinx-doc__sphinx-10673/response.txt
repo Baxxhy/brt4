@@ -1,0 +1,127 @@
+{
+  "issue_summary": "在 Sphinx 的 toctree 指令中包含对 'genindex'、'modindex'、'search' 等特殊页面的引用时，会生成关于文档不存在的警告。",
+  "trigger_condition": {
+    "text": "在 .rst 文件的 toctree 指令中，将 'genindex'、'modindex' 或 'search' 作为文档条目包含。",
+    "evidence": ["Issue 中用户提供的 toctree 指令示例：'.. toctree::' 下包含 'genindex'、'modindex'、'search'。", "Issue 中显示的警告信息：'toctree contains reference to nonexisting document'。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "构建时（例如运行 `make html`）会输出警告，提示 toctree 引用了不存在的文档。",
+    "symptom_type": "warning",
+    "evidence": ["Issue 中显示的警告输出：'WARNING: toctree contains reference to nonexisting document 'genindex'' 等。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "在 toctree 中包含 'genindex'、'modindex'、'search' 等特殊页面引用时，不应产生警告，且这些引用应被正确处理。",
+    "evidence": ["Issue 中描述的期望：'The following directive should be possible and do not rise errors'。", "Issue 中用户希望这些链接能正常工作，如 Stack Overflow 链接所示。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "toctree",
+      "kind": "class",
+      "source_path": "sphinx/addnodes.py",
+      "reason": "Issue 的核心是关于 toctree 指令的行为，该类是 toctree 的节点表示。"
+    },
+    {
+      "name": "app.builder.build_all",
+      "kind": "method",
+      "source_path": "",
+      "reason": "多个相关测试都调用此方法来触发构建过程，这是复现构建警告的关键步骤。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sphinx/addnodes.py",
+      "object": "toctree",
+      "lines": "81-114",
+      "reason": "这是 toctree 指令的节点类，其处理逻辑可能涉及检查文档是否存在，从而产生警告。"
+    },
+    {
+      "path": "sphinx/domains/rst.py",
+      "object": "",
+      "lines": "",
+      "reason": "该文件可能包含处理 reStructuredText 域和指令（如 toctree）的逻辑，与引用解析相关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_toctree_not_found",
+      "test_file": "tests/test_build_latex.py",
+      "why_relevant": "该测试直接处理 toctree 未找到文档的情况，并检查警告输出，与当前 Issue 的症状（警告）高度相关。",
+      "reusable_parts": ["使用 @pytest.mark.sphinx 装饰器设置构建器", "调用 app.builder.build_all()", "检查 warning.getvalue() 的输出"],
+      "possible_gap": "该测试的 testroot 是 'toctree-maxdepth'，且 confoverrides 了 root_doc，可能没有直接测试 'genindex' 等特殊条目。"
+    },
+    {
+      "test_name": "test_circular_toctree",
+      "test_file": "tests/test_build.py",
+      "why_relevant": "该测试检查 toctree 中的循环引用警告，展示了如何断言 warning 输出中包含特定字符串的模式。",
+      "reusable_parts": ["使用 app.builder.build_all()", "从 warning.getvalue() 中提取警告信息", "使用 assert ... in warnings 进行断言"],
+      "possible_gap": "测试焦点是循环引用，而非引用不存在的特殊文档。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "测试 'test_toctree_not_found' 可能使用常规的 .rst 文件内容。",
+      "target_pattern": "在 toctree 指令的条目列表中加入 'genindex'、'modindex'、'search'。",
+      "reason": "Issue 明确指出，包含这些特殊条目会触发警告，这是复现缺陷的关键输入变化。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "相关测试可能使用默认或特定的 conf.py 配置。",
+      "target_pattern": "确保配置允许生成索引和搜索页面（这通常是默认的）。",
+      "reason": "'genindex' 等页面是 Sphinx 自动生成的，其存在性可能受配置影响。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "warning",
+      "expression_hint": "warning.getvalue()",
+      "reason": "Issue 的核心症状是构建过程中产生的警告信息，观察警告输出是判断问题是否触发的直接方式。"
+    },
+    {
+      "kind": "file_output",
+      "expression_hint": "生成的 HTML 文件中是否包含指向索引和搜索页面的正确链接。",
+      "reason": "修复后，toctree 应能正确链接到这些自动生成的页面，而不仅仅是消除警告。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证构建输出中不包含关于 'genindex'、'modindex'、'search' 文档不存在的警告。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "断言完整的警告字符串完全相等，因为行号或路径可能变化。",
+      "reason": "Issue 期望这些引用不引发错误/警告，因此断言警告输出中不包含特定的错误信息片段是稳定且对齐的。"
+    },
+    {
+      "assertion_goal": "验证生成的导航结构中包含了指向索引和搜索页面的有效链接。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "断言完整的 HTML 结构或精确的 URL，因为主题或构建器可能影响输出格式。",
+      "reason": "修复的目标不仅是消除警告，还要确保功能正常，因此需要验证链接的存在。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 @pytest.mark.sphinx 装饰器来设置 Sphinx 应用和构建器（如 'html'）。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要一个临时的源代码目录（srcdir）来存放包含问题 toctree 指令的 .rst 文件。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要一个简单的 conf.py 文件来配置项目。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "触发警告的确切代码逻辑位于哪个具体模块和函数中。",
+    "'genindex' 等页面在构建过程中的具体生成和注册时机，以及 toctree 解析器如何判断其“存在”。",
+    "修复后的正确行为是 toctree 完全忽略这些条目，还是将它们解析为指向自动生成页面的有效链接。"
+  ]
+}

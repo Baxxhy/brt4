@@ -1,0 +1,547 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+partitions() reusing the output dictionaries
+The partitions() iterator in sympy.utilities.iterables reuses the output dictionaries. There is a caveat about it in the docstring. 
+
+I'm wondering if it's really that important for it to do this. It shouldn't be that much of a performance loss to copy the dictionary before yielding it. This behavior is very confusing. It means that something as simple as list(partitions()) will give an apparently wrong result. And it can lead to much more subtle bugs if the partitions are used in a nontrivial way. 
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/utilities/iterables.py
+对象名称：partitions
+节点类型：top-level function
+父节点：iterables
+行号范围：1696-1847
+代码：
+def partitions(n, m=None, k=None, size=False):
+    """Generate all partitions of positive integer, n.
+
+    Parameters
+    ==========
+
+    m : integer (default gives partitions of all sizes)
+        limits number of parts in partition (mnemonic: m, maximum parts)
+    k : integer (default gives partitions number from 1 through n)
+        limits the numbers that are kept in the partition (mnemonic: k, keys)
+    size : bool (default False, only partition is returned)
+        when ``True`` then (M, P) is returned where M is the sum of the
+        multiplicities and P is the generated partition.
+
+    Each partition is represented as a dictionary, mapping an integer
+    to the number of copies of that integer in the partition.  For example,
+    the first partition of 4 returned is {4: 1}, "4: one of them".
+
+    Examples
+    ========
+
+    >>> from sympy.utilities.iterables import partitions
+
+    The numbers appearing in the partition (the key of the returned dict)
+    are limited with k:
+
+    >>> for p in partitions(6, k=2):  # doctest: +SKIP
+    ...     print(p)
+    {2: 3}
+    {1: 2, 2: 2}
+    {1: 4, 2: 1}
+    {1: 6}
+
+    The maximum number of parts in the partition (the sum of the values in
+    the returned dict) are limited with m (default value, None, gives
+    partitions from 1 through n):
+
+    >>> for p in partitions(6, m=2):  # doctest: +SKIP
+    ...     print(p)
+    ...
+    {6: 1}
+    {1: 1, 5: 1}
+    {2: 1, 4: 1}
+    {3: 2}
+
+    Note that the _same_ dictionary object is returned each time.
+    This is for speed:  generating each partition goes quickly,
+    taking constant time, independent of n.
+
+    >>> [p for p in partitions(6, k=2)]
+    [{1: 6}, {1: 6}, {1: 6}, {1: 6}]
+
+    If you want to build a list of the returned dictionaries then
+    make a copy of them:
+
+    >>> [p.copy() for p in partitions(6, k=2)]  # doctest: +SKIP
+    [{2: 3}, {1: 2, 2: 2}, {1: 4, 2: 1}, {1: 6}]
+    >>> [(M, p.copy()) for M, p in partitions(6, k=2, size=True)]  # doctest: +SKIP
+    [(3, {2: 3}), (4, {1: 2, 2: 2}), (5, {1: 4, 2: 1}), (6, {1: 6})]
+
+    References
+    ==========
+
+    .. [1] modified from Tim Peter's version to allow for k and m values:
+           http://code.activestate.com/recipes/218332-generator-for-integer-partitions/
+
+    See Also
+    ========
+
+    sympy.combinatorics.partitions.Partition
+    sympy.combinatorics.partitions.IntegerPartition
+
+    """
+    if (n <= 0 or
+        m is not None and m < 1 or
+        k is not None and k < 1 or
+        m and k and m*k < n):
+        # the empty set is the only way to handle these inputs
+        # and returning {} to represent it is consistent with
+        # the counting convention, e.g. nT(0) == 1.
+        if size:
+            yield 0, {}
+        else:
+            yield {}
+        return
+
+    if m is None:
+        m = n
+    else:
+        m = min(m, n)
+
+    if n == 0:
+        if size:
+            yield 1, {0: 1}
+        else:
+            yield {0: 1}
+        return
+
+    k = min(k or n, n)
+
+    n, m, k = as_int(n), as_int(m), as_int(k)
+    q, r = divmod(n, k)
+    ms = {k: q}
+    keys = [k]  # ms.keys(), from largest to smallest
+    if r:
+        ms[r] = 1
+        keys.append(r)
+    room = m - q - bool(r)
+    if size:
+        yield sum(ms.values()), ms
+    else:
+        yield ms
+
+    while keys != [1]:
+        # Reuse any 1's.
+        if keys[-1] == 1:
+            del keys[-1]
+            reuse = ms.pop(1)
+            room += reuse
+        else:
+            reuse = 0
+
+        while 1:
+            # Let i be the smallest key larger than 1.  Reuse one
+            # instance of i.
+            i = keys[-1]
+            newcount = ms[i] = ms[i] - 1
+            reuse += i
+            if newcount == 0:
+                del keys[-1], ms[i]
+            room += 1
+
+            # Break the remainder into pieces of size i-1.
+            i -= 1
+            q, r = divmod(reuse, i)
+            need = q + bool(r)
+            if need > room:
+                if not keys:
+                    return
+                continue
+
+            ms[i] = q
+            keys.append(i)
+            if r:
+                ms[r] = 1
+                keys.append(r)
+            break
+        room -= need
+        if size:
+            yield sum(ms.values()), ms
+        else:
+            yield ms
+
+
+【源码片段 2】
+文件路径：sympy/combinatorics/permutations.py
+对象名称：list
+节点类型：class_function
+父节点：Cycle
+行号范围：344-375
+代码：
+    def list(self, size=None):
+        """Return the cycles as an explicit list starting from 0 up
+        to the greater of the largest value in the cycles and size.
+
+        Truncation of trailing unmoved items will occur when size
+        is less than the maximum element in the cycle; if this is
+        desired, setting ``size=-1`` will guarantee such trimming.
+
+        Examples
+        ========
+
+        >>> from sympy.combinatorics.permutations import Cycle
+        >>> p = Cycle(2, 3)(4, 5)
+        >>> p.list()
+        [0, 1, 3, 2, 5, 4]
+        >>> p.list(10)
+        [0, 1, 3, 2, 5, 4, 6, 7, 8, 9]
+
+        Passing a length too small will trim trailing, unchanged elements
+        in the permutation:
+
+        >>> Cycle(2, 4)(1, 2, 4).list(-1)
+        [0, 2, 1]
+        """
+        if not self and size is None:
+            raise ValueError('must give size for empty Cycle')
+        if size is not None:
+            big = max([i for i in self.keys() if self[i] != i] + [0])
+            size = max(size, big + 1)
+        else:
+            size = self.size
+        return [self[i] for i in range(size)]
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/utilities/tests/test_iterables.py
+测试名称：test_partitions
+测试代码：
+def test_partitions():
+    ans = [[{}], [(0, {})]]
+    for i in range(2):
+        assert list(partitions(0, size=i)) == ans[i]
+        assert list(partitions(1, 0, size=i)) == ans[i]
+        assert list(partitions(6, 2, 2, size=i)) == ans[i]
+        assert list(partitions(6, 2, None, size=i)) != ans[i]
+        assert list(partitions(6, None, 2, size=i)) != ans[i]
+        assert list(partitions(6, 2, 0, size=i)) == ans[i]
+
+    assert [p.copy() for p in partitions(6, k=2)] == [
+        {2: 3}, {1: 2, 2: 2}, {1: 4, 2: 1}, {1: 6}]
+
+    assert [p.copy() for p in partitions(6, k=3)] == [
+        {3: 2}, {1: 1, 2: 1, 3: 1}, {1: 3, 3: 1}, {2: 3}, {1: 2, 2: 2},
+        {1: 4, 2: 1}, {1: 6}]
+
+    assert [p.copy() for p in partitions(8, k=4, m=3)] == [
+        {4: 2}, {1: 1, 3: 1, 4: 1}, {2: 2, 4: 1}, {2: 1, 3: 2}] == [
+        i.copy() for i in partitions(8, k=4, m=3) if all(k <= 4 for k in i)
+        and sum(i.values()) <=3]
+
+    assert [p.copy() for p in partitions(S(3), m=2)] == [
+        {3: 1}, {1: 1, 2: 1}]
+
+    assert [i.copy() for i in partitions(4, k=3)] == [
+        {1: 1, 3: 1}, {2: 2}, {1: 2, 2: 1}, {1: 4}] == [
+        i.copy() for i in partitions(4) if all(k <= 3 for k in i)]
+
+
+    # Consistency check on output of _partitions and RGS_unrank.
+    # This provides a sanity test on both routines.  Also verifies that
+    # the total number of partitions is the same in each case.
+    #    (from pkrathmann2)
+
+    for n in range(2, 6):
+        i  = 0
+        for m, q  in _set_partitions(n):
+            assert  q == RGS_unrank(i, n)
+            i += 1
+        assert i == RGS_enum(n)
+
+【相关测试 2】
+测试文件：sympy/utilities/tests/test_iterables.py
+测试名称：test_multiset_partitions
+测试代码：
+def test_multiset_partitions():
+    A = [0, 1, 2, 3, 4]
+
+    assert list(multiset_partitions(A, 5)) == [[[0], [1], [2], [3], [4]]]
+    assert len(list(multiset_partitions(A, 4))) == 10
+    assert len(list(multiset_partitions(A, 3))) == 25
+
+    assert list(multiset_partitions([1, 1, 1, 2, 2], 2)) == [
+        [[1, 1, 1, 2], [2]], [[1, 1, 1], [2, 2]], [[1, 1, 2, 2], [1]],
+        [[1, 1, 2], [1, 2]], [[1, 1], [1, 2, 2]]]
+
+    assert list(multiset_partitions([1, 1, 2, 2], 2)) == [
+        [[1, 1, 2], [2]], [[1, 1], [2, 2]], [[1, 2, 2], [1]],
+        [[1, 2], [1, 2]]]
+
+    assert list(multiset_partitions([1, 2, 3, 4], 2)) == [
+        [[1, 2, 3], [4]], [[1, 2, 4], [3]], [[1, 2], [3, 4]],
+        [[1, 3, 4], [2]], [[1, 3], [2, 4]], [[1, 4], [2, 3]],
+        [[1], [2, 3, 4]]]
+
+    assert list(multiset_partitions([1, 2, 2], 2)) == [
+        [[1, 2], [2]], [[1], [2, 2]]]
+
+    assert list(multiset_partitions(3)) == [
+        [[0, 1, 2]], [[0, 1], [2]], [[0, 2], [1]], [[0], [1, 2]],
+        [[0], [1], [2]]]
+    assert list(multiset_partitions(3, 2)) == [
+        [[0, 1], [2]], [[0, 2], [1]], [[0], [1, 2]]]
+    assert list(multiset_partitions([1] * 3, 2)) == [[[1], [1, 1]]]
+    assert list(multiset_partitions([1] * 3)) == [
+        [[1, 1, 1]], [[1], [1, 1]], [[1], [1], [1]]]
+    a = [3, 2, 1]
+    assert list(multiset_partitions(a)) == \
+        list(multiset_partitions(sorted(a)))
+    assert list(multiset_partitions(a, 5)) == []
+    assert list(multiset_partitions(a, 1)) == [[[1, 2, 3]]]
+    assert list(multiset_partitions(a + [4], 5)) == []
+    assert list(multiset_partitions(a + [4], 1)) == [[[1, 2, 3, 4]]]
+    assert list(multiset_partitions(2, 5)) == []
+    assert list(multiset_partitions(2, 1)) == [[[0, 1]]]
+    assert list(multiset_partitions('a')) == [[['a']]]
+    assert list(multiset_partitions('a', 2)) == []
+    assert list(multiset_partitions('ab')) == [[['a', 'b']], [['a'], ['b']]]
+    assert list(multiset_partitions('ab', 1)) == [[['a', 'b']]]
+    assert list(multiset_partitions('aaa', 1)) == [['aaa']]
+    assert list(multiset_partitions([1, 1], 1)) == [[[1, 1]]]
+    ans = [('mpsyy',), ('mpsy', 'y'), ('mps', 'yy'), ('mps', 'y', 'y'),
+           ('mpyy', 's'), ('mpy', 'sy'), ('mpy', 's', 'y'), ('mp', 'syy'),
+           ('mp', 'sy', 'y'), ('mp', 's', 'yy'), ('mp', 's', 'y', 'y'),
+           ('msyy', 'p'), ('msy', 'py'), ('msy', 'p', 'y'), ('ms', 'pyy'),
+           ('ms', 'py', 'y'), ('ms', 'p', 'yy'), ('ms', 'p', 'y', 'y'),
+           ('myy', 'ps'), ('myy', 'p', 's'), ('my', 'psy'), ('my', 'ps', 'y'),
+           ('my', 'py', 's'), ('my', 'p', 'sy'), ('my', 'p', 's', 'y'),
+           ('m', 'psyy'), ('m', 'psy', 'y'), ('m', 'ps', 'yy'),
+           ('m', 'ps', 'y', 'y'), ('m', 'pyy', 's'), ('m', 'py', 'sy'),
+           ('m', 'py', 's', 'y'), ('m', 'p', 'syy'),
+           ('m', 'p', 'sy', 'y'), ('m', 'p', 's', 'yy'),
+           ('m', 'p', 's', 'y', 'y')]
+    assert list(tuple("".join(part) for part in p)
+                for p in multiset_partitions('sympy')) == ans
+    factorings = [[24], [8, 3], [12, 2], [4, 6], [4, 2, 3],
+                  [6, 2, 2], [2, 2, 2, 3]]
+    assert list(factoring_visitor(p, [2,3]) for
+                p in multiset_partitions_taocp([3, 1])) == factorings
+
+【相关测试 3】
+测试文件：sympy/utilities/tests/test_iterables.py
+测试名称：test_ordered_partitions
+测试代码：
+def test_ordered_partitions():
+    from sympy.functions.combinatorial.numbers import nT
+    f = ordered_partitions
+    assert list(f(0, 1)) == [[]]
+    assert list(f(1, 0)) == [[]]
+    for i in range(1, 7):
+        for j in [None] + list(range(1, i)):
+            assert (
+                sum(1 for p in f(i, j, 1)) ==
+                sum(1 for p in f(i, j, 0)) ==
+                nT(i, j))
+
+【相关测试 4】
+测试文件：sympy/combinatorics/tests/test_partitions.py
+测试名称：test_integer_partition
+测试代码：
+def test_integer_partition():
+    # no zeros in partition
+    raises(ValueError, lambda: IntegerPartition(list(range(3))))
+    # check fails since 1 + 2 != 100
+    raises(ValueError, lambda: IntegerPartition(100, list(range(1, 3))))
+    a = IntegerPartition(8, [1, 3, 4])
+    b = a.next_lex()
+    c = IntegerPartition([1, 3, 4])
+    d = IntegerPartition(8, {1: 3, 3: 1, 2: 1})
+    assert a == c
+    assert a.integer == d.integer
+    assert a.conjugate == [3, 2, 2, 1]
+    assert (a == b) is False
+    assert a <= b
+    assert (a > b) is False
+    assert a != b
+
+    for i in range(1, 11):
+        next = set()
+        prev = set()
+        a = IntegerPartition([i])
+        ans = {IntegerPartition(p) for p in partitions(i)}
+        n = len(ans)
+        for j in range(n):
+            next.add(a)
+            a = a.next_lex()
+            IntegerPartition(i, a.partition)  # check it by giving i
+        for j in range(n):
+            prev.add(a)
+            a = a.prev_lex()
+            IntegerPartition(i, a.partition)  # check it by giving i
+        assert next == ans
+        assert prev == ans
+
+    assert IntegerPartition([1, 2, 3]).as_ferrers() == '###\n##\n#'
+    assert IntegerPartition([1, 1, 3]).as_ferrers('o') == 'ooo\no\no'
+    assert str(IntegerPartition([1, 1, 3])) == '[3, 1, 1]'
+    assert IntegerPartition([1, 1, 3]).partition == [3, 1, 1]
+
+    raises(ValueError, lambda: random_integer_partition(-1))
+    assert random_integer_partition(1) == [1]
+    assert random_integer_partition(10, seed=[1, 3, 2, 1, 5, 1]
+            ) == [5, 2, 1, 1, 1]
+
+【相关测试 5】
+测试文件：sympy/combinatorics/tests/test_partitions.py
+测试名称：test_partition
+测试代码：
+def test_partition():
+    from sympy.abc import x
+
+    a = Partition([1, 2, 3], [4])
+    b = Partition([1, 2], [3, 4])
+    c = Partition([x])
+    l = [a, b, c]
+    l.sort(key=default_sort_key)
+    assert l == [c, a, b]
+    l.sort(key=lambda w: default_sort_key(w, order='rev-lex'))
+    assert l == [c, a, b]
+
+    assert (a == b) is False
+    assert a <= b
+    assert (a > b) is False
+    assert a != b
+    assert a < b
+
+    assert (a + 2).partition == [[1, 2], [3, 4]]
+    assert (b - 1).partition == [[1, 2, 4], [3]]
+
+    assert (a - 1).partition == [[1, 2, 3, 4]]
+    assert (a + 1).partition == [[1, 2, 4], [3]]
+    assert (b + 1).partition == [[1, 2], [3], [4]]
+
+    assert a.rank == 1
+    assert b.rank == 3
+
+    assert a.RGS == (0, 0, 0, 1)
+    assert b.RGS == (0, 0, 1, 1)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

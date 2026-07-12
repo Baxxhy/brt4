@@ -1,0 +1,549 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Voting estimator will fail at fit if weights are passed and an estimator is None
+Because we don't check for an estimator to be `None` in `sample_weight` support, `fit` is failing`.
+
+```python
+    X, y = load_iris(return_X_y=True)
+    voter = VotingClassifier(
+        estimators=[('lr', LogisticRegression()),
+                    ('rf', RandomForestClassifier())]
+    )
+    voter.fit(X, y, sample_weight=np.ones(y.shape))
+    voter.set_params(lr=None)
+    voter.fit(X, y, sample_weight=np.ones(y.shape))
+```
+
+```
+AttributeError: 'NoneType' object has no attribute 'fit'
+```
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sklearn/ensemble/voting.py
+对象名称：VotingClassifier
+节点类型：class
+父节点：voting
+行号范围：138-365
+代码：
+class VotingClassifier(_BaseVoting, ClassifierMixin):
+    """Soft Voting/Majority Rule classifier for unfitted estimators.
+
+    .. versionadded:: 0.17
+
+    Read more in the :ref:`User Guide <voting_classifier>`.
+
+    Parameters
+    ----------
+    estimators : list of (string, estimator) tuples
+        Invoking the ``fit`` method on the ``VotingClassifier`` will fit clones
+        of those original estimators that will be stored in the class attribute
+        ``self.estimators_``. An estimator can be set to `None` using
+        ``set_params``.
+
+    voting : str, {'hard', 'soft'} (default='hard')
+        If 'hard', uses predicted class labels for majority rule voting.
+        Else if 'soft', predicts the class label based on the argmax of
+        the sums of the predicted probabilities, which is recommended for
+        an ensemble of well-calibrated classifiers.
+
+    weights : array-like, shape (n_classifiers,), optional (default=`None`)
+        Sequence of weights (`float` or `int`) to weight the occurrences of
+        predicted class labels (`hard` voting) or class probabilities
+        before averaging (`soft` voting). Uses uniform weights if `None`.
+
+    n_jobs : int or None, optional (default=None)
+        The number of jobs to run in parallel for ``fit``.
+        ``None`` means 1 unless in a :obj:`joblib.parallel_backend` context.
+        ``-1`` means using all processors. See :term:`Glossary <n_jobs>`
+        for more details.
+
+    flatten_transform : bool, optional (default=True)
+        Affects shape of transform output only when voting='soft'
+        If voting='soft' and flatten_transform=True, transform method returns
+        matrix with shape (n_samples, n_classifiers * n_classes). If
+        flatten_transform=False, it returns
+        (n_classifiers, n_samples, n_classes).
+
+    Attributes
+    ----------
+    estimators_ : list of classifiers
+        The collection of fitted sub-estimators as defined in ``estimators``
+        that are not `None`.
+
+    named_estimators_ : Bunch object, a dictionary with attribute access
+        Attribute to access any fitted sub-estimators by name.
+
+        .. versionadded:: 0.20
+
+    classes_ : array-like, shape (n_predictions,)
+        The classes labels.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from sklearn.linear_model import LogisticRegression
+    >>> from sklearn.naive_bayes import GaussianNB
+    >>> from sklearn.ensemble import RandomForestClassifier, VotingClassifier
+    >>> clf1 = LogisticRegression(solver='lbfgs', multi_class='multinomial',
+    ...                           random_state=1)
+    >>> clf2 = RandomForestClassifier(n_estimators=50, random_state=1)
+    >>> clf3 = GaussianNB()
+    >>> X = np.array([[-1, -1], [-2, -1], [-3, -2], [1, 1], [2, 1], [3, 2]])
+    >>> y = np.array([1, 1, 1, 2, 2, 2])
+    >>> eclf1 = VotingClassifier(estimators=[
+    ...         ('lr', clf1), ('rf', clf2), ('gnb', clf3)], voting='hard')
+    >>> eclf1 = eclf1.fit(X, y)
+    >>> print(eclf1.predict(X))
+    [1 1 1 2 2 2]
+    >>> np.array_equal(eclf1.named_estimators_.lr.predict(X),
+    ...                eclf1.named_estimators_['lr'].predict(X))
+    True
+    >>> eclf2 = VotingClassifier(estimators=[
+    ...         ('lr', clf1), ('rf', clf2), ('gnb', clf3)],
+    ...         voting='soft')
+    >>> eclf2 = eclf2.fit(X, y)
+    >>> print(eclf2.predict(X))
+    [1 1 1 2 2 2]
+    >>> eclf3 = VotingClassifier(estimators=[
+    ...        ('lr', clf1), ('rf', clf2), ('gnb', clf3)],
+    ...        voting='soft', weights=[2,1,1],
+    ...        flatten_transform=True)
+    >>> eclf3 = eclf3.fit(X, y)
+    >>> print(eclf3.predict(X))
+    [1 1 1 2 2 2]
+    >>> print(eclf3.transform(X).shape)
+    (6, 6)
+
+    See also
+    --------
+    VotingRegressor: Prediction voting regressor.
+    """
+    def __init__(self, estimators, voting='hard', weights=None, n_jobs=None,
+                 flatten_transform=True):
+    def fit(self, X, y, sample_weight=None):
+    def predict(self, X):
+    def _collect_probas(self, X):
+    def _predict_proba(self, X):
+    @property
+    def predict_proba(self):
+    def transform(self, X):
+
+
+【源码片段 2】
+文件路径：sklearn/ensemble/voting.py
+对象名称：fit
+节点类型：class_function
+父节点：VotingClassifier
+行号范围：240-273
+代码：
+    def fit(self, X, y, sample_weight=None):
+        """ Fit the estimators.
+
+        Parameters
+        ----------
+        X : {array-like, sparse matrix}, shape (n_samples, n_features)
+            Training vectors, where n_samples is the number of samples and
+            n_features is the number of features.
+
+        y : array-like, shape (n_samples,)
+            Target values.
+
+        sample_weight : array-like, shape (n_samples,) or None
+            Sample weights. If None, then samples are equally weighted.
+            Note that this is supported only if all underlying estimators
+            support sample weights.
+
+        Returns
+        -------
+        self : object
+        """
+        if isinstance(y, np.ndarray) and len(y.shape) > 1 and y.shape[1] > 1:
+            raise NotImplementedError('Multilabel and multi-output'
+                                      ' classification is not supported.')
+
+        if self.voting not in ('soft', 'hard'):
+            raise ValueError("Voting must be 'soft' or 'hard'; got (voting=%r)"
+                             % self.voting)
+
+        self.le_ = LabelEncoder().fit(y)
+        self.classes_ = self.le_.classes_
+        transformed_y = self.le_.transform(y)
+
+        return super().fit(X, transformed_y, sample_weight)
+
+
+【源码片段 3】
+文件路径：sklearn/ensemble/voting.py
+对象名称：set_params
+节点类型：class_function
+父节点：_BaseVoting
+行号范围：103-124
+代码：
+    def set_params(self, **params):
+        """ Setting the parameters for the ensemble estimator
+
+        Valid parameter keys can be listed with get_params().
+
+        Parameters
+        ----------
+        **params : keyword arguments
+            Specific parameters using e.g. set_params(parameter_name=new_value)
+            In addition, to setting the parameters of the ensemble estimator,
+            the individual estimators of the ensemble estimator can also be
+            set or replaced by setting them to None.
+
+        Examples
+        --------
+        # In this example, the RandomForestClassifier is removed
+        clf1 = LogisticRegression()
+        clf2 = RandomForestClassifier()
+        eclf = VotingClassifier(estimators=[('lr', clf1), ('rf', clf2)]
+        eclf.set_params(rf=None)
+        """
+        return self._set_params('estimators', **params)
+
+
+【源码片段 4】
+文件路径：examples/calibration/plot_calibration.py
+对象名称：sample_weight
+节点类型：global_var
+父节点：plot_calibration
+行号范围：55-55
+代码：
+sample_weight = np.random.RandomState(42).rand(y.shape[0])
+
+
+【源码片段 5】
+文件路径：examples/decomposition/plot_faces_decomposition.py
+对象名称：estimators
+节点类型：global_var
+父节点：plot_faces_decomposition
+行号范围：67-102
+代码：
+estimators = [
+    ('Eigenfaces - PCA using randomized SVD',
+     decomposition.PCA(n_components=n_components, svd_solver='randomized',
+                       whiten=True),
+     True),
+
+    ('Non-negative components - NMF',
+     decomposition.NMF(n_components=n_components, init='nndsvda', tol=5e-3),
+     False),
+
+    ('Independent components - FastICA',
+     decomposition.FastICA(n_components=n_components, whiten=True),
+     True),
+
+    ('Sparse comp. - MiniBatchSparsePCA',
+     decomposition.MiniBatchSparsePCA(n_components=n_components, alpha=0.8,
+                                      n_iter=100, batch_size=3,
+                                      random_state=rng,
+                                      normalize_components=True),
+     True),
+
+    ('MiniBatchDictionaryLearning',
+        decomposition.MiniBatchDictionaryLearning(n_components=15, alpha=0.1,
+                                                  n_iter=50, batch_size=3,
+                                                  random_state=rng),
+     True),
+
+    ('Cluster centers - MiniBatchKMeans',
+        MiniBatchKMeans(n_clusters=n_components, tol=1e-3, batch_size=20,
+                        max_iter=50, random_state=rng),
+     True),
+
+    ('Factor Analysis components - FA',
+     decomposition.FactorAnalysis(n_components=n_components, max_iter=20),
+     True),
+]
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sklearn/ensemble/tests/test_voting.py
+测试名称：test_set_estimator_none
+测试代码：
+@pytest.mark.filterwarnings('ignore: Default solver will be changed')  # 0.22
+@pytest.mark.filterwarnings('ignore: Default multi_class will')  # 0.22
+@pytest.mark.filterwarnings('ignore:The default value of n_estimators')
+def test_set_estimator_none():
+    """VotingClassifier set_params should be able to set estimators as None"""
+    # Test predict
+    clf1 = LogisticRegression(random_state=123)
+    clf2 = RandomForestClassifier(random_state=123)
+    clf3 = GaussianNB()
+    eclf1 = VotingClassifier(estimators=[('lr', clf1), ('rf', clf2),
+                                         ('nb', clf3)],
+                             voting='hard', weights=[1, 0, 0.5]).fit(X, y)
+
+    eclf2 = VotingClassifier(estimators=[('lr', clf1), ('rf', clf2),
+                                         ('nb', clf3)],
+                             voting='hard', weights=[1, 1, 0.5])
+    eclf2.set_params(rf=None).fit(X, y)
+    assert_array_equal(eclf1.predict(X), eclf2.predict(X))
+
+    assert dict(eclf2.estimators)["rf"] is None
+    assert len(eclf2.estimators_) == 2
+    assert all(isinstance(est, (LogisticRegression, GaussianNB))
+               for est in eclf2.estimators_)
+    assert eclf2.get_params()["rf"] is None
+
+    eclf1.set_params(voting='soft').fit(X, y)
+    eclf2.set_params(voting='soft').fit(X, y)
+    assert_array_equal(eclf1.predict(X), eclf2.predict(X))
+    assert_array_almost_equal(eclf1.predict_proba(X), eclf2.predict_proba(X))
+    msg = 'All estimators are None. At least one is required!'
+    assert_raise_message(
+        ValueError, msg, eclf2.set_params(lr=None, rf=None, nb=None).fit, X, y)
+
+    # Test soft voting transform
+    X1 = np.array([[1], [2]])
+    y1 = np.array([1, 2])
+    eclf1 = VotingClassifier(estimators=[('rf', clf2), ('nb', clf3)],
+                             voting='soft', weights=[0, 0.5],
+                             flatten_transform=False).fit(X1, y1)
+
+    eclf2 = VotingClassifier(estimators=[('rf', clf2), ('nb', clf3)],
+                             voting='soft', weights=[1, 0.5],
+                             flatten_transform=False)
+    eclf2.set_params(rf=None).fit(X1, y1)
+    assert_array_almost_equal(eclf1.transform(X1),
+                              np.array([[[0.7, 0.3], [0.3, 0.7]],
+                                        [[1., 0.], [0., 1.]]]))
+    assert_array_almost_equal(eclf2.transform(X1),
+                              np.array([[[1., 0.],
+                                         [0., 1.]]]))
+    eclf1.set_params(voting='hard')
+    eclf2.set_params(voting='hard')
+    assert_array_equal(eclf1.transform(X1), np.array([[0, 0], [1, 1]]))
+    assert_array_equal(eclf2.transform(X1), np.array([[0], [1]]))
+
+【相关测试 2】
+测试文件：sklearn/ensemble/tests/test_voting.py
+测试名称：test_sample_weight
+测试代码：
+@pytest.mark.filterwarnings('ignore: Default solver will be changed')  # 0.22
+@pytest.mark.filterwarnings('ignore: Default multi_class will')  # 0.22
+@pytest.mark.filterwarnings('ignore:The default value of n_estimators')
+def test_sample_weight():
+    """Tests sample_weight parameter of VotingClassifier"""
+    clf1 = LogisticRegression(random_state=123)
+    clf2 = RandomForestClassifier(random_state=123)
+    clf3 = SVC(gamma='scale', probability=True, random_state=123)
+    eclf1 = VotingClassifier(estimators=[
+        ('lr', clf1), ('rf', clf2), ('svc', clf3)],
+        voting='soft').fit(X, y, sample_weight=np.ones((len(y),)))
+    eclf2 = VotingClassifier(estimators=[
+        ('lr', clf1), ('rf', clf2), ('svc', clf3)],
+        voting='soft').fit(X, y)
+    assert_array_equal(eclf1.predict(X), eclf2.predict(X))
+    assert_array_almost_equal(eclf1.predict_proba(X), eclf2.predict_proba(X))
+
+    sample_weight = np.random.RandomState(123).uniform(size=(len(y),))
+    eclf3 = VotingClassifier(estimators=[('lr', clf1)], voting='soft')
+    eclf3.fit(X, y, sample_weight)
+    clf1.fit(X, y, sample_weight)
+    assert_array_equal(eclf3.predict(X), clf1.predict(X))
+    assert_array_almost_equal(eclf3.predict_proba(X), clf1.predict_proba(X))
+
+    clf4 = KNeighborsClassifier()
+    eclf3 = VotingClassifier(estimators=[
+        ('lr', clf1), ('svc', clf3), ('knn', clf4)],
+        voting='soft')
+    msg = ('Underlying estimator \'knn\' does not support sample weights.')
+    assert_raise_message(ValueError, msg, eclf3.fit, X, y, sample_weight)
+
+【相关测试 3】
+测试文件：sklearn/ensemble/tests/test_voting.py
+测试名称：test_sample_weight_kwargs
+测试代码：
+def test_sample_weight_kwargs():
+    """Check that VotingClassifier passes sample_weight as kwargs"""
+    class MockClassifier(BaseEstimator, ClassifierMixin):
+        """Mock Classifier to check that sample_weight is received as kwargs"""
+        def fit(self, X, y, *args, **sample_weight):
+            assert 'sample_weight' in sample_weight
+
+    clf = MockClassifier()
+    eclf = VotingClassifier(estimators=[('mock', clf)], voting='soft')
+
+    # Should not raise an error.
+    eclf.fit(X, y, sample_weight=np.ones((len(y),)))
+
+【相关测试 4】
+测试文件：sklearn/ensemble/tests/test_voting.py
+测试名称：test_set_params
+测试代码：
+@pytest.mark.filterwarnings('ignore: Default solver will be changed')  # 0.22
+@pytest.mark.filterwarnings('ignore: Default multi_class will')  # 0.22
+@pytest.mark.filterwarnings('ignore:The default value of n_estimators')
+def test_set_params():
+    """set_params should be able to set estimators"""
+    clf1 = LogisticRegression(random_state=123, C=1.0)
+    clf2 = RandomForestClassifier(random_state=123, max_depth=None)
+    clf3 = GaussianNB()
+    eclf1 = VotingClassifier([('lr', clf1), ('rf', clf2)], voting='soft',
+                             weights=[1, 2])
+    assert 'lr' in eclf1.named_estimators
+    assert eclf1.named_estimators.lr is eclf1.estimators[0][1]
+    assert eclf1.named_estimators.lr is eclf1.named_estimators['lr']
+    eclf1.fit(X, y)
+    assert 'lr' in eclf1.named_estimators_
+    assert eclf1.named_estimators_.lr is eclf1.estimators_[0]
+    assert eclf1.named_estimators_.lr is eclf1.named_estimators_['lr']
+
+    eclf2 = VotingClassifier([('lr', clf1), ('nb', clf3)], voting='soft',
+                             weights=[1, 2])
+    eclf2.set_params(nb=clf2).fit(X, y)
+    assert not hasattr(eclf2, 'nb')
+
+    assert_array_equal(eclf1.predict(X), eclf2.predict(X))
+    assert_array_almost_equal(eclf1.predict_proba(X), eclf2.predict_proba(X))
+    assert_equal(eclf2.estimators[0][1].get_params(), clf1.get_params())
+    assert_equal(eclf2.estimators[1][1].get_params(), clf2.get_params())
+
+    eclf1.set_params(lr__C=10.0)
+    eclf2.set_params(nb__max_depth=5)
+
+    assert eclf1.estimators[0][1].get_params()['C'] == 10.0
+    assert eclf2.estimators[1][1].get_params()['max_depth'] == 5
+    assert_equal(eclf1.get_params()["lr__C"],
+                 eclf1.get_params()["lr"].get_params()['C'])
+
+【相关测试 5】
+测试文件：sklearn/tests/test_pipeline.py
+测试名称：test_pipeline_sample_weight_supported
+测试代码：
+def test_pipeline_sample_weight_supported():
+    # Pipeline should pass sample_weight
+    X = np.array([[1, 2]])
+    pipe = Pipeline([('transf', Transf()), ('clf', FitParamT())])
+    pipe.fit(X, y=None)
+    assert_equal(pipe.score(X), 3)
+    assert_equal(pipe.score(X, y=None), 3)
+    assert_equal(pipe.score(X, y=None, sample_weight=None), 3)
+    assert_equal(pipe.score(X, sample_weight=np.array([2, 3])), 8)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

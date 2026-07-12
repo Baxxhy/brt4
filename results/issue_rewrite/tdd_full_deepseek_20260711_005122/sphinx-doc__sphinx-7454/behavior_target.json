@@ -1,0 +1,333 @@
+{
+  "instance_id": "sphinx-doc__sphinx-7454",
+  "issue_summary": "当 autodoc_typehints 配置为 'signature' 时，函数签名中的 None 类型提示没有生成指向 Python 官方文档的链接，而配置为 'description' 时则能正确生成链接。",
+  "trigger_condition": {
+    "text": "使用 Sphinx 的 autodoc 扩展生成文档，配置 autodoc_typehints='signature'，并为一个返回类型为 None 的函数生成文档。",
+    "evidence": [
+      "Issue 的 To Reproduce 部分提供了完整的复现脚本，展示了在 signature 模式下运行 Sphinx 构建。",
+      "相关测试 test_autodoc_typehints_signature 使用了 confoverrides={'autodoc_typehints': \"signature\"}。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "生成的 HTML 文档中，函数签名里的 None 类型没有变成指向 https://docs.python.org/3/library/constants.html#None 的超链接，而其他类型（如 int）则有链接。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 中展示了运行 grep 命令后的输出，其中 f2 的 int 有链接，而 f1 的 None 没有链接。",
+      "Issue 描述明确指出：\"the `None` in the signature is not clickable\"。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "无论 autodoc_typehints 配置为 'description' 还是 'signature'，函数类型提示中的 None 都应该生成指向 Python 官方 None 常量文档的超链接。",
+    "evidence": [
+      "Issue 的 Expected behavior 部分明确说明：\"That `None` in a type hint links to the documentation for the `None` singleton regardless of whether 'description' or 'signature' mode is used.\""
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "sphinx.ext.autodoc",
+      "kind": "module",
+      "source_path": "",
+      "reason": "Issue 涉及 autodoc 扩展及其 autodoc_typehints 配置的行为。"
+    },
+    {
+      "name": "sphinx.ext.intersphinx",
+      "kind": "module",
+      "source_path": "sphinx/ext/intersphinx.py",
+      "reason": "Issue 中使用了 intersphinx 映射来生成外部链接，检索出的相关源码也指向此文件。"
+    },
+    {
+      "name": "format_signature",
+      "kind": "method",
+      "source_path": "",
+      "reason": "相关测试 test_format_signature 测试了签名格式化，这可能与 None 在签名中的呈现方式有关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sphinx/ext/intersphinx.py",
+      "object": "intersphinx",
+      "lines": "",
+      "reason": "检索出的相关源码指向此文件，该模块负责处理外部文档链接，可能与 None 类型的链接生成逻辑有关。"
+    },
+    {
+      "path": "",
+      "object": "处理 autodoc_typehints='signature' 模式下类型提示渲染的代码",
+      "lines": "",
+      "reason": "Issue 表明问题仅在 signature 模式下出现，而 description 模式正常，因此差异可能在于签名渲染时对 None 的特殊处理。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_autodoc_typehints_signature",
+      "test_file": "tests/test_ext_autodoc_configs.py",
+      "why_relevant": "该测试专门验证了 autodoc_typehints='signature' 配置下的输出，与触发条件直接相关。",
+      "reusable_parts": [
+        "@pytest.mark.sphinx fixture 的使用",
+        "confoverrides 设置配置",
+        "do_autodoc 辅助函数的调用模式",
+        "对输出列表的断言风格"
+      ],
+      "possible_gap": "该测试断言的是生成的 reStructuredText 内容，而非最终 HTML 中的超链接，因此无法直接检测链接缺失问题。"
+    },
+    {
+      "test_name": "test_autodoc_typehints_description",
+      "test_file": "tests/test_ext_autodoc_configs.py",
+      "why_relevant": "该测试验证了 'description' 模式，Issue 表明此模式下 None 的链接生成正常，可作为对比基线。",
+      "reusable_parts": [
+        "使用 app.build() 和读取输出文件",
+        "在文本上下文中进行片段匹配的断言风格"
+      ],
+      "possible_gap": "测试输出格式是 text 而非 html，且没有检查链接。"
+    },
+    {
+      "test_name": "test_format_signature",
+      "test_file": "tests/test_autodoc.py",
+      "why_relevant": "该测试直接测试了 format_signature 方法，该方法负责生成签名字符串，可能影响 None 在签名中的呈现。",
+      "reusable_parts": [
+        "formatsig 辅助函数的构造",
+        "对各种函数和类签名格式的测试用例",
+        "对返回值注解（如 -> None）的处理"
+      ],
+      "possible_gap": "该测试不涉及链接生成或 HTML 输出，只检查签名文本。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "相关测试中 confoverrides 设置了 autodoc_typehints 为 'signature'、'description' 或 'none'。",
+      "target_pattern": "将配置设置为 'signature'，并确保 intersphinx 映射已启用，以触发 None 链接缺失的场景。",
+      "reason": "Issue 表明问题仅在 signature 模式下出现，而相关测试已包含此配置，但需要确保测试生成的是 HTML 并检查链接。",
+      "confidence": "high"
+    },
+    {
+      "slot": "input",
+      "current_pattern": "相关测试使用 target.typehints 模块，其中包含返回 None 的方法（如 Math.nothing() -> None）。",
+      "target_pattern": "创建一个简单的模块，包含一个返回类型明确为 None 的函数（如 def f1() -> None: ...），作为 autodoc 的输入。",
+      "reason": "Issue 的复现脚本使用了这样一个函数来演示问题，这是触发缺陷的必要输入。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "测试通常调用 do_autodoc 或使用 .. automodule:: 指令。",
+      "target_pattern": "在测试中构建完整的 Sphinx 应用，生成 HTML 输出，然后检查生成的 HTML 内容。",
+      "reason": "链接缺失的症状体现在最终 HTML 中，而非中间 reStructuredText 表示。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "file_output",
+      "expression_hint": "生成的 HTML 文件内容，特别是包含函数签名的部分。",
+      "reason": "Issue 通过 grep 搜索 'docs.python.org' 来检查链接是否存在，这是判断问题是否触发的直接方式。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "签名中 None 类型提示在内部数据结构中的表示（例如，是作为普通字符串还是可链接的节点）。",
+      "reason": "需要了解在 signature 模式下，None 是否被正确识别为应生成链接的类型。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证在生成的 HTML 中，函数签名内的 None 文本是一个指向正确 Python 文档 URL 的超链接。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免断言完整的、可能变化的 HTML 字符串（如包含具体标题属性）。避免断言不相关的链接。",
+      "reason": "Issue 的核心是链接的存在性，而非链接的精确属性。使用片段匹配（如检查是否包含 '<a ... href=\"...constants.html#None\"'）更稳定。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 @pytest.mark.sphinx fixture 来设置 Sphinx 测试应用。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要配置 intersphinx_mapping 以连接到 Python 官方文档。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要创建一个临时的 Python 模块文件（如 type_hint_test.py）作为 autodoc 的文档源。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试输出目录 (app.outdir) 用于存放生成的 HTML 文件以供检查。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "导致 signature 模式下 None 无链接的具体代码位置在哪里？",
+    "在 signature 模式下，类型提示的链接生成逻辑与 description 模式有何不同？",
+    "除了 None，是否还有其他内置常量（如 True, False, Ellipsis）存在类似的链接不一致问题？"
+  ],
+  "raw": {
+    "issue_summary": "当 autodoc_typehints 配置为 'signature' 时，函数签名中的 None 类型提示没有生成指向 Python 官方文档的链接，而配置为 'description' 时则能正确生成链接。",
+    "trigger_condition": {
+      "text": "使用 Sphinx 的 autodoc 扩展生成文档，配置 autodoc_typehints='signature'，并为一个返回类型为 None 的函数生成文档。",
+      "evidence": [
+        "Issue 的 To Reproduce 部分提供了完整的复现脚本，展示了在 signature 模式下运行 Sphinx 构建。",
+        "相关测试 test_autodoc_typehints_signature 使用了 confoverrides={'autodoc_typehints': \"signature\"}。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 HTML 文档中，函数签名里的 None 类型没有变成指向 https://docs.python.org/3/library/constants.html#None 的超链接，而其他类型（如 int）则有链接。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中展示了运行 grep 命令后的输出，其中 f2 的 int 有链接，而 f1 的 None 没有链接。",
+        "Issue 描述明确指出：\"the `None` in the signature is not clickable\"。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "无论 autodoc_typehints 配置为 'description' 还是 'signature'，函数类型提示中的 None 都应该生成指向 Python 官方 None 常量文档的超链接。",
+      "evidence": [
+        "Issue 的 Expected behavior 部分明确说明：\"That `None` in a type hint links to the documentation for the `None` singleton regardless of whether 'description' or 'signature' mode is used.\""
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sphinx.ext.autodoc",
+        "kind": "module",
+        "source_path": "",
+        "reason": "Issue 涉及 autodoc 扩展及其 autodoc_typehints 配置的行为。"
+      },
+      {
+        "name": "sphinx.ext.intersphinx",
+        "kind": "module",
+        "source_path": "sphinx/ext/intersphinx.py",
+        "reason": "Issue 中使用了 intersphinx 映射来生成外部链接，检索出的相关源码也指向此文件。"
+      },
+      {
+        "name": "format_signature",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 test_format_signature 测试了签名格式化，这可能与 None 在签名中的呈现方式有关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sphinx/ext/intersphinx.py",
+        "object": "intersphinx",
+        "lines": "",
+        "reason": "检索出的相关源码指向此文件，该模块负责处理外部文档链接，可能与 None 类型的链接生成逻辑有关。"
+      },
+      {
+        "path": "",
+        "object": "处理 autodoc_typehints='signature' 模式下类型提示渲染的代码",
+        "lines": "",
+        "reason": "Issue 表明问题仅在 signature 模式下出现，而 description 模式正常，因此差异可能在于签名渲染时对 None 的特殊处理。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_autodoc_typehints_signature",
+        "test_file": "tests/test_ext_autodoc_configs.py",
+        "why_relevant": "该测试专门验证了 autodoc_typehints='signature' 配置下的输出，与触发条件直接相关。",
+        "reusable_parts": [
+          "@pytest.mark.sphinx fixture 的使用",
+          "confoverrides 设置配置",
+          "do_autodoc 辅助函数的调用模式",
+          "对输出列表的断言风格"
+        ],
+        "possible_gap": "该测试断言的是生成的 reStructuredText 内容，而非最终 HTML 中的超链接，因此无法直接检测链接缺失问题。"
+      },
+      {
+        "test_name": "test_autodoc_typehints_description",
+        "test_file": "tests/test_ext_autodoc_configs.py",
+        "why_relevant": "该测试验证了 'description' 模式，Issue 表明此模式下 None 的链接生成正常，可作为对比基线。",
+        "reusable_parts": [
+          "使用 app.build() 和读取输出文件",
+          "在文本上下文中进行片段匹配的断言风格"
+        ],
+        "possible_gap": "测试输出格式是 text 而非 html，且没有检查链接。"
+      },
+      {
+        "test_name": "test_format_signature",
+        "test_file": "tests/test_autodoc.py",
+        "why_relevant": "该测试直接测试了 format_signature 方法，该方法负责生成签名字符串，可能影响 None 在签名中的呈现。",
+        "reusable_parts": [
+          "formatsig 辅助函数的构造",
+          "对各种函数和类签名格式的测试用例",
+          "对返回值注解（如 -> None）的处理"
+        ],
+        "possible_gap": "该测试不涉及链接生成或 HTML 输出，只检查签名文本。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中 confoverrides 设置了 autodoc_typehints 为 'signature'、'description' 或 'none'。",
+        "target_pattern": "将配置设置为 'signature'，并确保 intersphinx 映射已启用，以触发 None 链接缺失的场景。",
+        "reason": "Issue 表明问题仅在 signature 模式下出现，而相关测试已包含此配置，但需要确保测试生成的是 HTML 并检查链接。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试使用 target.typehints 模块，其中包含返回 None 的方法（如 Math.nothing() -> None）。",
+        "target_pattern": "创建一个简单的模块，包含一个返回类型明确为 None 的函数（如 def f1() -> None: ...），作为 autodoc 的输入。",
+        "reason": "Issue 的复现脚本使用了这样一个函数来演示问题，这是触发缺陷的必要输入。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常调用 do_autodoc 或使用 .. automodule:: 指令。",
+        "target_pattern": "在测试中构建完整的 Sphinx 应用，生成 HTML 输出，然后检查生成的 HTML 内容。",
+        "reason": "链接缺失的症状体现在最终 HTML 中，而非中间 reStructuredText 表示。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "生成的 HTML 文件内容，特别是包含函数签名的部分。",
+        "reason": "Issue 通过 grep 搜索 'docs.python.org' 来检查链接是否存在，这是判断问题是否触发的直接方式。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "签名中 None 类型提示在内部数据结构中的表示（例如，是作为普通字符串还是可链接的节点）。",
+        "reason": "需要了解在 signature 模式下，None 是否被正确识别为应生成链接的类型。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在生成的 HTML 中，函数签名内的 None 文本是一个指向正确 Python 文档 URL 的超链接。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、可能变化的 HTML 字符串（如包含具体标题属性）。避免断言不相关的链接。",
+        "reason": "Issue 的核心是链接的存在性，而非链接的精确属性。使用片段匹配（如检查是否包含 '<a ... href=\"...constants.html#None\"'）更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 @pytest.mark.sphinx fixture 来设置 Sphinx 测试应用。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要配置 intersphinx_mapping 以连接到 Python 官方文档。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建一个临时的 Python 模块文件（如 type_hint_test.py）作为 autodoc 的文档源。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试输出目录 (app.outdir) 用于存放生成的 HTML 文件以供检查。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "导致 signature 模式下 None 无链接的具体代码位置在哪里？",
+      "在 signature 模式下，类型提示的链接生成逻辑与 description 模式有何不同？",
+      "除了 None，是否还有其他内置常量（如 True, False, Ellipsis）存在类似的链接不一致问题？"
+    ]
+  }
+}

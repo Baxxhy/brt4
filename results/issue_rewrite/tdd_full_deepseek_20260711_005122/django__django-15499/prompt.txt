@@ -1,0 +1,375 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Optimize CreateModel + AlterModelManagers to CreateModel
+Description
+	
+During migration optimization, CreateModel + AlterModelOptions is reduced to just CreateModel, with the model options. Similarly, CreateModel + AlterModelManagers can become just CreateModel.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/db/migrations/operations/models.py
+对象名称：CreateModel
+节点类型：class
+父节点：models
+行号范围：41-293
+代码：
+class CreateModel(ModelOperation):
+    """Create a model's table."""
+    serialization_expand_args = ["fields", "options", "managers"]
+    def __init__(self, name, fields, options=None, bases=None, managers=None):
+    def deconstruct(self):
+    def state_forwards(self, app_label, state):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+    def database_backwards(self, app_label, schema_editor, from_state, to_state):
+    def describe(self):
+    @property
+    def migration_name_fragment(self):
+    def references_model(self, name, app_label):
+    def reduce(self, operation, app_label):
+
+
+【源码片段 2】
+文件路径：django/db/migrations/operations/models.py
+对象名称：AlterModelManagers
+节点类型：class
+父节点：models
+行号范围：732-758
+代码：
+class AlterModelManagers(ModelOptionOperation):
+    """Alter the model's managers."""
+    serialization_expand_args = ["managers"]
+    def __init__(self, name, managers):
+    def deconstruct(self):
+    def state_forwards(self, app_label, state):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+    def database_backwards(self, app_label, schema_editor, from_state, to_state):
+    def describe(self):
+    @property
+    def migration_name_fragment(self):
+
+
+【源码片段 3】
+文件路径：django/db/migrations/operations/models.py
+对象名称：AlterModelOptions
+节点类型：class
+父节点：models
+行号范围：677-729
+代码：
+class AlterModelOptions(ModelOptionOperation):
+    """
+    Set new model options that don't directly affect the database schema
+    (like verbose_name, permissions, ordering). Python code in migrations
+    may still need them.
+    """
+    ALTER_OPTION_KEYS = [
+        "base_manager_name",
+        "default_manager_name",
+        "default_related_name",
+        "get_latest_by",
+        "managed",
+        "ordering",
+        "permissions",
+        "default_permissions",
+        "select_on_save",
+        "verbose_name",
+        "verbose_name_plural",
+    ]
+    def __init__(self, name, options):
+    def deconstruct(self):
+    def state_forwards(self, app_label, state):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+    def database_backwards(self, app_label, schema_editor, from_state, to_state):
+    def describe(self):
+    @property
+    def migration_name_fragment(self):
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/migrations/test_optimizer.py
+测试名称：OptimizerTests.test_create_alter_model_options
+测试代码：
+class OptimizerTests(SimpleTestCase):
+    def test_create_alter_model_options(self):
+        self.assertOptimizesTo(
+            [
+                migrations.CreateModel("Foo", fields=[]),
+                migrations.AlterModelOptions(
+                    name="Foo", options={"verbose_name_plural": "Foozes"}
+                ),
+            ],
+            [
+                migrations.CreateModel(
+                    "Foo", fields=[], options={"verbose_name_plural": "Foozes"}
+                ),
+            ],
+        )
+
+【相关测试 2】
+测试文件：tests/migrations/test_optimizer.py
+测试名称：OptimizerTests.test_create_model_and_remove_model_options
+测试代码：
+class OptimizerTests(SimpleTestCase):
+    def test_create_model_and_remove_model_options(self):
+        self.assertOptimizesTo(
+            [
+                migrations.CreateModel(
+                    "MyModel",
+                    fields=[],
+                    options={"verbose_name": "My Model"},
+                ),
+                migrations.AlterModelOptions("MyModel", options={}),
+            ],
+            [migrations.CreateModel("MyModel", fields=[])],
+        )
+        self.assertOptimizesTo(
+            [
+                migrations.CreateModel(
+                    "MyModel",
+                    fields=[],
+                    options={
+                        "verbose_name": "My Model",
+                        "verbose_name_plural": "My Model plural",
+                    },
+                ),
+                migrations.AlterModelOptions(
+                    "MyModel",
+                    options={"verbose_name": "My Model"},
+                ),
+            ],
+            [
+                migrations.CreateModel(
+                    "MyModel",
+                    fields=[],
+                    options={"verbose_name": "My Model"},
+                ),
+            ],
+        )
+
+【相关测试 3】
+测试文件：tests/migrations/test_operations.py
+测试名称：test_create_model_managers
+测试代码：
+class OperationTests(OperationTestBase):
+    def test_create_model_managers(self):
+        """
+        The managers on a model are set.
+        """
+        project_state = self.set_up_test_model("test_cmoma")
+        # Test the state alteration
+        operation = migrations.CreateModel(
+            "Food",
+            fields=[
+                ("id", models.AutoField(primary_key=True)),
+            ],
+            managers=[
+                ("food_qs", FoodQuerySet.as_manager()),
+                ("food_mgr", FoodManager("a", "b")),
+                ("food_mgr_kwargs", FoodManager("x", "y", 3, 4)),
+            ],
+        )
+        self.assertEqual(operation.describe(), "Create model Food")
+        new_state = project_state.clone()
+        operation.state_forwards("test_cmoma", new_state)
+        self.assertIn(("test_cmoma", "food"), new_state.models)
+        managers = new_state.models["test_cmoma", "food"].managers
+        self.assertEqual(managers[0][0], "food_qs")
+        self.assertIsInstance(managers[0][1], models.Manager)
+        self.assertEqual(managers[1][0], "food_mgr")
+        self.assertIsInstance(managers[1][1], FoodManager)
+        self.assertEqual(managers[1][1].args, ("a", "b", 1, 2))
+        self.assertEqual(managers[2][0], "food_mgr_kwargs")
+        self.assertIsInstance(managers[2][1], FoodManager)
+        self.assertEqual(managers[2][1].args, ("x", "y", 3, 4))
+
+【相关测试 4】
+测试文件：tests/migrations/test_optimizer.py
+测试名称：OptimizerTests.test_create_model_add_field
+测试代码：
+class OptimizerTests(SimpleTestCase):
+    def test_create_model_add_field(self):
+        """
+        AddField should optimize into CreateModel.
+        """
+        managers = [("objects", EmptyManager())]
+        self.assertOptimizesTo(
+            [
+                migrations.CreateModel(
+                    name="Foo",
+                    fields=[("name", models.CharField(max_length=255))],
+                    options={"verbose_name": "Foo"},
+                    bases=(UnicodeModel,),
+                    managers=managers,
+                ),
+                migrations.AddField("Foo", "age", models.IntegerField()),
+            ],
+            [
+                migrations.CreateModel(
+                    name="Foo",
+                    fields=[
+                        ("name", models.CharField(max_length=255)),
+                        ("age", models.IntegerField()),
+                    ],
+                    options={"verbose_name": "Foo"},
+                    bases=(UnicodeModel,),
+                    managers=managers,
+                ),
+            ],
+        )
+
+【相关测试 5】
+测试文件：tests/migrations/test_optimizer.py
+测试名称：OptimizerTests.test_create_model_alter_field
+测试代码：
+class OptimizerTests(SimpleTestCase):
+    def test_create_model_alter_field(self):
+        """
+        AlterField should optimize into CreateModel.
+        """
+        managers = [("objects", EmptyManager())]
+        self.assertOptimizesTo(
+            [
+                migrations.CreateModel(
+                    name="Foo",
+                    fields=[("name", models.CharField(max_length=255))],
+                    options={"verbose_name": "Foo"},
+                    bases=(UnicodeModel,),
+                    managers=managers,
+                ),
+                migrations.AlterField("Foo", "name", models.IntegerField()),
+            ],
+            [
+                migrations.CreateModel(
+                    name="Foo",
+                    fields=[
+                        ("name", models.IntegerField()),
+                    ],
+                    options={"verbose_name": "Foo"},
+                    bases=(UnicodeModel,),
+                    managers=managers,
+                ),
+            ],
+        )
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

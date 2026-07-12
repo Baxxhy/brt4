@@ -1,0 +1,281 @@
+{
+  "instance_id": "matplotlib__matplotlib-20676",
+  "issue_summary": "当创建交互式 SpanSelector 时，坐标轴的范围会被错误地扩展到包含 0。",
+  "trigger_condition": {
+    "text": "创建一个带有 `interactive=True` 参数的 SpanSelector 对象。",
+    "evidence": [
+      "Issue 中的代码片段：`ss = SpanSelector(ax, print, \"horizontal\", interactive=True)`",
+      "源码片段 2 中显示了 `__init__` 方法接收 `interactive` 参数。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "坐标轴的 x 轴范围被扩展到包含 x=0。",
+    "symptom_type": "state_not_updated",
+    "evidence": [
+      "Issue 中描述：\"The axes xlimits are expanded to include x=0.\"",
+      "Issue 中预期行为：\"The axes xlimits remain at (10, 20) + margins...\""
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "创建交互式 SpanSelector 后，坐标轴的 x 轴范围应保持在初始设置的范围（例如 (10, 20)）加上边距，不应被强制包含 0。",
+    "evidence": [
+      "Issue 中描述：\"The axes xlimits remain at (10, 20) + margins, as was the case in Matplotlib 3.4 (with `interactive` replaced by its old name `span_stays`).\""
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "SpanSelector",
+      "kind": "class",
+      "source_path": "lib/matplotlib/widgets.py",
+      "reason": "Issue 直接关于 SpanSelector 类的行为。"
+    },
+    {
+      "name": "SpanSelector.__init__",
+      "kind": "method",
+      "source_path": "lib/matplotlib/widgets.py",
+      "reason": "创建 SpanSelector 对象时传入 `interactive=True` 触发了问题。"
+    },
+    {
+      "name": "ax.get_xlim",
+      "kind": "method",
+      "source_path": "",
+      "reason": "用于检查坐标轴范围是否被错误修改。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "lib/matplotlib/widgets.py",
+      "object": "SpanSelector",
+      "lines": "1991-2339",
+      "reason": "Issue 直接指向 SpanSelector 类，且其 `__init__` 方法处理 `interactive` 参数。"
+    },
+    {
+      "path": "lib/matplotlib/widgets.py",
+      "object": "SpanSelector.new_axes",
+      "lines": "",
+      "reason": "`__init__` 中调用了 `new_axes(ax)`，可能与坐标轴范围设置有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_span_selector_drag",
+      "test_file": "lib/matplotlib/tests/test_widgets.py",
+      "why_relevant": "它测试了带有 `interactive=True` 的 SpanSelector 的创建和交互。",
+      "reusable_parts": [
+        "导入 `widgets` 和 `do_event`",
+        "使用 `get_ax()` fixture",
+        "创建 `SpanSelector` 对象并设置 `interactive=True`",
+        "使用 `do_event` 模拟交互",
+        "使用 `assert` 检查 `tool.extents`"
+      ],
+      "possible_gap": "该测试没有检查创建 SpanSelector 后坐标轴范围 (`ax.get_xlim()`) 是否被改变。"
+    },
+    {
+      "test_name": "check_span",
+      "test_file": "lib/matplotlib/tests/test_widgets.py",
+      "why_relevant": "它是测试 SpanSelector 各种配置的通用函数，包括 `interactive` 参数。",
+      "reusable_parts": [
+        "测试函数结构",
+        "创建 `SpanSelector` 的通用模式",
+        "使用 `do_event` 模拟鼠标事件"
+      ],
+      "possible_gap": "它没有专门测试 `interactive=True` 对坐标轴范围的影响。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "相关测试中创建 SpanSelector 时可能没有显式检查坐标轴范围。",
+      "target_pattern": "在创建 `SpanSelector(..., interactive=True)` 后，立即检查 `ax.get_xlim()` 是否与初始范围一致。",
+      "reason": "Issue 表明，仅创建交互式选择器就会改变坐标轴范围，而现有测试没有验证这一点。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "测试通常关注选择器本身的状态（如 `extents`）。",
+      "target_pattern": "测试需要关注父坐标轴对象 (`ax`) 的状态（`xlim`）在选择器创建前后的变化。",
+      "reason": "错误症状是坐标轴状态被意外修改，而非选择器内部状态。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "state",
+      "expression_hint": "ax.get_xlim()",
+      "reason": "Issue 的核心是坐标轴范围被错误修改。观察创建 SpanSelector 前后的 `ax.get_xlim()` 值可以检测问题。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "ss._interactive",
+      "reason": "确认 SpanSelector 对象是否确实以交互模式创建。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "创建交互式 SpanSelector 后，坐标轴的 x 轴范围应保持不变（不包含 0）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的坐标轴对象或复杂的 repr 字符串。",
+      "reason": "Issue 明确指出范围应保持为 (10, 20) 加上边距。断言范围元组是否相等是直接且稳定的。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 `get_ax()` fixture 获取测试坐标轴，如相关测试所示。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "使用 `do_event` 辅助函数模拟鼠标事件以驱动交互式小部件。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "导致坐标轴范围扩展到包含 0 的具体代码位置尚不确定。",
+    "`interactive=False` 时是否也会出现此问题？Issue 暗示这是 `interactive=True` 特有的。",
+    "边距（margins）的确切计算方式可能影响预期的精确范围值。"
+  ],
+  "raw": {
+    "issue_summary": "当创建交互式 SpanSelector 时，坐标轴的范围会被错误地扩展到包含 0。",
+    "trigger_condition": {
+      "text": "创建一个带有 `interactive=True` 参数的 SpanSelector 对象。",
+      "evidence": [
+        "Issue 中的代码片段：`ss = SpanSelector(ax, print, \"horizontal\", interactive=True)`",
+        "源码片段 2 中显示了 `__init__` 方法接收 `interactive` 参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "坐标轴的 x 轴范围被扩展到包含 x=0。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 中描述：\"The axes xlimits are expanded to include x=0.\"",
+        "Issue 中预期行为：\"The axes xlimits remain at (10, 20) + margins...\""
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "创建交互式 SpanSelector 后，坐标轴的 x 轴范围应保持在初始设置的范围（例如 (10, 20)）加上边距，不应被强制包含 0。",
+      "evidence": [
+        "Issue 中描述：\"The axes xlimits remain at (10, 20) + margins, as was the case in Matplotlib 3.4 (with `interactive` replaced by its old name `span_stays`).\""
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "SpanSelector",
+        "kind": "class",
+        "source_path": "lib/matplotlib/widgets.py",
+        "reason": "Issue 直接关于 SpanSelector 类的行为。"
+      },
+      {
+        "name": "SpanSelector.__init__",
+        "kind": "method",
+        "source_path": "lib/matplotlib/widgets.py",
+        "reason": "创建 SpanSelector 对象时传入 `interactive=True` 触发了问题。"
+      },
+      {
+        "name": "ax.get_xlim",
+        "kind": "method",
+        "source_path": "",
+        "reason": "用于检查坐标轴范围是否被错误修改。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/widgets.py",
+        "object": "SpanSelector",
+        "lines": "1991-2339",
+        "reason": "Issue 直接指向 SpanSelector 类，且其 `__init__` 方法处理 `interactive` 参数。"
+      },
+      {
+        "path": "lib/matplotlib/widgets.py",
+        "object": "SpanSelector.new_axes",
+        "lines": "",
+        "reason": "`__init__` 中调用了 `new_axes(ax)`，可能与坐标轴范围设置有关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_span_selector_drag",
+        "test_file": "lib/matplotlib/tests/test_widgets.py",
+        "why_relevant": "它测试了带有 `interactive=True` 的 SpanSelector 的创建和交互。",
+        "reusable_parts": [
+          "导入 `widgets` 和 `do_event`",
+          "使用 `get_ax()` fixture",
+          "创建 `SpanSelector` 对象并设置 `interactive=True`",
+          "使用 `do_event` 模拟交互",
+          "使用 `assert` 检查 `tool.extents`"
+        ],
+        "possible_gap": "该测试没有检查创建 SpanSelector 后坐标轴范围 (`ax.get_xlim()`) 是否被改变。"
+      },
+      {
+        "test_name": "check_span",
+        "test_file": "lib/matplotlib/tests/test_widgets.py",
+        "why_relevant": "它是测试 SpanSelector 各种配置的通用函数，包括 `interactive` 参数。",
+        "reusable_parts": [
+          "测试函数结构",
+          "创建 `SpanSelector` 的通用模式",
+          "使用 `do_event` 模拟鼠标事件"
+        ],
+        "possible_gap": "它没有专门测试 `interactive=True` 对坐标轴范围的影响。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试中创建 SpanSelector 时可能没有显式检查坐标轴范围。",
+        "target_pattern": "在创建 `SpanSelector(..., interactive=True)` 后，立即检查 `ax.get_xlim()` 是否与初始范围一致。",
+        "reason": "Issue 表明，仅创建交互式选择器就会改变坐标轴范围，而现有测试没有验证这一点。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试通常关注选择器本身的状态（如 `extents`）。",
+        "target_pattern": "测试需要关注父坐标轴对象 (`ax`) 的状态（`xlim`）在选择器创建前后的变化。",
+        "reason": "错误症状是坐标轴状态被意外修改，而非选择器内部状态。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "ax.get_xlim()",
+        "reason": "Issue 的核心是坐标轴范围被错误修改。观察创建 SpanSelector 前后的 `ax.get_xlim()` 值可以检测问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "ss._interactive",
+        "reason": "确认 SpanSelector 对象是否确实以交互模式创建。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "创建交互式 SpanSelector 后，坐标轴的 x 轴范围应保持不变（不包含 0）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的坐标轴对象或复杂的 repr 字符串。",
+        "reason": "Issue 明确指出范围应保持为 (10, 20) 加上边距。断言范围元组是否相等是直接且稳定的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 `get_ax()` fixture 获取测试坐标轴，如相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 `do_event` 辅助函数模拟鼠标事件以驱动交互式小部件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "导致坐标轴范围扩展到包含 0 的具体代码位置尚不确定。",
+      "`interactive=False` 时是否也会出现此问题？Issue 暗示这是 `interactive=True` 特有的。",
+      "边距（margins）的确切计算方式可能影响预期的精确范围值。"
+    ]
+  }
+}

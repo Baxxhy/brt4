@@ -1,0 +1,698 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Unexpected exception when multiplying geometry.Point and number
+```python
+from sympy import geometry as ge
+import sympy
+
+point1 = ge.Point(0,0)
+point2 = ge.Point(1,1)
+```
+
+This line works fine
+```python
+point1 + point2 * sympy.sympify(2.0)
+```
+
+But when I write the same this way it raises an exception
+```python
+point1 + sympy.sympify(2.0) * point2
+```
+
+```
+---------------------------------------------------------------------------
+TypeError                                 Traceback (most recent call last)
+~/.virtualenvs/test/lib/python3.6/site-packages/sympy/geometry/point.py in __add__(self, other)
+    219         try:
+--> 220             s, o = Point._normalize_dimension(self, Point(other, evaluate=False))
+    221         except TypeError:
+
+~/.virtualenvs/test/lib/python3.6/site-packages/sympy/geometry/point.py in __new__(cls, *args, **kwargs)
+    128                 Expecting sequence of coordinates, not `{}`'''
+--> 129                                        .format(func_name(coords))))
+    130         # A point where only `dim` is specified is initialized
+
+TypeError: 
+Expecting sequence of coordinates, not `Mul`
+
+During handling of the above exception, another exception occurred:
+
+GeometryError                             Traceback (most recent call last)
+<ipython-input-20-6dcbddac1ee2> in <module>
+----> 1 point1 + sympy.sympify(2.0)* point2
+
+~/.virtualenvs/test/lib/python3.6/site-packages/sympy/geometry/point.py in __add__(self, other)
+    220             s, o = Point._normalize_dimension(self, Point(other, evaluate=False))
+    221         except TypeError:
+--> 222             raise GeometryError("Don't know how to add {} and a Point object".format(other))
+    223 
+    224         coords = [simplify(a + b) for a, b in zip(s, o)]
+
+GeometryError: Don't know how to add 2.0*Point2D(1, 1) and a Point object
+```
+
+The expected behaviour is, that both lines give the same result
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/geometry/point.py
+对象名称：Point
+节点类型：class
+父节点：point
+行号范围：41-855
+代码：
+class Point(GeometryEntity):
+    """A point in a n-dimensional Euclidean space.
+
+    Parameters
+    ==========
+
+    coords : sequence of n-coordinate values. In the special
+        case where n=2 or 3, a Point2D or Point3D will be created
+        as appropriate.
+    evaluate : if `True` (default), all floats are turn into
+        exact types.
+    dim : number of coordinates the point should have.  If coordinates
+        are unspecified, they are padded with zeros.
+    on_morph : indicates what should happen when the number of
+        coordinates of a point need to be changed by adding or
+        removing zeros.  Possible values are `'warn'`, `'error'`, or
+        `ignore` (default).  No warning or error is given when `*args`
+        is empty and `dim` is given. An error is always raised when
+        trying to remove nonzero coordinates.
+
+
+    Attributes
+    ==========
+
+    length
+    origin: A `Point` representing the origin of the
+        appropriately-dimensioned space.
+
+    Raises
+    ======
+
+    TypeError : When instantiating with anything but a Point or sequence
+    ValueError : when instantiating with a sequence with length < 2 or
+        when trying to reduce dimensions if keyword `on_morph='error'` is
+        set.
+
+    See Also
+    ========
+
+    sympy.geometry.line.Segment : Connects two Points
+
+    Examples
+    ========
+
+    >>> from sympy.geometry import Point
+    >>> from sympy.abc import x
+    >>> Point(1, 2, 3)
+    Point3D(1, 2, 3)
+    >>> Point([1, 2])
+    Point2D(1, 2)
+    >>> Point(0, x)
+    Point2D(0, x)
+    >>> Point(dim=4)
+    Point(0, 0, 0, 0)
+
+    Floats are automatically converted to Rational unless the
+    evaluate flag is False:
+
+    >>> Point(0.5, 0.25)
+    Point2D(1/2, 1/4)
+    >>> Point(0.5, 0.25, evaluate=False)
+    Point2D(0.5, 0.25)
+
+    """
+    is_Point = True
+    def __new__(cls, *args, **kwargs):
+    def __abs__(self):
+    def __add__(self, other):
+    def __contains__(self, item):
+    def __div__(self, divisor):
+    def __eq__(self, other):
+    def __getitem__(self, key):
+    def __hash__(self):
+    def __iter__(self):
+    def __len__(self):
+    def __mul__(self, factor):
+    def __neg__(self):
+    def __sub__(self, other):
+    @classmethod
+    def _normalize_dimension(cls, *points, **kwargs):
+    @staticmethod
+    def affine_rank(*args):
+    @property
+    def ambient_dimension(self):
+    @classmethod
+    def are_coplanar(cls, *points):
+    def distance(self, other):
+    def dot(self, p):
+    def equals(self, other):
+    def evalf(self, prec=None, **options):
+    def intersection(self, other):
+    def is_collinear(self, *args):
+    def is_concyclic(self, *args):
+    @property
+    def is_nonzero(self):
+    def is_scalar_multiple(self, p):
+    @property
+    def is_zero(self):
+    @property
+    def length(self):
+    def midpoint(self, p):
+    @property
+    def origin(self):
+    @property
+    def orthogonal_direction(self):
+    @staticmethod
+    def project(a, b):
+    def taxicab_distance(self, p):
+    def canberra_distance(self, p):
+    @property
+    def unit(self):
+    n = evalf
+    __truediv__ = __div__
+
+
+【源码片段 2】
+文件路径：sympy/core/sympify.py
+对象名称：sympify
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 3】
+文件路径：sympy/geometry/point.py
+对象名称：__add__
+节点类型：class_function
+父节点：Point
+行号范围：185-222
+代码：
+    def __add__(self, other):
+        """Add other to self by incrementing self's coordinates by
+        those of other.
+
+        Notes
+        =====
+
+        >>> from sympy.geometry.point import Point
+
+        When sequences of coordinates are passed to Point methods, they
+        are converted to a Point internally. This __add__ method does
+        not do that so if floating point values are used, a floating
+        point result (in terms of SymPy Floats) will be returned.
+
+        >>> Point(1, 2) + (.1, .2)
+        Point2D(1.1, 2.2)
+
+        If this is not desired, the `translate` method can be used or
+        another Point can be added:
+
+        >>> Point(1, 2).translate(.1, .2)
+        Point2D(11/10, 11/5)
+        >>> Point(1, 2) + Point(.1, .2)
+        Point2D(11/10, 11/5)
+
+        See Also
+        ========
+
+        sympy.geometry.point.Point.translate
+
+        """
+        try:
+            s, o = Point._normalize_dimension(self, Point(other, evaluate=False))
+        except TypeError:
+            raise GeometryError("Don't know how to add {} and a Point object".format(other))
+
+        coords = [simplify(a + b) for a, b in zip(s, o)]
+        return Point(coords, evaluate=False)
+
+
+【源码片段 4】
+文件路径：sympy/geometry/point.py
+对象名称：__new__
+节点类型：class_function
+父节点：Point
+行号范围：108-178
+代码：
+    def __new__(cls, *args, **kwargs):
+        evaluate = kwargs.get('evaluate', global_evaluate[0])
+        on_morph = kwargs.get('on_morph', 'ignore')
+
+        # unpack into coords
+        coords = args[0] if len(args) == 1 else args
+
+        # check args and handle quickly handle Point instances
+        if isinstance(coords, Point):
+            # even if we're mutating the dimension of a point, we
+            # don't reevaluate its coordinates
+            evaluate = False
+            if len(coords) == kwargs.get('dim', len(coords)):
+                return coords
+
+        if not is_sequence(coords):
+            raise TypeError(filldedent('''
+                Expecting sequence of coordinates, not `{}`'''
+                                       .format(func_name(coords))))
+        # A point where only `dim` is specified is initialized
+        # to zeros.
+        if len(coords) == 0 and kwargs.get('dim', None):
+            coords = (S.Zero,)*kwargs.get('dim')
+
+        coords = Tuple(*coords)
+        dim = kwargs.get('dim', len(coords))
+
+        if len(coords) < 2:
+            raise ValueError(filldedent('''
+                Point requires 2 or more coordinates or
+                keyword `dim` > 1.'''))
+        if len(coords) != dim:
+            message = ("Dimension of {} needs to be changed "
+                       "from {} to {}.").format(coords, len(coords), dim)
+            if on_morph == 'ignore':
+                pass
+            elif on_morph == "error":
+                raise ValueError(message)
+            elif on_morph == 'warn':
+                warnings.warn(message)
+            else:
+                raise ValueError(filldedent('''
+                        on_morph value should be 'error',
+                        'warn' or 'ignore'.'''))
+        if any(coords[dim:]):
+            raise ValueError('Nonzero coordinates cannot be removed.')
+        if any(a.is_number and im(a) for a in coords):
+            raise ValueError('Imaginary coordinates are not permitted.')
+        if not all(isinstance(a, Expr) for a in coords):
+            raise TypeError('Coordinates must be valid SymPy expressions.')
+
+        # pad with zeros appropriately
+        coords = coords[:dim] + (S.Zero,)*(dim - len(coords))
+
+        # Turn any Floats into rationals and simplify
+        # any expressions before we instantiate
+        if evaluate:
+            coords = coords.xreplace(dict(
+                [(f, simplify(nsimplify(f, rational=True)))
+                 for f in coords.atoms(Float)]))
+
+        # return 2D or 3D instances
+        if len(coords) == 2:
+            kwargs['_nocheck'] = True
+            return Point2D(*coords, **kwargs)
+        elif len(coords) == 3:
+            kwargs['_nocheck'] = True
+            return Point3D(*coords, **kwargs)
+
+        # the general Point
+        return GeometryEntity.__new__(cls, *coords)
+
+
+【源码片段 5】
+文件路径：sympy/geometry/point.py
+对象名称：_normalize_dimension
+节点类型：class_function
+父节点：Point
+行号范围：292-307
+代码：
+    def _normalize_dimension(cls, *points, **kwargs):
+        """Ensure that points have the same dimension.
+        By default `on_morph='warn'` is passed to the
+        `Point` constructor."""
+        # if we have a built-in ambient dimension, use it
+        dim = getattr(cls, '_ambient_dimension', None)
+        # override if we specified it
+        dim = kwargs.get('dim', dim)
+        # if no dim was given, use the highest dimensional point
+        if dim is None:
+            dim = max(i.ambient_dimension for i in points)
+        if all(i.ambient_dimension == dim for i in points):
+            return list(points)
+        kwargs['dim'] = dim
+        kwargs['on_morph'] = kwargs.get('on_morph', 'warn')
+        return [Point(i, **kwargs) for i in points]
+
+
+【源码片段 6】
+文件路径：sympy/assumptions/handlers/sets.py
+对象名称：Mul
+节点类型：class_function
+父节点：AskIntegerHandler
+行号范围：47-72
+代码：
+    def Mul(expr, assumptions):
+        """
+        Integer*Integer      -> Integer
+        Integer*Irrational   -> !Integer
+        Odd/Even             -> !Integer
+        Integer*Rational     -> ?
+        """
+        if expr.is_number:
+            return AskIntegerHandler._number(expr, assumptions)
+        _output = True
+        for arg in expr.args:
+            if not ask(Q.integer(arg), assumptions):
+                if arg.is_Rational:
+                    if arg.q == 2:
+                        return ask(Q.even(2*expr), assumptions)
+                    if ~(arg.q & 1):
+                        return None
+                elif ask(Q.irrational(arg), assumptions):
+                    if _output:
+                        _output = False
+                    else:
+                        return
+                else:
+                    return
+
+        return _output
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/geometry/tests/test_point.py
+测试名称：test_point
+测试代码：
+def test_point():
+    x = Symbol('x', real=True)
+    y = Symbol('y', real=True)
+    x1 = Symbol('x1', real=True)
+    x2 = Symbol('x2', real=True)
+    y1 = Symbol('y1', real=True)
+    y2 = Symbol('y2', real=True)
+    half = S.Half
+    p1 = Point(x1, x2)
+    p2 = Point(y1, y2)
+    p3 = Point(0, 0)
+    p4 = Point(1, 1)
+    p5 = Point(0, 1)
+    line = Line(Point(1, 0), slope=1)
+
+    assert p1 in p1
+    assert p1 not in p2
+    assert p2.y == y2
+    assert (p3 + p4) == p4
+    assert (p2 - p1) == Point(y1 - x1, y2 - x2)
+    assert p4*5 == Point(5, 5)
+    assert -p2 == Point(-y1, -y2)
+    raises(ValueError, lambda: Point(3, I))
+    raises(ValueError, lambda: Point(2*I, I))
+    raises(ValueError, lambda: Point(3 + I, I))
+
+    assert Point(34.05, sqrt(3)) == Point(Rational(681, 20), sqrt(3))
+    assert Point.midpoint(p3, p4) == Point(half, half)
+    assert Point.midpoint(p1, p4) == Point(half + half*x1, half + half*x2)
+    assert Point.midpoint(p2, p2) == p2
+    assert p2.midpoint(p2) == p2
+
+    assert Point.distance(p3, p4) == sqrt(2)
+    assert Point.distance(p1, p1) == 0
+    assert Point.distance(p3, p2) == sqrt(p2.x**2 + p2.y**2)
+
+    # distance should be symmetric
+    assert p1.distance(line) == line.distance(p1)
+    assert p4.distance(line) == line.distance(p4)
+
+    assert Point.taxicab_distance(p4, p3) == 2
+
+    assert Point.canberra_distance(p4, p5) == 1
+
+    p1_1 = Point(x1, x1)
+    p1_2 = Point(y2, y2)
+    p1_3 = Point(x1 + 1, x1)
+    assert Point.is_collinear(p3)
+
+    with warns(UserWarning):
+        assert Point.is_collinear(p3, Point(p3, dim=4))
+    assert p3.is_collinear()
+    assert Point.is_collinear(p3, p4)
+    assert Point.is_collinear(p3, p4, p1_1, p1_2)
+    assert Point.is_collinear(p3, p4, p1_1, p1_3) is False
+    assert Point.is_collinear(p3, p3, p4, p5) is False
+
+    raises(TypeError, lambda: Point.is_collinear(line))
+    raises(TypeError, lambda: p1_1.is_collinear(line))
+
+    assert p3.intersection(Point(0, 0)) == [p3]
+    assert p3.intersection(p4) == []
+
+    x_pos = Symbol('x', real=True, positive=True)
+    p2_1 = Point(x_pos, 0)
+    p2_2 = Point(0, x_pos)
+    p2_3 = Point(-x_pos, 0)
+    p2_4 = Point(0, -x_pos)
+    p2_5 = Point(x_pos, 5)
+    assert Point.is_concyclic(p2_1)
+    assert Point.is_concyclic(p2_1, p2_2)
+    assert Point.is_concyclic(p2_1, p2_2, p2_3, p2_4)
+    for pts in permutations((p2_1, p2_2, p2_3, p2_5)):
+        assert Point.is_concyclic(*pts) is False
+    assert Point.is_concyclic(p4, p4 * 2, p4 * 3) is False
+    assert Point(0, 0).is_concyclic((1, 1), (2, 2), (2, 1)) is False
+
+    assert p4.scale(2, 3) == Point(2, 3)
+    assert p3.scale(2, 3) == p3
+
+    assert p4.rotate(pi, Point(0.5, 0.5)) == p3
+    assert p1.__radd__(p2) == p1.midpoint(p2).scale(2, 2)
+    assert (-p3).__rsub__(p4) == p3.midpoint(p4).scale(2, 2)
+
+    assert p4 * 5 == Point(5, 5)
+    assert p4 / 5 == Point(0.2, 0.2)
+
+    raises(ValueError, lambda: Point(0, 0) + 10)
+
+    # Point differences should be simplified
+    assert Point(x*(x - 1), y) - Point(x**2 - x, y + 1) == Point(0, -1)
+
+    a, b = S.Half, Rational(1, 3)
+    assert Point(a, b).evalf(2) == \
+        Point(a.n(2), b.n(2), evaluate=False)
+    raises(ValueError, lambda: Point(1, 2) + 1)
+
+    # test transformations
+    p = Point(1, 0)
+    assert p.rotate(pi/2) == Point(0, 1)
+    assert p.rotate(pi/2, p) == p
+    p = Point(1, 1)
+    assert p.scale(2, 3) == Point(2, 3)
+    assert p.translate(1, 2) == Point(2, 3)
+    assert p.translate(1) == Point(2, 1)
+    assert p.translate(y=1) == Point(1, 2)
+    assert p.translate(*p.args) == Point(2, 2)
+
+    # Check invalid input for transform
+    raises(ValueError, lambda: p3.transform(p3))
+    raises(ValueError, lambda: p.transform(Matrix([[1, 0], [0, 1]])))
+
+【相关测试 2】
+测试文件：sympy/geometry/tests/test_point.py
+测试名称：test__normalize_dimension
+测试代码：
+def test__normalize_dimension():
+    assert Point._normalize_dimension(Point(1, 2), Point(3, 4)) == [
+        Point(1, 2), Point(3, 4)]
+    assert Point._normalize_dimension(
+        Point(1, 2), Point(3, 4, 0), on_morph='ignore') == [
+        Point(1, 2, 0), Point(3, 4, 0)]
+
+【相关测试 3】
+测试文件：sympy/geometry/tests/test_point.py
+测试名称：test_arguments
+测试代码：
+def test_arguments():
+    """Functions accepting `Point` objects in `geometry`
+    should also accept tuples and lists and
+    automatically convert them to points."""
+
+    singles2d = ((1,2), [1,2], Point(1,2))
+    singles2d2 = ((1,3), [1,3], Point(1,3))
+    doubles2d = cartes(singles2d, singles2d2)
+    p2d = Point2D(1,2)
+    singles3d = ((1,2,3), [1,2,3], Point(1,2,3))
+    doubles3d = subsets(singles3d, 2)
+    p3d = Point3D(1,2,3)
+    singles4d = ((1,2,3,4), [1,2,3,4], Point(1,2,3,4))
+    doubles4d = subsets(singles4d, 2)
+    p4d = Point(1,2,3,4)
+
+    # test 2D
+    test_single = ['distance', 'is_scalar_multiple', 'taxicab_distance', 'midpoint', 'intersection', 'dot', 'equals', '__add__', '__sub__']
+    test_double = ['is_concyclic', 'is_collinear']
+    for p in singles2d:
+        Point2D(p)
+    for func in test_single:
+        for p in singles2d:
+            getattr(p2d, func)(p)
+    for func in test_double:
+        for p in doubles2d:
+            getattr(p2d, func)(*p)
+
+    # test 3D
+    test_double = ['is_collinear']
+    for p in singles3d:
+        Point3D(p)
+    for func in test_single:
+        for p in singles3d:
+            getattr(p3d, func)(p)
+    for func in test_double:
+        for p in doubles3d:
+            getattr(p3d, func)(*p)
+
+    # test 4D
+    test_double = ['is_collinear']
+    for p in singles4d:
+        Point(p)
+    for func in test_single:
+        for p in singles4d:
+            getattr(p4d, func)(p)
+    for func in test_double:
+        for p in doubles4d:
+            getattr(p4d, func)(*p)
+
+    # test evaluate=False for ops
+    x = Symbol('x')
+    a = Point(0, 1)
+    assert a + (0.1, x) == Point(0.1, 1 + x, evaluate=False)
+    a = Point(0, 1)
+    assert a/10.0 == Point(0, 0.1, evaluate=False)
+    a = Point(0, 1)
+    assert a*10.0 == Point(0.0, 10.0, evaluate=False)
+
+    # test evaluate=False when changing dimensions
+    u = Point(.1, .2, evaluate=False)
+    u4 = Point(u, dim=4, on_morph='ignore')
+    assert u4.args == (.1, .2, 0, 0)
+    assert all(i.is_Float for i in u4.args[:2])
+    # and even when *not* changing dimensions
+    assert all(i.is_Float for i in Point(u).args)
+
+    # never raise error if creating an origin
+    assert Point(dim=3, on_morph='error')
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

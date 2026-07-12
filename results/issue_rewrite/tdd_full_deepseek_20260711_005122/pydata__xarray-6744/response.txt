@@ -1,0 +1,129 @@
+{
+  "issue_summary": "手动迭代 DataArrayRolling 对象时，center=True 参数被忽略，导致返回的窗口序列与直接调用 .mean() 的结果不一致。",
+  "trigger_condition": {
+    "text": "使用 center=True 创建 DataArrayRolling 对象，然后手动迭代（例如使用 for 循环）并计算每个窗口的均值。",
+    "evidence": ["Issue 中用户创建了 my_data.rolling(x=3, center=True) 并手动迭代。", "Issue 中展示了手动迭代结果与直接调用 .mean() 的结果不同。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "手动迭代返回的窗口序列不是中心对齐的，导致计算出的均值序列与直接调用 .mean() 的结果不同。",
+    "symptom_type": "wrong_return",
+    "evidence": ["Issue 中 result1 为 [nan, 2., 3., 4., 5., 6., 7., 8., nan]，而 result2 为 [nan, nan, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "手动迭代 DataArrayRolling 对象时，如果指定了 center=True，返回的窗口序列也应该是中心对齐的，使得手动计算的结果与直接调用 .mean() 等聚合方法的结果一致。",
+    "evidence": ["Issue 中用户期望两种方式产生相同的序列。", "相关测试 test_rolling_pandas_compat 和 test_rolling_reduce 都测试了 center 参数，表明 center 应影响行为。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "DataArrayRolling.__iter__",
+      "kind": "method",
+      "source_path": "xarray/core/rolling.py",
+      "reason": "Issue 中手动迭代调用了此方法，它可能未正确处理 center 参数。"
+    },
+    {
+      "name": "DataArrayRolling.__init__",
+      "kind": "method",
+      "source_path": "xarray/core/rolling.py",
+      "reason": "负责初始化滚动对象，接收 center 参数。"
+    },
+    {
+      "name": "DataArray.rolling",
+      "kind": "method",
+      "source_path": "",
+      "reason": "创建 DataArrayRolling 对象的入口点。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "xarray/core/rolling.py",
+      "object": "DataArrayRolling.__iter__",
+      "lines": "",
+      "reason": "手动迭代时 center 参数被忽略，问题可能出在 __iter__ 方法的实现中，它可能没有根据 center 参数调整返回的窗口位置。"
+    },
+    {
+      "path": "xarray/core/rolling.py",
+      "object": "DataArrayRolling.__init__",
+      "lines": "",
+      "reason": "center 参数在此存储，但可能在后续迭代逻辑中未被使用。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "TestDataArrayRolling.test_rolling_iter",
+      "test_file": "xarray/tests/test_rolling.py",
+      "why_relevant": "它直接测试了手动迭代 DataArrayRolling 对象，并比较了迭代结果与聚合结果。",
+      "reusable_parts": ["imports", "DataArray 构造", "rolling 对象创建", "迭代循环结构", "assert_array_equal 和 np.allclose 的使用"],
+      "possible_gap": "该测试没有测试 center=True 的情况，只测试了默认的 center=False。"
+    },
+    {
+      "test_name": "TestDataArrayRolling.test_rolling_pandas_compat",
+      "test_file": "xarray/tests/test_rolling.py",
+      "why_relevant": "它测试了 center 参数，并比较了 xarray 与 pandas 的行为一致性。",
+      "reusable_parts": ["center 参数化", "DataArray.from_series 构造", "与 pandas 结果的比较模式", "np.testing.assert_allclose"],
+      "possible_gap": "它测试的是 .mean() 聚合，而不是手动迭代。"
+    },
+    {
+      "test_name": "TestDataArrayRolling.test_rolling_reduce",
+      "test_file": "xarray/tests/test_rolling.py",
+      "why_relevant": "它测试了 center 参数对 reduce 操作的影响，并比较了 .reduce 与直接方法（如 .mean）的结果。",
+      "reusable_parts": ["center 参数化", "rolling 对象创建", "assert_allclose 比较"],
+      "possible_gap": "它没有测试手动迭代。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "相似测试 test_rolling_iter 中创建 rolling 对象时没有指定 center 参数（默认为 False）。",
+      "target_pattern": "创建 rolling 对象时添加 center=True 参数。",
+      "reason": "Issue 表明 center=True 时手动迭代行为不正确，因此需要变异此参数来触发缺陷。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "相似测试 test_rolling_iter 中迭代后直接比较窗口均值与聚合结果。",
+      "target_pattern": "迭代后收集窗口均值序列，并与直接调用 .mean() 的结果序列进行比较。",
+      "reason": "Issue 的核心是比较两个序列是否相等，需要变异断言目标以捕获序列差异。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "迭代返回的 (label, window) 对中 window 的索引位置或 .isel 结果。",
+      "reason": "可以观察窗口是否相对于标签中心对齐，以判断 center 参数是否生效。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "手动迭代计算出的均值序列 result2 和直接调用 .mean().values 得到的序列 result1。",
+      "reason": "直接比较这两个序列是 Issue 中展示错误现象的方式。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "手动迭代计算出的均值序列应与直接调用 .mean() 得到的序列相等（在 NaN 位置和数值上）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的 repr 字符串或依赖于内部实现细节的精确值。",
+      "reason": "Issue 的核心是序列相等性，使用 np.allclose 或 assert_array_equal（处理 NaN）可以稳定地比较数值序列。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用简单的 DataArray 数据，如 np.arange(1,10)，以便于计算和验证。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 pytest 参数化来测试 center=True 和 center=False 的情况。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "DataArrayRolling.__iter__ 方法内部具体如何忽略 center 参数的确切机制。",
+    "除了均值，其他聚合函数（如 sum, std）在手动迭代时是否也受此影响。",
+    "修复后，__iter__ 返回的标签（label）是否也应该根据 center 参数进行调整。"
+  ]
+}

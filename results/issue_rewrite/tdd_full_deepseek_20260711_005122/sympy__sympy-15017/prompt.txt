@@ -1,0 +1,550 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+`len` of rank-0 arrays returns 0
+`sympy.tensor.array.NDimArray.__len__` always returns zero for rank-0 arrays (scalars). I believe the correct value should be one, which is the number of elements of the iterator and the observed behaviour in numpy.
+
+```python
+>>> import sympy
+>>> a = sympy.Array(3)
+>>> len(a)
+0
+>>> len(list(a))
+1
+```
+In numpy we have the following: 
+
+```python
+>>> import numpy
+>>> numpy.asarray(1).size
+1
+```
+
+This was tested in sympy 1.2-rc1 running in Python 3.6.6
+`len` of rank-0 arrays returns 0
+`sympy.tensor.array.NDimArray.__len__` always returns zero for rank-0 arrays (scalars). I believe the correct value should be one, which is the number of elements of the iterator and the observed behaviour in numpy.
+
+```python
+>>> import sympy
+>>> a = sympy.Array(3)
+>>> len(a)
+0
+>>> len(list(a))
+1
+```
+In numpy we have the following: 
+
+```python
+>>> import numpy
+>>> numpy.asarray(1).size
+1
+```
+
+This was tested in sympy 1.2-rc1 running in Python 3.6.6
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/tensor/array/ndim_array.py
+对象名称：NDimArray
+节点类型：class
+父节点：ndim_array
+行号范围：7-425
+代码：
+class NDimArray(object):
+    """
+
+    Examples
+    ========
+
+    Create an N-dim array of zeros:
+
+    >>> from sympy import MutableDenseNDimArray
+    >>> a = MutableDenseNDimArray.zeros(2, 3, 4)
+    >>> a
+    [[[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]]
+
+    Create an N-dim array from a list;
+
+    >>> a = MutableDenseNDimArray([[2, 3], [4, 5]])
+    >>> a
+    [[2, 3], [4, 5]]
+
+    >>> b = MutableDenseNDimArray([[[1, 2], [3, 4], [5, 6]], [[7, 8], [9, 10], [11, 12]]])
+    >>> b
+    [[[1, 2], [3, 4], [5, 6]], [[7, 8], [9, 10], [11, 12]]]
+
+    Create an N-dim array from a flat list with dimension shape:
+
+    >>> a = MutableDenseNDimArray([1, 2, 3, 4, 5, 6], (2, 3))
+    >>> a
+    [[1, 2, 3], [4, 5, 6]]
+
+    Create an N-dim array from a matrix:
+
+    >>> from sympy import Matrix
+    >>> a = Matrix([[1,2],[3,4]])
+    >>> a
+    Matrix([
+    [1, 2],
+    [3, 4]])
+    >>> b = MutableDenseNDimArray(a)
+    >>> b
+    [[1, 2], [3, 4]]
+
+    Arithmetic operations on N-dim arrays
+
+    >>> a = MutableDenseNDimArray([1, 1, 1, 1], (2, 2))
+    >>> b = MutableDenseNDimArray([4, 4, 4, 4], (2, 2))
+    >>> c = a + b
+    >>> c
+    [[5, 5], [5, 5]]
+    >>> a - b
+    [[-3, -3], [-3, -3]]
+
+    """
+    _diff_wrt = True
+    def __new__(cls, iterable, shape=None, **kwargs):
+    def _parse_index(self, index):
+
+    def _get_tuple_index(self, integer_index):
+    def _check_symbolic_index(self, index):
+    def _setter_iterable_check(self, value):
+    @classmethod
+    def _scan_iterable_shape(cls, iterable):
+    @classmethod
+    def _handle_ndarray_creation_inputs(cls, iterable=None, shape=None, **kwargs):
+    def __len__(self):
+    @property
+    def shape(self):
+    def rank(self):
+    def diff(self, *args):
+    def _accept_eval_derivative(self, s):
+    def _visit_eval_derivative_scalar(self, base):
+    def _visit_eval_derivative_array(self, base):
+    def _eval_derivative_n_times(self, s, n):
+    def _eval_derivative(self, arg):
+    def applyfunc(self, f):
+    def __str__(self):
+    def __repr__(self):
+    def tolist(self):
+    def __add__(self, other):
+    def __sub__(self, other):
+    def __mul__(self, other):
+    def __rmul__(self, other):
+    def __div__(self, other):
+    def __rdiv__(self, other):
+    def __neg__(self):
+    def __eq__(self, other):
+    def __ne__(self, other):
+    __truediv__ = __div__
+    __rtruediv__ = __rdiv__
+    def _eval_transpose(self):
+    def transpose(self):
+    def _eval_conjugate(self):
+    def conjugate(self):
+    def _eval_adjoint(self):
+    def adjoint(self):
+
+
+【源码片段 2】
+文件路径：sympy/tensor/array/ndim_array.py
+对象名称：__len__
+节点类型：class_function
+父节点：NDimArray
+行号范围：164-178
+代码：
+    def __len__(self):
+        """Overload common function len(). Returns number of elements in array.
+
+        Examples
+        ========
+
+        >>> from sympy import MutableDenseNDimArray
+        >>> a = MutableDenseNDimArray.zeros(3, 3)
+        >>> a
+        [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+        >>> len(a)
+        9
+
+        """
+        return self._loop_size
+
+
+【源码片段 3】
+文件路径：sympy/tensor/array/__init__.py
+对象名称：Array
+节点类型：global_var
+父节点：__init__
+行号范围：208-208
+代码：
+Array = ImmutableDenseNDimArray
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/tensor/array/tests/test_immutable_ndim_array.py
+测试名称：test_ndim_array_initiation
+测试代码：
+def test_ndim_array_initiation():
+    arr_with_one_element = ImmutableDenseNDimArray([23])
+    assert len(arr_with_one_element) == 1
+    assert arr_with_one_element[0] == 23
+    assert arr_with_one_element[:] == [23]
+    assert arr_with_one_element.rank() == 1
+
+    arr_with_symbol_element = ImmutableDenseNDimArray([Symbol('x')])
+    assert len(arr_with_symbol_element) == 1
+    assert arr_with_symbol_element[0] == Symbol('x')
+    assert arr_with_symbol_element[:] == [Symbol('x')]
+    assert arr_with_symbol_element.rank() == 1
+
+    number5 = 5
+    vector = ImmutableDenseNDimArray.zeros(number5)
+    assert len(vector) == number5
+    assert vector.shape == (number5,)
+    assert vector.rank() == 1
+
+    vector = ImmutableSparseNDimArray.zeros(number5)
+    assert len(vector) == number5
+    assert vector.shape == (number5,)
+    assert vector._sparse_array == Dict()
+    assert vector.rank() == 1
+
+    n_dim_array = ImmutableDenseNDimArray(range(3**4), (3, 3, 3, 3,))
+    assert len(n_dim_array) == 3 * 3 * 3 * 3
+    assert n_dim_array.shape == (3, 3, 3, 3)
+    assert n_dim_array.rank() == 4
+
+    array_shape = (3, 3, 3, 3)
+    sparse_array = ImmutableSparseNDimArray.zeros(*array_shape)
+    assert len(sparse_array._sparse_array) == 0
+    assert len(sparse_array) == 3 * 3 * 3 * 3
+    assert n_dim_array.shape == array_shape
+    assert n_dim_array.rank() == 4
+
+    one_dim_array = ImmutableDenseNDimArray([2, 3, 1])
+    assert len(one_dim_array) == 3
+    assert one_dim_array.shape == (3,)
+    assert one_dim_array.rank() == 1
+    assert one_dim_array.tolist() == [2, 3, 1]
+
+    shape = (3, 3)
+    array_with_many_args = ImmutableSparseNDimArray.zeros(*shape)
+    assert len(array_with_many_args) == 3 * 3
+    assert array_with_many_args.shape == shape
+    assert array_with_many_args[0, 0] == 0
+    assert array_with_many_args.rank() == 2
+
+    shape = (long(3), long(3))
+    array_with_long_shape = ImmutableSparseNDimArray.zeros(*shape)
+    assert len(array_with_long_shape) == 3 * 3
+    assert array_with_long_shape.shape == shape
+    assert array_with_long_shape[long(0), long(0)] == 0
+    assert array_with_long_shape.rank() == 2
+
+    vector_with_long_shape = ImmutableDenseNDimArray(range(5), long(5))
+    assert len(vector_with_long_shape) == 5
+    assert vector_with_long_shape.shape == (long(5),)
+    assert vector_with_long_shape.rank() == 1
+    raises(ValueError, lambda: vector_with_long_shape[long(5)])
+
+    from sympy.abc import x
+    rank_zero_array = ImmutableDenseNDimArray(x)
+    assert len(rank_zero_array) == 0
+    assert rank_zero_array.shape == ()
+    assert rank_zero_array.rank() == 0
+    assert rank_zero_array[()] == x
+    raises(ValueError, lambda: rank_zero_array[0])
+
+【相关测试 2】
+测试文件：sympy/tensor/array/tests/test_mutable_ndim_array.py
+测试名称：test_ndim_array_initiation
+测试代码：
+def test_ndim_array_initiation():
+    arr_with_one_element = MutableDenseNDimArray([23])
+    assert len(arr_with_one_element) == 1
+    assert arr_with_one_element[0] == 23
+    assert arr_with_one_element.rank() == 1
+    raises(ValueError, lambda: arr_with_one_element[1])
+
+    arr_with_symbol_element = MutableDenseNDimArray([Symbol('x')])
+    assert len(arr_with_symbol_element) == 1
+    assert arr_with_symbol_element[0] == Symbol('x')
+    assert arr_with_symbol_element.rank() == 1
+
+    number5 = 5
+    vector = MutableDenseNDimArray.zeros(number5)
+    assert len(vector) == number5
+    assert vector.shape == (number5,)
+    assert vector.rank() == 1
+    raises(ValueError, lambda: arr_with_one_element[5])
+
+    vector = MutableSparseNDimArray.zeros(number5)
+    assert len(vector) == number5
+    assert vector.shape == (number5,)
+    assert vector._sparse_array == {}
+    assert vector.rank() == 1
+
+    n_dim_array = MutableDenseNDimArray(range(3**4), (3, 3, 3, 3,))
+    assert len(n_dim_array) == 3 * 3 * 3 * 3
+    assert n_dim_array.shape == (3, 3, 3, 3)
+    assert n_dim_array.rank() == 4
+    raises(ValueError, lambda: n_dim_array[0, 0, 0, 3])
+    raises(ValueError, lambda: n_dim_array[3, 0, 0, 0])
+    raises(ValueError, lambda: n_dim_array[3**4])
+
+    array_shape = (3, 3, 3, 3)
+    sparse_array = MutableSparseNDimArray.zeros(*array_shape)
+    assert len(sparse_array._sparse_array) == 0
+    assert len(sparse_array) == 3 * 3 * 3 * 3
+    assert n_dim_array.shape == array_shape
+    assert n_dim_array.rank() == 4
+
+    one_dim_array = MutableDenseNDimArray([2, 3, 1])
+    assert len(one_dim_array) == 3
+    assert one_dim_array.shape == (3,)
+    assert one_dim_array.rank() == 1
+    assert one_dim_array.tolist() == [2, 3, 1]
+
+    shape = (3, 3)
+    array_with_many_args = MutableSparseNDimArray.zeros(*shape)
+    assert len(array_with_many_args) == 3 * 3
+    assert array_with_many_args.shape == shape
+    assert array_with_many_args[0, 0] == 0
+    assert array_with_many_args.rank() == 2
+
+    shape = (long(3), long(3))
+    array_with_long_shape = MutableSparseNDimArray.zeros(*shape)
+    assert len(array_with_long_shape) == 3 * 3
+    assert array_with_long_shape.shape == shape
+    assert array_with_long_shape[long(0), long(0)] == 0
+    assert array_with_long_shape.rank() == 2
+
+    vector_with_long_shape = MutableDenseNDimArray(range(5), long(5))
+    assert len(vector_with_long_shape) == 5
+    assert vector_with_long_shape.shape == (long(5),)
+    assert vector_with_long_shape.rank() == 1
+    raises(ValueError, lambda: vector_with_long_shape[long(5)])
+
+【相关测试 3】
+测试文件：sympy/tensor/array/tests/test_immutable_ndim_array.py
+测试名称：test_ndim_array_converting
+测试代码：
+def test_ndim_array_converting():
+    dense_array = ImmutableDenseNDimArray([1, 2, 3, 4], (2, 2))
+    alist = dense_array.tolist()
+
+    alist == [[1, 2], [3, 4]]
+
+    matrix = dense_array.tomatrix()
+    assert (isinstance(matrix, Matrix))
+
+    for i in range(len(dense_array)):
+        assert dense_array[i] == matrix[i]
+    assert matrix.shape == dense_array.shape
+
+    assert ImmutableDenseNDimArray(matrix) == dense_array
+    assert ImmutableDenseNDimArray(matrix.as_immutable()) == dense_array
+    assert ImmutableDenseNDimArray(matrix.as_mutable()) == dense_array
+
+    sparse_array = ImmutableSparseNDimArray([1, 2, 3, 4], (2, 2))
+    alist = sparse_array.tolist()
+
+    assert alist == [[1, 2], [3, 4]]
+
+    matrix = sparse_array.tomatrix()
+    assert(isinstance(matrix, SparseMatrix))
+
+    for i in range(len(sparse_array)):
+        assert sparse_array[i] == matrix[i]
+    assert matrix.shape == sparse_array.shape
+
+    assert ImmutableSparseNDimArray(matrix) == sparse_array
+    assert ImmutableSparseNDimArray(matrix.as_immutable()) == sparse_array
+    assert ImmutableSparseNDimArray(matrix.as_mutable()) == sparse_array
+
+【相关测试 4】
+测试文件：sympy/tensor/array/tests/test_mutable_ndim_array.py
+测试名称：test_ndim_array_converting
+测试代码：
+def test_ndim_array_converting():
+    dense_array = MutableDenseNDimArray([1, 2, 3, 4], (2, 2))
+    alist = dense_array.tolist()
+
+    alist == [[1, 2], [3, 4]]
+
+    matrix = dense_array.tomatrix()
+    assert (isinstance(matrix, Matrix))
+
+    for i in range(len(dense_array)):
+        assert dense_array[i] == matrix[i]
+    assert matrix.shape == dense_array.shape
+
+    assert MutableDenseNDimArray(matrix) == dense_array
+    assert MutableDenseNDimArray(matrix.as_immutable()) == dense_array
+    assert MutableDenseNDimArray(matrix.as_mutable()) == dense_array
+
+    sparse_array = MutableSparseNDimArray([1, 2, 3, 4], (2, 2))
+    alist = sparse_array.tolist()
+
+    assert alist == [[1, 2], [3, 4]]
+
+    matrix = sparse_array.tomatrix()
+    assert(isinstance(matrix, SparseMatrix))
+
+    for i in range(len(sparse_array)):
+        assert sparse_array[i] == matrix[i]
+    assert matrix.shape == sparse_array.shape
+
+    assert MutableSparseNDimArray(matrix) == sparse_array
+    assert MutableSparseNDimArray(matrix.as_immutable()) == sparse_array
+    assert MutableSparseNDimArray(matrix.as_mutable()) == sparse_array
+
+【相关测试 5】
+测试文件：sympy/tensor/array/tests/test_mutable_ndim_array.py
+测试名称：test_sparse
+测试代码：
+def test_sparse():
+    sparse_array = MutableSparseNDimArray([0, 0, 0, 1], (2, 2))
+    assert len(sparse_array) == 2 * 2
+    # dictionary where all data is, only non-zero entries are actually stored:
+    assert len(sparse_array._sparse_array) == 1
+
+    assert list(sparse_array) == [0, 0, 0, 1]
+
+    for i, j in zip(sparse_array, [0, 0, 0, 1]):
+        assert i == j
+
+    sparse_array[0, 0] = 123
+    assert len(sparse_array._sparse_array) == 2
+    assert sparse_array[0, 0] == 123
+
+    # when element in sparse array become zero it will disappear from
+    # dictionary
+    sparse_array[0, 0] = 0
+    assert len(sparse_array._sparse_array) == 1
+    sparse_array[1, 1] = 0
+    assert len(sparse_array._sparse_array) == 0
+    assert sparse_array[0, 0] == 0
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

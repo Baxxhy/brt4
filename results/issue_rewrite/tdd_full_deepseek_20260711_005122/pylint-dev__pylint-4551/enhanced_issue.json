@@ -1,0 +1,275 @@
+{
+  "instance_id": "pylint-dev__pylint-4551",
+  "issue_summary": "pyreverse 在处理带有 Python 类型提示（如 `a: str = None`）的类定义时，生成的 UML 图中未能正确显示参数的类型信息。",
+  "trigger_condition": {
+    "text": "使用 pyreverse 分析一个包含带有类型提示和默认值（尤其是 `None`）的 `__init__` 方法的类定义。",
+    "evidence": [
+      "Issue 中的代码示例：`class C(object): def __init__(self, a: str = None): self.a = a`",
+      "Issue 描述指出 pyreverse 不读取 Python 类型提示。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "生成的 UML 图输出中，参数 `a` 没有显示预期的类型信息（如 `String`），而是可能显示为无类型或默认值。",
+    "symptom_type": "wrong_type",
+    "evidence": [
+      "Issue 中用户期望看到 `a : String`，但当前输出图片未显示此信息。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "pyreverse 生成的 UML 图应正确解析并显示 Python 类型提示，例如将 `a: str` 显示为 `a : String`。",
+    "evidence": [
+      "Issue 中用户期望：'I would like to see something like : `a : String` in the output.'"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "pyreverse",
+      "kind": "module",
+      "source_path": "",
+      "reason": "Issue 直接报告 pyreverse 工具的行为问题。"
+    },
+    {
+      "name": "DiadefsHandler",
+      "kind": "class",
+      "source_path": "",
+      "reason": "相关测试中用于处理图表定义，可能与生成 UML 的逻辑相关。"
+    },
+    {
+      "name": "DefaultDiadefGenerator",
+      "kind": "class",
+      "source_path": "",
+      "reason": "相关测试中用于生成图表定义，是 pyreverse 内部流程的一部分。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "pylint/reporters/ureports/nodes.py",
+      "object": "VNode.__init__",
+      "lines": "19-23",
+      "reason": "检索出的源码片段涉及节点初始化，可能与 UML 图中节点信息的构建有关，但直接关联性较弱。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_default_values",
+      "test_file": "tests/unittest_pyreverse_diadefs.py",
+      "why_relevant": "该测试明确针对图表中默认值的处理，与 Issue 中关于默认值和类型显示的 bug 主题直接相关。",
+      "reusable_parts": [
+        "测试名称和目的",
+        "可能的数据文件（如 'data'）导入方式"
+      ],
+      "possible_gap": "该测试可能未覆盖带有类型提示的默认值（如 `str = None`）场景。"
+    },
+    {
+      "test_name": "test_known_values1",
+      "test_file": "tests/unittest_pyreverse_diadefs.py",
+      "why_relevant": "该测试验证了 pyreverse 对一组已知模块和类生成图表的结果，包含了对输出内容的断言，可作为生成和断言图表输出的起点。",
+      "reusable_parts": [
+        "使用 get_project 加载测试数据",
+        "DefaultDiadefGenerator 和 Linker 的调用模式",
+        "_process_classes 辅助函数",
+        "对图表对象和标题的断言风格"
+      ],
+      "possible_gap": "测试使用的现有数据模块（如 'data'）可能不包含带有类型提示的类定义。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "测试使用现有数据文件（如 'data'、'data.clientmodule_test'）中的模块，这些模块可能不包含带类型提示的类。",
+      "target_pattern": "创建一个新的测试模块文件，其中包含 Issue 示例中的类定义（`class C: def __init__(self, a: str = None): ...`）。",
+      "reason": "现有测试数据可能无法触发类型提示解析的缺陷路径，需要提供包含该语法的新输入。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "测试中可能检查类的通用属性或关系。",
+      "target_pattern": "在断言中检查生成的图表对象中，特定类的方法参数是否带有正确的类型信息。",
+      "reason": "Issue 的核心是参数类型信息在输出中的缺失，因此断言目标需要聚焦于此。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "type",
+      "expression_hint": "生成的图表对象（如 cd.objects 中的类节点）中，特定方法（如 __init__）参数的表示或属性。",
+      "reason": "为了判断参数的类型提示（如 `str`）是否被正确解析并体现在输出数据结构中。"
+    },
+    {
+      "kind": "file_output",
+      "expression_hint": "pyreverse 最终生成的图表文件（如 .dot 或图片）的文本内容。",
+      "reason": "Issue 直接展示了图形化输出，检查输出文件的内容可以确认类型信息是否被正确渲染。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证在生成的图表定义中，特定类的 `__init__` 方法的参数 `a` 关联有类型信息（例如 `str` 或 `String`）。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免断言完整的、格式化的输出字符串相等，因为输出格式可能变化。",
+      "reason": "Issue 期望类型信息出现，但不指定精确的完整输出格式。断言包含关键类型片段更稳定。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要准备包含带类型提示的类定义的临时 Python 模块文件作为 pyreverse 的输入。",
+      "source": "inference",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用类似 `get_project` 的 fixture 或函数来加载自定义测试数据。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    },
+    {
+      "hint": "测试可能需要在 `tests/unittest_pyreverse_diadefs.py` 的上下文中运行，利用现有的配置和处理器。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "pyreverse 内部处理类型提示的具体代码位置和缺陷根因未知。",
+    "UML 图中类型信息的确切表示形式（是 'str'、'String' 还是其他）不确定。",
+    "现有测试数据（'data' 目录）中是否已有可复现此问题的案例不确定。",
+    "参数默认值为 `None` 是否对触发 bug 有特殊影响，还是仅类型提示缺失的问题。"
+  ],
+  "raw": {
+    "issue_summary": "pyreverse 在处理带有 Python 类型提示（如 `a: str = None`）的类定义时，生成的 UML 图中未能正确显示参数的类型信息。",
+    "trigger_condition": {
+      "text": "使用 pyreverse 分析一个包含带有类型提示和默认值（尤其是 `None`）的 `__init__` 方法的类定义。",
+      "evidence": [
+        "Issue 中的代码示例：`class C(object): def __init__(self, a: str = None): self.a = a`",
+        "Issue 描述指出 pyreverse 不读取 Python 类型提示。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 UML 图输出中，参数 `a` 没有显示预期的类型信息（如 `String`），而是可能显示为无类型或默认值。",
+      "symptom_type": "wrong_type",
+      "evidence": [
+        "Issue 中用户期望看到 `a : String`，但当前输出图片未显示此信息。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "pyreverse 生成的 UML 图应正确解析并显示 Python 类型提示，例如将 `a: str` 显示为 `a : String`。",
+      "evidence": [
+        "Issue 中用户期望：'I would like to see something like : `a : String` in the output.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pyreverse",
+        "kind": "module",
+        "source_path": "",
+        "reason": "Issue 直接报告 pyreverse 工具的行为问题。"
+      },
+      {
+        "name": "DiadefsHandler",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试中用于处理图表定义，可能与生成 UML 的逻辑相关。"
+      },
+      {
+        "name": "DefaultDiadefGenerator",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试中用于生成图表定义，是 pyreverse 内部流程的一部分。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "pylint/reporters/ureports/nodes.py",
+        "object": "VNode.__init__",
+        "lines": "19-23",
+        "reason": "检索出的源码片段涉及节点初始化，可能与 UML 图中节点信息的构建有关，但直接关联性较弱。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_default_values",
+        "test_file": "tests/unittest_pyreverse_diadefs.py",
+        "why_relevant": "该测试明确针对图表中默认值的处理，与 Issue 中关于默认值和类型显示的 bug 主题直接相关。",
+        "reusable_parts": [
+          "测试名称和目的",
+          "可能的数据文件（如 'data'）导入方式"
+        ],
+        "possible_gap": "该测试可能未覆盖带有类型提示的默认值（如 `str = None`）场景。"
+      },
+      {
+        "test_name": "test_known_values1",
+        "test_file": "tests/unittest_pyreverse_diadefs.py",
+        "why_relevant": "该测试验证了 pyreverse 对一组已知模块和类生成图表的结果，包含了对输出内容的断言，可作为生成和断言图表输出的起点。",
+        "reusable_parts": [
+          "使用 get_project 加载测试数据",
+          "DefaultDiadefGenerator 和 Linker 的调用模式",
+          "_process_classes 辅助函数",
+          "对图表对象和标题的断言风格"
+        ],
+        "possible_gap": "测试使用的现有数据模块（如 'data'）可能不包含带有类型提示的类定义。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试使用现有数据文件（如 'data'、'data.clientmodule_test'）中的模块，这些模块可能不包含带类型提示的类。",
+        "target_pattern": "创建一个新的测试模块文件，其中包含 Issue 示例中的类定义（`class C: def __init__(self, a: str = None): ...`）。",
+        "reason": "现有测试数据可能无法触发类型提示解析的缺陷路径，需要提供包含该语法的新输入。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "测试中可能检查类的通用属性或关系。",
+        "target_pattern": "在断言中检查生成的图表对象中，特定类的方法参数是否带有正确的类型信息。",
+        "reason": "Issue 的核心是参数类型信息在输出中的缺失，因此断言目标需要聚焦于此。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "生成的图表对象（如 cd.objects 中的类节点）中，特定方法（如 __init__）参数的表示或属性。",
+        "reason": "为了判断参数的类型提示（如 `str`）是否被正确解析并体现在输出数据结构中。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "pyreverse 最终生成的图表文件（如 .dot 或图片）的文本内容。",
+        "reason": "Issue 直接展示了图形化输出，检查输出文件的内容可以确认类型信息是否被正确渲染。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在生成的图表定义中，特定类的 `__init__` 方法的参数 `a` 关联有类型信息（例如 `str` 或 `String`）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、格式化的输出字符串相等，因为输出格式可能变化。",
+        "reason": "Issue 期望类型信息出现，但不指定精确的完整输出格式。断言包含关键类型片段更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要准备包含带类型提示的类定义的临时 Python 模块文件作为 pyreverse 的输入。",
+        "source": "inference",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用类似 `get_project` 的 fixture 或函数来加载自定义测试数据。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试可能需要在 `tests/unittest_pyreverse_diadefs.py` 的上下文中运行，利用现有的配置和处理器。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "pyreverse 内部处理类型提示的具体代码位置和缺陷根因未知。",
+      "UML 图中类型信息的确切表示形式（是 'str'、'String' 还是其他）不确定。",
+      "现有测试数据（'data' 目录）中是否已有可复现此问题的案例不确定。",
+      "参数默认值为 `None` 是否对触发 bug 有特殊影响，还是仅类型提示缺失的问题。"
+    ]
+  }
+}

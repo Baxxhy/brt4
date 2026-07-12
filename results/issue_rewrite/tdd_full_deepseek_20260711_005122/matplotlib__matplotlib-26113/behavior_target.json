@@ -1,0 +1,287 @@
+{
+  "instance_id": "matplotlib__matplotlib-26113",
+  "issue_summary": "hexbin 的 mincnt 参数行为不一致，取决于是否提供了 C 参数。",
+  "trigger_condition": {
+    "text": "调用 ax.hexbin 时，同时指定 C 参数（例如 C=Z）和 mincnt=1。",
+    "evidence": [
+      "Issue 中提供了代码片段，展示了当 C 和 mincnt=1 都指定时，行为与预期不符。",
+      "Issue 描述：'With mincnt == 1 I'd expect the same gridpoints to be plotted, whether C is supplied or not...'"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "当 C 参数被指定且 mincnt=1 时，只有包含至少两个数据点的网格点被绘制，而不是预期的至少一个数据点。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 中代码注释：'shows only a plot where gridpoints containing at least **two** data points are shown(!!!)'",
+      "Issue 描述：'With C specified but not mincnt specified...' 和 'With mincnt == 1...' 对比了行为。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "无论是否提供 C 参数，mincnt=1 都应导致只绘制包含至少一个数据点的网格点。",
+    "evidence": [
+      "Issue 中期望：'with mincnt == 1 I'd expect the same gridpoints to be plotted, whether C is supplied or not...'",
+      "Issue 中建议的修复：'len(vals) >= mincnt', 而不是 'len(vals) > mincnt'。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "matplotlib.axes.Axes.hexbin",
+      "kind": "method",
+      "source_path": "lib/matplotlib/axes/_axes.py",
+      "reason": "Issue 直接报告了 hexbin 方法中 mincnt 参数的行为问题。"
+    },
+    {
+      "name": "matplotlib.pyplot.hexbin",
+      "kind": "function",
+      "source_path": "lib/matplotlib/pyplot.py",
+      "reason": "pyplot.hexbin 是 Axes.hexbin 的顶层包装，相关测试可能调用它。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "lib/matplotlib/axes/_axes.py",
+      "object": "Axes.hexbin",
+      "lines": "4625",
+      "reason": "Issue 中链接了处理 C 不为 None 时 mincnt 的代码行。"
+    },
+    {
+      "path": "lib/matplotlib/axes/_axes.py",
+      "object": "Axes.hexbin",
+      "lines": "4594",
+      "reason": "Issue 中链接了处理 C 为 None 时 mincnt 的代码行，用于对比行为。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_hexbin_linear",
+      "test_file": "lib/matplotlib/tests/test_axes.py",
+      "why_relevant": "该测试调用了 hexbin 并指定了 reduce_C_function，与 Issue 中涉及 C 参数的场景相关。",
+      "reusable_parts": [
+        "imports (plt, np)",
+        "数据生成模式 (np.random.seed, np.random.standard_normal)",
+        "hexbin 调用模式，包括 gridsize, marginals, reduce_C_function"
+      ],
+      "possible_gap": "该测试没有显式设置 mincnt 参数，因此无法直接复现 mincnt 与 C 交互的 bug。"
+    },
+    {
+      "test_name": "test_hexbin_extent",
+      "test_file": "lib/matplotlib/tests/test_axes.py",
+      "why_relevant": "该测试调用了 hexbin 并指定了 extent 参数，与 Issue 中使用的参数类似。",
+      "reusable_parts": [
+        "imports",
+        "数据构造 (x, y arrays)",
+        "hexbin 调用模式，包括 extent"
+      ],
+      "possible_gap": "该测试没有使用 C 或 mincnt 参数，因此无法直接复现 bug。"
+    },
+    {
+      "test_name": "test_hexbin_empty",
+      "test_file": "lib/matplotlib/tests/test_axes.py",
+      "why_relevant": "该测试涉及 hexbin 的边缘情况（空数据），可能对理解计数逻辑有帮助。",
+      "reusable_parts": [
+        "imports",
+        "hexbin 调用模式"
+      ],
+      "possible_gap": "该测试关注空输入，而非 mincnt 与 C 的交互。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "相似测试中可能没有同时指定 C 和 mincnt=1。",
+      "target_pattern": "在 hexbin 调用中同时添加 C=Z（例如 np.ones_like(X)）和 mincnt=1。",
+      "reason": "Issue 表明只有当 C 和 mincnt=1 同时存在时，才会触发不一致行为（计数要求变为 >1 而不是 >=1）。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "相似测试中可能使用默认的 reduce_C_function (np.mean)。",
+      "target_pattern": "显式指定 reduce_C_function=np.sum，以匹配 Issue 中的代码。",
+      "reason": "Issue 的复现代码使用了 reduce_C_function=np.sum，确保行为一致。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "hexbin 返回的 PolyCollection 对象的 get_offsets() 或 get_array()，以观察哪些网格点被绘制及其值。",
+      "reason": "Issue 的核心是哪些网格点被显示。观察返回的集合可以推断哪些网格点通过了 mincnt 过滤。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "内部计数（例如每个六边形 bin 中的数据点数量），可能在 hexbin 内部变量中。",
+      "reason": "需要确认当 C 和 mincnt=1 都指定时，过滤条件是否错误地使用了 len(vals) > mincnt 而不是 len(vals) >= mincnt。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "当 mincnt=1 且 C 被指定时，包含恰好一个数据点的网格点应该被绘制（即其值不为 NaN 或掩码）。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "直接断言图像像素或完整集合的字符串表示。",
+      "reason": "Issue 是关于计数逻辑，断言特定数据点计数的网格点是否出现在输出中更稳定。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 np.random.seed 确保数据可复现，并创建简单的 X, Y, Z 数据（如 Issue 中所示）。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用非交互式后端（如 'Agg'）来运行测试，避免弹出图形窗口。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "hexbin 内部用于存储每个 bin 数据点计数的确切变量名和访问方式。",
+    "当 mincnt 过滤发生时，返回的 PolyCollection 中未通过过滤的网格点是如何表示的（例如 NaN、掩码、完全省略）。",
+    "mincnt 的默认值在 C 指定和未指定时是否不同，以及这如何影响行为。"
+  ],
+  "raw": {
+    "issue_summary": "hexbin 的 mincnt 参数行为不一致，取决于是否提供了 C 参数。",
+    "trigger_condition": {
+      "text": "调用 ax.hexbin 时，同时指定 C 参数（例如 C=Z）和 mincnt=1。",
+      "evidence": [
+        "Issue 中提供了代码片段，展示了当 C 和 mincnt=1 都指定时，行为与预期不符。",
+        "Issue 描述：'With mincnt == 1 I'd expect the same gridpoints to be plotted, whether C is supplied or not...'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当 C 参数被指定且 mincnt=1 时，只有包含至少两个数据点的网格点被绘制，而不是预期的至少一个数据点。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中代码注释：'shows only a plot where gridpoints containing at least **two** data points are shown(!!!)'",
+        "Issue 描述：'With C specified but not mincnt specified...' 和 'With mincnt == 1...' 对比了行为。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "无论是否提供 C 参数，mincnt=1 都应导致只绘制包含至少一个数据点的网格点。",
+      "evidence": [
+        "Issue 中期望：'with mincnt == 1 I'd expect the same gridpoints to be plotted, whether C is supplied or not...'",
+        "Issue 中建议的修复：'len(vals) >= mincnt', 而不是 'len(vals) > mincnt'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "matplotlib.axes.Axes.hexbin",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axes/_axes.py",
+        "reason": "Issue 直接报告了 hexbin 方法中 mincnt 参数的行为问题。"
+      },
+      {
+        "name": "matplotlib.pyplot.hexbin",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "pyplot.hexbin 是 Axes.hexbin 的顶层包装，相关测试可能调用它。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/axes/_axes.py",
+        "object": "Axes.hexbin",
+        "lines": "4625",
+        "reason": "Issue 中链接了处理 C 不为 None 时 mincnt 的代码行。"
+      },
+      {
+        "path": "lib/matplotlib/axes/_axes.py",
+        "object": "Axes.hexbin",
+        "lines": "4594",
+        "reason": "Issue 中链接了处理 C 为 None 时 mincnt 的代码行，用于对比行为。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_hexbin_linear",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "该测试调用了 hexbin 并指定了 reduce_C_function，与 Issue 中涉及 C 参数的场景相关。",
+        "reusable_parts": [
+          "imports (plt, np)",
+          "数据生成模式 (np.random.seed, np.random.standard_normal)",
+          "hexbin 调用模式，包括 gridsize, marginals, reduce_C_function"
+        ],
+        "possible_gap": "该测试没有显式设置 mincnt 参数，因此无法直接复现 mincnt 与 C 交互的 bug。"
+      },
+      {
+        "test_name": "test_hexbin_extent",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "该测试调用了 hexbin 并指定了 extent 参数，与 Issue 中使用的参数类似。",
+        "reusable_parts": [
+          "imports",
+          "数据构造 (x, y arrays)",
+          "hexbin 调用模式，包括 extent"
+        ],
+        "possible_gap": "该测试没有使用 C 或 mincnt 参数，因此无法直接复现 bug。"
+      },
+      {
+        "test_name": "test_hexbin_empty",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "该测试涉及 hexbin 的边缘情况（空数据），可能对理解计数逻辑有帮助。",
+        "reusable_parts": [
+          "imports",
+          "hexbin 调用模式"
+        ],
+        "possible_gap": "该测试关注空输入，而非 mincnt 与 C 的交互。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中可能没有同时指定 C 和 mincnt=1。",
+        "target_pattern": "在 hexbin 调用中同时添加 C=Z（例如 np.ones_like(X)）和 mincnt=1。",
+        "reason": "Issue 表明只有当 C 和 mincnt=1 同时存在时，才会触发不一致行为（计数要求变为 >1 而不是 >=1）。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中可能使用默认的 reduce_C_function (np.mean)。",
+        "target_pattern": "显式指定 reduce_C_function=np.sum，以匹配 Issue 中的代码。",
+        "reason": "Issue 的复现代码使用了 reduce_C_function=np.sum，确保行为一致。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "hexbin 返回的 PolyCollection 对象的 get_offsets() 或 get_array()，以观察哪些网格点被绘制及其值。",
+        "reason": "Issue 的核心是哪些网格点被显示。观察返回的集合可以推断哪些网格点通过了 mincnt 过滤。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "内部计数（例如每个六边形 bin 中的数据点数量），可能在 hexbin 内部变量中。",
+        "reason": "需要确认当 C 和 mincnt=1 都指定时，过滤条件是否错误地使用了 len(vals) > mincnt 而不是 len(vals) >= mincnt。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 mincnt=1 且 C 被指定时，包含恰好一个数据点的网格点应该被绘制（即其值不为 NaN 或掩码）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "直接断言图像像素或完整集合的字符串表示。",
+        "reason": "Issue 是关于计数逻辑，断言特定数据点计数的网格点是否出现在输出中更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 np.random.seed 确保数据可复现，并创建简单的 X, Y, Z 数据（如 Issue 中所示）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用非交互式后端（如 'Agg'）来运行测试，避免弹出图形窗口。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "hexbin 内部用于存储每个 bin 数据点计数的确切变量名和访问方式。",
+      "当 mincnt 过滤发生时，返回的 PolyCollection 中未通过过滤的网格点是如何表示的（例如 NaN、掩码、完全省略）。",
+      "mincnt 的默认值在 C 指定和未指定时是否不同，以及这如何影响行为。"
+    ]
+  }
+}

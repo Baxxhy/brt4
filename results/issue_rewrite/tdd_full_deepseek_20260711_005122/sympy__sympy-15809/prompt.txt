@@ -1,0 +1,508 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Zero-argument Min() and Max()
+Right now `Min()` and `Max()` with no arguments raise `ValueError: The Max/Min functions must have arguments.`. It might be mathematically more convenient to have them return `oo` and `-oo`, respectively. See https://en.wikipedia.org/wiki/Empty_set#Extended_real_numbers for why these are valid answers mathematically. 
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/functions/elementary/miscellaneous.py
+对象名称：Min
+节点类型：class
+父节点：miscellaneous
+行号范围：765-827
+代码：
+class Min(MinMaxBase, Application):
+    """
+    Return, if possible, the minimum value of the list.
+    It is named ``Min`` and not ``min`` to avoid conflicts
+    with the built-in function ``min``.
+
+    Examples
+    ========
+
+    >>> from sympy import Min, Symbol, oo
+    >>> from sympy.abc import x, y
+    >>> p = Symbol('p', positive=True)
+    >>> n = Symbol('n', negative=True)
+
+    >>> Min(x, -2)                  #doctest: +SKIP
+    Min(x, -2)
+    >>> Min(x, -2).subs(x, 3)
+    -2
+    >>> Min(p, -3)
+    -3
+    >>> Min(x, y)                   #doctest: +SKIP
+    Min(x, y)
+    >>> Min(n, 8, p, -7, p, oo)     #doctest: +SKIP
+    Min(n, -7)
+
+    See Also
+    ========
+
+    Max : find maximum values
+    """
+    zero = S.NegativeInfinity
+    identity = S.Infinity
+    def fdiff( self, argindex ):
+    def _eval_rewrite_as_Heaviside(self, *args, **kwargs):
+    def _eval_rewrite_as_Piecewise(self, *args, **kwargs):
+    def _eval_is_positive(self):
+    def _eval_is_nonnegative(self):
+    def _eval_is_negative(self):
+
+
+【源码片段 2】
+文件路径：sympy/functions/elementary/miscellaneous.py
+对象名称：Max
+节点类型：class
+父节点：miscellaneous
+行号范围：645-762
+代码：
+class Max(MinMaxBase, Application):
+    """
+    Return, if possible, the maximum value of the list.
+
+    When number of arguments is equal one, then
+    return this argument.
+
+    When number of arguments is equal two, then
+    return, if possible, the value from (a, b) that is >= the other.
+
+    In common case, when the length of list greater than 2, the task
+    is more complicated. Return only the arguments, which are greater
+    than others, if it is possible to determine directional relation.
+
+    If is not possible to determine such a relation, return a partially
+    evaluated result.
+
+    Assumptions are used to make the decision too.
+
+    Also, only comparable arguments are permitted.
+
+    It is named ``Max`` and not ``max`` to avoid conflicts
+    with the built-in function ``max``.
+
+
+    Examples
+    ========
+
+    >>> from sympy import Max, Symbol, oo
+    >>> from sympy.abc import x, y
+    >>> p = Symbol('p', positive=True)
+    >>> n = Symbol('n', negative=True)
+
+    >>> Max(x, -2)                  #doctest: +SKIP
+    Max(x, -2)
+    >>> Max(x, -2).subs(x, 3)
+    3
+    >>> Max(p, -2)
+    p
+    >>> Max(x, y)
+    Max(x, y)
+    >>> Max(x, y) == Max(y, x)
+    True
+    >>> Max(x, Max(y, z))           #doctest: +SKIP
+    Max(x, y, z)
+    >>> Max(n, 8, p, 7, -oo)        #doctest: +SKIP
+    Max(8, p)
+    >>> Max (1, x, oo)
+    oo
+
+    * Algorithm
+
+    The task can be considered as searching of supremums in the
+    directed complete partial orders [1]_.
+
+    The source values are sequentially allocated by the isolated subsets
+    in which supremums are searched and result as Max arguments.
+
+    If the resulted supremum is single, then it is returned.
+
+    The isolated subsets are the sets of values which are only the comparable
+    with each other in the current set. E.g. natural numbers are comparable with
+    each other, but not comparable with the `x` symbol. Another example: the
+    symbol `x` with negative assumption is comparable with a natural number.
+
+    Also there are "least" elements, which are comparable with all others,
+    and have a zero property (maximum or minimum for all elements). E.g. `oo`.
+    In case of it the allocation operation is terminated and only this value is
+    returned.
+
+    Assumption:
+       - if A > B > C then A > C
+       - if A == B then B can be removed
+
+    References
+    ==========
+
+    .. [1] https://en.wikipedia.org/wiki/Directed_complete_partial_order
+    .. [2] https://en.wikipedia.org/wiki/Lattice_%28order%29
+
+    See Also
+    ========
+
+    Min : find minimum values
+    """
+    zero = S.Infinity
+    identity = S.NegativeInfinity
+    def fdiff( self, argindex ):
+    def _eval_rewrite_as_Heaviside(self, *args, **kwargs):
+    def _eval_rewrite_as_Piecewise(self, *args, **kwargs):
+    def _eval_is_positive(self):
+    def _eval_is_nonnegative(self):
+    def _eval_is_negative(self):
+
+
+【源码片段 3】
+文件路径：sympy/stats/crv_types.py
+对象名称：oo
+节点类型：global_var
+父节点：crv_types
+行号范围：64-64
+代码：
+oo = S.Infinity
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/functions/elementary/tests/test_miscellaneous.py
+测试名称：test_Max
+测试代码：
+def test_Max():
+    from sympy.abc import x, y, z
+    n = Symbol('n', negative=True)
+    n_ = Symbol('n_', negative=True)
+    nn = Symbol('nn', nonnegative=True)
+    nn_ = Symbol('nn_', nonnegative=True)
+    p = Symbol('p', positive=True)
+    p_ = Symbol('p_', positive=True)
+    np = Symbol('np', nonpositive=True)
+    np_ = Symbol('np_', nonpositive=True)
+    r = Symbol('r', real=True)
+
+    assert Max(5, 4) == 5
+
+    # lists
+
+    raises(ValueError, lambda: Max())
+    assert Max(x, y) == Max(y, x)
+    assert Max(x, y, z) == Max(z, y, x)
+    assert Max(x, Max(y, z)) == Max(z, y, x)
+    assert Max(x, Min(y, oo)) == Max(x, y)
+    assert Max(n, -oo, n_, p, 2) == Max(p, 2)
+    assert Max(n, -oo, n_, p) == p
+    assert Max(2, x, p, n, -oo, S.NegativeInfinity, n_, p, 2) == Max(2, x, p)
+    assert Max(0, x, 1, y) == Max(1, x, y)
+    assert Max(r, r + 1, r - 1) == 1 + r
+    assert Max(1000, 100, -100, x, p, n) == Max(p, x, 1000)
+    assert Max(cos(x), sin(x)) == Max(sin(x), cos(x))
+    assert Max(cos(x), sin(x)).subs(x, 1) == sin(1)
+    assert Max(cos(x), sin(x)).subs(x, S(1)/2) == cos(S(1)/2)
+    raises(ValueError, lambda: Max(cos(x), sin(x)).subs(x, I))
+    raises(ValueError, lambda: Max(I))
+    raises(ValueError, lambda: Max(I, x))
+    raises(ValueError, lambda: Max(S.ComplexInfinity, 1))
+    assert Max(n, -oo, n_,  p, 2) == Max(p, 2)
+    assert Max(n, -oo, n_,  p, 1000) == Max(p, 1000)
+
+    assert Max(1, x).diff(x) == Heaviside(x - 1)
+    assert Max(x, 1).diff(x) == Heaviside(x - 1)
+    assert Max(x**2, 1 + x, 1).diff(x) == \
+        2*x*Heaviside(x**2 - Max(1, x + 1)) \
+        + Heaviside(x - Max(1, x**2) + 1)
+
+    e = Max(0, x)
+    assert e.evalf == e.n
+    assert e.n().args == (0, x)
+
+    # issue 8643
+    m = Max(p, p_, n, r)
+    assert m.is_positive is True
+    assert m.is_nonnegative is True
+    assert m.is_negative is False
+
+    m = Max(n, n_)
+    assert m.is_positive is False
+    assert m.is_nonnegative is False
+    assert m.is_negative is True
+
+    m = Max(n, n_, r)
+    assert m.is_positive is None
+    assert m.is_nonnegative is None
+    assert m.is_negative is None
+
+    m = Max(n, nn, r)
+    assert m.is_positive is None
+    assert m.is_nonnegative is True
+    assert m.is_negative is False
+
+【相关测试 2】
+测试文件：sympy/functions/elementary/tests/test_miscellaneous.py
+测试名称：test_Min
+测试代码：
+def test_Min():
+    from sympy.abc import x, y, z
+    n = Symbol('n', negative=True)
+    n_ = Symbol('n_', negative=True)
+    nn = Symbol('nn', nonnegative=True)
+    nn_ = Symbol('nn_', nonnegative=True)
+    p = Symbol('p', positive=True)
+    p_ = Symbol('p_', positive=True)
+    np = Symbol('np', nonpositive=True)
+    np_ = Symbol('np_', nonpositive=True)
+    r = Symbol('r', real=True)
+
+    assert Min(5, 4) == 4
+    assert Min(-oo, -oo) == -oo
+    assert Min(-oo, n) == -oo
+    assert Min(n, -oo) == -oo
+    assert Min(-oo, np) == -oo
+    assert Min(np, -oo) == -oo
+    assert Min(-oo, 0) == -oo
+    assert Min(0, -oo) == -oo
+    assert Min(-oo, nn) == -oo
+    assert Min(nn, -oo) == -oo
+    assert Min(-oo, p) == -oo
+    assert Min(p, -oo) == -oo
+    assert Min(-oo, oo) == -oo
+    assert Min(oo, -oo) == -oo
+    assert Min(n, n) == n
+    assert Min(n, np) == Min(n, np)
+    assert Min(np, n) == Min(np, n)
+    assert Min(n, 0) == n
+    assert Min(0, n) == n
+    assert Min(n, nn) == n
+    assert Min(nn, n) == n
+    assert Min(n, p) == n
+    assert Min(p, n) == n
+    assert Min(n, oo) == n
+    assert Min(oo, n) == n
+    assert Min(np, np) == np
+    assert Min(np, 0) == np
+    assert Min(0, np) == np
+    assert Min(np, nn) == np
+    assert Min(nn, np) == np
+    assert Min(np, p) == np
+    assert Min(p, np) == np
+    assert Min(np, oo) == np
+    assert Min(oo, np) == np
+    assert Min(0, 0) == 0
+    assert Min(0, nn) == 0
+    assert Min(nn, 0) == 0
+    assert Min(0, p) == 0
+    assert Min(p, 0) == 0
+    assert Min(0, oo) == 0
+    assert Min(oo, 0) == 0
+    assert Min(nn, nn) == nn
+    assert Min(nn, p) == Min(nn, p)
+    assert Min(p, nn) == Min(p, nn)
+    assert Min(nn, oo) == nn
+    assert Min(oo, nn) == nn
+    assert Min(p, p) == p
+    assert Min(p, oo) == p
+    assert Min(oo, p) == p
+    assert Min(oo, oo) == oo
+
+    assert Min(n, n_).func is Min
+    assert Min(nn, nn_).func is Min
+    assert Min(np, np_).func is Min
+    assert Min(p, p_).func is Min
+
+    # lists
+    raises(ValueError, lambda: Min())
+    assert Min(x, y) == Min(y, x)
+    assert Min(x, y, z) == Min(z, y, x)
+    assert Min(x, Min(y, z)) == Min(z, y, x)
+    assert Min(x, Max(y, -oo)) == Min(x, y)
+    assert Min(p, oo, n, p, p, p_) == n
+    assert Min(p_, n_, p) == n_
+    assert Min(n, oo, -7, p, p, 2) == Min(n, -7)
+    assert Min(2, x, p, n, oo, n_, p, 2, -2, -2) == Min(-2, x, n, n_)
+    assert Min(0, x, 1, y) == Min(0, x, y)
+    assert Min(1000, 100, -100, x, p, n) == Min(n, x, -100)
+    assert Min(cos(x), sin(x)) == Min(cos(x), sin(x))
+    assert Min(cos(x), sin(x)).subs(x, 1) == cos(1)
+    assert Min(cos(x), sin(x)).subs(x, S(1)/2) == sin(S(1)/2)
+    raises(ValueError, lambda: Min(cos(x), sin(x)).subs(x, I))
+    raises(ValueError, lambda: Min(I))
+    raises(ValueError, lambda: Min(I, x))
+    raises(ValueError, lambda: Min(S.ComplexInfinity, x))
+
+    assert Min(1, x).diff(x) == Heaviside(1 - x)
+    assert Min(x, 1).diff(x) == Heaviside(1 - x)
+    assert Min(0, -x, 1 - 2*x).diff(x) == -Heaviside(x + Min(0, -2*x + 1)) \
+        - 2*Heaviside(2*x + Min(0, -x) - 1)
+
+    # issue 7619
+    f = Function('f')
+    assert Min(1, 2*Min(f(1), 2))  # doesn't fail
+
+    # issue 7233
+    e = Min(0, x)
+    assert e.evalf == e.n
+    assert e.n().args == (0, x)
+
+    # issue 8643
+    m = Min(n, p_, n_, r)
+    assert m.is_positive is False
+    assert m.is_nonnegative is False
+    assert m.is_negative is True
+
+    m = Min(p, p_)
+    assert m.is_positive is True
+    assert m.is_nonnegative is True
+    assert m.is_negative is False
+
+    m = Min(p, nn_, p_)
+    assert m.is_positive is None
+    assert m.is_nonnegative is True
+    assert m.is_negative is False
+
+    m = Min(nn, p, r)
+    assert m.is_positive is None
+    assert m.is_nonnegative is None
+    assert m.is_negative is None
+
+【相关测试 3】
+测试文件：sympy/functions/elementary/tests/test_miscellaneous.py
+测试名称：test_instantiation_evaluation
+测试代码：
+def test_instantiation_evaluation():
+    from sympy.abc import v, w, x, y, z
+    assert Min(1, Max(2, x)) == 1
+    assert Max(3, Min(2, x)) == 3
+    assert Min(Max(x, y), Max(x, z)) == Max(x, Min(y, z))
+    assert set(Min(Max(w, x), Max(y, z)).args) == set(
+        [Max(w, x), Max(y, z)])
+    assert Min(Max(x, y), Max(x, z), w) == Min(
+        w, Max(x, Min(y, z)))
+    A, B = Min, Max
+    for i in range(2):
+        assert A(x, B(x, y)) == x
+        assert A(x, B(y, A(x, w, z))) == A(x, B(y, A(w, z)))
+        A, B = B, A
+    assert Min(w, Max(x, y), Max(v, x, z)) == Min(
+        w, Max(x, Min(y, Max(v, z))))
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

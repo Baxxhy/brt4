@@ -1,0 +1,139 @@
+instance_id: django__django-14170
+
+issue_summary: YearLookup 优化错误地将 __iso_year 查找转换为 BETWEEN 查询，导致 ExtractIsoYear 在过滤时返回错误数据。
+
+trigger_condition:
+{
+  "text": "使用 ExtractIsoYear 注解或 __iso_year 查找进行过滤查询。",
+  "evidence": [
+    "Issue 中显示：使用 qs.filter(extracted=2020) 或 DTModel.objects.filter(start_date__iso_year=2020) 会触发 BETWEEN 优化。",
+    "相关测试 3 中测试了 start_datetime__iso_year 和 start_date__iso_year 的过滤。",
+    "相关测试 4 和 5 也测试了 iso_year 与比较运算符（gt, gte, lt, lte）的过滤。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "过滤查询生成的 SQL 错误地使用了 BETWEEN 子句而不是 EXTRACT('isoyear' FROM ...) 操作，导致返回错误数据。",
+  "symptom_type": "wrong_sql",
+  "evidence": [
+    "Issue 中显示：filter(extracted=2020) 生成的 SQL 包含 WHERE ... BETWEEN 2020-01-01 AND 2020-12-31。",
+    "Issue 中显示：filter(start_date__iso_year=2020) 生成的 SQL 也包含 BETWEEN 子句。",
+    "Issue 明确说明：\"This results in the wrong data being returned by filters using iso_year.\""
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "使用 ExtractIsoYear 注解或 __iso_year 查找进行过滤时，应正确使用 EXTRACT('isoyear' FROM ...) 操作或等价的正确转换，以确保返回正确的数据。",
+  "evidence": [
+    "Issue 中显示：仅使用注解（不带过滤）时，SQL 正确生成 EXTRACT('isoyear' FROM ...)。",
+    "相关测试 1 和 2 展示了 ExtractIsoYear 注解在过滤和比较中的预期使用，并验证了结果。",
+    "Issue 的 PR 描述旨在修复此行为。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "ExtractIsoYear",
+    "kind": "class",
+    "source_path": "django/db/models/functions/datetime.py",
+    "reason": "Issue 的核心是关于 ExtractIsoYear 功能在过滤时被破坏。"
+  },
+  {
+    "name": "YearLookup",
+    "kind": "class",
+    "source_path": "django/db/models/lookups.py",
+    "reason": "Issue 指出 YearLookup 中的优化错误地应用于 __iso_year 查找。"
+  },
+  {
+    "name": "QuerySet.filter",
+    "kind": "method",
+    "source_path": "django/db/models/query.py",
+    "reason": "触发 bug 的操作是通过 filter 方法使用 __iso_year 查找或注解。"
+  },
+  {
+    "name": "QuerySet.annotate",
+    "kind": "method",
+    "source_path": "django/db/models/query.py",
+    "reason": "Issue 中展示了使用 ExtractIsoYear 进行注解的场景。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "在 test_extract_year_exact_lookup 中，对 lookup 为 'iso_year' 的情况，断言查询字符串包含 ' between ' 且不包含 'extract'。",
+    "target_pattern": "对于 lookup 为 'iso_year' 的情况，断言查询字符串不应包含 ' between '（或应包含正确的 EXTRACT 操作）。",
+    "reason": "Issue 表明 iso_year 查找不应使用 BETWEEN 优化，因为它与 ISO-8601 周编号年份不匹配。变异断言可以暴露错误。",
+    "confidence": "high"
+  },
+  {
+    "slot": "input",
+    "current_pattern": "在相关测试中，过滤使用常量年份值（如 2015）。",
+    "target_pattern": "使用边界日期值进行过滤，这些日期的日历年与 ISO 年不同（例如，2014-12-31 的 ISO 年是 2015）。",
+    "reason": "使用日历年与 ISO 年不同的日期可以更明显地暴露 BETWEEN 优化导致的错误结果。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "sql",
+    "expression_hint": "str(qs.query)",
+    "reason": "Issue 通过检查生成的 SQL 字符串来展示问题（包含错误的 BETWEEN 子句）。观测 SQL 是判断优化是否被错误应用的关键。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "qs.count() 或具体的查询结果集",
+    "reason": "Issue 指出错误优化导致返回错误数据。比较实际返回的数据与基于 ISO 年计算的预期数据可以确认 bug。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证使用 __iso_year 查找或 ExtractIsoYear 注解过滤时，生成的 SQL 不包含错误的 BETWEEN 优化（或包含正确的 EXTRACT 操作）。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言完整的、具体的 SQL 字符串相等，因为 SQL 生成可能因数据库后端而异。",
+    "reason": "Issue 的核心是 SQL 转换错误。检查 SQL 中是否缺少错误的 BETWEEN 片段或存在正确的 EXTRACT 片段是稳定且直接的对齐方式。"
+  },
+  {
+    "assertion_goal": "验证使用 __iso_year 过滤返回的数据是正确的（符合 ISO-8601 周编号年份）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "仅断言计数而不验证具体哪些记录被返回，因为错误可能发生在边界情况。",
+    "reason": "最终的用户可见错误是返回错误数据。断言正确的记录被过滤出来是根本的验证。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 DTModel 或类似的日期/时间字段模型。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要设置 USE_TZ 配置。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要创建测试数据，特别是那些日历年与 ISO 年不同的日期（如 2014-12-31）。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "YearLookup 中具体哪部分代码错误地将优化应用于 iso_year，以及修复的确切机制。",
+  "在修复版本中，对于 iso_year 查找，正确的 SQL 生成到底是什么样子（是完全禁用 BETWEEN，还是使用不同的、正确的范围计算）。",
+  "除了 exact 查找（=）之外，其他比较查找（gt, lt 等）是否也受到相同 bug 的影响，尽管 Issue 主要关注 exact 查找。"
+]

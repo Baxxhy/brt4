@@ -1,0 +1,138 @@
+{
+  "issue_summary": "MigrationAutodetector 在处理自定义 ForeignKey 字段（其 deconstruct 方法删除了 'to' 参数）时抛出 KeyError。",
+  "trigger_condition": {
+    "text": "当 MigrationAutodetector 比较两个 ProjectState，其中一个包含自定义 ForeignKey 字段（该字段在 __init__ 中硬编码了 'to' 参数，并在 deconstruct 方法中删除了 'to' 参数）时，在 generate_renamed_models 方法中调用 only_relation_agnostic_fields 方法时触发。",
+    "evidence": ["Issue 中提供了自定义字段 CustomFKField 的代码，其 deconstruct 方法删除了 kwargs['to']。", "Issue 中的堆栈跟踪指向 autodetector.py 第 99 行的 del deconstruction[2]['to']。", "源码片段 5 显示了 only_relation_agnostic_fields 方法，其中包含 del deconstruction[2]['to']。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "运行测试套件时抛出 KeyError: 'to'。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 中的堆栈跟踪显示 KeyError: 'to' 发生在 autodetector.py 第 99 行。", "Issue 描述中提到 'Traceback (most recent call last): ... KeyError: 'to''。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "MigrationAutodetector 应该能够处理自定义 ForeignKey 字段，即使其 deconstruct 方法没有返回 'to' 参数，也不应抛出 KeyError，而应正常进行迁移检测。",
+    "evidence": ["Issue 中提到将 del deconstruction[2]['to'] 改为 deconstruction[2].pop('to', None) 可以使测试套件正常运行。", "Issue 作者认为自定义字段的设计虽然可能有问题，但并非不正确，autodetector 应该能处理。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "MigrationAutodetector",
+      "kind": "class",
+      "source_path": "django/db/migrations/autodetector.py",
+      "reason": "Issue 的核心是关于 MigrationAutodetector 在处理自定义字段时抛出异常。"
+    },
+    {
+      "name": "MigrationAutodetector.only_relation_agnostic_fields",
+      "kind": "method",
+      "source_path": "django/db/migrations/autodetector.py",
+      "reason": "异常直接发生在这个方法中，它处理字段的 deconstruction。"
+    },
+    {
+      "name": "MigrationAutodetector.generate_renamed_models",
+      "kind": "method",
+      "source_path": "django/db/migrations/autodetector.py",
+      "reason": "Issue 的堆栈跟踪显示异常发生在 generate_renamed_models 调用的 only_relation_agnostic_fields 中。"
+    },
+    {
+      "name": "models.ForeignKey.deconstruct",
+      "kind": "method",
+      "source_path": "django/db/models/fields/related.py",
+      "reason": "自定义字段覆盖了 deconstruct 方法，删除了 'to' 参数，这是触发问题的根源。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/migrations/autodetector.py",
+      "object": "MigrationAutodetector.only_relation_agnostic_fields",
+      "lines": "89-101",
+      "reason": "Issue 的堆栈跟踪指向第 99 行的 del deconstruction[2]['to']，这里假设 deconstruction[2] 字典中总是存在 'to' 键，但对于自定义字段可能不成立。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "AutodetectorTests.test_custom_deconstructible",
+      "test_file": "tests/migrations/test_autodetector.py",
+      "why_relevant": "这个测试涉及自定义可解构字段和 autodetector 的行为，与 Issue 中自定义字段的场景相似。",
+      "reusable_parts": ["使用 MigrationAutodetector 和 ProjectState 进行模型状态比较的模式。", "使用 self.get_changes 方法（如果存在）来获取变化。", "断言变化数量的模式。"],
+      "possible_gap": "该测试可能使用不同的自定义字段，其 deconstruct 方法可能没有删除 'to' 参数，因此可能不会触发 KeyError。"
+    },
+    {
+      "test_name": "FieldDeconstructionTests.test_foreign_key",
+      "test_file": "tests/field_deconstruction/tests.py",
+      "why_relevant": "这个测试直接测试 ForeignKey 字段的 deconstruct 方法，展示了正常的 deconstruct 行为，包括 'to' 参数的存在。",
+      "reusable_parts": ["创建 ForeignKey 字段并调用 deconstruct 的方法。", "检查 deconstruct 返回值的断言模式。"],
+      "possible_gap": "该测试不涉及 MigrationAutodetector，也不测试自定义字段覆盖 deconstruct 的情况。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试中使用标准的 ForeignKey 字段，其 deconstruct 方法返回包含 'to' 参数的 kwargs。",
+      "target_pattern": "使用自定义 ForeignKey 字段，该字段在 __init__ 中硬编码 'to' 参数，并在 deconstruct 方法中删除 'to' 参数。",
+      "reason": "Issue 明确指出这种自定义字段是触发 KeyError 的原因。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "相似测试可能直接比较模型状态，但可能不涉及重命名检测路径。",
+      "target_pattern": "确保测试场景触发 MigrationAutodetector.generate_renamed_models 方法，因为异常发生在该方法调用的 only_relation_agnostic_fields 中。",
+      "reason": "堆栈跟踪显示错误发生在 generate_renamed_models 的上下文中。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "MigrationAutodetector(before, after)._detect_changes() 或 MigrationAutodetector(before, after).changes(...) 的调用结果。",
+      "reason": "Issue 中异常是在检测迁移变化时抛出的，观察是否抛出 KeyError 可以直接判断问题是否触发。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "自定义字段实例调用 deconstruct() 后的 kwargs 字典内容。",
+      "reason": "确认自定义字段的 deconstruct 方法确实没有返回 'to' 键，这是触发问题的前提。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "only_relation_agnostic_fields 方法中 field.deconstruction[2] 字典的内容。",
+      "reason": "KeyError 发生在这个字典上，观察其键可以确认 'to' 是否缺失。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 MigrationAutodetector 在处理自定义 ForeignKey 字段（其 deconstruct 不返回 'to'）时不会抛出 KeyError。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言完整的迁移操作列表或具体的字段变化，因为这些可能因场景而异。",
+      "reason": "Issue 的核心是异常，修复后应不再抛出异常。但注意：根据规则9，修复后应正常，所以最终断言不应是 raises KeyError，而应是正常完成或进行其他验证。对于缺陷复现测试，可以先验证当前行为会抛出异常。"
+    },
+    {
+      "assertion_goal": "验证迁移检测过程正常完成（修复后）。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "断言具体的迁移操作数量或类型，除非 Issue 明确说明。",
+      "reason": "修复后，autodetector 应该能够处理该字段并生成相应的迁移（或无迁移），而不崩溃。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要定义自定义 ForeignKey 字段类，覆盖 __init__ 和 deconstruct 方法，如 Issue 所示。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要使用 ProjectState 和 ModelState 来构建迁移前后的模型状态。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能需要继承自 django.test.TestCase 或 SimpleTestCase。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "除了删除 'to' 参数外，自定义字段的其他行为（如硬编码的 'to' 值）是否也是触发问题的必要条件？",
+    "是否只有在 generate_renamed_models 被调用时才会触发此错误？其他代码路径是否安全？",
+    "Issue 中建议的修复（使用 pop('to', None)）是否完整且正确，或者是否有其他边缘情况？"
+  ]
+}

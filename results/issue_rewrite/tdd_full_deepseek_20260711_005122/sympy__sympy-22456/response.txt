@@ -1,0 +1,131 @@
+{
+  "issue_summary": "String 类不支持 expr.func(*expr.args) == expr 的参数不变性，而使用了 expr.func(**expr.kwargs()) == expr。",
+  "trigger_condition": {
+    "text": "对 String 实例调用 expr.func(*expr.args) 并检查是否等于原实例。",
+    "evidence": ["Issue 提到 'expr.func(*expr.args) == expr' 应该对任何 Basic 子类成立，而 String 是 Basic 子类。", "相关测试 1 中使用了 st.func(**st.kwargs()) == st，但未测试 st.func(*st.args) == st。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "expr.func(*expr.args) == expr 对 String 实例不成立，导致等式为假。",
+    "symptom_type": "wrong_return",
+    "evidence": ["Issue 明确指出 'The former should hold for any Basic subclass, which String is.'，暗示当前不成立。", "相关测试 1 只测试了 st.func(**st.kwargs()) == st，未测试 st.func(*st.args) == st。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "String 实例应满足 expr.func(*expr.args) == expr 的不变性，即通过其构造函数和 args 重建应得到相等对象。",
+    "evidence": ["Issue 声明 'The former should hold for any Basic subclass, which String is.'", "源码片段 2 中 Basic.func 的文档说明 'x == x.func(*x.args)' 对所有对象都应成立。", "相关测试 2 和 3 展示了其他类（Node、CoordSys3D）满足此不变性。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "String",
+      "kind": "class",
+      "source_path": "sympy/codegen/ast.py",
+      "reason": "Issue 直接针对 String 类，需要构造其实例并测试不变性。"
+    },
+    {
+      "name": "String.func",
+      "kind": "method",
+      "source_path": "sympy/codegen/ast.py",
+      "reason": "用于获取类以重建对象，继承自 Basic.func。"
+    },
+    {
+      "name": "String.args",
+      "kind": "method",
+      "source_path": "sympy/codegen/ast.py",
+      "reason": "用于获取参数以传递给 func，继承自 Basic.args。"
+    },
+    {
+      "name": "String.kwargs",
+      "kind": "method",
+      "source_path": "sympy/codegen/ast.py",
+      "reason": "当前测试中用于重建，但 Issue 指出应使用 *args 而非 **kwargs。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/codegen/ast.py",
+      "object": "String",
+      "lines": "872-908",
+      "reason": "String 类可能未正确实现 args 属性或 __new__ 方法，导致 func(*args) 重建失败。"
+    },
+    {
+      "path": "sympy/codegen/ast.py",
+      "object": "Token",
+      "lines": "",
+      "reason": "String 继承自 Token，Token 可能影响 args 的生成。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_String",
+      "test_file": "sympy/codegen/tests/test_ast.py",
+      "why_relevant": "直接测试 String 类，包含构造、相等性及 func(**kwargs) 不变性检查。",
+      "reusable_parts": ["from sympy.codegen.ast import String", "st = String('foobar')", "assert st == String('foobar')", "assert st.func(**st.kwargs()) == st"],
+      "possible_gap": "未测试 st.func(*st.args) == st，且可能依赖 kwargs 而非 args 进行重建。"
+    },
+    {
+      "test_name": "test_Node",
+      "test_file": "sympy/codegen/tests/test_ast.py",
+      "why_relevant": "测试了 Node 类的 func(*args) 不变性，可作为对比模板。",
+      "reusable_parts": ["n = Node()", "assert n.func(*n.args) == n"],
+      "possible_gap": "Node 与 String 类不同，String 可能有特殊属性（如 text）影响 args。"
+    },
+    {
+      "test_name": "test_func_args",
+      "test_file": "sympy/vector/tests/test_coordsysrect.py",
+      "why_relevant": "展示了多个 SymPy 对象满足 func(*args) 不变性，验证了通用约定。",
+      "reusable_parts": ["assert expr.func(*expr.args) == expr 的断言模式"],
+      "possible_gap": "测试的是不同模块的对象，与 String 的实现无关。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "st.func(**st.kwargs()) == st",
+      "target_pattern": "st.func(*st.args) == st",
+      "reason": "Issue 指出应支持 *args 不变性而非 **kwargs，变异后可能触发不相等。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "使用 String('foobar') 构造",
+      "target_pattern": "使用不同文本（如空字符串、特殊字符）构造 String",
+      "reason": "检查不变性是否普遍成立，而非特定实例。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "st.func(*st.args) 的结果与 st 的比较",
+      "reason": "直接观察等式是否成立，若不成立则触发 Issue。"
+    },
+    {
+      "kind": "repr",
+      "expression_hint": "repr(st.args) 和 repr(st.kwargs())",
+      "reason": "检查 args 和 kwargs 的内容差异，以理解重建失败原因。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "String 实例应满足 expr.func(*expr.args) == expr。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免依赖完整 repr 字符串相等或 kwargs 重建。",
+      "reason": "直接测试 Issue 中提到的参数不变性，与 Basic 类的约定对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 String 类，可能需继承自 TestCase 或使用纯函数测试。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "String.args 具体返回什么？是空元组还是包含 text 的元组？",
+    "String.__new__ 或 _construct_text 如何处理 args？",
+    "not_in_args = ['text'] 属性是否影响 args 的生成？",
+    "修复后 st.func(*st.args) 应返回相等对象，但具体重建逻辑未知。"
+  ]
+}

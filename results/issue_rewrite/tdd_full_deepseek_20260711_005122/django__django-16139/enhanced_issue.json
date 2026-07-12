@@ -1,0 +1,297 @@
+{
+  "instance_id": "django__django-16139",
+  "issue_summary": "当通过另一个模型的 Admin 使用 to_field 参数访问 UserAdmin 时，UserChangeForm 中指向密码重置表单的链接会生成错误的 URL，导致 404 错误。",
+  "trigger_condition": {
+    "text": "通过另一个模型的 Admin 访问 UserAdmin，且该模型通过 to_field 参数（例如 to_field=\"uuid\"）引用 User 模型。",
+    "evidence": [
+      "Issue 描述：'Accessing the UserAdmin via another model's Admin that has a reference to User (with to_field set, e.g., to_field=\"uuid\") leads to the UserAdmin being accessed via an url that looks similar to this one: .../user/22222222-3333-4444-5555-666677778888/change/?_to_field=uuid'"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "UserChangeForm 中指向密码重置表单的链接（在 password 字段的 help_text 中）是错误的，导致点击该链接时出现 404 错误。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 描述：'This results in the link to the PasswordResetForm being wrong and thus ending up in a 404.'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "无论 UserAdmin 是通过其主键还是通过 to_field 参数访问，UserChangeForm 中指向密码重置表单的链接都应正确生成，并能成功导航到密码重置页面。",
+    "evidence": [
+      "Issue 描述：'If we drop the assumption that UserAdmin is always accessed via its pk, then we're good to go.'",
+      "相关测试 1 验证了链接的正确性：'self.assertEqual(urljoin(user_change_url, rel_link), password_change_url)'"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "UserChangeForm",
+      "kind": "class",
+      "source_path": "django/contrib/auth/forms.py",
+      "reason": "Issue 中描述的缺陷在于 UserChangeForm.__init__ 方法中 password 字段 help_text 的格式化逻辑。"
+    },
+    {
+      "name": "UserAdmin",
+      "kind": "class",
+      "source_path": "django/contrib/auth/admin.py",
+      "reason": "UserAdmin 是管理用户的核心类，Issue 描述了通过其访问时出现的问题。"
+    },
+    {
+      "name": "ReadOnlyPasswordHashField",
+      "kind": "class",
+      "source_path": "django/contrib/auth/forms.py",
+      "reason": "UserChangeForm 中的 password 字段是此类型，其 help_text 包含有问题的链接。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/contrib/auth/forms.py",
+      "object": "UserChangeForm.__init__",
+      "lines": "",
+      "reason": "Issue 明确指出问题在于 UserChangeForm.__init__ 中 password.help_text.format(\"../password/\") 这一行，它假设了访问路径基于主键。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "ChangelistTests.test_user_change_password",
+      "test_file": "tests/auth_tests/test_views.py",
+      "why_relevant": "该测试直接验证了 UserChangeForm 中密码重置链接的正确性，并检查了生成的链接是否匹配预期的密码更改 URL。",
+      "reusable_parts": [
+        "测试结构（@override_settings, class, self.client）",
+        "使用 reverse 构造 URL",
+        "从响应内容中提取链接并验证的逻辑",
+        "assertEqual 断言风格"
+      ],
+      "possible_gap": "该测试使用主键（self.admin.pk）访问 UserAdmin，没有模拟通过 to_field 参数访问的场景。"
+    },
+    {
+      "test_name": "UUIDUserTests.test_admin_password_change",
+      "test_file": "tests/auth_tests/test_views.py",
+      "why_relevant": "该测试使用了自定义用户模型（UUIDUser），其主键是 UUID，并测试了管理界面中的密码更改功能。",
+      "reusable_parts": [
+        "使用自定义用户模型（AUTH_USER_MODEL）的设置",
+        "创建超级用户并登录",
+        "访问用户更改和密码更改页面",
+        "assertRedirects 和 assertContains 断言"
+      ],
+      "possible_gap": "该测试虽然使用了非整数主键，但可能仍然是通过主键（u.pk）直接访问，没有模拟通过另一个模型的 Admin 并使用 _to_field 查询参数访问的场景。"
+    },
+    {
+      "test_name": "AdminSearchTest.test_with_fk_to_field",
+      "test_file": "tests/admin_views/tests.py",
+      "why_relevant": "该测试明确涉及了 TO_FIELD_VAR 参数，并验证了它在搜索中的保留情况。",
+      "reusable_parts": [
+        "使用 TO_FIELD_VAR 查询参数",
+        "assertContains 检查响应中是否包含隐藏的输入字段"
+      ],
+      "possible_gap": "该测试关注的是搜索列表视图，而不是用户更改表单视图及其内部的链接生成。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "在相关测试中，UserAdmin 通常通过其主键直接访问（例如 reverse(\"...\", args=(user.pk,))）。",
+      "target_pattern": "模拟通过另一个模型的 Admin 访问 UserAdmin，并在 URL 中添加 _to_field 查询参数（例如 ?_to_field=uuid）。",
+      "reason": "Issue 表明，当访问路径包含 _to_field 参数时，UserChangeForm 中生成链接的逻辑会出错。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "测试用户使用默认的整数主键或 UUID 主键。",
+      "target_pattern": "使用一个通过 to_field 引用 User 模型（例如使用 uuid 字段）的其他模型，并通过该模型的 Admin 界面导航到 UserAdmin。",
+      "reason": "Issue 描述的场景起始于“另一个模型的 Admin”，该模型有一个指向 User 的引用，且 to_field 被设置。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "从 UserChangeForm 页面响应中提取的密码重置链接（rel_link）。",
+      "reason": "Issue 的核心是生成的链接错误。比较提取的链接与预期的密码更改 URL 可以判断缺陷是否被触发。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "访问 UserChangeForm 页面时使用的完整 URL（包括路径和查询参数，特别是 _to_field）。",
+      "reason": "链接生成逻辑可能依赖于当前请求的 URL 路径结构。观测此状态有助于理解上下文。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "从 UserChangeForm 页面提取的密码重置链接应正确指向该用户的密码更改页面。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的 HTML 响应内容或链接的精确字符串格式，因为路径可能因设置而异。",
+      "reason": "相关测试 1 已经使用了这种断言风格（urljoin 和比较），它关注链接的功能正确性而非具体表示。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要一个自定义用户模型或一个具有非主键 to_field（如 uuid）引用的模型，并为其注册 Admin。可能需要配置 AUTH_USER_MODEL 和相应的 URLconf。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "使用 TestCase 和 client 来模拟管理员登录和页面访问。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 @override_settings 来配置自定义用户模型和 URL。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "如何精确地模拟“通过另一个模型的 Admin 访问 UserAdmin”这一导航路径？是直接构造带有 _to_field 参数的 URL，还是需要先创建并访问那个引用模型的对象？",
+    "UserChangeForm.__init__ 中生成链接的具体逻辑是什么？除了 Issue 提到的行，是否还有其他相关代码？",
+    "当 _to_field 参数存在时，Django Admin 如何解析对象 ID 并传递给表单？这如何影响 self.instance.pk？"
+  ],
+  "raw": {
+    "issue_summary": "当通过另一个模型的 Admin 使用 to_field 参数访问 UserAdmin 时，UserChangeForm 中指向密码重置表单的链接会生成错误的 URL，导致 404 错误。",
+    "trigger_condition": {
+      "text": "通过另一个模型的 Admin 访问 UserAdmin，且该模型通过 to_field 参数（例如 to_field=\"uuid\"）引用 User 模型。",
+      "evidence": [
+        "Issue 描述：'Accessing the UserAdmin via another model's Admin that has a reference to User (with to_field set, e.g., to_field=\"uuid\") leads to the UserAdmin being accessed via an url that looks similar to this one: .../user/22222222-3333-4444-5555-666677778888/change/?_to_field=uuid'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "UserChangeForm 中指向密码重置表单的链接（在 password 字段的 help_text 中）是错误的，导致点击该链接时出现 404 错误。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'This results in the link to the PasswordResetForm being wrong and thus ending up in a 404.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "无论 UserAdmin 是通过其主键还是通过 to_field 参数访问，UserChangeForm 中指向密码重置表单的链接都应正确生成，并能成功导航到密码重置页面。",
+      "evidence": [
+        "Issue 描述：'If we drop the assumption that UserAdmin is always accessed via its pk, then we're good to go.'",
+        "相关测试 1 验证了链接的正确性：'self.assertEqual(urljoin(user_change_url, rel_link), password_change_url)'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "UserChangeForm",
+        "kind": "class",
+        "source_path": "django/contrib/auth/forms.py",
+        "reason": "Issue 中描述的缺陷在于 UserChangeForm.__init__ 方法中 password 字段 help_text 的格式化逻辑。"
+      },
+      {
+        "name": "UserAdmin",
+        "kind": "class",
+        "source_path": "django/contrib/auth/admin.py",
+        "reason": "UserAdmin 是管理用户的核心类，Issue 描述了通过其访问时出现的问题。"
+      },
+      {
+        "name": "ReadOnlyPasswordHashField",
+        "kind": "class",
+        "source_path": "django/contrib/auth/forms.py",
+        "reason": "UserChangeForm 中的 password 字段是此类型，其 help_text 包含有问题的链接。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/auth/forms.py",
+        "object": "UserChangeForm.__init__",
+        "lines": "",
+        "reason": "Issue 明确指出问题在于 UserChangeForm.__init__ 中 password.help_text.format(\"../password/\") 这一行，它假设了访问路径基于主键。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ChangelistTests.test_user_change_password",
+        "test_file": "tests/auth_tests/test_views.py",
+        "why_relevant": "该测试直接验证了 UserChangeForm 中密码重置链接的正确性，并检查了生成的链接是否匹配预期的密码更改 URL。",
+        "reusable_parts": [
+          "测试结构（@override_settings, class, self.client）",
+          "使用 reverse 构造 URL",
+          "从响应内容中提取链接并验证的逻辑",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试使用主键（self.admin.pk）访问 UserAdmin，没有模拟通过 to_field 参数访问的场景。"
+      },
+      {
+        "test_name": "UUIDUserTests.test_admin_password_change",
+        "test_file": "tests/auth_tests/test_views.py",
+        "why_relevant": "该测试使用了自定义用户模型（UUIDUser），其主键是 UUID，并测试了管理界面中的密码更改功能。",
+        "reusable_parts": [
+          "使用自定义用户模型（AUTH_USER_MODEL）的设置",
+          "创建超级用户并登录",
+          "访问用户更改和密码更改页面",
+          "assertRedirects 和 assertContains 断言"
+        ],
+        "possible_gap": "该测试虽然使用了非整数主键，但可能仍然是通过主键（u.pk）直接访问，没有模拟通过另一个模型的 Admin 并使用 _to_field 查询参数访问的场景。"
+      },
+      {
+        "test_name": "AdminSearchTest.test_with_fk_to_field",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "该测试明确涉及了 TO_FIELD_VAR 参数，并验证了它在搜索中的保留情况。",
+        "reusable_parts": [
+          "使用 TO_FIELD_VAR 查询参数",
+          "assertContains 检查响应中是否包含隐藏的输入字段"
+        ],
+        "possible_gap": "该测试关注的是搜索列表视图，而不是用户更改表单视图及其内部的链接生成。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "在相关测试中，UserAdmin 通常通过其主键直接访问（例如 reverse(\"...\", args=(user.pk,))）。",
+        "target_pattern": "模拟通过另一个模型的 Admin 访问 UserAdmin，并在 URL 中添加 _to_field 查询参数（例如 ?_to_field=uuid）。",
+        "reason": "Issue 表明，当访问路径包含 _to_field 参数时，UserChangeForm 中生成链接的逻辑会出错。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试用户使用默认的整数主键或 UUID 主键。",
+        "target_pattern": "使用一个通过 to_field 引用 User 模型（例如使用 uuid 字段）的其他模型，并通过该模型的 Admin 界面导航到 UserAdmin。",
+        "reason": "Issue 描述的场景起始于“另一个模型的 Admin”，该模型有一个指向 User 的引用，且 to_field 被设置。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "从 UserChangeForm 页面响应中提取的密码重置链接（rel_link）。",
+        "reason": "Issue 的核心是生成的链接错误。比较提取的链接与预期的密码更改 URL 可以判断缺陷是否被触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "访问 UserChangeForm 页面时使用的完整 URL（包括路径和查询参数，特别是 _to_field）。",
+        "reason": "链接生成逻辑可能依赖于当前请求的 URL 路径结构。观测此状态有助于理解上下文。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "从 UserChangeForm 页面提取的密码重置链接应正确指向该用户的密码更改页面。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 HTML 响应内容或链接的精确字符串格式，因为路径可能因设置而异。",
+        "reason": "相关测试 1 已经使用了这种断言风格（urljoin 和比较），它关注链接的功能正确性而非具体表示。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个自定义用户模型或一个具有非主键 to_field（如 uuid）引用的模型，并为其注册 Admin。可能需要配置 AUTH_USER_MODEL 和相应的 URLconf。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 TestCase 和 client 来模拟管理员登录和页面访问。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 @override_settings 来配置自定义用户模型和 URL。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "如何精确地模拟“通过另一个模型的 Admin 访问 UserAdmin”这一导航路径？是直接构造带有 _to_field 参数的 URL，还是需要先创建并访问那个引用模型的对象？",
+      "UserChangeForm.__init__ 中生成链接的具体逻辑是什么？除了 Issue 提到的行，是否还有其他相关代码？",
+      "当 _to_field 参数存在时，Django Admin 如何解析对象 ID 并传递给表单？这如何影响 self.instance.pk？"
+    ]
+  }
+}

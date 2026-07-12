@@ -1,0 +1,449 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Product(n + 1 / 2**k, [k, 0, n-1]) is incorrect
+    >>> from sympy import *
+    >>> from sympy.abc import n,k
+    >>> p = Product(n + 1 / 2**k, [k, 0, n-1]).doit()
+    >>> print(simplify(p))
+    2**(n*(-n + 1)/2) + n**n
+    >>> print(p.subs(n,2))
+    9/2
+
+This is incorrect- for example, the product for `n=2` is `(2 + 2^0) * (2 + 2^(-1)) = 15/2`. The correct expression involves the [q-Pochhammer symbol](https://www.wolframalpha.com/input/?i=product+of+n+%2B+1%2F2%5Ek+from+k%3D0+to+n-1).
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/concrete/products.py
+对象名称：Product
+节点类型：class
+父节点：products
+行号范围：14-478
+代码：
+class Product(ExprWithIntLimits):
+    r"""Represents unevaluated products.
+
+    ``Product`` represents a finite or infinite product, with the first
+    argument being the general form of terms in the series, and the second
+    argument being ``(dummy_variable, start, end)``, with ``dummy_variable``
+    taking all integer values from ``start`` through ``end``. In accordance
+    with long-standing mathematical convention, the end term is included in
+    the product.
+
+    Finite products
+    ===============
+
+    For finite products (and products with symbolic limits assumed to be finite)
+    we follow the analogue of the summation convention described by Karr [1],
+    especially definition 3 of section 1.4. The product:
+
+    .. math::
+
+        \prod_{m \leq i < n} f(i)
+
+    has *the obvious meaning* for `m < n`, namely:
+
+    .. math::
+
+        \prod_{m \leq i < n} f(i) = f(m) f(m+1) \cdot \ldots \cdot f(n-2) f(n-1)
+
+    with the upper limit value `f(n)` excluded. The product over an empty set is
+    one if and only if `m = n`:
+
+    .. math::
+
+        \prod_{m \leq i < n} f(i) = 1  \quad \mathrm{for} \quad  m = n
+
+    Finally, for all other products over empty sets we assume the following
+    definition:
+
+    .. math::
+
+        \prod_{m \leq i < n} f(i) = \frac{1}{\prod_{n \leq i < m} f(i)}  \quad \mathrm{for} \quad  m > n
+
+    It is important to note that above we define all products with the upper
+    limit being exclusive. This is in contrast to the usual mathematical notation,
+    but does not affect the product convention. Indeed we have:
+
+    .. math::
+
+        \prod_{m \leq i < n} f(i) = \prod_{i = m}^{n - 1} f(i)
+
+    where the difference in notation is intentional to emphasize the meaning,
+    with limits typeset on the top being inclusive.
+
+    Examples
+    ========
+
+    >>> from sympy.abc import a, b, i, k, m, n, x
+    >>> from sympy import Product, factorial, oo
+    >>> Product(k, (k, 1, m))
+    Product(k, (k, 1, m))
+    >>> Product(k, (k, 1, m)).doit()
+    factorial(m)
+    >>> Product(k**2,(k, 1, m))
+    Product(k**2, (k, 1, m))
+    >>> Product(k**2,(k, 1, m)).doit()
+    factorial(m)**2
+
+    Wallis' product for pi:
+
+    >>> W = Product(2*i/(2*i-1) * 2*i/(2*i+1), (i, 1, oo))
+    >>> W
+    Product(4*i**2/((2*i - 1)*(2*i + 1)), (i, 1, oo))
+
+    Direct computation currently fails:
+
+    >>> W.doit()
+    Product(4*i**2/((2*i - 1)*(2*i + 1)), (i, 1, oo))
+
+    But we can approach the infinite product by a limit of finite products:
+
+    >>> from sympy import limit
+    >>> W2 = Product(2*i/(2*i-1)*2*i/(2*i+1), (i, 1, n))
+    >>> W2
+    Product(4*i**2/((2*i - 1)*(2*i + 1)), (i, 1, n))
+    >>> W2e = W2.doit()
+    >>> W2e
+    2**(-2*n)*4**n*factorial(n)**2/(RisingFactorial(1/2, n)*RisingFactorial(3/2, n))
+    >>> limit(W2e, n, oo)
+    pi/2
+
+    By the same formula we can compute sin(pi/2):
+
+    >>> from sympy import pi, gamma, simplify
+    >>> P = pi * x * Product(1 - x**2/k**2, (k, 1, n))
+    >>> P = P.subs(x, pi/2)
+    >>> P
+    pi**2*Product(1 - pi**2/(4*k**2), (k, 1, n))/2
+    >>> Pe = P.doit()
+    >>> Pe
+    pi**2*RisingFactorial(1 + pi/2, n)*RisingFactorial(-pi/2 + 1, n)/(2*factorial(n)**2)
+    >>> Pe = Pe.rewrite(gamma)
+    >>> Pe
+    pi**2*gamma(n + 1 + pi/2)*gamma(n - pi/2 + 1)/(2*gamma(1 + pi/2)*gamma(-pi/2 + 1)*gamma(n + 1)**2)
+    >>> Pe = simplify(Pe)
+    >>> Pe
+    sin(pi**2/2)*gamma(n + 1 + pi/2)*gamma(n - pi/2 + 1)/gamma(n + 1)**2
+    >>> limit(Pe, n, oo)
+    sin(pi**2/2)
+
+    Products with the lower limit being larger than the upper one:
+
+    >>> Product(1/i, (i, 6, 1)).doit()
+    120
+    >>> Product(i, (i, 2, 5)).doit()
+    120
+
+    The empty product:
+
+    >>> Product(i, (i, n, n-1)).doit()
+    1
+
+    An example showing that the symbolic result of a product is still
+    valid for seemingly nonsensical values of the limits. Then the Karr
+    convention allows us to give a perfectly valid interpretation to
+    those products by interchanging the limits according to the above rules:
+
+    >>> P = Product(2, (i, 10, n)).doit()
+    >>> P
+    2**(n - 9)
+    >>> P.subs(n, 5)
+    1/16
+    >>> Product(2, (i, 10, 5)).doit()
+    1/16
+    >>> 1/Product(2, (i, 6, 9)).doit()
+    1/16
+
+    An explicit example of the Karr summation convention applied to products:
+
+    >>> P1 = Product(x, (i, a, b)).doit()
+    >>> P1
+    x**(-a + b + 1)
+    >>> P2 = Product(x, (i, b+1, a-1)).doit()
+    >>> P2
+    x**(a - b - 1)
+    >>> simplify(P1 * P2)
+    1
+
+    And another one:
+
+    >>> P1 = Product(i, (i, b, a)).doit()
+    >>> P1
+    RisingFactorial(b, a - b + 1)
+    >>> P2 = Product(i, (i, a+1, b-1)).doit()
+    >>> P2
+    RisingFactorial(a + 1, -a + b - 1)
+    >>> P1 * P2
+    RisingFactorial(b, a - b + 1)*RisingFactorial(a + 1, -a + b - 1)
+    >>> simplify(P1 * P2)
+    1
+
+    See Also
+    ========
+
+    Sum, summation
+    product
+
+    References
+    ==========
+
+    .. [1] Michael Karr, "Summation in Finite Terms", Journal of the ACM,
+           Volume 28 Issue 2, April 1981, Pages 305-350
+           http://dl.acm.org/citation.cfm?doid=322248.322255
+    .. [2] http://en.wikipedia.org/wiki/Multiplication#Capital_Pi_notation
+    .. [3] http://en.wikipedia.org/wiki/Empty_product
+    """
+    __slots__ = ['is_commutative']
+    def __new__(cls, function, *symbols, **assumptions):
+    def _eval_rewrite_as_Sum(self, *args):
+    @property
+    def term(self):
+    function = term
+    def _eval_is_zero(self):
+    def doit(self, **hints):
+    def _eval_adjoint(self):
+    def _eval_conjugate(self):
+    def _eval_product(self, term, limits):
+    def _eval_simplify(self, ratio, measure):
+    def _eval_transpose(self):
+    def is_convergent(self):
+    def reverse_order(expr, *indices):
+
+
+【源码片段 2】
+文件路径：sympy/concrete/products.py
+对象名称：doit
+节点类型：class_function
+父节点：Product
+行号范围：208-226
+代码：
+    def doit(self, **hints):
+        f = self.function
+        for index, limit in enumerate(self.limits):
+            i, a, b = limit
+            dif = b - a
+            if dif.is_Integer and dif < 0:
+                a, b = b + 1, a - 1
+                f = 1 / f
+
+            g = self._eval_product(f, (i, a, b))
+            if g in (None, S.NaN):
+                return self.func(powsimp(f), *self.limits[index:])
+            else:
+                f = g
+
+        if hints.get('deep', True):
+            return f.doit(**hints)
+        else:
+            return powsimp(f)
+
+
+【源码片段 3】
+文件路径：sympy/polys/domains/expressiondomain.py
+对象名称：simplify
+节点类型：class_function
+父节点：ExpressionDomain
+行号范围：48-49
+代码：
+        def simplify(f, ex):
+            return f.__class__(ex.cancel())
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/concrete/tests/test_products.py
+测试名称：test_simple_products
+测试代码：
+def test_simple_products():
+    assert product(2, (k, a, n)) == 2**(n - a + 1)
+    assert product(k, (k, 1, n)) == factorial(n)
+    assert product(k**3, (k, 1, n)) == factorial(n)**3
+
+    assert product(k + 1, (k, 0, n - 1)) == factorial(n)
+    assert product(k + 1, (k, a, n - 1)) == rf(1 + a, n - a)
+
+    assert product(cos(k), (k, 0, 5)) == cos(1)*cos(2)*cos(3)*cos(4)*cos(5)
+    assert product(cos(k), (k, 3, 5)) == cos(3)*cos(4)*cos(5)
+    assert product(cos(k), (k, 1, Rational(5, 2))) != cos(1)*cos(2)
+
+    assert isinstance(product(k**k, (k, 1, n)), Product)
+
+    assert Product(x**k, (k, 1, n)).variables == [k]
+
+    raises(ValueError, lambda: Product(n))
+    raises(ValueError, lambda: Product(n, k))
+    raises(ValueError, lambda: Product(n, k, 1))
+    raises(ValueError, lambda: Product(n, k, 1, 10))
+    raises(ValueError, lambda: Product(n, (k, 1)))
+
+    assert product(1, (n, 1, oo)) == 1  # issue 8301
+    assert product(2, (n, 1, oo)) == oo
+    assert product(-1, (n, 1, oo)).func is Product
+
+【相关测试 2】
+测试文件：sympy/concrete/tests/test_products.py
+测试名称：test__eval_product
+测试代码：
+def test__eval_product():
+    from sympy.abc import i, n
+    # issue 4809
+    a = Function('a')
+    assert product(2*a(i), (i, 1, n)) == 2**n * Product(a(i), (i, 1, n))
+    # issue 4810
+    assert product(2**i, (i, 1, n)) == 2**(n/2 + n**2/2)
+
+【相关测试 3】
+测试文件：sympy/concrete/tests/test_products.py
+测试名称：test_rational_products
+测试代码：
+def test_rational_products():
+    assert product(1 + 1/k, (k, 1, n)) == rf(2, n)/factorial(n)
+
+【相关测试 4】
+测试文件：sympy/concrete/tests/test_sums_products.py
+测试名称：test_rational_products
+测试代码：
+def test_rational_products():
+    assert simplify(product(1 + 1/n, (n, a, b))) == (1 + b)/a
+    assert simplify(product(n + 1, (n, a, b))) == gamma(2 + b)/gamma(1 + a)
+    assert simplify(product((n + 1)/(n - 1), (n, a, b))) == b*(1 + b)/(a*(a - 1))
+    assert simplify(product(n/(n + 1)/(n + 2), (n, a, b))) == \
+        a*gamma(a + 2)/(b + 1)/gamma(b + 3)
+    assert simplify(product(n*(n + 1)/(n - 1)/(n - 2), (n, a, b))) == \
+        b**2*(b - 1)*(1 + b)/(a - 1)**2/(a*(a - 2))
+
+【相关测试 5】
+测试文件：sympy/concrete/tests/test_products.py
+测试名称：test_special_products
+测试代码：
+def test_special_products():
+    # Wallis product
+    assert product((4*k)**2 / (4*k**2 - 1), (k, 1, n)) == \
+        4**n*factorial(n)**2/rf(Rational(1, 2), n)/rf(Rational(3, 2), n)
+
+    # Euler's product formula for sin
+    assert product(1 + a/k**2, (k, 1, n)) == \
+        rf(1 - sqrt(-a), n)*rf(1 + sqrt(-a), n)/factorial(n)**2
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

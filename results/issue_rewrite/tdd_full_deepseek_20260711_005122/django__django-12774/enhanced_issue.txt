@@ -1,0 +1,124 @@
+instance_id: django__django-12774
+
+issue_summary: QuerySet.in_bulk() 对通过 UniqueConstraint 声明唯一性的字段会错误地抛出 ValueError，认为该字段不是唯一字段。
+
+trigger_condition:
+{
+  "text": "对一个 Django 模型，其某个字段（如 slug）是通过 Meta.constraints 中的 UniqueConstraint 声明为唯一的，而不是通过字段参数 unique=True。然后对该模型的 QuerySet 调用 in_bulk() 方法，并指定该字段为 field_name 参数。",
+  "evidence": [
+    "Issue 中提供了示例模型定义和调用：Article.objects.in_bulk(field_name=\"slug\")",
+    "源码片段 1 显示 in_bulk 方法会检查 field_name 对应的字段是否具有 unique 属性。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "调用 in_bulk(field_name=\"slug\") 时抛出 ValueError，提示 \"in_bulk()'s field_name must be a unique field but 'slug' isn't.\"",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中提供了完整的 Traceback 和错误信息。",
+    "源码片段 1 第 690-691 行是抛出该异常的代码。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "in_bulk() 方法应该能够识别通过 UniqueConstraint 声明为唯一的字段，并允许将其用作 field_name 参数，正常返回以该字段值为键的对象字典。",
+  "evidence": [
+    "Issue 描述指出 \"It should be pretty simple to fix this\"，暗示这是预期行为。",
+    "相关测试 1 (test_in_bulk_with_field) 展示了使用 unique=True 的字段（如 slug）调用 in_bulk 成功的模式。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "django.db.models.query.QuerySet.in_bulk",
+    "kind": "method",
+    "source_path": "django/db/models/query.py",
+    "reason": "这是 Issue 中直接触发错误的 API 方法。"
+  },
+  {
+    "name": "django.db.models.constraints.UniqueConstraint",
+    "kind": "class",
+    "source_path": "django/db/models/constraints.py",
+    "reason": "Issue 的核心是 in_bulk 未能正确处理通过 UniqueConstraint 定义的唯一性。"
+  },
+  {
+    "name": "django.db.models.Model._meta.get_field",
+    "kind": "method",
+    "source_path": "",
+    "reason": "源码中 in_bulk 使用此方法获取字段对象并检查其 unique 属性。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "相似测试 test_in_bulk_with_field 中，Article 模型的 slug 字段可能通过 unique=True 定义唯一性。",
+    "target_pattern": "Article 模型的 slug 字段不设置 unique=True，而是通过 Meta.constraints 添加一个 UniqueConstraint(fields=[\"slug\"], ...) 来定义唯一性。",
+    "reason": "这将使字段的 field.unique 属性为 False，但模型级约束使其实际唯一，从而触发 in_bulk 方法中的错误检查。",
+    "confidence": "high"
+  },
+  {
+    "slot": "argument",
+    "current_pattern": "相似测试中 in_bulk 调用使用 field_name='slug'。",
+    "target_pattern": "保持 field_name='slug'，但模型定义变为上述模式。",
+    "reason": "输入参数不变，但底层模型状态（字段定义方式）变化，是触发缺陷的关键。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用 Article.objects.in_bulk([slug_value], field_name='slug') 时是否抛出 ValueError。",
+    "reason": "Issue 的核心错误现象就是抛出特定异常。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "如果未抛出异常，观察 in_bulk 返回的字典结构，键是否为 slug 值，值是否为对应对象。",
+    "reason": "验证修复后功能是否正常，返回正确的映射。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "测试中 Article 模型实例的 slug 字段值，以及模型 Meta.constraints 的配置。",
+    "reason": "确认测试设置符合 Issue 场景：字段通过 UniqueConstraint 唯一。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "对于通过 UniqueConstraint 定义唯一的字段，in_bulk(field_name=该字段) 应成功返回字典，不抛出 ValueError。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的错误信息字符串，因为修复后信息可能微调；避免断言字段的 field.unique 属性值。",
+    "reason": "修复的目标是功能支持，断言返回的字典映射正确能稳定验证功能，而不依赖具体的实现检查逻辑或错误信息措辞。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要一个 Django TestCase 类，并定义或导入一个模型，其某个字段通过 Meta.constraints 中的 UniqueConstraint 声明唯一。需要为该模型创建具有不同唯一字段值的实例。",
+    "source": "issue|retrieved_test|inference",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要配置数据库并运行迁移，以创建包含相应唯一约束的表。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "Article 模型在现有测试中的确切定义（slug 是 unique=True 还是通过其他方式定义唯一）需要确认。",
+  "in_bulk 方法内部具体如何检查字段的唯一性（除了 field.unique 外，是否还有其他属性或方法可以查询模型级约束）需要进一步分析源码。",
+  "修复后，in_bulk 对同时存在 unique=True 和 UniqueConstraint 的字段，或复合 UniqueConstraint 中的单个字段，行为应如何定义。"
+]

@@ -1,0 +1,169 @@
+{
+  "issue_summary": "cla() 和 clf() 方法在清除坐标轴或图形时，未能正确重置已移除艺术家的 .axes 和 .figure 属性。",
+  "trigger_condition": {
+    "text": "创建一个图形和坐标轴，添加一个艺术家（如线条），然后调用坐标轴的 cla() 方法或图形的 clf() 方法。",
+    "evidence": ["Issue 中展示了 `a.cla()` 后 `l.axes` 不为 None 的示例。", "相关测试 test_figure_clear 测试了 `fig.clear()` 和 `fig.clf()` 方法。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "调用 cla() 或 clf() 后，被清除的艺术家的 .axes 和 .figure 属性仍然指向原来的坐标轴和图形，而不是 None。",
+    "symptom_type": "state_not_updated",
+    "evidence": ["Issue 中 `print(l.axes)` 在 `a.cla()` 后返回了 `Axes(...)` 而非 `None`。", "相关测试 test_remove 表明 `remove()` 后艺术家的 `axes` 和 `figure` 应为 `None`。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "调用坐标轴的 cla() 方法或图形的 clf() 方法后，所有从该坐标轴或图形中移除的艺术家的 .axes 和 .figure 属性应被重置为 None。",
+    "evidence": ["Issue 标题和描述表明 `cla()` 和 `clf()` 应该取消设置 `.axes` 和 `.figure` 属性。", "相关测试 test_remove 展示了 `remove()` 后艺术家属性应为 `None` 的预期行为。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "Axes.cla",
+      "kind": "method",
+      "source_path": "lib/matplotlib/axes/_base.py",
+      "reason": "Issue 中触发 bug 的方法，用于清除坐标轴。"
+    },
+    {
+      "name": "Figure.clf",
+      "kind": "method",
+      "source_path": "lib/matplotlib/figure.py",
+      "reason": "Issue 中提到的另一个方法，用于清除图形。"
+    },
+    {
+      "name": "Artist.axes",
+      "kind": "property",
+      "source_path": "lib/matplotlib/artist.py",
+      "reason": "Issue 中观察到的未正确重置的属性。"
+    },
+    {
+      "name": "Artist.figure",
+      "kind": "property",
+      "source_path": "lib/matplotlib/artist.py",
+      "reason": "Issue 标题中提到的另一个应被重置的属性。"
+    },
+    {
+      "name": "plt.subplots",
+      "kind": "function",
+      "source_path": "lib/matplotlib/pyplot.py",
+      "reason": "Issue 示例中用于创建图形和坐标轴的 API。"
+    },
+    {
+      "name": "Axes.plot",
+      "kind": "method",
+      "source_path": "lib/matplotlib/axes/_axes.py",
+      "reason": "Issue 示例中用于创建艺术家（线条）的 API。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "lib/matplotlib/axes/_base.py",
+      "object": "Axes.cla",
+      "lines": "",
+      "reason": "该方法负责清除坐标轴内容，可能未正确遍历并重置所有艺术家的属性。"
+    },
+    {
+      "path": "lib/matplotlib/figure.py",
+      "object": "Figure.clf",
+      "lines": "",
+      "reason": "该方法负责清除图形内容，可能未正确遍历并重置所有艺术家的属性。"
+    },
+    {
+      "path": "lib/matplotlib/artist.py",
+      "object": "Artist._axes",
+      "lines": "",
+      "reason": "艺术家 .axes 属性的底层存储，其设置逻辑可能在清除操作中未被调用。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_remove",
+      "test_file": "lib/matplotlib/tests/test_artist.py",
+      "why_relevant": "它直接测试了艺术家被移除后 `.axes` 和 `.figure` 属性应变为 `None`，与 Issue 的预期行为一致。",
+      "reusable_parts": ["imports (plt, np)", "使用 `plt.subplots()` 创建图形和坐标轴", "创建艺术家（如 `ax.plot`）", "断言 `art.axes is None` 和 `art.figure is None` 的风格"],
+      "possible_gap": "它测试的是 `remove()` 方法，而不是 `cla()` 或 `clf()` 方法。"
+    },
+    {
+      "test_name": "test_figure_clear",
+      "test_file": "lib/matplotlib/tests/test_figure.py",
+      "why_relevant": "它测试了 `fig.clear()` 和 `fig.clf()` 方法，并断言清除后 `fig.axes == []`，但未检查被清除艺术家的属性。",
+      "reusable_parts": ["参数化测试装饰器", "使用 `getattr(fig, clear_meth)()` 调用清除方法", "断言 `fig.axes == []` 来验证图形状态"],
+      "possible_gap": "它只验证了图形层面的坐标轴列表为空，没有验证单个艺术家对象的属性状态。"
+    },
+    {
+      "test_name": "test_inverted_cla",
+      "test_file": "lib/matplotlib/tests/test_axes.py",
+      "why_relevant": "它测试了 `ax.cla()` 方法，并检查了坐标轴反转状态，但未涉及艺术家属性。",
+      "reusable_parts": ["使用 `ax.cla()`", "创建图形和坐标轴的设置", "断言坐标轴属性的风格"],
+      "possible_gap": "测试焦点是坐标轴的反转状态，而非艺术家的 `.axes` 属性。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "call_chain",
+      "current_pattern": "在相关测试中，艺术家通过 `remove()` 方法被移除。",
+      "target_pattern": "艺术家通过坐标轴的 `cla()` 方法或图形的 `clf()` 方法被清除。",
+      "reason": "Issue 表明 `remove()` 能正确重置属性，但 `cla()`/`clf()` 不能，因此变异调用链可能触发缺陷。",
+      "confidence": "high"
+    },
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试在 `remove()` 后检查艺术家属性。",
+      "target_pattern": "在 `cla()` 或 `clf()` 后检查艺术家属性。",
+      "reason": "将检查点从 `remove()` 后改为清除方法后，可以观察属性是否被错误地保留。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "state",
+      "expression_hint": "artist.axes",
+      "reason": "Issue 的核心是 `artist.axes` 在清除后应为 `None`，观察其值可直接判断缺陷。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "artist.figure",
+      "reason": "Issue 标题也提到了 `.figure` 属性，观察其值可确保两个属性都被正确处理。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "ax.artists 或 ax._children",
+      "reason": "观察坐标轴内部艺术家列表的变化，以确认清除操作是否将艺术家从坐标轴中移除。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "在调用 `ax.cla()` 或 `fig.clf()` 后，之前添加的艺术家的 `.axes` 属性应为 `None`。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的坐标轴对象表示或与特定坐标轴实例的相等性，因为坐标轴可能被销毁或重用。",
+      "reason": "直接断言 `artist.axes is None` 与 Issue 描述和 `remove()` 的预期行为一致，且稳定不依赖具体对象 ID。"
+    },
+    {
+      "assertion_goal": "在调用 `ax.cla()` 或 `fig.clf()` 后，之前添加的艺术家的 `.figure` 属性应为 `None`。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的图形对象表示。",
+      "reason": "确保 `.figure` 属性也被正确重置，符合 Issue 标题的完整描述。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 `plt.subplots()` 创建图形和坐标轴，使用 `ax.plot()` 创建线条艺术家。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能需要导入 `matplotlib.pyplot as plt` 和 `numpy as np`。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可以放在现有的测试类或文件中，如 `test_artist.py` 或 `test_axes.py`。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "`cla()` 和 `clf()` 方法内部遍历和清除艺术家的具体逻辑是什么？",
+    "是否所有类型的艺术家（如图像、文本、补丁）都会受到此缺陷影响？",
+    "清除操作后，艺术家的其他内部状态（如 `stale` 属性）应如何变化？"
+  ]
+}

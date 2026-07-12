@@ -1,0 +1,122 @@
+{
+  "issue_summary": "在 formfield_for_manytomany() 中设置 widget 参数无效，与 formfield_for_foreignkey() 的行为不一致。",
+  "trigger_condition": {
+    "text": "在自定义 ModelAdmin 的 formfield_for_manytomany 方法中，通过 kwargs 传入 widget 参数。",
+    "evidence": ["Issue 描述：'It does not work when I set widget param to function formfield_for_manytomany().'"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "widget 参数被忽略，未应用到生成的表单字段上。",
+    "symptom_type": "wrong_return",
+    "evidence": ["Issue 描述：'It does not work...' 以及 'This is different from the formfield_for_foreignkey() function.' 暗示了行为差异。"],
+    "confidence": "medium"
+  },
+  "expected_behavior": {
+    "text": "在 formfield_for_manytomany() 中传入的 widget 参数应该被正确处理，并应用到生成的 ManyToMany 表单字段上，使其行为与 formfield_for_foreignkey() 一致。",
+    "evidence": ["Issue 标题 'Allow overridding widget in formfield_for_manytomany().' 暗示了期望功能。", "Issue 通过对比 formfield_for_foreignkey() 暗示了期望的一致性行为。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "formfield_for_manytomany",
+      "kind": "method",
+      "source_path": "",
+      "reason": "Issue 直接报告此方法中 widget 参数设置无效。"
+    },
+    {
+      "name": "formfield_for_foreignkey",
+      "kind": "method",
+      "source_path": "",
+      "reason": "Issue 将其作为正确行为的参照。"
+    },
+    {
+      "name": "ModelAdmin",
+      "kind": "class",
+      "source_path": "",
+      "reason": "formfield_for_manytomany 和 formfield_for_foreignkey 是 ModelAdmin 的方法。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "",
+      "object": "formfield_for_manytomany",
+      "lines": "",
+      "reason": "Issue 明确指出该方法中 widget 参数设置无效。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_formfield_overrides",
+      "test_file": "tests/admin_widgets/tests.py",
+      "why_relevant": "测试了通过 formfield_overrides 配置覆盖 widget 的功能，与通过方法参数覆盖 widget 相关。",
+      "reusable_parts": ["assertFormfield 辅助方法的使用", "ModelAdmin 子类的定义模式", "widget 类型检查"],
+      "possible_gap": "该测试使用 formfield_overrides 配置，而非通过 formfield_for_manytomany 方法的 kwargs 参数传递 widget。"
+    },
+    {
+      "test_name": "test_many_to_many",
+      "test_file": "tests/admin_widgets/tests.py",
+      "why_relevant": "直接测试了 ManyToMany 字段的默认表单字段生成，涉及 formfield_for_dbfield 对 ManyToManyField 的处理。",
+      "reusable_parts": ["assertFormfield 辅助方法的使用", "Band 和 Member 模型的使用", "对 ManyToMany 字段 (Band.members) 的测试"],
+      "possible_gap": "该测试检查默认行为，未测试通过 formfield_for_manytomany 方法参数覆盖 widget。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "相关测试中，widget 通过 formfield_overrides 配置或使用默认值。",
+      "target_pattern": "在 formfield_for_manytomany 方法内部，通过 kwargs['widget'] = SomeWidget 传入自定义 widget。",
+      "reason": "Issue 表明通过方法参数传入 widget 是触发缺陷的条件。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "测试通常直接调用 formfield_for_dbfield 或使用 assertFormfield 辅助方法。",
+      "target_pattern": "创建自定义 ModelAdmin 子类，重写 formfield_for_manytomany 方法并传入 widget 参数，然后调用该方法获取表单字段。",
+      "reason": "需要模拟 Issue 描述的用户操作：在自定义 ModelAdmin 的 formfield_for_manytomany 中设置 widget。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "formfield_for_manytomany 返回的 forms.Field 实例的 .widget 属性。",
+      "reason": "Issue 的核心是返回的表单字段是否使用了传入的 widget。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "type(formfield_for_manytomany(...).widget)",
+      "reason": "检查返回字段的 widget 类型是否与传入的 widget 参数类型一致。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "通过 formfield_for_manytomany 的 kwargs 传入的 widget 被成功应用到返回的表单字段上。",
+      "preferred_assertion_style": "isinstance",
+      "avoid": "避免断言完整的 repr 字符串或与具体模型/字段名称强绑定的属性。",
+      "reason": "断言 widget 类型是稳定且与 Issue 核心直接相关的。"
+    },
+    {
+      "assertion_goal": "formfield_for_manytomany 与 formfield_for_foreignkey 在接收 widget 参数时行为一致。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言内部实现细节或非公开API的调用结果。",
+      "reason": "Issue 强调了两个方法行为应一致，可通过比较返回字段的 widget 类型是否相同来验证。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要继承 SimpleTestCase 或 TestCase，并导入必要的模块：admin, forms, 以及相关的模型（如 Band, Member）。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要创建一个简单的 ModelAdmin 子类来重写 formfield_for_manytomany 方法。",
+      "source": "inference",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "缺陷的确切源码位置（具体在 django/contrib/admin/options.py 还是其他地方）。",
+    "widget 参数被忽略的具体机制（例如，是否在方法内部被覆盖，或者在父类处理中被丢弃）。",
+    "除了 widget 参数，其他通过 kwargs 传入的参数（如 queryset）是否也受影响。"
+  ]
+}

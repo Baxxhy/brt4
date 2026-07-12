@@ -1,0 +1,119 @@
+instance_id: astropy__astropy-12907
+
+issue_summary: Modeling 的 separability_matrix 函数在计算嵌套复合模型的可分离性矩阵时，对线性模型输入输出的可分离性判断错误。
+
+trigger_condition:
+{
+  "text": "调用 separability_matrix 函数，传入一个由 '&' 运算符连接 Pix2Sky_TAN 模型与另一个由 '&' 运算符连接两个 Linear1D 模型构成的复合模型。",
+  "evidence": [
+    "Issue 中展示了 `separability_matrix(m.Pix2Sky_TAN() & cm)` 的调用，其中 `cm = m.Linear1D(10) & m.Linear1D(5)`。",
+    "Issue 指出对于非嵌套的复合模型 `m.Pix2Sky_TAN() & m.Linear1D(10) & m.Linear1D(5)`，结果是正确的，但嵌套后结果错误。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "返回的可分离性矩阵中，原本应为 True 的某些对角线元素（对应线性模型输入输出）错误地变为 True，表明系统错误地认为这些输入输出是相关的。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 中展示了 `separability_matrix(m.Pix2Sky_TAN() & cm)` 的输出矩阵，其中最后两行两列的子矩阵为全 True，而预期应为 `[[True, False], [False, True]]`。",
+    "Issue 提问者认为这感觉像是一个 bug。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "对于嵌套的复合模型，其可分离性矩阵应正确反映各子模型输入输出之间的独立性。具体地，两个 Linear1D 模型的输入输出应彼此独立，在矩阵中表现为对应的 2x2 子矩阵是对角线为 True 的矩阵。",
+  "evidence": [
+    "Issue 中展示了非嵌套复合模型 `m.Pix2Sky_TAN() & m.Linear1D(10) & m.Linear1D(5)` 的正确输出矩阵，其中对应两个 Linear1D 的部分是对角线为 True 的 2x2 子矩阵。",
+    "Issue 提问者期望嵌套模型 `m.Pix2Sky_TAN() & cm` 应有类似的可分离性行为。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "separability_matrix",
+    "kind": "function",
+    "source_path": "astropy/modeling/separable.py",
+    "reason": "这是 Issue 中直接调用的、报告有问题的函数。"
+  },
+  {
+    "name": "Linear1D",
+    "kind": "class",
+    "source_path": "astropy/modeling/functional_models.py",
+    "reason": "Issue 中用于构造复合模型 `cm` 的组件。"
+  },
+  {
+    "name": "CompoundModel",
+    "kind": "class",
+    "source_path": "astropy/modeling/core.py",
+    "reason": "`&` 运算符会创建复合模型，其可分离性计算逻辑可能在此类中或相关函数中。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "测试 `test_separable` 中参数化的 `compound_model` 可能包含各种非嵌套或简单嵌套的复合模型。",
+    "target_pattern": "构造一个嵌套的复合模型，即一个由 `&` 连接的复合模型作为另一个 `&` 连接的右操作数（或左操作数），例如 `model1 & (model2 & model3)`。",
+    "reason": "Issue 表明当复合模型 `cm` 作为另一个 `&` 运算的操作数时，`separability_matrix` 的计算出现偏差。",
+    "confidence": "high"
+  },
+  {
+    "slot": "operator",
+    "current_pattern": "相似测试可能使用 `&` 连接多个基本模型（如 `Shift` 和 `Gaussian1D`）。",
+    "target_pattern": "使用 `&` 连接一个变换模型（如 `Pix2Sky_TAN`）和一个已经由 `&` 连接两个 `Linear1D` 的复合模型。",
+    "reason": "Issue 中触发 bug 的模型结构是 `Pix2Sky_TAN() & (Linear1D(10) & Linear1D(5))`。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "separability_matrix(nested_compound_model)",
+    "reason": "直接观察函数的返回值是否与预期矩阵匹配，是判断 Issue 是否触发的核心。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "separability_matrix(flat_compound_model)",
+    "reason": "将嵌套结构展开为扁平结构后调用同一函数，对比两者的返回值差异，有助于定位问题是否源于嵌套。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证对于嵌套复合模型，`separability_matrix` 返回的矩阵中，对应两个 Linear1D 输入输出的 2x2 子矩阵是一个对角线为 True、非对角线为 False 的单位矩阵。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言完整的、包含 Pix2Sky_TAN 部分的整个矩阵，因为那部分可能正确且稳定。应聚焦于有问题的子矩阵。",
+    "reason": "Issue 的核心是嵌套导致线性模型部分的可分离性判断错误，断言子矩阵能更精准地捕捉问题。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 `astropy.modeling.models` 和 `astropy.modeling.separable.separability_matrix`。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要在 pytest 环境中运行，并使用 `assert_allclose` 或 `assert_array_equal` 进行数组比较。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "`_separable` 辅助函数的具体实现逻辑及其对嵌套复合模型的处理方式。",
+  "除了 `&` 运算符，其他运算符（如 `|`）组合嵌套模型是否也会出现类似问题。",
+  "`Pix2Sky_TAN` 模型的具体可分离性属性，以及它是否对 bug 有特殊影响。"
+]

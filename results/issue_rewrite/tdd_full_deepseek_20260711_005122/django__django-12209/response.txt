@@ -1,0 +1,145 @@
+{
+  "issue_summary": "当主键字段有默认值且显式指定 pk 值时，保存模型实例的行为从 INSERT+UPDATE 变为两次 INSERT，导致第二次 INSERT 失败。",
+  "trigger_condition": {
+    "text": "创建一个具有默认主键（如 UUIDField(default=uuid4)）的模型实例，然后创建另一个具有相同显式 pk 值的实例并调用 save()。",
+    "evidence": ["Issue 中描述了 s0 = Sample.objects.create(); s1 = Sample(pk=s0.pk, name='Test 1'); s1.save() 的操作序列。", "Issue 提到行为在 Django 3.0 中改变，且与 default=uuid4 有关。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "第二个 save() 操作尝试执行 INSERT 而非 UPDATE，导致数据库完整性错误（如主键冲突）。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 说明 'this results in two INSERTs (naturally the second one fails)'。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当保存一个具有显式 pk 值且该 pk 已存在于数据库中的模型实例时，应执行 UPDATE 操作而非 INSERT。",
+    "evidence": ["Issue 提到 Django 2.2 及更早版本中，该操作序列导致 'an INSERT followed by an UPDATE'。", "Issue 推测意图可能是 'only change the behaviour if an explicit pk value was not set on the model instance being saved'，暗示期望的向后兼容行为。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "Model.save",
+      "kind": "method",
+      "source_path": "",
+      "reason": "Issue 的核心是关于模型实例保存行为的变化。"
+    },
+    {
+      "name": "models.UUIDField",
+      "kind": "class",
+      "source_path": "django/db/models/fields/__init__.py",
+      "reason": "Issue 中使用的模型字段类型，且其 default 参数是关键。"
+    },
+    {
+      "name": "loaddata",
+      "kind": "module",
+      "source_path": "django/core/management/commands/loaddata.py",
+      "reason": "Issue 提到该行为变化也影响了 loaddata 命令。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/base.py",
+      "object": "Model.save_base",
+      "lines": "",
+      "reason": "该方法是决定执行 INSERT 还是 UPDATE 的核心逻辑，Issue 链接的 ticket #29260 可能与此相关。"
+    },
+    {
+      "path": "django/db/models/fields/__init__.py",
+      "object": "Field",
+      "lines": "",
+      "reason": "主键字段的 default 属性可能影响了保存时对 pk 是否被设置的判断。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_save_primary_with_default",
+      "test_file": "tests/basic/tests.py",
+      "why_relevant": "直接测试了具有默认主键的模型保存行为，并关注查询数量（INSERT vs UPDATE）。",
+      "reusable_parts": ["ModelInstanceCreationTests 测试类结构", "assertNumQueries 的使用", "PrimaryKeyWithDefault 模型的构造"],
+      "possible_gap": "该测试只检查了单个新实例的保存（应 INSERT），没有测试为现有 pk 创建新实例并保存的场景（应 UPDATE）。"
+    },
+    {
+      "test_name": "test_uuid_pk_on_save",
+      "test_file": "tests/model_fields/test_uuid.py",
+      "why_relevant": "测试了 UUID 作为主键的模型保存，涉及 id=None 的创建和获取。",
+      "reusable_parts": ["PrimaryKeyUUIDModel 的导入和使用", "objects.create 和 objects.get 的调用", "对 pk 值的断言"],
+      "possible_gap": "没有测试为现有 UUID pk 显式创建新实例并保存的场景。"
+    },
+    {
+      "test_name": "test_force_update",
+      "test_file": "tests/force_insert_update/tests.py",
+      "why_relevant": "测试了 save() 方法中 force_insert 和 force_update 参数的行为，直接关系到 INSERT/UPDATE 决策逻辑。",
+      "reusable_parts": ["force_update=True 和 force_insert=True 的使用", "对 DatabaseError 和 ValueError 的断言", "事务块的使用"],
+      "possible_gap": "测试主要关注显式 force 参数，而非默认的、由 pk 和 default 触发的自动决策逻辑。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "object_state",
+      "current_pattern": "相似测试中通常创建新实例（pk 为 None 或由 default 生成）并保存。",
+      "target_pattern": "创建一个新模型实例，但其 pk 属性被显式设置为一个已存在于数据库中的值（来自另一个实例），然后调用 save()。",
+      "reason": "Issue 表明，当 pk 有 default 且被显式设置时，保存决策逻辑可能错误地选择了 INSERT。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "通常直接调用 Model.save() 或 Model.objects.create()。",
+      "target_pattern": "先通过 Model.objects.create() 创建一个实例（获取其 pk），然后使用 Model(pk=existing_pk, ...) 构造第二个实例，再调用第二个实例的 save()。",
+      "reason": "Issue 中描述的触发步骤正是这种顺序，以模拟 loaddata 或显式指定 pk 的场景。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "sql",
+      "expression_hint": "在 save() 调用期间执行的 SQL 查询（INSERT 或 UPDATE）。",
+      "reason": "Issue 的核心是 SQL 操作类型从 UPDATE 错误地变为 INSERT，观测查询可以明确行为。"
+    },
+    {
+      "kind": "exception",
+      "expression_hint": "第二次 save() 调用是否引发 IntegrityError（如主键冲突）。",
+      "reason": "错误症状是第二次 INSERT 失败，观测异常可以确认 bug 被触发。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "第二个实例在 save() 调用前后的 _state.adding 属性（或类似内部标志）。",
+      "reason": "该属性可能影响 Django 决定执行 INSERT 还是 UPDATE。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "当保存一个具有已存在 pk 的实例时，应执行 UPDATE 查询，且不引发 IntegrityError。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "断言精确的 SQL 字符串，因为不同数据库后端可能有差异。",
+      "reason": "修复后，行为应恢复为执行 UPDATE，因此断言不包含 'INSERT' 片段（或使用 assertNumQueries 检查 UPDATE 数量）是稳定且与 Issue 对齐的。"
+    },
+    {
+      "assertion_goal": "保存操作应成功完成，数据库中的对应记录被更新。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "断言完整的 repr 或精确的返回值。",
+      "reason": "可以通过比较保存前后从数据库获取的对象的字段值，来验证 UPDATE 是否生效。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要一个具有 UUIDField(primary_key=True, default=uuid4) 的测试模型。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要使用 TestCase 和数据库支持。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 assertNumQueries 来观测查询类型和数量。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "缺陷的确切源码位置（如 Model.save_base 中的哪部分逻辑）以及 default 参数如何影响 pk 的 '设置' 状态判断。",
+    "除了 UUIDField，其他具有默认值的主键字段（如 AutoField 的变体）是否也受相同问题影响。",
+    "loaddata 命令内部如何调用 save()，以及其特定的触发条件细节。"
+  ]
+}

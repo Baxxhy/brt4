@@ -1,0 +1,638 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Django Admin with Inlines not using UUIDField default value
+Description
+	 
+		(last modified by Joseph Metzinger)
+	 
+Hello,
+I am a long time django user, first time bug reporter, so please let me know if I need to do anything else to help get this bug fixed :)
+I am using Django 3.1.3 and python 3.8.5 and have cerated a toy project to illustrate the bug. I have the following models:
+class UUIDModel(models.Model):
+	pkid = models.BigAutoField(primary_key=True, editable=False)
+	id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+	class Meta:
+		abstract = True
+class Thing(UUIDModel):
+	name = models.CharField(max_length=191)
+class SubThing(models.Model):
+	name = models.CharField(max_length=191)
+	thing = models.ForeignKey(
+		'bugapp.Thing',
+		to_field='id',
+		on_delete = models.CASCADE,
+		related_name='subthings',
+	)
+And the following admin.py file:
+class SubThingInline(admin.StackedInline):
+	model = SubThing
+@admin.register(Thing)
+class ThingAdmin(admin.ModelAdmin):
+	list_display = ('name',)
+	ordering = ('pkid',)
+	inlines = (SubThingInline,)
+When logging into the admin, if you delete all of the entries for "subthings", add a name, and save the model, it will work. As soon as you try to add a subthing alongside the main Thing, it fails with the following exception:
+​https://dpaste.com/8EU4FF6RW
+It shows that the value of "id" in the Thing model is being set to null.
+I believe this is a bug in django.
+Thanks!
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/db/models/fields/__init__.py
+对象名称：UUIDField
+节点类型：class
+父节点：__init__
+行号范围：2708-2760
+代码：
+class UUIDField(Field):
+    default_error_messages = {
+        "invalid": _("“%(value)s” is not a valid UUID."),
+    }
+    description = _("Universally unique identifier")
+    empty_strings_allowed = False
+    def __init__(self, verbose_name=None, **kwargs):
+    def deconstruct(self):
+    def get_internal_type(self):
+    def get_prep_value(self, value):
+    def get_db_prep_value(self, value, connection, prepared=False):
+    def to_python(self, value):
+    def formfield(self, **kwargs):
+
+
+【源码片段 2】
+文件路径：django/contrib/messages/storage/cookie.py
+对象名称：default
+节点类型：class_function
+父节点：MessageEncoder
+行号范围：18-26
+代码：
+    def default(self, obj):
+        if isinstance(obj, Message):
+            # Using 0/1 here instead of False/True to produce more compact json
+            is_safedata = 1 if isinstance(obj.message, SafeData) else 0
+            message = [self.message_key, is_safedata, obj.level, obj.message]
+            if obj.extra_tags is not None:
+                message.append(obj.extra_tags)
+            return message
+        return super().default(obj)
+
+
+【源码片段 3】
+文件路径：django/db/models/base.py
+对象名称：Model
+节点类型：class
+父节点：base
+行号范围：459-2530
+代码：
+class Model(AltersData, metaclass=ModelBase):
+    def __init__(self, *args, **kwargs):
+    @classmethod
+    def from_db(cls, db, field_names, values):
+    def __repr__(self):
+    def __str__(self):
+    def __eq__(self, other):
+    def __hash__(self):
+    def __reduce__(self):
+    def __getstate__(self):
+    def __setstate__(self, state):
+    def _get_pk_val(self, meta=None):
+    def _set_pk_val(self, value):
+    pk = property(_get_pk_val, _set_pk_val)
+    def get_deferred_fields(self):
+    def refresh_from_db(self, using=None, fields=None):
+    async def arefresh_from_db(self, using=None, fields=None):
+    def serializable_value(self, field_name):
+    def save(
+        self, force_insert=False, force_update=False, using=None, update_fields=None
+    ):
+    save.alters_data = True
+    async def asave(
+        self, force_insert=False, force_update=False, using=None, update_fields=None
+    ):
+    asave.alters_data = True
+    @classmethod
+    def _validate_force_insert(cls, force_insert):
+    def save_base(
+        self,
+        raw=False,
+        force_insert=False,
+        force_update=False,
+        using=None,
+        update_fields=None,
+    ):
+    save_base.alters_data = True
+    def _save_parents(
+        self, cls, using, update_fields, force_insert, updated_parents=None
+    ):
+    def _save_table(
+        self,
+        raw=False,
+        cls=None,
+        force_insert=False,
+        force_update=False,
+        using=None,
+        update_fields=None,
+    ):
+    def _do_update(self, base_qs, using, pk_val, values, update_fields, forced_update):
+    def _do_insert(self, manager, using, fields, returning_fields, raw):
+    def _prepare_related_fields_for_save(self, operation_name, fields=None):
+    def delete(self, using=None, keep_parents=False):
+    delete.alters_data = True
+    async def adelete(self, using=None, keep_parents=False):
+    adelete.alters_data = True
+    def _get_FIELD_display(self, field):
+    def _get_next_or_previous_by_FIELD(self, field, is_next, **kwargs):
+    def _get_next_or_previous_in_order(self, is_next):
+    def _get_field_value_map(self, meta, exclude=None):
+    def prepare_database_save(self, field):
+    def clean(self):
+    def validate_unique(self, exclude=None):
+    def _get_unique_checks(self, exclude=None, include_meta_constraints=False):
+    def _perform_unique_checks(self, unique_checks):
+    def _perform_date_checks(self, date_checks):
+    def date_error_message(self, lookup_type, field_name, unique_for):
+    def unique_error_message(self, model_class, unique_check):
+    def get_constraints(self):
+    def validate_constraints(self, exclude=None):
+    def full_clean(self, exclude=None, validate_unique=True, validate_constraints=True):
+    def clean_fields(self, exclude=None):
+    @classmethod
+    def check(cls, **kwargs):
+    @classmethod
+    def _check_default_pk(cls):
+    @classmethod
+    def _check_db_table_comment(cls, databases):
+    @classmethod
+    def _check_swappable(cls):
+    @classmethod
+    def _check_model(cls):
+    @classmethod
+    def _check_managers(cls, **kwargs):
+    @classmethod
+    def _check_fields(cls, **kwargs):
+    @classmethod
+    def _check_m2m_through_same_relationship(cls):
+    @classmethod
+    def _check_id_field(cls):
+    @classmethod
+    def _check_field_name_clashes(cls):
+    @classmethod
+    def _check_column_name_clashes(cls):
+    @classmethod
+    def _check_model_name_db_lookup_clashes(cls):
+    @classmethod
+    def _check_property_name_related_field_accessor_clashes(cls):
+    @classmethod
+    def _check_single_primary_key(cls):
+    @classmethod
+    def _check_index_together(cls):
+    @classmethod
+    def _check_unique_together(cls):
+    @classmethod
+    def _check_indexes(cls, databases):
+    @classmethod
+    def _check_local_fields(cls, fields, option):
+    @classmethod
+    def _check_ordering(cls):
+    @classmethod
+    def _check_long_column_names(cls, databases):
+    @classmethod
+    def _get_expr_references(cls, expr):
+    @classmethod
+    def _check_constraints(cls, databases):
+
+
+【源码片段 4】
+文件路径：django/contrib/admin/options.py
+对象名称：StackedInline
+节点类型：class
+父节点：options
+行号范围：2528-2529
+代码：
+class StackedInline(InlineModelAdmin):
+    template = "admin/edit_inline/stacked.html"
+
+
+【源码片段 5】
+文件路径：django/contrib/admin/options.py
+对象名称：ModelAdmin
+节点类型：class
+父节点：options
+行号范围：641-2314
+代码：
+class ModelAdmin(BaseModelAdmin):
+    """Encapsulate all admin options and functionality for a given model."""
+    list_display = ("__str__",)
+    list_display_links = ()
+    list_filter = ()
+    list_select_related = False
+    list_per_page = 100
+    list_max_show_all = 200
+    list_editable = ()
+    search_fields = ()
+    search_help_text = None
+    date_hierarchy = None
+    save_as = False
+    save_as_continue = True
+    save_on_top = False
+    paginator = Paginator
+    preserve_filters = True
+    show_facets = ShowFacets.ALLOW
+    inlines = ()
+    add_form_template = None
+    change_form_template = None
+    change_list_template = None
+    delete_confirmation_template = None
+    delete_selected_confirmation_template = None
+    object_history_template = None
+    popup_response_template = None
+    actions = ()
+    action_form = helpers.ActionForm
+    actions_on_top = True
+    actions_on_bottom = False
+    actions_selection_counter = True
+    checks_class = ModelAdminChecks
+    def __init__(self, model, admin_site):
+    def __str__(self):
+    def __repr__(self):
+    def get_inline_instances(self, request, obj=None):
+    def get_urls(self):
+    @property
+    def urls(self):
+    @property
+    def media(self):
+    def get_model_perms(self, request):
+    def _get_form_for_get_fields(self, request, obj):
+    def get_form(self, request, obj=None, change=False, **kwargs):
+    def get_changelist(self, request, **kwargs):
+    def get_changelist_instance(self, request):
+    def get_object(self, request, object_id, from_field=None):
+    def get_changelist_form(self, request, **kwargs):
+    def get_changelist_formset(self, request, **kwargs):
+    def get_formsets_with_inlines(self, request, obj=None):
+    def get_paginator(
+        self, request, queryset, per_page, orphans=0, allow_empty_first_page=True
+    ):
+    def log_addition(self, request, obj, message):
+    def log_change(self, request, obj, message):
+    def log_deletion(self, request, obj, object_repr):
+    def action_checkbox(self, obj):
+    @staticmethod
+    def _get_action_description(func, name):
+    def _get_base_actions(self):
+    def _filter_actions_by_permissions(self, request, actions):
+    def get_actions(self, request):
+    def get_action_choices(self, request, default_choices=models.BLANK_CHOICE_DASH):
+    def get_action(self, action):
+    def get_list_display(self, request):
+    def get_list_display_links(self, request, list_display):
+    def get_list_filter(self, request):
+    def get_list_select_related(self, request):
+    def get_search_fields(self, request):
+    def get_search_results(self, request, queryset, search_term):
+    def get_preserved_filters(self, request):
+    def construct_change_message(self, request, form, formsets, add=False):
+    def message_user(
+        self, request, message, level=messages.INFO, extra_tags="", fail_silently=False
+    ):
+    def save_form(self, request, form, change):
+    def save_model(self, request, obj, form, change):
+    def delete_model(self, request, obj):
+    def delete_queryset(self, request, queryset):
+    def save_formset(self, request, form, formset, change):
+    def save_related(self, request, form, formsets, change):
+    def render_change_form(
+        self, request, context, add=False, change=False, form_url="", obj=None
+    ):
+    def response_add(self, request, obj, post_url_continue=None):
+    def response_change(self, request, obj):
+    def _response_post_save(self, request, obj):
+    def response_post_save_add(self, request, obj):
+    def response_post_save_change(self, request, obj):
+    def response_action(self, request, queryset):
+    def response_delete(self, request, obj_display, obj_id):
+    def render_delete_form(self, request, context):
+    def get_inline_formsets(self, request, formsets, inline_instances, obj=None):
+    def get_changeform_initial_data(self, request):
+    def _get_obj_does_not_exist_redirect(self, request, opts, object_id):
+    @csrf_protect_m
+    def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
+    def _changeform_view(self, request, object_id, form_url, extra_context):
+    def add_view(self, request, form_url="", extra_context=None):
+    def change_view(self, request, object_id, form_url="", extra_context=None):
+    def _get_edited_object_pks(self, request, prefix):
+    def _get_list_editable_queryset(self, request, prefix):
+    @csrf_protect_m
+    def changelist_view(self, request, extra_context=None):
+    def get_deleted_objects(self, objs, request):
+    @csrf_protect_m
+    def delete_view(self, request, object_id, extra_context=None):
+    def _delete_view(self, request, object_id, extra_context):
+    def history_view(self, request, object_id, extra_context=None):
+    def get_formset_kwargs(self, request, obj, inline, prefix):
+    def _create_formsets(self, request, obj, change):
+
+
+【源码片段 6】
+文件路径：django/db/models/fields/related.py
+对象名称：ForeignKey
+节点类型：class
+父节点：related
+行号范围：919-1214
+代码：
+class ForeignKey(ForeignObject):
+    """
+    Provide a many-to-one relation by adding a column to the local model
+    to hold the remote value.
+
+    By default ForeignKey will target the pk of the remote model but this
+    behavior can be changed by using the ``to_field`` argument.
+    """
+    descriptor_class = ForeignKeyDeferredAttribute
+    many_to_many = False
+    many_to_one = True
+    one_to_many = False
+    one_to_one = False
+    rel_class = ManyToOneRel
+    empty_strings_allowed = False
+    default_error_messages = {
+        "invalid": _("%(model)s instance with %(field)s %(value)r does not exist.")
+    }
+    description = _("Foreign Key (type determined by related field)")
+    def __init__(
+        self,
+        to,
+        on_delete,
+        related_name=None,
+        related_query_name=None,
+        limit_choices_to=None,
+        parent_link=False,
+        to_field=None,
+        db_constraint=True,
+        **kwargs,
+    ):
+    def __class_getitem__(cls, *args, **kwargs):
+    def check(self, **kwargs):
+    def _check_on_delete(self):
+    def _check_unique(self, **kwargs):
+    def deconstruct(self):
+    def to_python(self, value):
+    @property
+    def target_field(self):
+    def validate(self, value, model_instance):
+    def resolve_related_fields(self):
+    def get_attname(self):
+    def get_attname_column(self):
+    def get_default(self):
+    def get_db_prep_save(self, value, connection):
+    def get_db_prep_value(self, value, connection, prepared=False):
+    def get_prep_value(self, value):
+    def contribute_to_related_class(self, cls, related):
+    def formfield(self, *, using=None, **kwargs):
+    def db_check(self, connection):
+    def db_type(self, connection):
+    def cast_db_type(self, connection):
+    def db_parameters(self, connection):
+    def convert_empty_strings(self, value, expression, connection):
+    def get_db_converters(self, connection):
+    def get_col(self, alias, output_field=None):
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/admin_inlines/tests.py
+测试名称：test_inline_nonauto_noneditable_pk
+测试代码：
+@override_settings(ROOT_URLCONF="admin_inlines.urls")
+class TestInline(TestDataMixin, TestCase):
+    def test_inline_nonauto_noneditable_pk(self):
+        response = self.client.get(reverse("admin:admin_inlines_author_add"))
+        self.assertContains(
+            response,
+            '<input id="id_nonautopkbook_set-0-rand_pk" '
+            'name="nonautopkbook_set-0-rand_pk" type="hidden">',
+            html=True,
+        )
+        self.assertContains(
+            response,
+            '<input id="id_nonautopkbook_set-2-0-rand_pk" '
+            'name="nonautopkbook_set-2-0-rand_pk" type="hidden">',
+            html=True,
+        )
+
+【相关测试 2】
+测试文件：tests/admin_inlines/tests.py
+测试名称：test_inline_nonauto_noneditable_inherited_pk
+测试代码：
+@override_settings(ROOT_URLCONF="admin_inlines.urls")
+class TestInline(TestDataMixin, TestCase):
+    def test_inline_nonauto_noneditable_inherited_pk(self):
+        response = self.client.get(reverse("admin:admin_inlines_author_add"))
+        self.assertContains(
+            response,
+            '<input id="id_nonautopkbookchild_set-0-nonautopkbook_ptr" '
+            'name="nonautopkbookchild_set-0-nonautopkbook_ptr" type="hidden">',
+            html=True,
+        )
+        self.assertContains(
+            response,
+            '<input id="id_nonautopkbookchild_set-2-nonautopkbook_ptr" '
+            'name="nonautopkbookchild_set-2-nonautopkbook_ptr" type="hidden">',
+            html=True,
+        )
+
+【相关测试 3】
+测试文件：tests/admin_inlines/tests.py
+测试名称：test_create_inlines_on_inherited_model
+测试代码：
+@override_settings(ROOT_URLCONF="admin_inlines.urls")
+class TestInline(TestDataMixin, TestCase):
+    def test_create_inlines_on_inherited_model(self):
+        """
+        An object can be created with inlines when it inherits another class.
+        """
+        data = {
+            "name": "Martian",
+            "sighting_set-TOTAL_FORMS": 1,
+            "sighting_set-INITIAL_FORMS": 0,
+            "sighting_set-MAX_NUM_FORMS": 0,
+            "sighting_set-0-place": "Zone 51",
+            "_save": "Save",
+        }
+        response = self.client.post(
+            reverse("admin:admin_inlines_extraterrestrial_add"), data
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Sighting.objects.filter(et__name="Martian").count(), 1)
+
+【相关测试 4】
+测试文件：tests/admin_inlines/tests.py
+测试名称：test_inline_editable_pk
+测试代码：
+@override_settings(ROOT_URLCONF="admin_inlines.urls")
+class TestInline(TestDataMixin, TestCase):
+    def test_inline_editable_pk(self):
+        response = self.client.get(reverse("admin:admin_inlines_author_add"))
+        self.assertContains(
+            response,
+            '<input class="vIntegerField" id="id_editablepkbook_set-0-manual_pk" '
+            'name="editablepkbook_set-0-manual_pk" type="number">',
+            html=True,
+            count=1,
+        )
+        self.assertContains(
+            response,
+            '<input class="vIntegerField" id="id_editablepkbook_set-2-0-manual_pk" '
+            'name="editablepkbook_set-2-0-manual_pk" type="number">',
+            html=True,
+            count=1,
+        )
+
+【相关测试 5】
+测试文件：tests/admin_inlines/tests.py
+测试名称：test_inline_primary
+测试代码：
+@override_settings(ROOT_URLCONF="admin_inlines.urls")
+class TestInline(TestDataMixin, TestCase):
+    def test_inline_primary(self):
+        person = Person.objects.create(firstname="Imelda")
+        item = OutfitItem.objects.create(name="Shoes")
+        # Imelda likes shoes, but can't carry her own bags.
+        data = {
+            "shoppingweakness_set-TOTAL_FORMS": 1,
+            "shoppingweakness_set-INITIAL_FORMS": 0,
+            "shoppingweakness_set-MAX_NUM_FORMS": 0,
+            "_save": "Save",
+            "person": person.id,
+            "max_weight": 0,
+            "shoppingweakness_set-0-item": item.id,
+        }
+        response = self.client.post(
+            reverse("admin:admin_inlines_fashionista_add"), data
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(Fashionista.objects.filter(person__firstname="Imelda")), 1)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

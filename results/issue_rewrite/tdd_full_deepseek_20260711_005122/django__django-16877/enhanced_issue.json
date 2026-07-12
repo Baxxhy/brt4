@@ -1,0 +1,297 @@
+{
+  "instance_id": "django__django-16877",
+  "issue_summary": "Issue 提议添加一个名为 `escapeseq` 的新模板过滤器，其功能类似于 `safeseq` 之于 `safe`，用于在自动转义关闭时对序列中的每个元素进行转义。",
+  "trigger_condition": {
+    "text": "在 Django 模板中，当 `autoescape` 被设置为 `off` 时，对一个包含需要转义字符（如 `&`, `<`）的列表应用 `join` 过滤器，但缺少一个能先对列表中每个元素进行转义，再执行连接操作的过滤器。",
+    "evidence": [
+      "Issue 描述：'This usage makes sense in a context where autoescape is off.'",
+      "相关测试 2 和 5 展示了在 `autoescape off` 块内的操作。",
+      "源码片段 3 定义了 `autoescape` 标签。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "当前不存在 `escapeseq` 过滤器，因此在 `autoescape` 关闭的上下文中，无法便捷地对序列中的每个元素进行转义后再连接，可能导致不安全的 HTML 输出。",
+    "symptom_type": "unknown",
+    "evidence": [
+      "Issue 描述：'it seems appropriate to provide a new template filter escapeseq'，表明该过滤器尚未实现。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "实现 `escapeseq` 过滤器，使其接收一个序列，对序列中的每个元素应用转义（类似于 `escape` 过滤器），并返回一个包含已转义字符串的新序列，以便后续过滤器（如 `join`）使用。",
+    "evidence": [
+      "Issue 描述：'which would be to escape what safeseq is to safe'，类比了 `safeseq` 和 `safe` 的关系。",
+      "源码片段 1 展示了 `safeseq` 的功能是标记序列中每个元素为安全。",
+      "相关测试 3 和 4 展示了 `escape` 过滤器的行为。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "escapeseq",
+      "kind": "function",
+      "source_path": "django/template/defaultfilters.py",
+      "reason": "Issue 提议添加的新过滤器，预期应放在与 `safeseq` 和 `escape` 相同的模块中。"
+    },
+    {
+      "name": "safeseq",
+      "kind": "function",
+      "source_path": "django/template/defaultfilters.py",
+      "reason": "`escapeseq` 被设计为与 `safeseq` 功能对称，但执行转义而非标记安全。"
+    },
+    {
+      "name": "escape",
+      "kind": "function",
+      "source_path": "django/template/defaultfilters.py",
+      "reason": "`escapeseq` 应对序列中的每个元素应用与 `escape` 相同的转义逻辑。"
+    },
+    {
+      "name": "join",
+      "kind": "function",
+      "source_path": "django/template/defaultfilters.py",
+      "reason": "Issue 示例展示了 `escapeseq` 与 `join` 过滤器链式使用。"
+    },
+    {
+      "name": "autoescape",
+      "kind": "function",
+      "source_path": "django/template/defaulttags.py",
+      "reason": "Issue 强调了 `escapeseq` 在 `autoescape` 关闭的上下文中的用途。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/template/defaultfilters.py",
+      "object": "escapeseq",
+      "lines": "",
+      "reason": "Issue 要求的新功能，当前缺失。需要在此文件中添加该函数实现。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_safeseq01",
+      "test_file": "tests/template_tests/filter_tests/test_safeseq.py",
+      "why_relevant": "它测试了 `safeseq` 与 `join` 的链式使用，展示了在 `autoescape on`（默认）时，`safeseq` 如何影响输出。这与 `escapeseq` 的预期使用模式非常相似，但逻辑相反（标记安全 vs. 转义）。",
+      "reusable_parts": [
+        "测试类 `SafeseqTests` 和 `SimpleTestCase` 基类",
+        "`@setup` 装饰器和模板字符串构造",
+        "`self.engine.render_to_string` 调用",
+        "使用 `assertEqual` 比较输出字符串"
+      ],
+      "possible_gap": "它测试的是 `safeseq`（标记安全）的行为，而不是 `escapeseq`（执行转义）的行为。输入数据（`[\"&\", \"<\"]`）相同，但预期输出不同。"
+    },
+    {
+      "test_name": "test_safeseq02",
+      "test_file": "tests/template_tests/filter_tests/test_safeseq.py",
+      "why_relevant": "它在 `{% autoescape off %}` 块内测试 `safeseq` 与 `join` 的链式使用，这正是 Issue 描述的 `escapeseq` 的目标使用上下文。",
+      "reusable_parts": [
+        "在模板中使用 `{% autoescape off %}` 块的模式",
+        "输入数据构造",
+        "测试方法结构"
+      ],
+      "possible_gap": "它测试的是 `safeseq` 在 `autoescape off` 下的行为（输出不变），而 `escapeseq` 在 `autoescape off` 下应导致输出被转义。"
+    },
+    {
+      "test_name": "test_escape01",
+      "test_file": "tests/template_tests/filter_tests/test_escape.py",
+      "why_relevant": "它测试了 `escape` 过滤器对普通字符串和已标记安全字符串的行为，展示了转义逻辑。`escapeseq` 应对序列中的每个元素应用此逻辑。",
+      "reusable_parts": [
+        "测试类 `EscapeTests`",
+        "使用 `mark_safe` 准备测试数据",
+        "断言输出包含转义和未转义片段的模式"
+      ],
+      "possible_gap": "它测试的是单个值的 `escape`，而不是序列的 `escapeseq`。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试 1 和 2 中，输入序列 `[\"&\", \"<\"]` 先经过 `safeseq` 过滤器。",
+      "target_pattern": "将过滤器链中的 `safeseq` 替换为提议的 `escapeseq`。",
+      "reason": "`safeseq` 标记元素为安全，阻止转义；而 `escapeseq` 应对元素进行转义。此变异将测试新过滤器的核心功能。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "相关测试 2 和 5 在 `{% autoescape off %}` 块内操作。",
+      "target_pattern": "保持 `{% autoescape off %}` 上下文，但使用 `escapeseq` 过滤器。",
+      "reason": "Issue 明确说明 `escapeseq` 在 `autoescape` 关闭的上下文中有意义，因为此时默认不会自动转义。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "`self.engine.render_to_string` 调用的输出字符串。",
+      "reason": "Issue 的核心是关于模板渲染输出的正确性。观察最终渲染的字符串是否包含正确转义（如 `&amp;`, `&lt;`）或未转义（`&`, `<`）的字符，是判断 `escapeseq` 是否起作用的直接方式。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证在 `autoescape off` 块内，对包含特殊字符的列表应用 `escapeseq|join` 后，输出中的特殊字符被正确转义。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的、硬编码的模板字符串或与具体转义实现细节过度耦合的输出（除非 Issue 明确给出）。应关注关键字符的转义状态。",
+      "reason": "`equals` 风格直接比较渲染输出与预期字符串，能清晰验证转义功能。基于现有测试（如 `test_safeseq01`）的断言模式是稳定的。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 Django 的模板测试框架，如 `SimpleTestCase` 和 `@setup` 装饰器。可能需要导入 `mark_safe` 来构造测试数据。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "`escapeseq` 过滤器的确切实现细节和签名（例如，它是否处理非字符串元素，是否调用 `force_str`）。",
+    "`escapeseq` 与 `join` 过滤器链式使用时，`join` 的 `autoescape` 参数应如何交互（从源码片段 4 看，`join` 内部有 `autoescape` 参数逻辑）。",
+    "`escapeseq` 对已经是 `mark_safe` 的字符串元素应如何处理（可能应保持其安全性不被转义，类似于 `escape` 过滤器的行为）。"
+  ],
+  "raw": {
+    "issue_summary": "Issue 提议添加一个名为 `escapeseq` 的新模板过滤器，其功能类似于 `safeseq` 之于 `safe`，用于在自动转义关闭时对序列中的每个元素进行转义。",
+    "trigger_condition": {
+      "text": "在 Django 模板中，当 `autoescape` 被设置为 `off` 时，对一个包含需要转义字符（如 `&`, `<`）的列表应用 `join` 过滤器，但缺少一个能先对列表中每个元素进行转义，再执行连接操作的过滤器。",
+      "evidence": [
+        "Issue 描述：'This usage makes sense in a context where autoescape is off.'",
+        "相关测试 2 和 5 展示了在 `autoescape off` 块内的操作。",
+        "源码片段 3 定义了 `autoescape` 标签。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当前不存在 `escapeseq` 过滤器，因此在 `autoescape` 关闭的上下文中，无法便捷地对序列中的每个元素进行转义后再连接，可能导致不安全的 HTML 输出。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述：'it seems appropriate to provide a new template filter escapeseq'，表明该过滤器尚未实现。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "实现 `escapeseq` 过滤器，使其接收一个序列，对序列中的每个元素应用转义（类似于 `escape` 过滤器），并返回一个包含已转义字符串的新序列，以便后续过滤器（如 `join`）使用。",
+      "evidence": [
+        "Issue 描述：'which would be to escape what safeseq is to safe'，类比了 `safeseq` 和 `safe` 的关系。",
+        "源码片段 1 展示了 `safeseq` 的功能是标记序列中每个元素为安全。",
+        "相关测试 3 和 4 展示了 `escape` 过滤器的行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "escapeseq",
+        "kind": "function",
+        "source_path": "django/template/defaultfilters.py",
+        "reason": "Issue 提议添加的新过滤器，预期应放在与 `safeseq` 和 `escape` 相同的模块中。"
+      },
+      {
+        "name": "safeseq",
+        "kind": "function",
+        "source_path": "django/template/defaultfilters.py",
+        "reason": "`escapeseq` 被设计为与 `safeseq` 功能对称，但执行转义而非标记安全。"
+      },
+      {
+        "name": "escape",
+        "kind": "function",
+        "source_path": "django/template/defaultfilters.py",
+        "reason": "`escapeseq` 应对序列中的每个元素应用与 `escape` 相同的转义逻辑。"
+      },
+      {
+        "name": "join",
+        "kind": "function",
+        "source_path": "django/template/defaultfilters.py",
+        "reason": "Issue 示例展示了 `escapeseq` 与 `join` 过滤器链式使用。"
+      },
+      {
+        "name": "autoescape",
+        "kind": "function",
+        "source_path": "django/template/defaulttags.py",
+        "reason": "Issue 强调了 `escapeseq` 在 `autoescape` 关闭的上下文中的用途。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/template/defaultfilters.py",
+        "object": "escapeseq",
+        "lines": "",
+        "reason": "Issue 要求的新功能，当前缺失。需要在此文件中添加该函数实现。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_safeseq01",
+        "test_file": "tests/template_tests/filter_tests/test_safeseq.py",
+        "why_relevant": "它测试了 `safeseq` 与 `join` 的链式使用，展示了在 `autoescape on`（默认）时，`safeseq` 如何影响输出。这与 `escapeseq` 的预期使用模式非常相似，但逻辑相反（标记安全 vs. 转义）。",
+        "reusable_parts": [
+          "测试类 `SafeseqTests` 和 `SimpleTestCase` 基类",
+          "`@setup` 装饰器和模板字符串构造",
+          "`self.engine.render_to_string` 调用",
+          "使用 `assertEqual` 比较输出字符串"
+        ],
+        "possible_gap": "它测试的是 `safeseq`（标记安全）的行为，而不是 `escapeseq`（执行转义）的行为。输入数据（`[\"&\", \"<\"]`）相同，但预期输出不同。"
+      },
+      {
+        "test_name": "test_safeseq02",
+        "test_file": "tests/template_tests/filter_tests/test_safeseq.py",
+        "why_relevant": "它在 `{% autoescape off %}` 块内测试 `safeseq` 与 `join` 的链式使用，这正是 Issue 描述的 `escapeseq` 的目标使用上下文。",
+        "reusable_parts": [
+          "在模板中使用 `{% autoescape off %}` 块的模式",
+          "输入数据构造",
+          "测试方法结构"
+        ],
+        "possible_gap": "它测试的是 `safeseq` 在 `autoescape off` 下的行为（输出不变），而 `escapeseq` 在 `autoescape off` 下应导致输出被转义。"
+      },
+      {
+        "test_name": "test_escape01",
+        "test_file": "tests/template_tests/filter_tests/test_escape.py",
+        "why_relevant": "它测试了 `escape` 过滤器对普通字符串和已标记安全字符串的行为，展示了转义逻辑。`escapeseq` 应对序列中的每个元素应用此逻辑。",
+        "reusable_parts": [
+          "测试类 `EscapeTests`",
+          "使用 `mark_safe` 准备测试数据",
+          "断言输出包含转义和未转义片段的模式"
+        ],
+        "possible_gap": "它测试的是单个值的 `escape`，而不是序列的 `escapeseq`。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 和 2 中，输入序列 `[\"&\", \"<\"]` 先经过 `safeseq` 过滤器。",
+        "target_pattern": "将过滤器链中的 `safeseq` 替换为提议的 `escapeseq`。",
+        "reason": "`safeseq` 标记元素为安全，阻止转义；而 `escapeseq` 应对元素进行转义。此变异将测试新过滤器的核心功能。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 2 和 5 在 `{% autoescape off %}` 块内操作。",
+        "target_pattern": "保持 `{% autoescape off %}` 上下文，但使用 `escapeseq` 过滤器。",
+        "reason": "Issue 明确说明 `escapeseq` 在 `autoescape` 关闭的上下文中有意义，因为此时默认不会自动转义。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "`self.engine.render_to_string` 调用的输出字符串。",
+        "reason": "Issue 的核心是关于模板渲染输出的正确性。观察最终渲染的字符串是否包含正确转义（如 `&amp;`, `&lt;`）或未转义（`&`, `<`）的字符，是判断 `escapeseq` 是否起作用的直接方式。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在 `autoescape off` 块内，对包含特殊字符的列表应用 `escapeseq|join` 后，输出中的特殊字符被正确转义。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、硬编码的模板字符串或与具体转义实现细节过度耦合的输出（除非 Issue 明确给出）。应关注关键字符的转义状态。",
+        "reason": "`equals` 风格直接比较渲染输出与预期字符串，能清晰验证转义功能。基于现有测试（如 `test_safeseq01`）的断言模式是稳定的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 Django 的模板测试框架，如 `SimpleTestCase` 和 `@setup` 装饰器。可能需要导入 `mark_safe` 来构造测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "`escapeseq` 过滤器的确切实现细节和签名（例如，它是否处理非字符串元素，是否调用 `force_str`）。",
+      "`escapeseq` 与 `join` 过滤器链式使用时，`join` 的 `autoescape` 参数应如何交互（从源码片段 4 看，`join` 内部有 `autoescape` 参数逻辑）。",
+      "`escapeseq` 对已经是 `mark_safe` 的字符串元素应如何处理（可能应保持其安全性不被转义，类似于 `escape` 过滤器的行为）。"
+    ]
+  }
+}

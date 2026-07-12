@@ -1,0 +1,714 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Using symbols to create functions doesn't work if there is an extra layer of parentheses
+Sympy version == 1.10.1
+
+Using `symbols` to create symbol-like objects like instances of `Function` as shown in the [documentation](https://docs.sympy.org/latest/modules/core.html?highlight=symbols#symbols) creates objects of class `Symbol` instead of `Function` if there is an extra layer of parentheses.
+
+The extra layer of parentheses are necessary to deconstruct the output as separate tuples.
+
+Running the code:
+```
+q, u = smp.symbols(('q:2', 'u:2'), cls=smp.Function)
+print(type(q[0]))
+```
+#### Expected result:
+<class 'sympy.core.function.UndefinedFunction'>
+
+#### Actual result: 
+<class 'sympy.core.symbol.Symbol'>
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/core/symbol.py
+对象名称：symbols
+节点类型：top-level function
+父节点：symbol
+行号范围：586-796
+代码：
+def symbols(names, *, cls=Symbol, **args) -> Any:
+    r"""
+    Transform strings into instances of :class:`Symbol` class.
+
+    :func:`symbols` function returns a sequence of symbols with names taken
+    from ``names`` argument, which can be a comma or whitespace delimited
+    string, or a sequence of strings::
+
+        >>> from sympy import symbols, Function
+
+        >>> x, y, z = symbols('x,y,z')
+        >>> a, b, c = symbols('a b c')
+
+    The type of output is dependent on the properties of input arguments::
+
+        >>> symbols('x')
+        x
+        >>> symbols('x,')
+        (x,)
+        >>> symbols('x,y')
+        (x, y)
+        >>> symbols(('a', 'b', 'c'))
+        (a, b, c)
+        >>> symbols(['a', 'b', 'c'])
+        [a, b, c]
+        >>> symbols({'a', 'b', 'c'})
+        {a, b, c}
+
+    If an iterable container is needed for a single symbol, set the ``seq``
+    argument to ``True`` or terminate the symbol name with a comma::
+
+        >>> symbols('x', seq=True)
+        (x,)
+
+    To reduce typing, range syntax is supported to create indexed symbols.
+    Ranges are indicated by a colon and the type of range is determined by
+    the character to the right of the colon. If the character is a digit
+    then all contiguous digits to the left are taken as the nonnegative
+    starting value (or 0 if there is no digit left of the colon) and all
+    contiguous digits to the right are taken as 1 greater than the ending
+    value::
+
+        >>> symbols('x:10')
+        (x0, x1, x2, x3, x4, x5, x6, x7, x8, x9)
+
+        >>> symbols('x5:10')
+        (x5, x6, x7, x8, x9)
+        >>> symbols('x5(:2)')
+        (x50, x51)
+
+        >>> symbols('x5:10,y:5')
+        (x5, x6, x7, x8, x9, y0, y1, y2, y3, y4)
+
+        >>> symbols(('x5:10', 'y:5'))
+        ((x5, x6, x7, x8, x9), (y0, y1, y2, y3, y4))
+
+    If the character to the right of the colon is a letter, then the single
+    letter to the left (or 'a' if there is none) is taken as the start
+    and all characters in the lexicographic range *through* the letter to
+    the right are used as the range::
+
+        >>> symbols('x:z')
+        (x, y, z)
+        >>> symbols('x:c')  # null range
+        ()
+        >>> symbols('x(:c)')
+        (xa, xb, xc)
+
+        >>> symbols(':c')
+        (a, b, c)
+
+        >>> symbols('a:d, x:z')
+        (a, b, c, d, x, y, z)
+
+        >>> symbols(('a:d', 'x:z'))
+        ((a, b, c, d), (x, y, z))
+
+    Multiple ranges are supported; contiguous numerical ranges should be
+    separated by parentheses to disambiguate the ending number of one
+    range from the starting number of the next::
+
+        >>> symbols('x:2(1:3)')
+        (x01, x02, x11, x12)
+        >>> symbols(':3:2')  # parsing is from left to right
+        (00, 01, 10, 11, 20, 21)
+
+    Only one pair of parentheses surrounding ranges are removed, so to
+    include parentheses around ranges, double them. And to include spaces,
+    commas, or colons, escape them with a backslash::
+
+        >>> symbols('x((a:b))')
+        (x(a), x(b))
+        >>> symbols(r'x(:1\,:2)')  # or r'x((:1)\,(:2))'
+        (x(0,0), x(0,1))
+
+    All newly created symbols have assumptions set according to ``args``::
+
+        >>> a = symbols('a', integer=True)
+        >>> a.is_integer
+        True
+
+        >>> x, y, z = symbols('x,y,z', real=True)
+        >>> x.is_real and y.is_real and z.is_real
+        True
+
+    Despite its name, :func:`symbols` can create symbol-like objects like
+    instances of Function or Wild classes. To achieve this, set ``cls``
+    keyword argument to the desired type::
+
+        >>> symbols('f,g,h', cls=Function)
+        (f, g, h)
+
+        >>> type(_[0])
+        <class 'sympy.core.function.UndefinedFunction'>
+
+    """
+    result = []
+
+    if isinstance(names, str):
+        marker = 0
+        splitters = r'\,', r'\:', r'\ '
+        literals: list[tuple[str, str]] = []
+        for splitter in splitters:
+            if splitter in names:
+                while chr(marker) in names:
+                    marker += 1
+                lit_char = chr(marker)
+                marker += 1
+                names = names.replace(splitter, lit_char)
+                literals.append((lit_char, splitter[1:]))
+        def literal(s):
+            if literals:
+                for c, l in literals:
+                    s = s.replace(c, l)
+            return s
+
+        names = names.strip()
+        as_seq = names.endswith(',')
+        if as_seq:
+            names = names[:-1].rstrip()
+        if not names:
+            raise ValueError('no symbols given')
+
+        # split on commas
+        names = [n.strip() for n in names.split(',')]
+        if not all(n for n in names):
+            raise ValueError('missing symbol between commas')
+        # split on spaces
+        for i in range(len(names) - 1, -1, -1):
+            names[i: i + 1] = names[i].split()
+
+        seq = args.pop('seq', as_seq)
+
+        for name in names:
+            if not name:
+                raise ValueError('missing symbol')
+
+            if ':' not in name:
+                symbol = cls(literal(name), **args)
+                result.append(symbol)
+                continue
+
+            split: list[str] = _range.split(name)
+            split_list: list[list[str]] = []
+            # remove 1 layer of bounding parentheses around ranges
+            for i in range(len(split) - 1):
+                if i and ':' in split[i] and split[i] != ':' and \
+                        split[i - 1].endswith('(') and \
+                        split[i + 1].startswith(')'):
+                    split[i - 1] = split[i - 1][:-1]
+                    split[i + 1] = split[i + 1][1:]
+            for s in split:
+                if ':' in s:
+                    if s.endswith(':'):
+                        raise ValueError('missing end range')
+                    a, b = s.split(':')
+                    if b[-1] in string.digits:
+                        a_i = 0 if not a else int(a)
+                        b_i = int(b)
+                        split_list.append([str(c) for c in range(a_i, b_i)])
+                    else:
+                        a = a or 'a'
+                        split_list.append([string.ascii_letters[c] for c in range(
+                            string.ascii_letters.index(a),
+                            string.ascii_letters.index(b) + 1)])  # inclusive
+                    if not split_list[-1]:
+                        break
+                else:
+                    split_list.append([s])
+            else:
+                seq = True
+                if len(split_list) == 1:
+                    names = split_list[0]
+                else:
+                    names = [''.join(s) for s in product(*split_list)]
+                if literals:
+                    result.extend([cls(literal(s), **args) for s in names])
+                else:
+                    result.extend([cls(s, **args) for s in names])
+
+        if not seq and len(result) <= 1:
+            if not result:
+                return ()
+            return result[0]
+
+        return tuple(result)
+    else:
+        for name in names:
+            result.append(symbols(name, **args))
+
+        return type(names)(result)
+
+
+【源码片段 2】
+文件路径：sympy/core/function.py
+对象名称：Function
+节点类型：class
+父节点：function
+行号范围：370-837
+代码：
+class Function(Application, Expr):
+    """
+    Base class for applied mathematical functions.
+
+    It also serves as a constructor for undefined function classes.
+
+    Examples
+    ========
+
+    First example shows how to use Function as a constructor for undefined
+    function classes:
+
+    >>> from sympy import Function, Symbol
+    >>> x = Symbol('x')
+    >>> f = Function('f')
+    >>> g = Function('g')(x)
+    >>> f
+    f
+    >>> f(x)
+    f(x)
+    >>> g
+    g(x)
+    >>> f(x).diff(x)
+    Derivative(f(x), x)
+    >>> g.diff(x)
+    Derivative(g(x), x)
+
+    Assumptions can be passed to Function, and if function is initialized with a
+    Symbol, the function inherits the name and assumptions associated with the Symbol:
+
+    >>> f_real = Function('f', real=True)
+    >>> f_real(x).is_real
+    True
+    >>> f_real_inherit = Function(Symbol('f', real=True))
+    >>> f_real_inherit(x).is_real
+    True
+
+    Note that assumptions on a function are unrelated to the assumptions on
+    the variable it is called on. If you want to add a relationship, subclass
+    Function and define the appropriate ``_eval_is_assumption`` methods.
+
+    In the following example Function is used as a base class for
+    ``my_func`` that represents a mathematical function *my_func*. Suppose
+    that it is well known, that *my_func(0)* is *1* and *my_func* at infinity
+    goes to *0*, so we want those two simplifications to occur automatically.
+    Suppose also that *my_func(x)* is real exactly when *x* is real. Here is
+    an implementation that honours those requirements:
+
+    >>> from sympy import Function, S, oo, I, sin
+    >>> class my_func(Function):
+    ...
+    ...     @classmethod
+    ...     def eval(cls, x):
+    ...         if x.is_Number:
+    ...             if x.is_zero:
+    ...                 return S.One
+    ...             elif x is S.Infinity:
+    ...                 return S.Zero
+    ...
+    ...     def _eval_is_real(self):
+    ...         return self.args[0].is_real
+    ...
+    >>> x = S('x')
+    >>> my_func(0) + sin(0)
+    1
+    >>> my_func(oo)
+    0
+    >>> my_func(3.54).n() # Not yet implemented for my_func.
+    my_func(3.54)
+    >>> my_func(I).is_real
+    False
+
+    In order for ``my_func`` to become useful, several other methods would
+    need to be implemented. See source code of some of the already
+    implemented functions for more complete examples.
+
+    Also, if the function can take more than one argument, then ``nargs``
+    must be defined, e.g. if ``my_func`` can take one or two arguments
+    then,
+
+    >>> class my_func(Function):
+    ...     nargs = (1, 2)
+    ...
+    >>>
+
+    """
+    @property
+    def _diff_wrt(self):
+    @cacheit
+    def __new__(cls, *args, **options):
+    @classmethod
+    def _should_evalf(cls, arg):
+    @classmethod
+    def class_key(cls):
+    def _eval_evalf(self, prec):
+
+    def _eval_derivative(self, s):
+    def _eval_is_commutative(self):
+    def _eval_is_meromorphic(self, x, a):
+    _singularities = None  # type: tUnion[FuzzyBool, tTuple[Expr, ...]]
+    @classmethod
+    def is_singular(cls, a):
+    def as_base_exp(self):
+    def _eval_aseries(self, n, args0, x, logx):
+    def _eval_nseries(self, x, n, logx, cdir=0):
+    def fdiff(self, argindex=1):
+    def _eval_as_leading_term(self, x, logx=None, cdir=0):
+
+
+【源码片段 3】
+文件路径：sympy/core/function.py
+对象名称：UndefinedFunction
+节点类型：class
+父节点：function
+行号范围：893-948
+代码：
+class UndefinedFunction(FunctionClass):
+    """
+    The (meta)class of undefined functions.
+    """
+    def __new__(mcl, name, bases=(AppliedUndef,), __dict__=None, **kwargs):
+    def __instancecheck__(cls, instance):
+    _kwargs = {}  # type: tDict[str, Optional[bool]]
+    def __hash__(self):
+    def __eq__(self, other):
+    def __ne__(self, other):
+    @property
+    def _diff_wrt(self):
+
+
+【源码片段 4】
+文件路径：sympy/core/symbol.py
+对象名称：Symbol
+节点类型：class
+父节点：symbol
+行号范围：206-385
+代码：
+class Symbol(AtomicExpr, Boolean):
+    """
+    Assumptions:
+       commutative = True
+
+    You can override the default assumptions in the constructor.
+
+    Examples
+    ========
+
+    >>> from sympy import symbols
+    >>> A,B = symbols('A,B', commutative = False)
+    >>> bool(A*B != B*A)
+    True
+    >>> bool(A*B*2 == 2*A*B) == True # multiplication by scalars is commutative
+    True
+
+    """
+    is_comparable = False
+    __slots__ = ('name',)
+    is_Symbol = True
+    is_symbol = True
+    @property
+    def kind(self):
+    @property
+    def _diff_wrt(self):
+    @staticmethod
+    def _sanitize(assumptions, obj=None):
+    def _merge(self, assumptions):
+    def __new__(cls, name, **assumptions):
+    @staticmethod
+    def __xnew__(cls, name, **assumptions):  # never cached (e.g. dummy)
+    @staticmethod
+    @cacheit
+    def __xnew_cached_(cls, name, **assumptions):  # symbols are always cached
+    def __getnewargs_ex__(self):
+    def __setstate__(self, state):
+    def _hashable_content(self):
+    def _eval_subs(self, old, new):
+    def _eval_refine(self, assumptions):
+    @property
+    def assumptions0(self):
+    @cacheit
+    def sort_key(self, order=None):
+    def as_dummy(self):
+    def as_real_imag(self, deep=True, **hints):
+    def is_constant(self, *wrt, **flags):
+    @property
+    def free_symbols(self):
+    binary_symbols = free_symbols  # in this case, not always
+    def as_set(self):
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/core/tests/test_symbol.py
+测试名称：test_symbols
+测试代码：
+def test_symbols():
+    x = Symbol('x')
+    y = Symbol('y')
+    z = Symbol('z')
+
+    assert symbols('x') == x
+    assert symbols('x ') == x
+    assert symbols(' x ') == x
+    assert symbols('x,') == (x,)
+    assert symbols('x, ') == (x,)
+    assert symbols('x ,') == (x,)
+
+    assert symbols('x , y') == (x, y)
+
+    assert symbols('x,y,z') == (x, y, z)
+    assert symbols('x y z') == (x, y, z)
+
+    assert symbols('x,y,z,') == (x, y, z)
+    assert symbols('x y z ') == (x, y, z)
+
+    xyz = Symbol('xyz')
+    abc = Symbol('abc')
+
+    assert symbols('xyz') == xyz
+    assert symbols('xyz,') == (xyz,)
+    assert symbols('xyz,abc') == (xyz, abc)
+
+    assert symbols(('xyz',)) == (xyz,)
+    assert symbols(('xyz,',)) == ((xyz,),)
+    assert symbols(('x,y,z,',)) == ((x, y, z),)
+    assert symbols(('xyz', 'abc')) == (xyz, abc)
+    assert symbols(('xyz,abc',)) == ((xyz, abc),)
+    assert symbols(('xyz,abc', 'x,y,z')) == ((xyz, abc), (x, y, z))
+
+    assert symbols(('x', 'y', 'z')) == (x, y, z)
+    assert symbols(['x', 'y', 'z']) == [x, y, z]
+    assert symbols({'x', 'y', 'z'}) == {x, y, z}
+
+    raises(ValueError, lambda: symbols(''))
+    raises(ValueError, lambda: symbols(','))
+    raises(ValueError, lambda: symbols('x,,y,,z'))
+    raises(ValueError, lambda: symbols(('x', '', 'y', '', 'z')))
+
+    a, b = symbols('x,y', real=True)
+    assert a.is_real and b.is_real
+
+    x0 = Symbol('x0')
+    x1 = Symbol('x1')
+    x2 = Symbol('x2')
+
+    y0 = Symbol('y0')
+    y1 = Symbol('y1')
+
+    assert symbols('x0:0') == ()
+    assert symbols('x0:1') == (x0,)
+    assert symbols('x0:2') == (x0, x1)
+    assert symbols('x0:3') == (x0, x1, x2)
+
+    assert symbols('x:0') == ()
+    assert symbols('x:1') == (x0,)
+    assert symbols('x:2') == (x0, x1)
+    assert symbols('x:3') == (x0, x1, x2)
+
+    assert symbols('x1:1') == ()
+    assert symbols('x1:2') == (x1,)
+    assert symbols('x1:3') == (x1, x2)
+
+    assert symbols('x1:3,x,y,z') == (x1, x2, x, y, z)
+
+    assert symbols('x:3,y:2') == (x0, x1, x2, y0, y1)
+    assert symbols(('x:3', 'y:2')) == ((x0, x1, x2), (y0, y1))
+
+    a = Symbol('a')
+    b = Symbol('b')
+    c = Symbol('c')
+    d = Symbol('d')
+
+    assert symbols('x:z') == (x, y, z)
+    assert symbols('a:d,x:z') == (a, b, c, d, x, y, z)
+    assert symbols(('a:d', 'x:z')) == ((a, b, c, d), (x, y, z))
+
+    aa = Symbol('aa')
+    ab = Symbol('ab')
+    ac = Symbol('ac')
+    ad = Symbol('ad')
+
+    assert symbols('aa:d') == (aa, ab, ac, ad)
+    assert symbols('aa:d,x:z') == (aa, ab, ac, ad, x, y, z)
+    assert symbols(('aa:d','x:z')) == ((aa, ab, ac, ad), (x, y, z))
+
+
+    # issue 6675
+    def sym(s):
+        return str(symbols(s))
+    assert sym('a0:4') == '(a0, a1, a2, a3)'
+    assert sym('a2:4,b1:3') == '(a2, a3, b1, b2)'
+    assert sym('a1(2:4)') == '(a12, a13)'
+    assert sym('a0:2.0:2') == '(a0.0, a0.1, a1.0, a1.1)'
+    assert sym('aa:cz') == '(aaz, abz, acz)'
+    assert sym('aa:c0:2') == '(aa0, aa1, ab0, ab1, ac0, ac1)'
+    assert sym('aa:ba:b') == '(aaa, aab, aba, abb)'
+    assert sym('a:3b') == '(a0b, a1b, a2b)'
+    assert sym('a-1:3b') == '(a-1b, a-2b)'
+    assert sym(r'a:2\,:2' + chr(0)) == '(a0,0%s, a0,1%s, a1,0%s, a1,1%s)' % (
+        (chr(0),)*4)
+    assert sym('x(:a:3)') == '(x(a0), x(a1), x(a2))'
+    assert sym('x(:c):1') == '(xa0, xb0, xc0)'
+    assert sym('x((:a)):3') == '(x(a)0, x(a)1, x(a)2)'
+    assert sym('x(:a:3') == '(x(a0, x(a1, x(a2)'
+    assert sym(':2') == '(0, 1)'
+    assert sym(':b') == '(a, b)'
+    assert sym(':b:2') == '(a0, a1, b0, b1)'
+    assert sym(':2:2') == '(00, 01, 10, 11)'
+    assert sym(':b:b') == '(aa, ab, ba, bb)'
+
+    raises(ValueError, lambda: symbols(':'))
+    raises(ValueError, lambda: symbols('a:'))
+    raises(ValueError, lambda: symbols('::'))
+    raises(ValueError, lambda: symbols('a::'))
+    raises(ValueError, lambda: symbols(':a:'))
+    raises(ValueError, lambda: symbols('::a'))
+
+【相关测试 2】
+测试文件：sympy/core/tests/test_symbol.py
+测试名称：test_symbols_become_functions_issue_3539
+测试代码：
+def test_symbols_become_functions_issue_3539():
+    from sympy.abc import alpha, phi, beta, t
+    raises(TypeError, lambda: beta(2))
+    raises(TypeError, lambda: beta(2.5))
+    raises(TypeError, lambda: phi(2.5))
+    raises(TypeError, lambda: alpha(2.5))
+    raises(TypeError, lambda: phi(t))
+
+【相关测试 3】
+测试文件：sympy/core/tests/test_var.py
+测试名称：test_var_cls
+测试代码：
+def test_var_cls():
+    ns = {"var": var, "Function": Function}
+    eval("var('f', cls=Function)", ns)
+
+    assert isinstance(ns['f'], FunctionClass)
+
+    eval("var('g,h', cls=Function)", ns)
+
+    assert isinstance(ns['g'], FunctionClass)
+    assert isinstance(ns['h'], FunctionClass)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

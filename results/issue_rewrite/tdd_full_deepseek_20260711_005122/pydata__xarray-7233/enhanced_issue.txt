@@ -1,0 +1,118 @@
+instance_id: pydata__xarray-7233
+
+issue_summary: Dataset.coarsen.construct 方法错误地将非维度坐标降级为变量。
+
+trigger_condition:
+{
+  "text": "对一个包含非维度坐标的 Dataset 调用 coarsen.construct 方法。",
+  "evidence": [
+    "Issue 中的 MVCE 展示了 ds.coarsen(time=12).construct(time=(\"year\", \"month\")) 调用。",
+    "相关测试 test_coarsen_construct 展示了类似的操作模式。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "在 coarsen.construct 操作后，原本是坐标的变量（如 'day'）变成了数据变量，不再出现在 Coordinates 部分。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 中操作前后的输出对比显示，'day' 在操作前是 Coordinate，操作后是 Data variable。",
+    "Issue 描述明确指出 'demotes non-dimensional coordinates to variables'。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "所有在 coarsen.construct 操作前是坐标的变量，在操作后应保持为坐标。",
+  "evidence": [
+    "Issue 的期望部分：'All variables that were coordinates before the coarsen.construct stay as coordinates afterwards.'"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "Dataset.coarsen",
+    "kind": "method",
+    "source_path": "xarray/core/dataset.py",
+    "reason": "Issue 的触发入口，用于创建 DatasetCoarsen 对象。"
+  },
+  {
+    "name": "DatasetCoarsen.construct",
+    "kind": "method",
+    "source_path": "xarray/core/rolling.py",
+    "reason": "Issue 中直接调用的方法，是缺陷发生的核心。"
+  },
+  {
+    "name": "DataArray.coarsen",
+    "kind": "method",
+    "source_path": "xarray/core/dataarray.py",
+    "reason": "相关测试中使用了 DataArray 的 coarsen 方法，且 Issue 的 MVCE 从 DataArray 开始构建。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试 test_coarsen_construct 中，Dataset 的坐标都是维度坐标（如 'time'）。",
+    "target_pattern": "Dataset 应包含非维度坐标（如 Issue 中的 'day'）。",
+    "reason": "Issue 的核心是处理非维度坐标时出错，因此需要变异输入数据以包含此类坐标。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "相似测试中，对包含维度坐标的 Dataset 调用 coarsen.construct。",
+    "target_pattern": "对包含非维度坐标的 Dataset 调用 coarsen.construct。",
+    "reason": "触发缺陷需要调用链作用于非维度坐标。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "result.coords 和 result.data_vars 的内容，或 result['day'].dims 与 result['day'].attrs 的状态。",
+    "reason": "可以检查操作后 'day' 是否仍在 coords 中，还是被移到了 data_vars 中。"
+  },
+  {
+    "kind": "repr",
+    "expression_hint": "repr(result) 的输出片段，特别是 'Coordinates:' 和 'Data variables:' 部分。",
+    "reason": "Issue 通过 repr 输出展示了坐标被降级，这是直接的观察点。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证在 coarsen.construct 操作后，原始的非维度坐标（如 'day'）仍然是坐标。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的 repr 字符串相等，因为 repr 可能包含无关格式变化。",
+    "reason": "应稳定地检查坐标集合的成员关系，这与 Issue 的核心语义（坐标保持）直接对齐。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要构造一个包含非维度坐标的 Dataset，如 Issue 中的 MVCE 所示。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "可以使用 pytest 的参数化来测试不同的数据后端（如 dask）。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "缺陷是否也影响 DataArray.coarsen.construct，还是仅限于 Dataset。",
+  "construct 方法内部处理坐标的具体逻辑和错误位置。",
+  "除了非维度坐标，是否还有其他类型的坐标（如多维坐标）也会被错误处理。"
+]

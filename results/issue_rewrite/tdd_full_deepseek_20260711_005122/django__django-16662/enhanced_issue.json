@@ -1,0 +1,241 @@
+{
+  "instance_id": "django__django-16662",
+  "issue_summary": "新生成的迁移文件中的导入语句顺序违反了 Django 编码风格和 isort 默认规则。",
+  "trigger_condition": {
+    "text": "生成新的迁移文件，例如通过 makemigrations 命令或 MigrationWriter 创建包含多种导入类型（如 `import datetime` 和 `from django.db import migrations, models`）的迁移。",
+    "evidence": [
+      "Issue 描述中提到了新迁移文件的生成示例。",
+      "相关测试 1 展示了使用 MigrationWriter 生成迁移输出的过程。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "生成的迁移文件中，`import` 语句和 `from ... import` 语句的排序不正确，导致违反编码风格和 isort 检查失败。",
+    "symptom_type": "wrong_order",
+    "evidence": [
+      "Issue 描述中给出了错误的导入顺序示例：`import datetime`、`from django.db import migrations, models`、`import time`。",
+      "Issue 指出这违反了 Django 编码风格和 isort 默认规则。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "生成的迁移文件中，所有 `import` 模块语句应排在 `from module import objects` 语句之前。",
+    "evidence": [
+      "Issue 描述中引用了 Django 编码风格，要求在每个部分中，所有 `import module` 语句应放在 `from module import objects` 之前。",
+      "Issue 给出了正确的顺序示例：`import datetime`、`import time`、`from django.db import migrations, models`。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "MigrationWriter",
+      "kind": "class",
+      "source_path": "",
+      "reason": "相关测试 1 和 2 使用 MigrationWriter 来生成迁移文件字符串，这是生成迁移输出的关键类。"
+    },
+    {
+      "name": "makemigrations",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 涉及新迁移文件的生成，相关测试 5 使用了 call_command('makemigrations', ...)。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/migrations/operations/models.py",
+      "object": "models",
+      "lines": "",
+      "reason": "iCoRe 检索出的相关源代码指向此文件，可能与迁移操作和导入生成逻辑有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "WriterTests.test_sorted_imports",
+      "test_file": "tests/migrations/test_writer.py",
+      "why_relevant": "该测试直接验证迁移输出中的导入顺序，与 Issue 主题高度相关。",
+      "reusable_parts": [
+        "MigrationWriter 的构造和使用",
+        "使用 type() 动态创建 migration 对象",
+        "assertIn 检查输出字符串片段"
+      ],
+      "possible_gap": "该测试当前的断言检查的是错误的顺序（`import datetime\\nfrom django.db import migrations, models\\n`），可能无法检测到 Issue 描述的正确顺序要求。"
+    },
+    {
+      "test_name": "MakeMigrationsTests.test_files_content",
+      "test_file": "tests/migrations/test_commands.py",
+      "why_relevant": "该测试涉及通过 makemigrations 命令实际生成迁移文件并检查其内容。",
+      "reusable_parts": [
+        "使用 temporary_migration_module",
+        "call_command('makemigrations', ...)",
+        "读取和断言生成的文件内容"
+      ],
+      "possible_gap": "该测试主要检查文件存在性和内容片段（如 verbose_name），没有专门检查导入语句的顺序。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试 1 中，迁移操作使用了 datetime.datetime 和 models.DateTimeField，导致输出中包含 `import datetime` 和 `from django.db import migrations, models`。",
+      "target_pattern": "创建一个迁移，其中包含多个 `import` 语句（例如 `import datetime` 和 `import time`）以及 `from ... import` 语句，以触发排序逻辑。",
+      "reason": "Issue 的核心是当存在多个 `import` 语句时，它们没有全部被排序到 `from ... import` 语句之前。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "order",
+      "expression_hint": "MigrationWriter(migration).as_string() 输出的字符串中，导入语句块的顺序。",
+      "reason": "Issue 的错误现象是导入语句的顺序错误，直接观察生成字符串的导入部分可以判断问题。"
+    },
+    {
+      "kind": "file_output",
+      "expression_hint": "通过 makemigrations 命令生成的迁移文件（如 0001_initial.py）的内容。",
+      "reason": "Issue 描述的是新生成的迁移文件的问题，检查实际生成的文件内容可以确认缺陷。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证生成的迁移输出中，所有 `import` 语句出现在任何 `from ... import` 语句之前。",
+      "preferred_assertion_style": "order_equals",
+      "avoid": "避免断言完整的、固定的输出字符串，因为导入的具体模块和数量可能变化。",
+      "reason": "Issue 关注的是相对顺序，而不是具体的导入列表。检查顺序关系更稳定。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "可能需要一个临时的迁移模块（temporary_migration_module）来生成和检查迁移文件。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 SimpleTestCase 或 MigrationTestBase 作为测试基类。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "导入排序逻辑具体位于哪个源码文件（如 django/db/migrations/writer.py）的哪部分代码中。",
+    "修复后的正确输出中，多个 `import` 语句之间是否也需要按字母顺序排序（Issue 未明确说明）。",
+    "是否所有类型的迁移操作都会触发此问题，还是仅限特定操作。"
+  ],
+  "raw": {
+    "issue_summary": "新生成的迁移文件中的导入语句顺序违反了 Django 编码风格和 isort 默认规则。",
+    "trigger_condition": {
+      "text": "生成新的迁移文件，例如通过 makemigrations 命令或 MigrationWriter 创建包含多种导入类型（如 `import datetime` 和 `from django.db import migrations, models`）的迁移。",
+      "evidence": [
+        "Issue 描述中提到了新迁移文件的生成示例。",
+        "相关测试 1 展示了使用 MigrationWriter 生成迁移输出的过程。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的迁移文件中，`import` 语句和 `from ... import` 语句的排序不正确，导致违反编码风格和 isort 检查失败。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 描述中给出了错误的导入顺序示例：`import datetime`、`from django.db import migrations, models`、`import time`。",
+        "Issue 指出这违反了 Django 编码风格和 isort 默认规则。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "生成的迁移文件中，所有 `import` 模块语句应排在 `from module import objects` 语句之前。",
+      "evidence": [
+        "Issue 描述中引用了 Django 编码风格，要求在每个部分中，所有 `import module` 语句应放在 `from module import objects` 之前。",
+        "Issue 给出了正确的顺序示例：`import datetime`、`import time`、`from django.db import migrations, models`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "MigrationWriter",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试 1 和 2 使用 MigrationWriter 来生成迁移文件字符串，这是生成迁移输出的关键类。"
+      },
+      {
+        "name": "makemigrations",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 涉及新迁移文件的生成，相关测试 5 使用了 call_command('makemigrations', ...)。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/operations/models.py",
+        "object": "models",
+        "lines": "",
+        "reason": "iCoRe 检索出的相关源代码指向此文件，可能与迁移操作和导入生成逻辑有关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "WriterTests.test_sorted_imports",
+        "test_file": "tests/migrations/test_writer.py",
+        "why_relevant": "该测试直接验证迁移输出中的导入顺序，与 Issue 主题高度相关。",
+        "reusable_parts": [
+          "MigrationWriter 的构造和使用",
+          "使用 type() 动态创建 migration 对象",
+          "assertIn 检查输出字符串片段"
+        ],
+        "possible_gap": "该测试当前的断言检查的是错误的顺序（`import datetime\\nfrom django.db import migrations, models\\n`），可能无法检测到 Issue 描述的正确顺序要求。"
+      },
+      {
+        "test_name": "MakeMigrationsTests.test_files_content",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "该测试涉及通过 makemigrations 命令实际生成迁移文件并检查其内容。",
+        "reusable_parts": [
+          "使用 temporary_migration_module",
+          "call_command('makemigrations', ...)",
+          "读取和断言生成的文件内容"
+        ],
+        "possible_gap": "该测试主要检查文件存在性和内容片段（如 verbose_name），没有专门检查导入语句的顺序。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中，迁移操作使用了 datetime.datetime 和 models.DateTimeField，导致输出中包含 `import datetime` 和 `from django.db import migrations, models`。",
+        "target_pattern": "创建一个迁移，其中包含多个 `import` 语句（例如 `import datetime` 和 `import time`）以及 `from ... import` 语句，以触发排序逻辑。",
+        "reason": "Issue 的核心是当存在多个 `import` 语句时，它们没有全部被排序到 `from ... import` 语句之前。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "order",
+        "expression_hint": "MigrationWriter(migration).as_string() 输出的字符串中，导入语句块的顺序。",
+        "reason": "Issue 的错误现象是导入语句的顺序错误，直接观察生成字符串的导入部分可以判断问题。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "通过 makemigrations 命令生成的迁移文件（如 0001_initial.py）的内容。",
+        "reason": "Issue 描述的是新生成的迁移文件的问题，检查实际生成的文件内容可以确认缺陷。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证生成的迁移输出中，所有 `import` 语句出现在任何 `from ... import` 语句之前。",
+        "preferred_assertion_style": "order_equals",
+        "avoid": "避免断言完整的、固定的输出字符串，因为导入的具体模块和数量可能变化。",
+        "reason": "Issue 关注的是相对顺序，而不是具体的导入列表。检查顺序关系更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要一个临时的迁移模块（temporary_migration_module）来生成和检查迁移文件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 SimpleTestCase 或 MigrationTestBase 作为测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "导入排序逻辑具体位于哪个源码文件（如 django/db/migrations/writer.py）的哪部分代码中。",
+      "修复后的正确输出中，多个 `import` 语句之间是否也需要按字母顺序排序（Issue 未明确说明）。",
+      "是否所有类型的迁移操作都会触发此问题，还是仅限特定操作。"
+    ]
+  }
+}

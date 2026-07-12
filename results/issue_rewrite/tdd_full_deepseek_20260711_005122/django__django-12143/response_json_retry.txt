@@ -1,0 +1,128 @@
+```json
+{
+    "issue_summary": "在 admin changeform 视图中使用包含正则表达式特殊字符的 formset prefix 时可能导致数据丢失。",
+    "trigger_condition": {
+        "text": "在 Django admin 中使用包含正则表达式特殊字符（如 '.'、'*'、'['、']'、'('、')'、'?'、'+'、'\\'、'^'、'$'、'|'）的 formset prefix 进行表单提交。",
+        "evidence": ["Issue 中提到 'prefix has no such restrictions and could contain any number of special regex characters'", "Issue 引用的代码行显示正则表达式通过字符串格式化生成：'pk_pattern = re.compile(r'{}-\d+-{}$'.format(prefix, self.model._meta.pk.name))'"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "当 formset prefix 包含正则表达式特殊字符时，生成的正则表达式模式可能无法正确匹配表单字段名，导致无法识别和保存内联表单数据，造成数据丢失。",
+        "symptom_type": "state_not_updated",
+        "evidence": ["Issue 标题 'Possible data loss in admin changeform view'", "Issue 描述指出 'Generating a regex like this using string formatting can cause problems when the arguments contain special regex characters'"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "无论 formset prefix 是否包含正则表达式特殊字符，admin changeform 视图都应能正确识别和保存内联表单数据。",
+        "evidence": ["Issue 建议的修复是 'use re.escape()'，表明期望正则表达式能正确处理特殊字符", "相关测试显示正常情况下的内联表单保存功能应正常工作"],
+        "confidence": "high"
+    },
+    "target_apis": [
+        {
+            "name": "re.compile",
+            "kind": "function",
+            "source_path": "",
+            "reason": "Issue 中明确提到正则表达式编译是问题的核心，代码行使用了 re.compile"
+        },
+        {
+            "name": "re.escape",
+            "kind": "function",
+            "source_path": "",
+            "reason": "Issue 建议的修复方法是使用 re.escape() 来转义特殊字符"
+        },
+        {
+            "name": "inlineformset_factory",
+            "kind": "function",
+            "source_path": "",
+            "reason": "相关测试 4 使用了这个 API 来创建内联表单集，与 admin 内联功能相关"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "django/contrib/admin/options.py",
+            "object": "某个方法中的正则表达式编译代码",
+            "lines": "",
+            "reason": "Issue 明确引用了该文件第 1634 行附近的代码，其中包含有问题的正则表达式生成"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "AdminInlineTests.test_simple_inline",
+            "test_file": "tests/admin_views/tests.py",
+            "why_relevant": "该测试验证了 admin 内联表单的基本保存功能，使用了 formset prefix（'widget_set'），展示了正常的内联表单工作流程。",
+            "reusable_parts": ["测试类结构", "使用 self.client.post 提交表单", "使用 reverse 生成 URL", "验证响应状态码和对象数量", "assertEqual 断言风格"],
+            "possible_gap": "该测试使用的 formset prefix 'widget_set' 不包含正则表达式特殊字符，因此不会触发 bug。"
+        },
+        {
+            "test_name": "ModelFormsetTest.test_inline_formsets",
+            "test_file": "tests/model_formsets/tests.py",
+            "why_relevant": "该测试展示了 inlineformset_factory 的使用，验证了内联表单集的基本功能，包括表单渲染和数据保存。",
+            "reusable_parts": ["inlineformset_factory 的使用", "表单集数据构造", "formset.is_valid() 验证", "formset.save() 调用", "assertQuerysetEqual 断言"],
+            "possible_gap": "该测试使用的 formset prefix 'book_set' 不包含正则表达式特殊字符，且不涉及 admin 视图。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "input",
+            "current_pattern": "相关测试中使用的普通 formset prefix，如 'widget_set'、'doohickey_set'、'whatsit_set'、'book_set'",
+            "target_pattern": "包含正则表达式特殊字符的 formset prefix，如 'prefix.'、'prefix*'、'prefix[0]'、'prefix(1)'",
+            "reason": "Issue 明确指出当 prefix 包含正则表达式特殊字符时会触发问题，而现有测试都使用普通字符串作为 prefix。",
+            "confidence": "high"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "state",
+            "expression_hint": "内联表单对象在提交前后的数量变化，如 Widget.objects.count()",
+            "reason": "Issue 描述的是数据丢失问题，观察对象数量可以判断内联表单数据是否被正确保存。"
+        },
+        {
+            "kind": "return_value",
+            "expression_hint": "表单提交后的响应状态码，如 response.status_code",
+            "reason": "正常情况应返回 302 重定向，异常情况可能返回其他状态码或错误。"
+        },
+        {
+            "kind": "warning",
+            "expression_hint": "可能产生的警告信息",
+            "reason": "正则表达式匹配失败可能导致警告或静默失败。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "使用包含正则表达式特殊字符的 formset prefix 时，内联表单数据应被正确保存，对象数量应增加。",
+            "preferred_assertion_style": "equals",
+            "avoid": "断言完整的 HTML 输出或具体的字段名模式，因为这些可能因 prefix 变化而改变。",
+            "reason": "Issue 的核心是数据保存功能，而不是具体的输出格式，对象数量断言更稳定且直接相关。"
+        },
+        {
+            "assertion_goal": "表单提交应成功完成，返回正确的状态码。",
+            "preferred_assertion_style": "equals",
+            "avoid": "断言具体的重定向 URL，因为 admin URL 可能变化。",
+            "reason": "状态码是 HTTP 响应的稳定属性，能反映操作是否成功。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要使用 TestCase 和 client 来模拟 admin 请求，可能需要设置 ROOT_URLCONF 和登录 admin 用户。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "需要创建父模型和内联模型的测试数据。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "可能需要配置 admin 站点注册相关模型。",
+            "source": "inference",
+            "confidence": "medium"
+        }
+    ],
+    "uncertainties": [
+        "具体哪些正则表达式特殊字符会触发问题，以及触发的确切条件（如字符位置、组合方式）。",
+        "除了数据丢失外，是否会有异常抛出或警告产生。",
+        "除了 admin/options.py 中的代码外，Django 其他部分是否也存在类似的未转义正则表达式问题。",
+        "self.model._meta.pk.name 是否真的完全安全，如 Issue 作者所说 'probably safe' 但 'not 100% sure'。"
+    ]
+}
+```

@@ -1,0 +1,322 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+flush() on self.stdout/stderr management commands doesn't work.
+Description
+	
+flush() is notably called during migrate command; it doesn't work, and a long migration effectively prints to stderr no relevant information up until the end:
+Operations to perform:
+ Apply all migrations: myapp
+Running migrations:
+Then nothing more, but the migration is being done.
+Then at the end of the real migration, the rest is flushed:
+ Applying myapp.0002_auto_20200817_1030... OK
+Expected behavior:
+Operations to perform:
+ Apply all migrations: myapp
+Running migrations:
+ Applying myapp.0002_auto_20200817_1030...
+then work
+then OK
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/db/migrations/recorder.py
+对象名称：flush
+节点类型：class_function
+父节点：MigrationRecorder
+行号范围：94-96
+代码：
+    def flush(self):
+        """Delete all migration records. Useful for testing migrations."""
+        self.migration_qs.all().delete()
+
+
+【源码片段 2】
+文件路径：django/db/migrations/executor.py
+对象名称：migrate
+节点类型：class_function
+父节点：MigrationExecutor
+行号范围：82-125
+代码：
+    def migrate(self, targets, plan=None, state=None, fake=False, fake_initial=False):
+        """
+        Migrate the database up to the given targets.
+
+        Django first needs to create all project states before a migration is
+        (un)applied and in a second step run all the database operations.
+        """
+        # The django_migrations table must be present to record applied
+        # migrations.
+        self.recorder.ensure_schema()
+
+        if plan is None:
+            plan = self.migration_plan(targets)
+        # Create the forwards plan Django would follow on an empty database
+        full_plan = self.migration_plan(self.loader.graph.leaf_nodes(), clean_start=True)
+
+        all_forwards = all(not backwards for mig, backwards in plan)
+        all_backwards = all(backwards for mig, backwards in plan)
+
+        if not plan:
+            if state is None:
+                # The resulting state should include applied migrations.
+                state = self._create_project_state(with_applied_migrations=True)
+        elif all_forwards == all_backwards:
+            # This should only happen if there's a mixed plan
+            raise InvalidMigrationPlan(
+                "Migration plans with both forwards and backwards migrations "
+                "are not supported. Please split your migration process into "
+                "separate plans of only forwards OR backwards migrations.",
+                plan
+            )
+        elif all_forwards:
+            if state is None:
+                # The resulting state should still include applied migrations.
+                state = self._create_project_state(with_applied_migrations=True)
+            state = self._migrate_all_forwards(state, plan, full_plan, fake=fake, fake_initial=fake_initial)
+        else:
+            # No need to check for `elif all_backwards` here, as that condition
+            # would always evaluate to true.
+            state = self._migrate_all_backwards(plan, full_plan, fake=fake)
+
+        self.check_replacements()
+
+        return state
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/migrations/test_commands.py
+测试名称：MigrateTests.test_migrate
+测试代码：
+class MigrateTests(MigrationTestBase):
+    @override_settings(MIGRATION_MODULES={"migrations": "migrations.test_migrations"})
+    def test_migrate(self):
+        """
+        Tests basic usage of the migrate command.
+        """
+        # No tables are created
+        self.assertTableNotExists("migrations_author")
+        self.assertTableNotExists("migrations_tribble")
+        self.assertTableNotExists("migrations_book")
+        # Run the migrations to 0001 only
+        stdout = io.StringIO()
+        call_command('migrate', 'migrations', '0001', verbosity=1, stdout=stdout, no_color=True)
+        stdout = stdout.getvalue()
+        self.assertIn('Target specific migration: 0001_initial, from migrations', stdout)
+        self.assertIn('Applying migrations.0001_initial... OK', stdout)
+        # The correct tables exist
+        self.assertTableExists("migrations_author")
+        self.assertTableExists("migrations_tribble")
+        self.assertTableNotExists("migrations_book")
+        # Run migrations all the way
+        call_command("migrate", verbosity=0)
+        # The correct tables exist
+        self.assertTableExists("migrations_author")
+        self.assertTableNotExists("migrations_tribble")
+        self.assertTableExists("migrations_book")
+        # Unmigrate everything
+        stdout = io.StringIO()
+        call_command('migrate', 'migrations', 'zero', verbosity=1, stdout=stdout, no_color=True)
+        stdout = stdout.getvalue()
+        self.assertIn('Unapply all migrations: migrations', stdout)
+        self.assertIn('Unapplying migrations.0002_second... OK', stdout)
+        # Tables are gone
+        self.assertTableNotExists("migrations_author")
+        self.assertTableNotExists("migrations_tribble")
+        self.assertTableNotExists("migrations_book")
+
+【相关测试 2】
+测试文件：tests/admin_scripts/tests.py
+测试名称：CommandTypes.test_custom_stdout
+测试代码：
+class CommandTypes(AdminScriptTestCase):
+    def test_custom_stdout(self):
+        class Command(BaseCommand):
+            requires_system_checks = []
+
+            def handle(self, *args, **options):
+                self.stdout.write("Hello, World!")
+
+        out = StringIO()
+        command = Command(stdout=out)
+        call_command(command)
+        self.assertEqual(out.getvalue(), "Hello, World!\n")
+        out.truncate(0)
+        new_out = StringIO()
+        call_command(command, stdout=new_out)
+        self.assertEqual(out.getvalue(), "")
+        self.assertEqual(new_out.getvalue(), "Hello, World!\n")
+
+【相关测试 3】
+测试文件：tests/admin_scripts/tests.py
+测试名称：CommandTypes.test_custom_stderr
+测试代码：
+class CommandTypes(AdminScriptTestCase):
+    def test_custom_stderr(self):
+        class Command(BaseCommand):
+            requires_system_checks = []
+
+            def handle(self, *args, **options):
+                self.stderr.write("Hello, World!")
+
+        err = StringIO()
+        command = Command(stderr=err)
+        call_command(command)
+        self.assertEqual(err.getvalue(), "Hello, World!\n")
+        err.truncate(0)
+        new_err = StringIO()
+        call_command(command, stderr=new_err)
+        self.assertEqual(err.getvalue(), "")
+        self.assertEqual(new_err.getvalue(), "Hello, World!\n")
+
+【相关测试 4】
+测试文件：tests/admin_scripts/tests.py
+测试名称：CommandTypes.test_base_command
+测试代码：
+class CommandTypes(AdminScriptTestCase):
+    def test_base_command(self):
+        "User BaseCommands can execute when a label is provided"
+        args = ['base_command', 'testlabel']
+        expected_labels = "('testlabel',)"
+        self._test_base_command(args, expected_labels)
+
+【相关测试 5】
+测试文件：tests/user_commands/tests.py
+测试名称：CommandTests.test_command
+测试代码：
+@override_settings(
+    INSTALLED_APPS=[
+        'django.contrib.auth',
+        'django.contrib.contenttypes',
+        'user_commands',
+    ],
+)
+class CommandTests(SimpleTestCase):
+    def test_command(self):
+        out = StringIO()
+        management.call_command('dance', stdout=out)
+        self.assertIn("I don't feel like dancing Rock'n'Roll.\n", out.getvalue())
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

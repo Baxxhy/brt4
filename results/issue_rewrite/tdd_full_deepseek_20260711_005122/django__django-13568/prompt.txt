@@ -1,0 +1,411 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Skip auth.E003 system check for USERNAME_FIELD with total UniqueConstraints.
+Description
+	
+Defining a user model like this:
+class User(AbstractBaseUser):
+	username = models.CharField(max_length=30)
+	USERNAME_FIELD = "username"
+	class Meta:
+		constraints = [UniqueConstraint(fields=["username"], name="user_username_unq")]
+Will trigger auth.E003:
+auth.User: (auth.E003) 'User.username' must be unique because it is named as the 'USERNAME_FIELD'.
+Sometimes it’s not preferable to set the field as unique with unique=True as it will create an extra implicit *_like index for CharField and TextField on PostgresSQL. The system check should be extended to check for the presence of USERNAME_FIELD in Model._meta.constraints. Not really sure if this classifies as a bug.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/contrib/auth/models.py
+对象名称：User
+节点类型：class
+父节点：models
+行号范围：389-397
+代码：
+class User(AbstractUser):
+    """
+    Users within the Django authentication system are represented by this
+    model.
+
+    Username and password are required. Other fields are optional.
+    """
+
+
+【源码片段 2】
+文件路径：django/core/checks/translation.py
+对象名称：E003
+节点类型：global_var
+父节点：translation
+行号范围：17-20
+代码：
+E003 = Error(
+    'You have provided an invalid language code in the LANGUAGES_BIDI setting: {!r}.',
+    id='translation.E003',
+)
+
+
+【源码片段 3】
+文件路径：django/db/models/constraints.py
+对象名称：UniqueConstraint
+节点类型：class
+父节点：constraints
+行号范围：79-195
+代码：
+class UniqueConstraint(BaseConstraint):
+    def __init__(
+        self,
+        *,
+        fields,
+        name,
+        condition=None,
+        deferrable=None,
+        include=None,
+        opclasses=(),
+    ):
+    def _get_condition_sql(self, model, schema_editor):
+    def constraint_sql(self, model, schema_editor):
+    def create_sql(self, model, schema_editor):
+    def remove_sql(self, model, schema_editor):
+    def __repr__(self):
+    def __eq__(self, other):
+    def deconstruct(self):
+
+
+【源码片段 4】
+文件路径：django/contrib/auth/base_user.py
+对象名称：AbstractBaseUser
+节点类型：class
+父节点：base_user
+行号范围：48-152
+代码：
+class AbstractBaseUser(models.Model):
+    password = models.CharField(_('password'), max_length=128)
+    last_login = models.DateTimeField(_('last login'), blank=True, null=True)
+    is_active = True
+    REQUIRED_FIELDS = []
+    _password = None
+    def __str__(self):
+    def save(self, *args, **kwargs):
+    def get_username(self):
+    def clean(self):
+    def natural_key(self):
+    @property
+    def is_anonymous(self):
+    @property
+    def is_authenticated(self):
+    def set_password(self, raw_password):
+    def check_password(self, raw_password):
+    def set_unusable_password(self):
+    def has_usable_password(self):
+    def _legacy_get_session_auth_hash(self):
+    def get_session_auth_hash(self):
+    @classmethod
+    def get_email_field_name(cls):
+    @classmethod
+    def normalize_username(cls, username):
+
+
+【源码片段 5】
+文件路径：django/db/models/fields/__init__.py
+对象名称：CharField
+节点类型：class
+父节点：__init__
+行号范围：1002-1092
+代码：
+class CharField(Field):
+    description = _("String (up to %(max_length)s)")
+    def __init__(self, *args, db_collation=None, **kwargs):
+    def check(self, **kwargs):
+    def _check_max_length_attribute(self, **kwargs):
+    def _check_db_collation(self, databases):
+    def cast_db_type(self, connection):
+    def get_internal_type(self):
+    def to_python(self, value):
+    def get_prep_value(self, value):
+    def formfield(self, **kwargs):
+    def deconstruct(self):
+
+
+【源码片段 6】
+文件路径：django/db/models/constraints.py
+对象名称：constraints
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/auth_tests/test_checks.py
+测试名称：test_username_non_unique
+测试代码：
+@isolate_apps('auth_tests', attr_name='apps')
+@override_system_checks([check_user_model])
+class UserModelChecksTests(SimpleTestCase):
+    @override_settings(AUTH_USER_MODEL='auth_tests.CustomUserNonUniqueUsername')
+    def test_username_non_unique(self):
+        """
+        A non-unique USERNAME_FIELD raises an error only if the default
+        authentication backend is used. Otherwise, a warning is raised.
+        """
+        errors = checks.run_checks()
+        self.assertEqual(errors, [
+            checks.Error(
+                "'CustomUserNonUniqueUsername.username' must be "
+                "unique because it is named as the 'USERNAME_FIELD'.",
+                obj=CustomUserNonUniqueUsername,
+                id='auth.E003',
+            ),
+        ])
+        with self.settings(AUTHENTICATION_BACKENDS=['my.custom.backend']):
+            errors = checks.run_checks()
+            self.assertEqual(errors, [
+                checks.Warning(
+                    "'CustomUserNonUniqueUsername.username' is named as "
+                    "the 'USERNAME_FIELD', but it is not unique.",
+                    hint='Ensure that your authentication backend(s) can handle non-unique usernames.',
+                    obj=CustomUserNonUniqueUsername,
+                    id='auth.W004',
+                ),
+            ])
+
+【相关测试 2】
+测试文件：tests/auth_tests/test_checks.py
+测试名称：test_required_fields_is_list
+测试代码：
+@isolate_apps('auth_tests', attr_name='apps')
+@override_system_checks([check_user_model])
+class UserModelChecksTests(SimpleTestCase):
+    @override_settings(AUTH_USER_MODEL='auth_tests.CustomUserNonListRequiredFields')
+    def test_required_fields_is_list(self):
+        """REQUIRED_FIELDS should be a list."""
+        class CustomUserNonListRequiredFields(AbstractBaseUser):
+            username = models.CharField(max_length=30, unique=True)
+            date_of_birth = models.DateField()
+
+            USERNAME_FIELD = 'username'
+            REQUIRED_FIELDS = 'date_of_birth'
+
+        errors = checks.run_checks(app_configs=self.apps.get_app_configs())
+        self.assertEqual(errors, [
+            checks.Error(
+                "'REQUIRED_FIELDS' must be a list or tuple.",
+                obj=CustomUserNonListRequiredFields,
+                id='auth.E001',
+            ),
+        ])
+
+【相关测试 3】
+测试文件：tests/auth_tests/test_checks.py
+测试名称：test_is_anonymous_authenticated_methods
+测试代码：
+@isolate_apps('auth_tests', attr_name='apps')
+@override_system_checks([check_user_model])
+class UserModelChecksTests(SimpleTestCase):
+    @override_settings(AUTH_USER_MODEL='auth_tests.BadUser')
+    def test_is_anonymous_authenticated_methods(self):
+        """
+        <User Model>.is_anonymous/is_authenticated must not be methods.
+        """
+        class BadUser(AbstractBaseUser):
+            username = models.CharField(max_length=30, unique=True)
+            USERNAME_FIELD = 'username'
+
+            def is_anonymous(self):
+                return True
+
+            def is_authenticated(self):
+                return True
+
+        errors = checks.run_checks(app_configs=self.apps.get_app_configs())
+        self.assertEqual(errors, [
+            checks.Critical(
+                '%s.is_anonymous must be an attribute or property rather than '
+                'a method. Ignoring this is a security issue as anonymous '
+                'users will be treated as authenticated!' % BadUser,
+                obj=BadUser,
+                id='auth.C009',
+            ),
+            checks.Critical(
+                '%s.is_authenticated must be an attribute or property rather '
+                'than a method. Ignoring this is a security issue as anonymous '
+                'users will be treated as authenticated!' % BadUser,
+                obj=BadUser,
+                id='auth.C010',
+            ),
+        ])
+
+【相关测试 4】
+测试文件：tests/auth_tests/test_checks.py
+测试名称：test_username_not_in_required_fields
+测试代码：
+@isolate_apps('auth_tests', attr_name='apps')
+@override_system_checks([check_user_model])
+class UserModelChecksTests(SimpleTestCase):
+    @override_settings(AUTH_USER_MODEL='auth_tests.CustomUserBadRequiredFields')
+    def test_username_not_in_required_fields(self):
+        """USERNAME_FIELD should not appear in REQUIRED_FIELDS."""
+        class CustomUserBadRequiredFields(AbstractBaseUser):
+            username = models.CharField(max_length=30, unique=True)
+            date_of_birth = models.DateField()
+
+            USERNAME_FIELD = 'username'
+            REQUIRED_FIELDS = ['username', 'date_of_birth']
+
+        errors = checks.run_checks(self.apps.get_app_configs())
+        self.assertEqual(errors, [
+            checks.Error(
+                "The field named as the 'USERNAME_FIELD' for a custom user model "
+                "must not be included in 'REQUIRED_FIELDS'.",
+                hint=(
+                    "The 'USERNAME_FIELD' is currently set to 'username', you "
+                    "should remove 'username' from the 'REQUIRED_FIELDS'."
+                ),
+                obj=CustomUserBadRequiredFields,
+                id='auth.E002',
+            ),
+        ])
+
+【相关测试 5】
+测试文件：tests/check_framework/test_model_checks.py
+测试名称：test_collision_in_same_model
+测试代码：
+@isolate_apps('check_framework', attr_name='apps')
+@override_system_checks([checks.model_checks.check_all_models])
+class IndexNameTests(SimpleTestCase):
+    def test_collision_in_same_model(self):
+        index = models.Index(fields=['id'], name='foo')
+
+        class Model(models.Model):
+            class Meta:
+                indexes = [index, index]
+
+        self.assertEqual(checks.run_checks(app_configs=self.apps.get_app_configs()), [
+            Error(
+                "index name 'foo' is not unique for model check_framework.Model.",
+                id='models.E029',
+            ),
+        ])
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

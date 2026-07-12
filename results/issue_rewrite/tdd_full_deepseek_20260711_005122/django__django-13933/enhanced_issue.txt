@@ -1,0 +1,139 @@
+instance_id: django__django-13933
+
+issue_summary: ModelChoiceField 在抛出验证错误时未显示无效选项的值。
+
+trigger_condition:
+{
+  "text": "向 ModelChoiceField 提供一个不在其查询集（queryset）中的值进行验证。",
+  "evidence": [
+    "Issue 描述指出 ModelChoiceField 在引发验证错误时未显示无效选项的值。",
+    "相关测试 1 中通过 f.clean('4') 测试无效值。",
+    "相关测试 4 中通过 f.clean(0) 和 f.clean(c4.id)（在删除后）测试无效值。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "当输入无效选项时，ModelChoiceField 引发的 ValidationError 的错误消息中不包含无效值，而 ModelMultipleChoiceField 和 ChoiceField 的错误消息中包含无效值。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中对比了 ModelChoiceField 和 ModelMultipleChoiceField 的 default_error_messages：ModelChoiceField 的消息是 'Select a valid choice. That choice is not one of the available choices.'，而 ModelMultipleChoiceField 的消息是 'Select a valid choice. %(value)s is not one of the available choices.'。",
+    "相关测试 1 中 ModelChoiceField 的测试使用了自定义错误消息 'INVALID CHOICE'，但未显示值。",
+    "相关测试 2 和 5 显示 ChoiceField 的错误消息包含 %(value)s 占位符。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "ModelChoiceField 在抛出 invalid_choice 验证错误时，其错误消息应包含无效选项的值。",
+  "evidence": [
+    "Issue 描述建议通过传递包含无效值的参数并修改 invalid_choice 的默认错误消息来修复此问题。",
+    "从 ModelMultipleChoiceField 和 ChoiceField 的 default_error_messages 推断，它们都使用了 %(value)s 占位符来显示无效值。",
+    "相关测试 2 和 3 显示 ChoiceField 和 MultipleChoiceField 的错误消息可以包含无效值。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "ModelChoiceField",
+    "kind": "class",
+    "source_path": "django/forms/models.py",
+    "reason": "Issue 直接报告了 ModelChoiceField 的问题。"
+  },
+  {
+    "name": "ModelChoiceField.clean",
+    "kind": "method",
+    "source_path": "django/forms/models.py",
+    "reason": "验证用户输入并可能引发 ValidationError 的方法。"
+  },
+  {
+    "name": "ModelChoiceField.validate",
+    "kind": "method",
+    "source_path": "django/forms/models.py",
+    "reason": "可能负责验证逻辑并抛出 invalid_choice 错误。"
+  },
+  {
+    "name": "ChoiceField",
+    "kind": "class",
+    "source_path": "django/forms/fields.py",
+    "reason": "ModelChoiceField 的父类，其错误消息格式是修复的参考。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中使用已知有效的值（如存在的 pk）或空字符串进行验证。",
+    "target_pattern": "使用不在查询集中的值（如不存在的 pk 或字符串）进行验证。",
+    "reason": "Issue 指出当输入无效选项时会触发问题。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "相似测试中可能使用自定义 error_messages 覆盖默认消息。",
+    "target_pattern": "使用默认的 error_messages（不覆盖）进行测试。",
+    "reason": "需要测试默认错误消息的行为，以观察其是否缺少无效值。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "捕获的 ValidationError 实例的 message 或 messages 属性。",
+    "reason": "Issue 关注的是验证错误消息的内容，特别是是否包含无效值。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "ModelChoiceField.clean 方法的返回值（在有效输入时）。",
+    "reason": "需要区分有效输入（正常返回）和无效输入（引发异常）的路径。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证当输入无效值时，引发的 ValidationError 的错误消息字符串包含该无效值。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "断言完整的错误消息字符串相等，因为具体措辞可能在未来改变。",
+    "reason": "Issue 的核心是错误消息应包含无效值，而不是消息的精确措辞。"
+  },
+  {
+    "assertion_goal": "验证 ModelChoiceField 的默认错误消息格式与 ChoiceField 和 ModelMultipleChoiceField 一致，支持 %(value)s 占位符。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "断言 default_error_messages 字典的完整相等。",
+    "reason": "修复可能涉及更新 default_error_messages 字典以包含占位符。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要一个 Django 测试用例（如 TestCase）来支持数据库操作，因为 ModelChoiceField 依赖于查询集。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要创建测试模型实例（如 ChoiceModel 或 Category）以填充 ModelChoiceField 的查询集。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要使用 assertRaisesMessage 或 assertFormErrors 来捕获和验证 ValidationError。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "ModelChoiceField.validate 方法内部具体是如何构造和抛出 ValidationError 的，以及无效值是否被传递给了错误消息。",
+  "除了更新 default_error_messages 字符串外，是否还需要修改其他代码（如 validate 或 clean 方法）来将值传递给错误消息。",
+  "对于非整数或非主键类型的无效值，错误消息的行为是否一致。"
+]

@@ -1,0 +1,654 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Doc rendering is incorrect when :param has datatype dict(str,str)
+**Describe the bug**
+I have a parameter defined under docstring of a method as:-
+:param dict(str, str) opc_meta: (optional)
+
+Which is being incorrectly rendered in the generated docs as:-
+str) opc_meta (dict(str,) –(optional) 
+
+**To Reproduce**
+Create any method with the docstring containg the above param
+
+**Expected behavior**
+The param should be rendered in the generated docs as:-
+opc_meta (dict(str,str)) – (optional) 
+
+**Your project**
+[sphinxTest.zip](https://github.com/sphinx-doc/sphinx/files/6468074/sphinxTest.zip)
+
+
+**Screenshots**
+<img width="612" alt="Screen Shot 2021-05-12 at 12 30 50 PM" src="https://user-images.githubusercontent.com/8617566/118020143-5f59a280-b31f-11eb-8dc2-5280d5c4896b.png">
+<img width="681" alt="Screen Shot 2021-05-12 at 12 32 25 PM" src="https://user-images.githubusercontent.com/8617566/118020154-62549300-b31f-11eb-953d-9287f9cc27ff.png">
+
+
+**Environment info**
+- OS: Mac
+- Python version: 3.9.0
+- Sphinx version: 4.0.1
+- Sphinx extensions:  ["sphinx.ext.autodoc", "sphinx.ext.autosummary", "sphinx.ext.intersphinx", "autodocsumm"]
+- Extra tools: Browser Firefox.
+
+**Additional context**
+N/A
+
+
+
+
+====================
+【iCoRe 检索出的相关源代码】
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/test_ext_napoleon_docstring.py
+测试名称：NumpyDocstringTest.test_parameter_types
+测试代码：
+class NumpyDocstringTest(BaseDocstringTest):
+    def test_parameter_types(self):
+        docstring = dedent("""\
+            Parameters
+            ----------
+            param1 : DataFrame
+                the data to work on
+            param2 : int or float or None, optional
+                a parameter with different types
+            param3 : dict-like, optional
+                a optional mapping
+            param4 : int or float or None, optional
+                a optional parameter with different types
+            param5 : {"F", "C", "N"}, optional
+                a optional parameter with fixed values
+            param6 : int, default None
+                different default format
+            param7 : mapping of hashable to str, optional
+                a optional mapping
+            param8 : ... or Ellipsis
+                ellipsis
+        """)
+        expected = dedent("""\
+            :param param1: the data to work on
+            :type param1: :class:`DataFrame`
+            :param param2: a parameter with different types
+            :type param2: :class:`int` or :class:`float` or :obj:`None`, *optional*
+            :param param3: a optional mapping
+            :type param3: :term:`dict-like <mapping>`, *optional*
+            :param param4: a optional parameter with different types
+            :type param4: :class:`int` or :class:`float` or :obj:`None`, *optional*
+            :param param5: a optional parameter with fixed values
+            :type param5: ``{"F", "C", "N"}``, *optional*
+            :param param6: different default format
+            :type param6: :class:`int`, *default* :obj:`None`
+            :param param7: a optional mapping
+            :type param7: :term:`mapping` of :term:`hashable` to :class:`str`, *optional*
+            :param param8: ellipsis
+            :type param8: :obj:`... <Ellipsis>` or :obj:`Ellipsis`
+        """)
+        translations = {
+            "dict-like": ":term:`dict-like <mapping>`",
+            "mapping": ":term:`mapping`",
+            "hashable": ":term:`hashable`",
+        }
+        config = Config(
+            napoleon_use_param=True,
+            napoleon_use_rtype=True,
+            napoleon_preprocess_types=True,
+            napoleon_type_aliases=translations,
+        )
+        actual = str(NumpyDocstring(docstring, config))
+        self.assertEqual(expected, actual)
+
+【相关测试 2】
+测试文件：tests/test_util_inspect.py
+测试名称：test_signature_annotations
+测试代码：
+def test_signature_annotations():
+    from .typing_test_data import (Node, f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12,
+                                   f13, f14, f15, f16, f17, f18, f19, f20, f21)
+
+    # Class annotations
+    sig = inspect.signature(f0)
+    assert stringify_signature(sig) == '(x: int, y: numbers.Integral) -> None'
+
+    # Generic types with concrete parameters
+    sig = inspect.signature(f1)
+    assert stringify_signature(sig) == '(x: List[int]) -> List[int]'
+
+    # TypeVars and generic types with TypeVars
+    sig = inspect.signature(f2)
+    if sys.version_info < (3, 7):
+        assert stringify_signature(sig) == '(x: List[T], y: List[T_co], z: T) -> List[T_contra]'
+    else:
+        assert stringify_signature(sig) == ('(x: List[tests.typing_test_data.T],'
+                                            ' y: List[tests.typing_test_data.T_co],'
+                                            ' z: tests.typing_test_data.T'
+                                            ') -> List[tests.typing_test_data.T_contra]')
+
+    # Union types
+    sig = inspect.signature(f3)
+    assert stringify_signature(sig) == '(x: Union[str, numbers.Integral]) -> None'
+
+    # Quoted annotations
+    sig = inspect.signature(f4)
+    assert stringify_signature(sig) == '(x: str, y: str) -> None'
+
+    # Keyword-only arguments
+    sig = inspect.signature(f5)
+    assert stringify_signature(sig) == '(x: int, *, y: str, z: str) -> None'
+
+    # Keyword-only arguments with varargs
+    sig = inspect.signature(f6)
+    assert stringify_signature(sig) == '(x: int, *args, y: str, z: str) -> None'
+
+    # Space around '=' for defaults
+    sig = inspect.signature(f7)
+    assert stringify_signature(sig) == '(x: Optional[int] = None, y: dict = {}) -> None'
+
+    # Callable types
+    sig = inspect.signature(f8)
+    assert stringify_signature(sig) == '(x: Callable[[int, str], int]) -> None'
+
+    sig = inspect.signature(f9)
+    assert stringify_signature(sig) == '(x: Callable) -> None'
+
+    # Tuple types
+    sig = inspect.signature(f10)
+    assert stringify_signature(sig) == '(x: Tuple[int, str], y: Tuple[int, ...]) -> None'
+
+    # Instance annotations
+    sig = inspect.signature(f11)
+    assert stringify_signature(sig) == '(x: CustomAnnotation, y: 123) -> None'
+
+    # tuple with more than two items
+    sig = inspect.signature(f12)
+    assert stringify_signature(sig) == '() -> Tuple[int, str, int]'
+
+    # optional
+    sig = inspect.signature(f13)
+    assert stringify_signature(sig) == '() -> Optional[str]'
+
+    # optional union
+    sig = inspect.signature(f20)
+    if sys.version_info < (3, 7):
+        assert stringify_signature(sig) in ('() -> Optional[Union[int, str]]',
+                                            '() -> Optional[Union[str, int]]')
+    else:
+        assert stringify_signature(sig) == '() -> Optional[Union[int, str]]'
+
+    # Any
+    sig = inspect.signature(f14)
+    assert stringify_signature(sig) == '() -> Any'
+
+    # ForwardRef
+    sig = inspect.signature(f15)
+    assert stringify_signature(sig) == '(x: Unknown, y: int) -> Any'
+
+    # keyword only arguments (1)
+    sig = inspect.signature(f16)
+    assert stringify_signature(sig) == '(arg1, arg2, *, arg3=None, arg4=None)'
+
+    # keyword only arguments (2)
+    sig = inspect.signature(f17)
+    assert stringify_signature(sig) == '(*, arg3, arg4)'
+
+    sig = inspect.signature(f18)
+    assert stringify_signature(sig) == '(self, arg1: Union[int, Tuple] = 10) -> List[Dict]'
+
+    # annotations for variadic and keyword parameters
+    sig = inspect.signature(f19)
+    assert stringify_signature(sig) == '(*args: int, **kwargs: str)'
+
+    # default value is inspect.Signature.empty
+    sig = inspect.signature(f21)
+    assert stringify_signature(sig) == "(arg1='whatever', arg2)"
+
+    # type hints by string
+    sig = inspect.signature(Node.children)
+    assert stringify_signature(sig) == '(self) -> List[tests.typing_test_data.Node]'
+
+    sig = inspect.signature(Node.__init__)
+    assert stringify_signature(sig) == '(self, parent: Optional[tests.typing_test_data.Node]) -> None'
+
+    # show_annotation is False
+    sig = inspect.signature(f7)
+    assert stringify_signature(sig, show_annotation=False) == '(x=None, y={})'
+
+    # show_return_annotation is False
+    sig = inspect.signature(f7)
+    assert stringify_signature(sig, show_return_annotation=False) == '(x: Optional[int] = None, y: dict = {})'
+
+【相关测试 3】
+测试文件：tests/test_ext_autodoc.py
+测试名称：test_format_signature
+测试代码：
+def test_format_signature(app):
+    app.connect('autodoc-process-signature', process_signature)
+    app.connect('autodoc-skip-member', skip_member)
+
+    directive = make_directive_bridge(app.env)
+
+    def formatsig(objtype, name, obj, args, retann):
+        inst = app.registry.documenters[objtype](directive, name)
+        inst.fullname = name
+        inst.doc_as_attr = False  # for class objtype
+        inst.parent = object  # dummy
+        inst.object = obj
+        inst.objpath = [name]
+        inst.args = args
+        inst.retann = retann
+        res = inst.format_signature()
+        print(res)
+        return res
+
+    # no signatures for modules
+    assert formatsig('module', 'test', None, None, None) == ''
+
+    # test for functions
+    def f(a, b, c=1, **d):
+        pass
+
+    def g(a='\n'):
+        pass
+    assert formatsig('function', 'f', f, None, None) == '(a, b, c=1, **d)'
+    assert formatsig('function', 'f', f, 'a, b, c, d', None) == '(a, b, c, d)'
+    assert formatsig('function', 'g', g, None, None) == r"(a='\n')"
+
+    # test for classes
+    class D:
+        pass
+
+    class E:
+        def __init__(self):
+            pass
+
+    # an empty init and no init are the same
+    for C in (D, E):
+        assert formatsig('class', 'D', C, None, None) == '()'
+
+    class SomeMeta(type):
+        def __call__(cls, a, b=None):
+            return type.__call__(cls, a, b)
+
+    # these three are all equivalent
+    class F:
+        def __init__(self, a, b=None):
+            pass
+
+    class FNew:
+        def __new__(cls, a, b=None):
+            return super().__new__(cls)
+
+    class FMeta(metaclass=SomeMeta):
+        pass
+
+    # and subclasses should always inherit
+    class G(F):
+        pass
+
+    class GNew(FNew):
+        pass
+
+    class GMeta(FMeta):
+        pass
+
+    # subclasses inherit
+    for C in (F, FNew, FMeta, G, GNew, GMeta):
+        assert formatsig('class', 'C', C, None, None) == '(a, b=None)'
+    assert formatsig('class', 'C', D, 'a, b', 'X') == '(a, b) -> X'
+
+    class ListSubclass(list):
+        pass
+
+    # only supported if the python implementation decides to document it
+    if getattr(list, '__text_signature__', None) is not None:
+        assert formatsig('class', 'C', ListSubclass, None, None) == '(iterable=(), /)'
+    else:
+        assert formatsig('class', 'C', ListSubclass, None, None) == ''
+
+    class ExceptionSubclass(Exception):
+        pass
+
+    # Exception has no __text_signature__ at least in Python 3.8
+    if getattr(Exception, '__text_signature__', None) is None:
+        assert formatsig('class', 'C', ExceptionSubclass, None, None) == ''
+
+    # __init__ have signature at first line of docstring
+    directive.env.config.autoclass_content = 'both'
+
+    class F2:
+        '''some docstring for F2.'''
+        def __init__(self, *args, **kw):
+            '''
+            __init__(a1, a2, kw1=True, kw2=False)
+
+            some docstring for __init__.
+            '''
+    class G2(F2):
+        pass
+
+    assert formatsig('class', 'F2', F2, None, None) == \
+        '(a1, a2, kw1=True, kw2=False)'
+    assert formatsig('class', 'G2', G2, None, None) == \
+        '(a1, a2, kw1=True, kw2=False)'
+
+    # test for methods
+    class H:
+        def foo1(self, b, *c):
+            pass
+
+        def foo2(b, *c):
+            pass
+
+        def foo3(self, d='\n'):
+            pass
+    assert formatsig('method', 'H.foo', H.foo1, None, None) == '(b, *c)'
+    assert formatsig('method', 'H.foo', H.foo1, 'a', None) == '(a)'
+    assert formatsig('method', 'H.foo', H.foo2, None, None) == '(*c)'
+    assert formatsig('method', 'H.foo', H.foo3, None, None) == r"(d='\n')"
+
+    # test bound methods interpreted as functions
+    assert formatsig('function', 'foo', H().foo1, None, None) == '(b, *c)'
+    assert formatsig('function', 'foo', H().foo2, None, None) == '(*c)'
+    assert formatsig('function', 'foo', H().foo3, None, None) == r"(d='\n')"
+
+    # test exception handling (exception is caught and args is '')
+    directive.env.config.autodoc_docstring_signature = False
+    assert formatsig('function', 'int', int, None, None) == ''
+
+    # test processing by event handler
+    assert formatsig('method', 'bar', H.foo1, None, None) == '42'
+
+    # test functions created via functools.partial
+    from functools import partial
+    curried1 = partial(lambda a, b, c: None, 'A')
+    assert formatsig('function', 'curried1', curried1, None, None) == \
+        '(b, c)'
+    curried2 = partial(lambda a, b, c=42: None, 'A')
+    assert formatsig('function', 'curried2', curried2, None, None) == \
+        '(b, c=42)'
+    curried3 = partial(lambda a, b, *c: None, 'A')
+    assert formatsig('function', 'curried3', curried3, None, None) == \
+        '(b, *c)'
+    curried4 = partial(lambda a, b, c=42, *d, **e: None, 'A')
+    assert formatsig('function', 'curried4', curried4, None, None) == \
+        '(b, c=42, *d, **e)'
+
+【相关测试 4】
+测试文件：tests/test_ext_autodoc.py
+测试名称：test_get_doc
+测试代码：
+def test_get_doc(app):
+    directive = make_directive_bridge(app.env)
+
+    def getdocl(objtype, obj):
+        inst = app.registry.documenters[objtype](directive, 'tmp')
+        inst.parent = object  # dummy
+        inst.object = obj
+        inst.objpath = [obj.__name__]
+        inst.doc_as_attr = False
+        inst.format_signature()  # handle docstring signatures!
+        ds = inst.get_doc()
+        # for testing purposes, concat them and strip the empty line at the end
+        res = sum(ds, [])[:-1]
+        print(res)
+        return res
+
+    # objects without docstring
+    def f():
+        pass
+    assert getdocl('function', f) == []
+
+    # standard function, diverse docstring styles...
+    def f():
+        """Docstring"""
+    def g():
+        """
+        Docstring
+        """
+    for func in (f, g):
+        assert getdocl('function', func) == ['Docstring']
+
+    # first line vs. other lines indentation
+    def f():
+        """First line
+
+        Other
+          lines
+        """
+    assert getdocl('function', f) == ['First line', '', 'Other', '  lines']
+
+    # charset guessing (this module is encoded in utf-8)
+    def f():
+        """Döcstring"""
+    assert getdocl('function', f) == ['Döcstring']
+
+    # verify that method docstrings get extracted in both normal case
+    # and in case of bound method posing as a function
+    class J:  # NOQA
+        def foo(self):
+            """Method docstring"""
+    assert getdocl('method', J.foo) == ['Method docstring']
+    assert getdocl('function', J().foo) == ['Method docstring']
+
+【相关测试 5】
+测试文件：tests/test_ext_autodoc.py
+测试名称：test_autodoc_typed_instance_variables
+测试代码：
+@pytest.mark.sphinx('html', testroot='ext-autodoc')
+def test_autodoc_typed_instance_variables(app):
+    options = {"members": None,
+               "undoc-members": None}
+    actual = do_autodoc(app, 'module', 'target.typed_vars', options)
+    assert list(actual) == [
+        '',
+        '.. py:module:: target.typed_vars',
+        '',
+        '',
+        '.. py:attribute:: Alias',
+        '   :module: target.typed_vars',
+        '',
+        '   alias of :class:`target.typed_vars.Derived`',
+        '',
+        '.. py:class:: Class()',
+        '   :module: target.typed_vars',
+        '',
+        '',
+        '   .. py:attribute:: Class.attr1',
+        '      :module: target.typed_vars',
+        '      :type: int',
+        '      :value: 0',
+        '',
+        '',
+        '   .. py:attribute:: Class.attr2',
+        '      :module: target.typed_vars',
+        '      :type: int',
+        '',
+        '',
+        '   .. py:attribute:: Class.attr3',
+        '      :module: target.typed_vars',
+        '      :type: int',
+        '      :value: 0',
+        '',
+        '',
+        '   .. py:attribute:: Class.attr4',
+        '      :module: target.typed_vars',
+        '      :type: int',
+        '',
+        '      attr4',
+        '',
+        '',
+        '   .. py:attribute:: Class.attr5',
+        '      :module: target.typed_vars',
+        '      :type: int',
+        '',
+        '      attr5',
+        '',
+        '',
+        '   .. py:attribute:: Class.attr6',
+        '      :module: target.typed_vars',
+        '      :type: int',
+        '',
+        '      attr6',
+        '',
+        '',
+        '   .. py:attribute:: Class.descr4',
+        '      :module: target.typed_vars',
+        '      :type: int',
+        '',
+        '      This is descr4',
+        '',
+        '',
+        '.. py:class:: Derived()',
+        '   :module: target.typed_vars',
+        '',
+        '',
+        '   .. py:attribute:: Derived.attr7',
+        '      :module: target.typed_vars',
+        '      :type: int',
+        '',
+        '',
+        '.. py:data:: attr1',
+        '   :module: target.typed_vars',
+        '   :type: str',
+        "   :value: ''",
+        '',
+        '   attr1',
+        '',
+        '',
+        '.. py:data:: attr2',
+        '   :module: target.typed_vars',
+        '   :type: str',
+        '',
+        '   attr2',
+        '',
+        '',
+        '.. py:data:: attr3',
+        '   :module: target.typed_vars',
+        '   :type: str',
+        "   :value: ''",
+        '',
+        '   attr3',
+        '',
+    ]
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

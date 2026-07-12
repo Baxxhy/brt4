@@ -1,0 +1,145 @@
+{
+  "issue_summary": "ConditionSet 的 subs 方法在基集为 ImageSet 时错误地替换了绑定变量，导致输出表达式混乱。",
+  "trigger_condition": {
+    "text": "对一个基集为 ImageSet 的 ConditionSet 对象调用 subs 方法，替换一个自由符号（如 y）为一个数值（如 Rational(1,3)）。",
+    "evidence": ["Issue 中 In[74] 创建了 ConditionSet(x, Contains(y, Interval(-1,1)), ImageSet(Lambda(n, 2*n*pi + asin(y)), S.Integers))，然后 In[75] 调用 _.subs(y, Rational(1,3)) 得到错误结果。", "Issue 描述：'if I construct a similar ConditionSet with an ImageSet instead of a FiniteSet, a plain `subs` gives a strange result'。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "subs 调用后，输出表达式中的绑定变量 x 似乎被错误地替换为了 y 的值，导致表达式结构混乱且语义错误。",
+    "symptom_type": "wrong_return",
+    "evidence": ["Issue 中 Out[75] 显示为 '{1/3 | 1/3 ∊ {2⋅π⋅n + asin(1/3) | n ∊ ℤ} ∧ (1/3 ∈ {2⋅π⋅n + asin(1/3) | n ∊ ℤ})}'，而预期应为类似 Out[78] 或 Out[80] 的 '{2⋅π⋅n + asin(1/3) | n ∊ ℤ}'。", "Issue 描述：'It's as if the bound variable `x` of the ConditionSet were mistaken for a `y`.'"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "对基集为 ImageSet 的 ConditionSet 调用 subs 替换自由符号 y 时，应正确替换条件中的 y 和基集 ImageSet 表达式中的 y，而不影响 ConditionSet 的绑定变量 x，最终得到一个结构正确的 ConditionSet 或 ImageSet。",
+    "evidence": ["Issue 中 Out[78] 和 Out[80] 展示了使用 xreplace 或 subs(simultaneous=True) 得到的预期结果 '{2⋅π⋅n + asin(1/3) | n ∊ ℤ}'。", "Issue 中 Out[72] 展示了当基集为 FiniteSet 时 subs 工作正常，得到 '{-1/3, 1/3}'。", "相关测试 test_subs_CondSet 展示了 ConditionSet.subs 的一般行为，如替换自由符号 y 为 w 得到 ConditionSet(x, x < w, ...)。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "ConditionSet",
+      "kind": "class",
+      "source_path": "sympy/sets/conditionset.py",
+      "reason": "Issue 的核心是关于 ConditionSet 对象的 subs 方法在特定上下文下的错误行为。"
+    },
+    {
+      "name": "ImageSet",
+      "kind": "class",
+      "source_path": "sympy/sets/fancysets.py",
+      "reason": "触发 bug 的 ConditionSet 的基集是 ImageSet。"
+    },
+    {
+      "name": "subs",
+      "kind": "method",
+      "source_path": "sympy/core/basic.py",
+      "reason": "触发 bug 的方法是 subs。"
+    },
+    {
+      "name": "xreplace",
+      "kind": "method",
+      "source_path": "sympy/core/function.py",
+      "reason": "Issue 中展示了 xreplace 可以避免该 bug。"
+    },
+    {
+      "name": "solveset_real",
+      "kind": "function",
+      "source_path": "sympy/solvers/solveset.py",
+      "reason": "Issue 中用于生成示例的入口函数。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/sets/conditionset.py",
+      "object": "ConditionSet._eval_subs",
+      "lines": "",
+      "reason": "Issue 表明 ConditionSet.subs 在处理基集为 ImageSet 时出错，_eval_subs 是处理替换逻辑的方法。"
+    },
+    {
+      "path": "sympy/sets/conditionset.py",
+      "object": "ConditionSet.__new__",
+      "lines": "",
+      "reason": "可能涉及 ConditionSet 的构造或内部表示，影响 subs 的行为。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_subs_CondSet",
+      "test_file": "sympy/sets/tests/test_conditionset.py",
+      "why_relevant": "该测试专门测试 ConditionSet.subs 的各种情况，包括替换自由符号和 dummy symbol。",
+      "reusable_parts": ["imports (如 from sympy import ...)", "ConditionSet 和 FiniteSet 的构造", "subs 调用的模式", "assert 风格"],
+      "possible_gap": "该测试没有覆盖基集为 ImageSet 的 ConditionSet 的 subs 场景。"
+    },
+    {
+      "test_name": "test_ImageSet",
+      "test_file": "sympy/sets/tests/test_fancysets.py",
+      "why_relevant": "该测试涉及 ImageSet 的构造和行为，Issue 中 bug 涉及 ImageSet 作为基集。",
+      "reusable_parts": ["ImageSet 和 Lambda 的构造", "contains 检查"],
+      "possible_gap": "该测试不涉及 ConditionSet 或 subs 操作。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "object_state",
+      "current_pattern": "相关测试 test_subs_CondSet 中 ConditionSet 的基集通常是 FiniteSet 或 Interval。",
+      "target_pattern": "将 ConditionSet 的基构造为一个 ImageSet（例如 ImageSet(Lambda(n, 2*n*pi + asin(y)), S.Integers)）。",
+      "reason": "Issue 表明当基集为 ImageSet 时 subs 行为异常，而现有测试未覆盖此场景。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "相关测试中对 ConditionSet 调用 subs 替换自由符号（如 y -> w）。",
+      "target_pattern": "对基集为 ImageSet 的 ConditionSet 调用 subs 替换自由符号 y 为一个数值（如 Rational(1,3)）。",
+      "reason": "Issue 中触发 bug 的具体操作是 subs(y, Rational(1,3))。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "调用 subs 后的结果对象的 repr 或字符串表示。",
+      "reason": "Issue 中错误表现为输出表达式的字符串表示混乱，观测此值可直接判断 bug 是否触发。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "调用 subs 后结果的类型（如 ConditionSet, ImageSet, Set）。",
+      "reason": "预期结果可能是一个 ImageSet 或 ConditionSet，类型变化可能指示错误。"
+    },
+    {
+      "kind": "repr",
+      "expression_hint": "结果中绑定变量（如 x）和自由符号（如 y）的表示。",
+      "reason": "Issue 中错误表现为绑定变量 x 似乎被替换，观测符号名可帮助诊断。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "subs 调用后的结果应是一个结构正确的集合，其绑定变量保持不变，自由符号 y 被正确替换。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的、可能不稳定的 repr 字符串相等。",
+      "reason": "Issue 展示了预期的简化形式（如 ImageSet），应使用结构相等的断言（如 sympy 的 == 运算符）。"
+    },
+    {
+      "assertion_goal": "subs 调用后的结果应与使用 xreplace 或 subs(simultaneous=True) 得到的结果一致。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免依赖内部未公开的属性进行断言。",
+      "reason": "Issue 中 xreplace 和 subs(simultaneous=True) 给出了预期行为，可作为参照。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 sympy 核心模块（如 Symbol, Rational, pi, asin）和集合模块（如 ConditionSet, ImageSet, Interval, S）。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能需要在类似现有测试文件（sympy/sets/tests/test_conditionset.py）的上下文中运行。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "bug 的确切根源是在 ConditionSet._eval_subs 中，还是在 ImageSet 与 ConditionSet 交互的其他部分。",
+    "除了 subs(y, Rational(1,3)) 之外，是否还有其他触发模式（如替换为其他符号或表达式）。",
+    "修复后的精确输出形式是 ConditionSet 还是简化为 ImageSet。"
+  ]
+}

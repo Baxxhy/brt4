@@ -1,0 +1,136 @@
+instance_id: matplotlib__matplotlib-22719
+
+issue_summary: 当使用字符串单位转换器的坐标轴处理空数据时，会触发令人困惑的弃用警告和转换错误。
+
+trigger_condition:
+{
+  "text": "在已通过 `ax.xaxis.update_units` 设置类别单位（如字符串列表）的坐标轴上，调用绘图方法（如 `ax.plot`）并传入空数据（如 `[]`）。",
+  "evidence": [
+    "Issue 中的复现代码：`ax.xaxis.update_units([\"a\", \"b\"])` 后 `ax.plot([], [])`。",
+    "Issue 中尝试遵循警告建议调用 `ax.convert_xunits([])` 也触发了相同问题。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "抛出 `MatplotlibDeprecationWarning`，警告信息为“Support for passing numbers through unit converters is deprecated...”，随后抛出 `ConversionError: Failed to convert value(s) to axis units: array([], dtype=float64)`。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中的实际结果部分显示了完整的警告和 `ConversionError` 堆栈跟踪。",
+    "Issue 中 `ax.convert_xunits([])` 的堆栈跟踪也显示了相同的警告和异常。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当向已设置类别单位的坐标轴传入空数据时，应能正常处理（例如创建无数据的艺术家对象），或者提供更准确、可操作的错误/警告信息。",
+  "evidence": [
+    "Issue 的预期结果部分：“I would expect this to either (1) continue producing artists with no data, or (2) more accurately describe what the problem is and how to avoid it.”",
+    "相关测试 `test_empty_arrays` 表明库期望能处理空数组的绘图。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "matplotlib.axis.Axis.update_units",
+    "kind": "method",
+    "source_path": "lib/matplotlib/axis.py",
+    "reason": "Issue 中用于设置坐标轴单位（字符串类别）的 API。"
+  },
+  {
+    "name": "matplotlib.axes.Axes.plot",
+    "kind": "method",
+    "source_path": "",
+    "reason": "触发警告和错误的绘图方法。"
+  },
+  {
+    "name": "matplotlib.axis.Axis.convert_units",
+    "kind": "method",
+    "source_path": "lib/matplotlib/axis.py",
+    "reason": "警告信息建议使用的 API，但 Issue 表明它同样会触发问题。"
+  },
+  {
+    "name": "matplotlib.category.StrCategoryConverter.convert",
+    "kind": "method",
+    "source_path": "lib/matplotlib/category.py",
+    "reason": "堆栈跟踪显示警告来自 `category.py` 的 `convert` 方法，这是处理字符串类别转换的核心。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相关测试中向绘图或转换方法传入非空数据（如列表 `[\"a\", \"b\"]` 或数值数组）。",
+    "target_pattern": "传入空列表 `[]` 或空 NumPy 数组 `np.array([])`。",
+    "reason": "Issue 表明空数据输入会触发弃用警告和转换错误。",
+    "confidence": "high"
+  },
+  {
+    "slot": "object_state",
+    "current_pattern": "坐标轴使用默认单位或未显式设置类别单位。",
+    "target_pattern": "在绘图前使用 `ax.xaxis.update_units([\"a\", \"b\"])` 将坐标轴单位设置为字符串类别。",
+    "reason": "Issue 表明只有在坐标轴使用字符串单位转换器时才会触发此问题。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "warning",
+    "expression_hint": "`warnings.catch_warnings(record=True)` 捕获的 `MatplotlibDeprecationWarning` 及其消息内容。",
+    "reason": "Issue 的核心症状之一是出现特定内容的弃用警告。"
+  },
+  {
+    "kind": "exception",
+    "expression_hint": "是否抛出 `munits.ConversionError` 及其错误消息。",
+    "reason": "Issue 显示最终会抛出 `ConversionError`，表明转换失败。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "`ax.plot([], [])` 或 `ax.convert_xunits([])` 的返回值（如果成功）。",
+    "reason": "观察在无异常情况下，这些调用是否返回了预期的结果（如空艺术家列表或空数组）。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当传入空数据时，不应抛出 `ConversionError`。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言完整的异常消息字符串，因为修复后消息可能改变。",
+    "reason": "Issue 的预期行为是正常处理空数据或提供更好的信息，而不是抛出转换错误。"
+  },
+  {
+    "assertion_goal": "当传入空数据时，不应出现关于“passing numbers through unit converters”的弃用警告。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言警告的完整堆栈或行号。",
+    "reason": "Issue 认为该警告是虚假的或不可操作的，修复后应消除或替换为更合适的警告。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "使用 `pytest` 和 `matplotlib.testing` 工具。可能需要 `mpl.style.context('default')` 确保可重复的样式。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  },
+  {
+    "hint": "需要导入 `matplotlib.pyplot as plt`、`numpy as np` 以及相关的 `matplotlib.units` 模块。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "修复后的确切行为是应该静默处理空数据并创建无数据的艺术家，还是应该抛出一个更具体、可操作的异常/警告？",
+  "弃用警告的逻辑是在 `category.py` 的 `convert` 方法中触发的，但空数组是否被错误地判定为“数字”（`is_numlike`）？",
+  "除了 `plot` 方法，其他绘图方法（如 `scatter`、`bar`）在相同条件下是否也会触发此问题？"
+]

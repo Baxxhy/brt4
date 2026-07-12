@@ -1,0 +1,122 @@
+instance_id: django__django-12039
+
+issue_summary: CREATE INDEX 语句中字段名与排序方向或操作类之间缺少或多余空格。
+
+trigger_condition:
+{
+  "text": "使用 Index 类创建索引，指定 fields 和 opclasses 参数，且 fields 中的字段没有指定降序（即没有 '-' 前缀）。",
+  "evidence": [
+    "Issue 描述：'Creating an index through: index = Index(fields=['-name'], name='idx')' 和 'index = Index(fields=['name'], name='idx', opclasses=['text_pattern_ops'])'",
+    "相关测试 2 和 3 展示了使用 opclasses 创建索引的模式。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "生成的 CREATE INDEX SQL 语句中，字段名与操作类之间缺少空格，或在操作类后有多余空格。例如：'(\"name\"DESC)' 或 '(\"name\" text_pattern_ops )'。",
+  "symptom_type": "wrong_sql",
+  "evidence": [
+    "Issue 描述：'CREATE INDEX \"idx\" ON \"schema_author\" (\"name\"DESC)' 和 'CREATE INDEX \"idx\" ON \"schema_author\" (\"name\" text_pattern_ops )'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "生成的 CREATE INDEX SQL 语句中，字段名与排序方向（如 DESC）或操作类（如 text_pattern_ops）之间应有且仅有一个空格分隔，且操作类后不应有多余空格。",
+  "evidence": [
+    "Issue 描述：'The following would be expected: CREATE INDEX \"idx\" ON \"schema_author\" (\"name\" DESC)' 和 'The expected output would be: CREATE INDEX \"idx\" ON \"schema_author\" (\"name\" text_pattern_ops)'"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "Index",
+    "kind": "class",
+    "source_path": "django/db/models/indexes.py",
+    "reason": "Issue 中创建索引的核心类，用于构造触发条件。"
+  },
+  {
+    "name": "Columns",
+    "kind": "class",
+    "source_path": "django/db/backends/ddl_references.py",
+    "reason": "Issue 中明确提到 col_suffixes 参数导致空格问题，此类负责生成列引用字符串。"
+  },
+  {
+    "name": "connection.schema_editor",
+    "kind": "method",
+    "source_path": "",
+    "reason": "相关测试中用于执行创建索引操作的上下文管理器。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相关测试 2 (test_ops_class) 中：fields=['headline'], opclasses=['varchar_pattern_ops']",
+    "target_pattern": "fields=['name'], opclasses=['text_pattern_ops'] （字段无 '-' 前缀）",
+    "reason": "Issue 指出当 opclasses 与升序字段（无 '-'）一起使用时，会导致空格问题。",
+    "confidence": "high"
+  },
+  {
+    "slot": "input",
+    "current_pattern": "相关测试 1 (test_ops_class_descending) 中：fields=['-body'], opclasses=['text_pattern_ops']",
+    "target_pattern": "fields=['body'], opclasses=['text_pattern_ops'] （移除 '-' 前缀）",
+    "reason": "将降序改为升序，以触发 Issue 中描述的 col_suffixes 包含空字符串的场景。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "sql",
+    "expression_hint": "由 schema_editor 生成的 CREATE INDEX SQL 语句字符串。",
+    "reason": "Issue 的核心错误现象是 SQL 语句中空格不正确，直接观察生成的 SQL 能判断问题是否触发。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "Columns 类的 __str__ 方法返回值，或类似生成列定义片段的内部表达式。",
+    "reason": "Issue 怀疑问题出在 Columns 类处理 col_suffixes 时，观察其输出可定位问题。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "生成的 CREATE INDEX SQL 片段中，字段名与紧随其后的操作类或排序方向之间应包含一个空格，且操作类后不应有空格。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "断言完整的、硬编码的 SQL 字符串相等，因为表名、引号等可能因数据库后端而异。",
+    "reason": "Issue 关注的是空格格式，而非整个 SQL 语句。检查关键片段是否包含正确的空格模式更稳定。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 PostgreSQL 数据库后端，因为 opclasses 是 PostgreSQL 特性。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要一个包含适当字段的 Django 模型（如 Issue 中的 'schema_author' 或测试中的 IndexedArticle2）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要使用 TransactionTestCase 和 connection.schema_editor() 来执行 DDL 操作。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "col_suffixes 参数在 Index.create_sql 中是如何计算并传递给 Columns 的确切流程。",
+  "除了 PostgreSQL，其他支持 opclasses 的数据库后端（如果有）是否受同样问题影响。",
+  "当 fields 列表包含多个字段且混合升序/降序和 opclasses 时，空格问题的具体表现。"
+]

@@ -1,0 +1,514 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Add transaction handling to Changelist list_editable processing.
+Description
+	
+It seems that changelist_view in Django admin is missing a transaction. Since the view may change data in database, it should be wrapped in a transaction to prevent unexpected states in case of errors.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/contrib/admin/options.py
+对象名称：changelist_view
+节点类型：class_function
+父节点：ModelAdmin
+行号范围：1914-2091
+代码：
+    def changelist_view(self, request, extra_context=None):
+        """
+        The 'change list' admin view for this model.
+        """
+        from django.contrib.admin.views.main import ERROR_FLAG
+
+        app_label = self.opts.app_label
+        if not self.has_view_or_change_permission(request):
+            raise PermissionDenied
+
+        try:
+            cl = self.get_changelist_instance(request)
+        except IncorrectLookupParameters:
+            # Wacky lookup parameters were given, so redirect to the main
+            # changelist page, without parameters, and pass an 'invalid=1'
+            # parameter via the query string. If wacky parameters were given
+            # and the 'invalid=1' parameter was already in the query string,
+            # something is screwed up with the database, so display an error
+            # page.
+            if ERROR_FLAG in request.GET:
+                return SimpleTemplateResponse(
+                    "admin/invalid_setup.html",
+                    {
+                        "title": _("Database error"),
+                    },
+                )
+            return HttpResponseRedirect(request.path + "?" + ERROR_FLAG + "=1")
+
+        # If the request was POSTed, this might be a bulk action or a bulk
+        # edit. Try to look up an action or confirmation first, but if this
+        # isn't an action the POST will fall through to the bulk edit check,
+        # below.
+        action_failed = False
+        selected = request.POST.getlist(helpers.ACTION_CHECKBOX_NAME)
+
+        actions = self.get_actions(request)
+        # Actions with no confirmation
+        if (
+            actions
+            and request.method == "POST"
+            and "index" in request.POST
+            and "_save" not in request.POST
+        ):
+            if selected:
+                response = self.response_action(
+                    request, queryset=cl.get_queryset(request)
+                )
+                if response:
+                    return response
+                else:
+                    action_failed = True
+            else:
+                msg = _(
+                    "Items must be selected in order to perform "
+                    "actions on them. No items have been changed."
+                )
+                self.message_user(request, msg, messages.WARNING)
+                action_failed = True
+
+        # Actions with confirmation
+        if (
+            actions
+            and request.method == "POST"
+            and helpers.ACTION_CHECKBOX_NAME in request.POST
+            and "index" not in request.POST
+            and "_save" not in request.POST
+        ):
+            if selected:
+                response = self.response_action(
+                    request, queryset=cl.get_queryset(request)
+                )
+                if response:
+                    return response
+                else:
+                    action_failed = True
+
+        if action_failed:
+            # Redirect back to the changelist page to avoid resubmitting the
+            # form if the user refreshes the browser or uses the "No, take
+            # me back" button on the action confirmation page.
+            return HttpResponseRedirect(request.get_full_path())
+
+        # If we're allowing changelist editing, we need to construct a formset
+        # for the changelist given all the fields to be edited. Then we'll
+        # use the formset to validate/process POSTed data.
+        formset = cl.formset = None
+
+        # Handle POSTed bulk-edit data.
+        if request.method == "POST" and cl.list_editable and "_save" in request.POST:
+            if not self.has_change_permission(request):
+                raise PermissionDenied
+            FormSet = self.get_changelist_formset(request)
+            modified_objects = self._get_list_editable_queryset(
+                request, FormSet.get_default_prefix()
+            )
+            formset = cl.formset = FormSet(
+                request.POST, request.FILES, queryset=modified_objects
+            )
+            if formset.is_valid():
+                changecount = 0
+                for form in formset.forms:
+                    if form.has_changed():
+                        obj = self.save_form(request, form, change=True)
+                        self.save_model(request, obj, form, change=True)
+                        self.save_related(request, form, formsets=[], change=True)
+                        change_msg = self.construct_change_message(request, form, None)
+                        self.log_change(request, obj, change_msg)
+                        changecount += 1
+
+                if changecount:
+                    msg = ngettext(
+                        "%(count)s %(name)s was changed successfully.",
+                        "%(count)s %(name)s were changed successfully.",
+                        changecount,
+                    ) % {
+                        "count": changecount,
+                        "name": model_ngettext(self.opts, changecount),
+                    }
+                    self.message_user(request, msg, messages.SUCCESS)
+
+                return HttpResponseRedirect(request.get_full_path())
+
+        # Handle GET -- construct a formset for display.
+        elif cl.list_editable and self.has_change_permission(request):
+            FormSet = self.get_changelist_formset(request)
+            formset = cl.formset = FormSet(queryset=cl.result_list)
+
+        # Build the list of media to be used by the formset.
+        if formset:
+            media = self.media + formset.media
+        else:
+            media = self.media
+
+        # Build the action form and populate it with available actions.
+        if actions:
+            action_form = self.action_form(auto_id=None)
+            action_form.fields["action"].choices = self.get_action_choices(request)
+            media += action_form.media
+        else:
+            action_form = None
+
+        selection_note_all = ngettext(
+            "%(total_count)s selected", "All %(total_count)s selected", cl.result_count
+        )
+
+        context = {
+            **self.admin_site.each_context(request),
+            "module_name": str(self.opts.verbose_name_plural),
+            "selection_note": _("0 of %(cnt)s selected") % {"cnt": len(cl.result_list)},
+            "selection_note_all": selection_note_all % {"total_count": cl.result_count},
+            "title": cl.title,
+            "subtitle": None,
+            "is_popup": cl.is_popup,
+            "to_field": cl.to_field,
+            "cl": cl,
+            "media": media,
+            "has_add_permission": self.has_add_permission(request),
+            "opts": cl.opts,
+            "action_form": action_form,
+            "actions_on_top": self.actions_on_top,
+            "actions_on_bottom": self.actions_on_bottom,
+            "actions_selection_counter": self.actions_selection_counter,
+            "preserved_filters": self.get_preserved_filters(request),
+            **(extra_context or {}),
+        }
+
+        request.current_app = self.admin_site.name
+
+        return TemplateResponse(
+            request,
+            self.change_list_template
+            or [
+                "admin/%s/%s/change_list.html" % (app_label, self.opts.model_name),
+                "admin/%s/change_list.html" % app_label,
+                "admin/change_list.html",
+            ],
+            context,
+        )
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/admin_changelist/tests.py
+测试名称：ChangeListTests.test_changelist_view_list_editable_changed_objects_uses_filter
+测试代码：
+@override_settings(ROOT_URLCONF="admin_changelist.urls")
+class ChangeListTests(TestCase):
+    def test_changelist_view_list_editable_changed_objects_uses_filter(self):
+        """list_editable edits use a filtered queryset to limit memory usage."""
+        a = Swallow.objects.create(origin="Swallow A", load=4, speed=1)
+        Swallow.objects.create(origin="Swallow B", load=2, speed=2)
+        data = {
+            "form-TOTAL_FORMS": "2",
+            "form-INITIAL_FORMS": "2",
+            "form-MIN_NUM_FORMS": "0",
+            "form-MAX_NUM_FORMS": "1000",
+            "form-0-uuid": str(a.pk),
+            "form-0-load": "10",
+            "_save": "Save",
+        }
+        superuser = self._create_superuser("superuser")
+        self.client.force_login(superuser)
+        changelist_url = reverse("admin:admin_changelist_swallow_changelist")
+        with CaptureQueriesContext(connection) as context:
+            response = self.client.post(changelist_url, data=data)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("WHERE", context.captured_queries[4]["sql"])
+            self.assertIn("IN", context.captured_queries[4]["sql"])
+            # Check only the first few characters since the UUID may have dashes.
+            self.assertIn(str(a.pk)[:8], context.captured_queries[4]["sql"])
+
+【相关测试 2】
+测试文件：tests/admin_changelist/tests.py
+测试名称：ChangeListTests.test_get_list_editable_queryset
+测试代码：
+@override_settings(ROOT_URLCONF="admin_changelist.urls")
+class ChangeListTests(TestCase):
+    def test_get_list_editable_queryset(self):
+        a = Swallow.objects.create(origin="Swallow A", load=4, speed=1)
+        Swallow.objects.create(origin="Swallow B", load=2, speed=2)
+        data = {
+            "form-TOTAL_FORMS": "2",
+            "form-INITIAL_FORMS": "2",
+            "form-MIN_NUM_FORMS": "0",
+            "form-MAX_NUM_FORMS": "1000",
+            "form-0-uuid": str(a.pk),
+            "form-0-load": "10",
+            "_save": "Save",
+        }
+        superuser = self._create_superuser("superuser")
+        self.client.force_login(superuser)
+        changelist_url = reverse("admin:admin_changelist_swallow_changelist")
+        m = SwallowAdmin(Swallow, custom_site)
+        request = self.factory.post(changelist_url, data=data)
+        queryset = m._get_list_editable_queryset(request, prefix="form")
+        self.assertEqual(queryset.count(), 1)
+        data["form-0-uuid"] = "INVALD_PRIMARY_KEY"
+        # The unfiltered queryset is returned if there's invalid data.
+        request = self.factory.post(changelist_url, data=data)
+        queryset = m._get_list_editable_queryset(request, prefix="form")
+        self.assertEqual(queryset.count(), 2)
+
+【相关测试 3】
+测试文件：tests/admin_changelist/tests.py
+测试名称：ChangeListTests.test_get_list_editable_queryset_with_regex_chars_in_prefix
+测试代码：
+@override_settings(ROOT_URLCONF="admin_changelist.urls")
+class ChangeListTests(TestCase):
+    def test_get_list_editable_queryset_with_regex_chars_in_prefix(self):
+        a = Swallow.objects.create(origin="Swallow A", load=4, speed=1)
+        Swallow.objects.create(origin="Swallow B", load=2, speed=2)
+        data = {
+            "form$-TOTAL_FORMS": "2",
+            "form$-INITIAL_FORMS": "2",
+            "form$-MIN_NUM_FORMS": "0",
+            "form$-MAX_NUM_FORMS": "1000",
+            "form$-0-uuid": str(a.pk),
+            "form$-0-load": "10",
+            "_save": "Save",
+        }
+        superuser = self._create_superuser("superuser")
+        self.client.force_login(superuser)
+        changelist_url = reverse("admin:admin_changelist_swallow_changelist")
+        m = SwallowAdmin(Swallow, custom_site)
+        request = self.factory.post(changelist_url, data=data)
+        queryset = m._get_list_editable_queryset(request, prefix="form$")
+        self.assertEqual(queryset.count(), 1)
+
+【相关测试 4】
+测试文件：tests/admin_changelist/tests.py
+测试名称：ChangeListTests.test_multiuser_edit
+测试代码：
+@override_settings(ROOT_URLCONF="admin_changelist.urls")
+class ChangeListTests(TestCase):
+    def test_multiuser_edit(self):
+        """
+        Simultaneous edits of list_editable fields on the changelist by
+        different users must not result in one user's edits creating a new
+        object instead of modifying the correct existing object (#11313).
+        """
+        # To replicate this issue, simulate the following steps:
+        # 1. User1 opens an admin changelist with list_editable fields.
+        # 2. User2 edits object "Foo" such that it moves to another page in
+        #    the pagination order and saves.
+        # 3. User1 edits object "Foo" and saves.
+        # 4. The edit made by User1 does not get applied to object "Foo" but
+        #    instead is used to create a new object (bug).
+
+        # For this test, order the changelist by the 'speed' attribute and
+        # display 3 objects per page (SwallowAdmin.list_per_page = 3).
+
+        # Setup the test to reflect the DB state after step 2 where User2 has
+        # edited the first swallow object's speed from '4' to '1'.
+        a = Swallow.objects.create(origin="Swallow A", load=4, speed=1)
+        b = Swallow.objects.create(origin="Swallow B", load=2, speed=2)
+        c = Swallow.objects.create(origin="Swallow C", load=5, speed=5)
+        d = Swallow.objects.create(origin="Swallow D", load=9, speed=9)
+
+        superuser = self._create_superuser("superuser")
+        self.client.force_login(superuser)
+        changelist_url = reverse("admin:admin_changelist_swallow_changelist")
+
+        # Send the POST from User1 for step 3. It's still using the changelist
+        # ordering from before User2's edits in step 2.
+        data = {
+            "form-TOTAL_FORMS": "3",
+            "form-INITIAL_FORMS": "3",
+            "form-MIN_NUM_FORMS": "0",
+            "form-MAX_NUM_FORMS": "1000",
+            "form-0-uuid": str(d.pk),
+            "form-1-uuid": str(c.pk),
+            "form-2-uuid": str(a.pk),
+            "form-0-load": "9.0",
+            "form-0-speed": "9.0",
+            "form-1-load": "5.0",
+            "form-1-speed": "5.0",
+            "form-2-load": "5.0",
+            "form-2-speed": "4.0",
+            "_save": "Save",
+        }
+        response = self.client.post(
+            changelist_url, data, follow=True, extra={"o": "-2"}
+        )
+
+        # The object User1 edited in step 3 is displayed on the changelist and
+        # has the correct edits applied.
+        self.assertContains(response, "1 swallow was changed successfully.")
+        self.assertContains(response, a.origin)
+        a.refresh_from_db()
+        self.assertEqual(a.load, float(data["form-2-load"]))
+        self.assertEqual(a.speed, float(data["form-2-speed"]))
+        b.refresh_from_db()
+        self.assertEqual(b.load, 2)
+        self.assertEqual(b.speed, 2)
+        c.refresh_from_db()
+        self.assertEqual(c.load, float(data["form-1-load"]))
+        self.assertEqual(c.speed, float(data["form-1-speed"]))
+        d.refresh_from_db()
+        self.assertEqual(d.load, float(data["form-0-load"]))
+        self.assertEqual(d.speed, float(data["form-0-speed"]))
+        # No new swallows were created.
+        self.assertEqual(len(Swallow.objects.all()), 4)
+
+【相关测试 5】
+测试文件：tests/admin_changelist/tests.py
+测试名称：ChangeListTests.test_get_edited_object_ids
+测试代码：
+@override_settings(ROOT_URLCONF="admin_changelist.urls")
+class ChangeListTests(TestCase):
+    def test_get_edited_object_ids(self):
+        a = Swallow.objects.create(origin="Swallow A", load=4, speed=1)
+        b = Swallow.objects.create(origin="Swallow B", load=2, speed=2)
+        c = Swallow.objects.create(origin="Swallow C", load=5, speed=5)
+        superuser = self._create_superuser("superuser")
+        self.client.force_login(superuser)
+        changelist_url = reverse("admin:admin_changelist_swallow_changelist")
+        m = SwallowAdmin(Swallow, custom_site)
+        data = {
+            "form-TOTAL_FORMS": "3",
+            "form-INITIAL_FORMS": "3",
+            "form-MIN_NUM_FORMS": "0",
+            "form-MAX_NUM_FORMS": "1000",
+            "form-0-uuid": str(a.pk),
+            "form-1-uuid": str(b.pk),
+            "form-2-uuid": str(c.pk),
+            "form-0-load": "9.0",
+            "form-0-speed": "9.0",
+            "form-1-load": "5.0",
+            "form-1-speed": "5.0",
+            "form-2-load": "5.0",
+            "form-2-speed": "4.0",
+            "_save": "Save",
+        }
+        request = self.factory.post(changelist_url, data=data)
+        pks = m._get_edited_object_pks(request, prefix="form")
+        self.assertEqual(sorted(pks), sorted([str(a.pk), str(b.pk), str(c.pk)]))
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

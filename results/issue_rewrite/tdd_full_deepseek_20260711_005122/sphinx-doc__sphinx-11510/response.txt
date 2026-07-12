@@ -1,0 +1,103 @@
+{
+  "issue_summary": "Sphinx 的 source-read 事件对通过 .. include:: 指令包含的文件内容所做的修改不会反映在最终生成的 HTML 中。",
+  "trigger_condition": {
+    "text": "使用自定义 Sphinx 扩展，通过 app.connect('source-read', callback) 注册事件处理器，该处理器修改 source[0] 的内容。构建包含 .. include:: 指令引用其他 .rst 文件的文档。",
+    "evidence": ["Issue 的 How to Reproduce 部分提供了完整的 conf.py、index.rst、something-to-include.rst 和 my-extension.py 文件。", "Issue 描述中提到 'source-read event does not modify include'd files source'。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "最终生成的 HTML 文件中，被包含文件（something-to-include.rst）中的占位符 &REPLACE_ME; 未被替换为 REPLACED，而主文件（index.rst）中的占位符被成功替换。",
+    "symptom_type": "state_not_updated",
+    "evidence": ["Issue 中提供的 build/index.html 片段显示 <p>&amp;REPLACE_ME;</p> 和 <p>REPLACED</p> 并存。", "Issue 中 Note 部分说明事件处理器确实被调用且 source[0] 被修改，但修改未生效于最终输出。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "最终生成的 HTML 文件中，所有源文件（包括通过 .. include:: 指令包含的文件）中的占位符 &REPLACE_ME; 都应被替换为 REPLACED。",
+    "evidence": ["Issue 的 Expected behavior 部分提供了期望的 HTML 输出，其中两个 <p>REPLACED</p> 标签。", "Issue 描述表明自定义扩展的目的是对所有文件进行搜索替换。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "Sphinx.connect",
+      "kind": "method",
+      "source_path": "sphinx/application.py",
+      "reason": "Issue 中自定义扩展使用此方法将回调函数连接到 'source-read' 事件。"
+    },
+    {
+      "name": "Sphinx",
+      "kind": "class",
+      "source_path": "sphinx/application.py",
+      "reason": "是 Sphinx 应用的主类，扩展通过其 setup 方法进行注册和配置。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sphinx/application.py",
+      "object": "Sphinx",
+      "lines": "",
+      "reason": "该类管理事件系统（包括 connect 方法）和文档构建流程，'source-read' 事件的处理和包含文件内容的传递可能在此类或其依赖的模块中存在问题。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_event_priority",
+      "test_file": "tests/test_events.py",
+      "why_relevant": "该测试演示了如何连接事件、设置优先级并验证回调执行顺序，与 Issue 中连接 'source-read' 事件的核心操作相似。",
+      "reusable_parts": ["EventManager 或 Sphinx 事件系统的使用模式", "connect 方法的调用方式", "lambda 或函数作为回调的写法"],
+      "possible_gap": "该测试仅验证事件回调的顺序，不涉及文档源内容的读取、修改或包含文件处理，也没有生成最终输出。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "测试中使用简单的事件（如 'builder-inited'）和回调（如追加数字到列表）。",
+      "target_pattern": "需要变异为使用 'source-read' 事件，并在回调中修改 source[0] 参数。测试输入需要包含通过 .. include:: 指令引用的文档结构。",
+      "reason": "Issue 表明缺陷仅在处理包含文件且通过 'source-read' 事件修改源内容时触发。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "相关测试未展示完整的 Sphinx 应用配置和文档构建。",
+      "target_pattern": "需要配置 Sphinx 扩展、创建包含 .. include:: 指令的 .rst 文件，并执行构建过程。",
+      "reason": "缺陷的复现依赖于完整的文档构建流程，而不仅仅是事件连接的单元测试。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "file_output",
+      "expression_hint": "构建后生成的 HTML 文件内容，特别是包含文件对应部分的文本。",
+      "reason": "Issue 的核心错误现象是最终输出文件内容不符合预期，直接观察输出文件是判断缺陷是否触发的直接方式。"
+    },
+    {
+      "kind": "state",
+      "expression_hint": "'source-read' 事件回调被调用时的 docname 和 source[0] 参数值，特别是对于被包含的文件。",
+      "reason": "Issue 提到回调确实被调用且 source[0] 被修改，但修改未持久化，观测这些中间状态有助于定位问题发生环节。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证最终生成的 HTML 文件中不包含未替换的占位符文本 '&REPLACE_ME;'（或其实体 '&amp;REPLACE_ME;'），且包含预期的替换文本 'REPLACED'。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "避免断言完整的、可能因 Sphinx 版本或主题而变化的 HTML 字符串相等。",
+      "reason": "Issue 关注的是文本替换是否成功，而非 HTML 结构的精确细节。使用片段断言更稳定，且与 Issue 中提供的 grep 检查逻辑一致。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要创建临时目录（tmp_path）来存放 conf.py、.rst 源文件、自定义扩展模块，并运行 sphinx-build。可能需要使用 sphinx.testing.fixtures 中的 make_app 或类似 fixture。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试类可能需要继承自 sphinx.testing.util.SphinxTest 或使用 pytest fixture 来管理 Sphinx 应用实例。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "'source-read' 事件处理流程中，被包含文件的源内容在修改后是如何（或为何）被后续步骤覆盖或忽略的具体代码位置。",
+    "除了包含文件，是否还有其他类似情况（如通过其他指令引用的文件）也会受此缺陷影响。",
+    "Sphinx 内部处理包含文件内容与主文件内容合并的确切机制。"
+  ]
+}

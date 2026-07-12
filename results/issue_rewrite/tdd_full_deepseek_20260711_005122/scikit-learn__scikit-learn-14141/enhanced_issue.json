@@ -1,0 +1,271 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-14141",
+  "issue_summary": "show_versions 函数未列出 joblib 依赖项，或 issue 模板在 sklearn 版本大于 0.20 时未包含 joblib。",
+  "trigger_condition": {
+    "text": "调用 show_versions() 函数，且 scikit-learn 版本大于 0.20。",
+    "evidence": [
+      "Issue 提到 'joblib should be added to the dependencies listed in show_versions or added to the issue template when sklearn version is > 0.20.'",
+      "源码片段 1 显示了 show_versions 函数及其依赖项收集逻辑。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "show_versions() 的输出中缺少 joblib 依赖项信息。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 明确要求将 joblib 添加到 show_versions 列出的依赖项中，暗示当前输出缺少它。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "show_versions() 的输出应包含 joblib 的版本信息。",
+    "evidence": [
+      "Issue 要求 'joblib should be added to the dependencies listed in show_versions'。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "show_versions",
+      "kind": "function",
+      "source_path": "sklearn/utils/_show_versions.py",
+      "reason": "Issue 直接针对此函数，要求其输出包含 joblib。"
+    },
+    {
+      "name": "_get_deps_info",
+      "kind": "function",
+      "source_path": "sklearn/utils/_show_versions.py",
+      "reason": "show_versions 调用此函数获取依赖信息，是添加 joblib 的关键位置。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sklearn/utils/_show_versions.py",
+      "object": "_get_deps_info",
+      "lines": "",
+      "reason": "此函数负责收集依赖信息，当前可能未包含 joblib。"
+    },
+    {
+      "path": "sklearn/utils/_show_versions.py",
+      "object": "show_versions",
+      "lines": "100-117",
+      "reason": "此函数打印依赖信息，其输出缺少 joblib。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_get_deps_info",
+      "test_file": "sklearn/utils/tests/test_show_versions.py",
+      "why_relevant": "它直接测试 _get_deps_info 函数返回的依赖字典内容。",
+      "reusable_parts": [
+        "import _get_deps_info",
+        "assert 'sklearn' in deps_info 等断言风格"
+      ],
+      "possible_gap": "当前测试断言列表不包含 'joblib'，无法检测其缺失。"
+    },
+    {
+      "test_name": "test_show_versions_with_blas",
+      "test_file": "sklearn/utils/tests/test_show_versions.py",
+      "why_relevant": "它测试 show_versions 的整体输出，并检查特定字符串是否存在。",
+      "reusable_parts": [
+        "使用 capsys fixture 捕获输出",
+        "assert 'numpy' in out 的检查模式"
+      ],
+      "possible_gap": "当前只检查了 'numpy' 和 'BLAS'，未检查 'joblib'。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "test_get_deps_info 断言依赖字典包含 'numpy', 'scipy' 等。",
+      "target_pattern": "断言依赖字典也应包含 'joblib'。",
+      "reason": "Issue 表明 joblib 应被列为依赖，因此测试断言需要相应扩展。",
+      "confidence": "high"
+    },
+    {
+      "slot": "input",
+      "current_pattern": "test_show_versions_with_blas 检查输出中是否包含 'numpy'。",
+      "target_pattern": "检查输出中是否包含 'joblib'。",
+      "reason": "show_versions 的输出应包含 joblib 信息。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "_get_deps_info() 返回的字典的键",
+      "reason": "观察依赖字典是否包含 'joblib' 键。"
+    },
+    {
+      "kind": "file_output",
+      "expression_hint": "capsys.readouterr().out 的内容",
+      "reason": "观察 show_versions() 打印的输出是否包含 joblib 版本信息。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 _get_deps_info() 返回的字典包含 'joblib' 键。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免断言完整的字典值或精确的版本字符串，因为版本可能变化。",
+      "reason": "Issue 的核心是 joblib 应被列出，检查键的存在是稳定且对齐的。"
+    },
+    {
+      "assertion_goal": "验证 show_versions() 打印的输出包含 'joblib' 字符串。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免断言完整的输出行或精确的格式化，因为格式可能调整。",
+      "reason": "检查输出中是否出现 'joblib' 能有效验证功能是否修复。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "可能需要 capsys fixture 来捕获 show_versions 的输出。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要导入 _get_deps_info 和 show_versions。",
+      "source": "retrieved_source",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "joblib 是否应作为核心依赖（如 numpy）列出，还是可选依赖？",
+    "show_versions 的输出中 joblib 信息的确切格式是什么？",
+    "scikit-learn 版本大于 0.20 的确切条件在测试中是否需要模拟？"
+  ],
+  "raw": {
+    "issue_summary": "show_versions 函数未列出 joblib 依赖项，或 issue 模板在 sklearn 版本大于 0.20 时未包含 joblib。",
+    "trigger_condition": {
+      "text": "调用 show_versions() 函数，且 scikit-learn 版本大于 0.20。",
+      "evidence": [
+        "Issue 提到 'joblib should be added to the dependencies listed in show_versions or added to the issue template when sklearn version is > 0.20.'",
+        "源码片段 1 显示了 show_versions 函数及其依赖项收集逻辑。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "show_versions() 的输出中缺少 joblib 依赖项信息。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 明确要求将 joblib 添加到 show_versions 列出的依赖项中，暗示当前输出缺少它。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "show_versions() 的输出应包含 joblib 的版本信息。",
+      "evidence": [
+        "Issue 要求 'joblib should be added to the dependencies listed in show_versions'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "show_versions",
+        "kind": "function",
+        "source_path": "sklearn/utils/_show_versions.py",
+        "reason": "Issue 直接针对此函数，要求其输出包含 joblib。"
+      },
+      {
+        "name": "_get_deps_info",
+        "kind": "function",
+        "source_path": "sklearn/utils/_show_versions.py",
+        "reason": "show_versions 调用此函数获取依赖信息，是添加 joblib 的关键位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/utils/_show_versions.py",
+        "object": "_get_deps_info",
+        "lines": "",
+        "reason": "此函数负责收集依赖信息，当前可能未包含 joblib。"
+      },
+      {
+        "path": "sklearn/utils/_show_versions.py",
+        "object": "show_versions",
+        "lines": "100-117",
+        "reason": "此函数打印依赖信息，其输出缺少 joblib。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_get_deps_info",
+        "test_file": "sklearn/utils/tests/test_show_versions.py",
+        "why_relevant": "它直接测试 _get_deps_info 函数返回的依赖字典内容。",
+        "reusable_parts": [
+          "import _get_deps_info",
+          "assert 'sklearn' in deps_info 等断言风格"
+        ],
+        "possible_gap": "当前测试断言列表不包含 'joblib'，无法检测其缺失。"
+      },
+      {
+        "test_name": "test_show_versions_with_blas",
+        "test_file": "sklearn/utils/tests/test_show_versions.py",
+        "why_relevant": "它测试 show_versions 的整体输出，并检查特定字符串是否存在。",
+        "reusable_parts": [
+          "使用 capsys fixture 捕获输出",
+          "assert 'numpy' in out 的检查模式"
+        ],
+        "possible_gap": "当前只检查了 'numpy' 和 'BLAS'，未检查 'joblib'。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_get_deps_info 断言依赖字典包含 'numpy', 'scipy' 等。",
+        "target_pattern": "断言依赖字典也应包含 'joblib'。",
+        "reason": "Issue 表明 joblib 应被列为依赖，因此测试断言需要相应扩展。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "test_show_versions_with_blas 检查输出中是否包含 'numpy'。",
+        "target_pattern": "检查输出中是否包含 'joblib'。",
+        "reason": "show_versions 的输出应包含 joblib 信息。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "_get_deps_info() 返回的字典的键",
+        "reason": "观察依赖字典是否包含 'joblib' 键。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "capsys.readouterr().out 的内容",
+        "reason": "观察 show_versions() 打印的输出是否包含 joblib 版本信息。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 _get_deps_info() 返回的字典包含 'joblib' 键。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的字典值或精确的版本字符串，因为版本可能变化。",
+        "reason": "Issue 的核心是 joblib 应被列出，检查键的存在是稳定且对齐的。"
+      },
+      {
+        "assertion_goal": "验证 show_versions() 打印的输出包含 'joblib' 字符串。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的输出行或精确的格式化，因为格式可能调整。",
+        "reason": "检查输出中是否出现 'joblib' 能有效验证功能是否修复。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要 capsys fixture 来捕获 show_versions 的输出。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 _get_deps_info 和 show_versions。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "joblib 是否应作为核心依赖（如 numpy）列出，还是可选依赖？",
+      "show_versions 的输出中 joblib 信息的确切格式是什么？",
+      "scikit-learn 版本大于 0.20 的确切条件在测试中是否需要模拟？"
+    ]
+  }
+}

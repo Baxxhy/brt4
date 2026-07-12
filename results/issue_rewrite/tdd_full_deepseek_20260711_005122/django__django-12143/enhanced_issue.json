@@ -1,0 +1,292 @@
+{
+  "instance_id": "django__django-12143",
+  "issue_summary": "在 Django admin 的 changeform 视图中，当 formset 前缀包含正则表达式特殊字符时，可能导致数据丢失。",
+  "trigger_condition": {
+    "text": "在 Django admin 中使用内联表单集（inline formset），并且该表单集的前缀（prefix）包含正则表达式特殊字符（例如 '.'、'*'、'['、'(' 等）。",
+    "evidence": [
+      "Issue 描述指出：'prefix has no such restrictions and could contain any number of special regex characters'",
+      "相关测试代码展示了使用内联表单集（如 'widget_set'、'doohickey_set'）的场景。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "由于未转义前缀中的正则表达式特殊字符，导致用于匹配主键字段的正则表达式编译或匹配失败，可能无法正确识别和处理表单数据，从而导致数据丢失或操作失败。",
+    "symptom_type": "state_not_updated",
+    "evidence": [
+      "Issue 描述指出：'Generating a regex like this using string formatting can cause problems when the arguments contain special regex characters.'",
+      "Issue 标题为 'Possible data loss'。"
+    ],
+    "confidence": "medium"
+  },
+  "expected_behavior": {
+    "text": "即使表单集前缀包含正则表达式特殊字符，admin changeform 视图也应能正确解析和处理内联表单数据，不会导致数据丢失。",
+    "evidence": [
+      "Issue 描述建议的修复是使用 re.escape() 来转义前缀字符串。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "re.compile",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 中明确指出问题出现在使用 re.compile 生成正则表达式时未转义前缀字符串。"
+    },
+    {
+      "name": "re.escape",
+      "kind": "function",
+      "source_path": "django/utils/html.py",
+      "reason": "Issue 建议使用 re.escape() 来修复问题，并且检索到的源码片段中包含 escape 函数（尽管是 HTML 转义，但概念相关）。"
+    },
+    {
+      "name": "inlineformset_factory",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试代码中使用了 inlineformset_factory 来创建内联表单集，这是触发问题的上下文。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/contrib/admin/options.py",
+      "object": "",
+      "lines": "1634",
+      "reason": "Issue 描述中直接引用了该文件第1634行，其中包含有问题的正则表达式编译代码行：'pk_pattern = re.compile(r'{}-\\d+-{}$'.format(prefix, self.model._meta.pk.name))'。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "AdminInlineTests.test_simple_inline",
+      "test_file": "tests/admin_views/tests.py",
+      "why_relevant": "该测试演示了在 Django admin 中使用内联表单集（widget_set）进行增删改查的完整流程，包括表单前缀的使用。",
+      "reusable_parts": [
+        "测试类结构（AdminInlineTests）、使用 Client 发送 POST 请求、使用 reverse 生成 URL、assertEqual 和 assertContains 断言风格。"
+      ],
+      "possible_gap": "该测试使用的表单集前缀是 'widget_set'，不包含正则表达式特殊字符，因此无法触发 Issue 描述的问题。"
+    },
+    {
+      "test_name": "ModelFormsetTest.test_inline_formsets",
+      "test_file": "tests/model_formsets/tests.py",
+      "why_relevant": "该测试直接使用了 inlineformset_factory 并检查了生成的 HTML 表单字段名称（如 'book_set-0-id'），展示了表单前缀在表单集构造和数据处理中的核心作用。",
+      "reusable_parts": [
+        "使用 inlineformset_factory、构造 formset 实例、使用 is_valid() 和 save() 方法、检查生成的 HTML 字段名。"
+      ],
+      "possible_gap": "该测试同样使用普通前缀（'book_set'），且不涉及 admin 视图或正则表达式匹配逻辑。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中使用普通字符串作为表单集前缀，如 'widget_set'、'doohickey_set'、'book_set'。",
+      "target_pattern": "使用包含正则表达式特殊字符的字符串作为表单集前缀，例如 'prefix.'、'prefix*'、'prefix[0]' 或 'prefix('。",
+      "reason": "Issue 明确指出问题发生在前缀包含正则表达式特殊字符时，这些字符在未转义的情况下会干扰正则表达式的编译和匹配。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "测试在标准 Django admin 配置下运行。",
+      "target_pattern": "配置一个自定义的 ModelAdmin 或 InlineModelAdmin，为其内联表单集设置一个包含特殊字符的前缀。",
+      "reason": "表单集前缀可以通过内联模型的 'prefix' 属性或相关配置进行设置，这是注入特殊字符的途径。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "state",
+      "expression_hint": "在提交包含特殊字符前缀的表单数据后，观察相关模型对象的数量或属性是否按预期更新。",
+      "reason": "Issue 提到“可能的数据丢失”，因此核心观测点是数据是否被正确保存。"
+    },
+    {
+      "kind": "exception",
+      "expression_hint": "在 admin 处理表单提交的过程中，观察是否有 re.error 或其他异常被抛出。",
+      "reason": "无效的正则表达式模式可能导致编译或匹配时抛出异常。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "观察用于匹配主键字段的正则表达式对象（pk_pattern）或其 match/search 方法的返回值。",
+      "reason": "问题根源在于正则表达式未能正确匹配表单字段名，导致无法提取主键。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证当使用包含正则表达式特殊字符的前缀时，内联表单数据能够被成功保存，相关模型对象按预期创建或更新。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的 HTML 输出或精确的正则表达式字符串。",
+      "reason": "数据是否成功保存是 Issue 核心（数据丢失），且不依赖于前端渲染细节。"
+    },
+    {
+      "assertion_goal": "验证在处理包含特殊字符前缀的表单时，没有因正则表达式问题而抛出异常。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言特定的异常消息文本。",
+      "reason": "在修复前，错误的正则表达式可能导致 re.error；修复后应不再抛出。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要一个 Django TestCase，并配置好 admin 站点和相关的模型（如 Collector, Widget, DooHickey, Whatsit, Author, Book）。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 override_settings 来设置 ROOT_URLCONF，以包含 admin 的 URL。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要创建父对象（如 Collector, Author）作为内联表单的实例。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "具体哪些正则表达式特殊字符会触发问题？是全部还是部分？",
+    "数据丢失的具体表现是什么？是完全无法保存，还是部分字段丢失？",
+    "除了 admin/options.py 中提到的行，Django 代码库中是否还有其他类似未转义的模式？",
+    "self.model._meta.pk.name 是否绝对安全？Issue 中表示‘probably safe’。"
+  ],
+  "raw": {
+    "issue_summary": "在 Django admin 的 changeform 视图中，当 formset 前缀包含正则表达式特殊字符时，可能导致数据丢失。",
+    "trigger_condition": {
+      "text": "在 Django admin 中使用内联表单集（inline formset），并且该表单集的前缀（prefix）包含正则表达式特殊字符（例如 '.'、'*'、'['、'(' 等）。",
+      "evidence": [
+        "Issue 描述指出：'prefix has no such restrictions and could contain any number of special regex characters'",
+        "相关测试代码展示了使用内联表单集（如 'widget_set'、'doohickey_set'）的场景。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "由于未转义前缀中的正则表达式特殊字符，导致用于匹配主键字段的正则表达式编译或匹配失败，可能无法正确识别和处理表单数据，从而导致数据丢失或操作失败。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述指出：'Generating a regex like this using string formatting can cause problems when the arguments contain special regex characters.'",
+        "Issue 标题为 'Possible data loss'。"
+      ],
+      "confidence": "medium"
+    },
+    "expected_behavior": {
+      "text": "即使表单集前缀包含正则表达式特殊字符，admin changeform 视图也应能正确解析和处理内联表单数据，不会导致数据丢失。",
+      "evidence": [
+        "Issue 描述建议的修复是使用 re.escape() 来转义前缀字符串。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "re.compile",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中明确指出问题出现在使用 re.compile 生成正则表达式时未转义前缀字符串。"
+      },
+      {
+        "name": "re.escape",
+        "kind": "function",
+        "source_path": "django/utils/html.py",
+        "reason": "Issue 建议使用 re.escape() 来修复问题，并且检索到的源码片段中包含 escape 函数（尽管是 HTML 转义，但概念相关）。"
+      },
+      {
+        "name": "inlineformset_factory",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试代码中使用了 inlineformset_factory 来创建内联表单集，这是触发问题的上下文。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/options.py",
+        "object": "",
+        "lines": "1634",
+        "reason": "Issue 描述中直接引用了该文件第1634行，其中包含有问题的正则表达式编译代码行：'pk_pattern = re.compile(r'{}-\\d+-{}$'.format(prefix, self.model._meta.pk.name))'。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AdminInlineTests.test_simple_inline",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "该测试演示了在 Django admin 中使用内联表单集（widget_set）进行增删改查的完整流程，包括表单前缀的使用。",
+        "reusable_parts": [
+          "测试类结构（AdminInlineTests）、使用 Client 发送 POST 请求、使用 reverse 生成 URL、assertEqual 和 assertContains 断言风格。"
+        ],
+        "possible_gap": "该测试使用的表单集前缀是 'widget_set'，不包含正则表达式特殊字符，因此无法触发 Issue 描述的问题。"
+      },
+      {
+        "test_name": "ModelFormsetTest.test_inline_formsets",
+        "test_file": "tests/model_formsets/tests.py",
+        "why_relevant": "该测试直接使用了 inlineformset_factory 并检查了生成的 HTML 表单字段名称（如 'book_set-0-id'），展示了表单前缀在表单集构造和数据处理中的核心作用。",
+        "reusable_parts": [
+          "使用 inlineformset_factory、构造 formset 实例、使用 is_valid() 和 save() 方法、检查生成的 HTML 字段名。"
+        ],
+        "possible_gap": "该测试同样使用普通前缀（'book_set'），且不涉及 admin 视图或正则表达式匹配逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用普通字符串作为表单集前缀，如 'widget_set'、'doohickey_set'、'book_set'。",
+        "target_pattern": "使用包含正则表达式特殊字符的字符串作为表单集前缀，例如 'prefix.'、'prefix*'、'prefix[0]' 或 'prefix('。",
+        "reason": "Issue 明确指出问题发生在前缀包含正则表达式特殊字符时，这些字符在未转义的情况下会干扰正则表达式的编译和匹配。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试在标准 Django admin 配置下运行。",
+        "target_pattern": "配置一个自定义的 ModelAdmin 或 InlineModelAdmin，为其内联表单集设置一个包含特殊字符的前缀。",
+        "reason": "表单集前缀可以通过内联模型的 'prefix' 属性或相关配置进行设置，这是注入特殊字符的途径。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "在提交包含特殊字符前缀的表单数据后，观察相关模型对象的数量或属性是否按预期更新。",
+        "reason": "Issue 提到“可能的数据丢失”，因此核心观测点是数据是否被正确保存。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "在 admin 处理表单提交的过程中，观察是否有 re.error 或其他异常被抛出。",
+        "reason": "无效的正则表达式模式可能导致编译或匹配时抛出异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "观察用于匹配主键字段的正则表达式对象（pk_pattern）或其 match/search 方法的返回值。",
+        "reason": "问题根源在于正则表达式未能正确匹配表单字段名，导致无法提取主键。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当使用包含正则表达式特殊字符的前缀时，内联表单数据能够被成功保存，相关模型对象按预期创建或更新。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 HTML 输出或精确的正则表达式字符串。",
+        "reason": "数据是否成功保存是 Issue 核心（数据丢失），且不依赖于前端渲染细节。"
+      },
+      {
+        "assertion_goal": "验证在处理包含特殊字符前缀的表单时，没有因正则表达式问题而抛出异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言特定的异常消息文本。",
+        "reason": "在修复前，错误的正则表达式可能导致 re.error；修复后应不再抛出。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django TestCase，并配置好 admin 站点和相关的模型（如 Collector, Widget, DooHickey, Whatsit, Author, Book）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 override_settings 来设置 ROOT_URLCONF，以包含 admin 的 URL。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建父对象（如 Collector, Author）作为内联表单的实例。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "具体哪些正则表达式特殊字符会触发问题？是全部还是部分？",
+      "数据丢失的具体表现是什么？是完全无法保存，还是部分字段丢失？",
+      "除了 admin/options.py 中提到的行，Django 代码库中是否还有其他类似未转义的模式？",
+      "self.model._meta.pk.name 是否绝对安全？Issue 中表示‘probably safe’。"
+    ],
+    "instance_id": "django__django-12143"
+  }
+}

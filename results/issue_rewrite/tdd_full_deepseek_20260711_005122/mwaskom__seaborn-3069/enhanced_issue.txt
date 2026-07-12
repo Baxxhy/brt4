@@ -1,0 +1,126 @@
+instance_id: mwaskom__seaborn-3069
+
+issue_summary: Nominal 比例尺在绘图时没有像分类比例尺那样处理轴范围、网格显示和轴反转。
+
+trigger_condition:
+{
+  "text": "使用 `so.Nominal` 比例尺（包括推断出的）创建 seaborn 分类图，并观察 x 轴或 y 轴的行为。",
+  "evidence": [
+    "Issue 描述：'It probably makes sense to have `so.Nominal` scales (including inferred ones) do this too.'",
+    "Issue 描述了分类轴的三个特征：轴范围、网格显示和轴反转。",
+    "相关测试 5 展示了分类轴设置 xlim 为 (-.5, 4.5) 的行为。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "使用 Nominal 比例尺时，轴范围未扩展 +/- 0.5，网格可能被错误显示，y 轴未反转。",
+  "symptom_type": "unknown",
+  "evidence": [
+    "Issue 描述：'Three distinctive things happen on the categorical axis...'",
+    "Issue 指出 Nominal 比例尺目前没有实现这些行为。"
+  ],
+  "confidence": "medium"
+}
+
+expected_behavior:
+{
+  "text": "Nominal 比例尺应像分类比例尺一样，将轴范围扩展到第一个和最后一个刻度之外 +/- 0.5，在适当主题下不显示网格，并在 y 轴上反转轴。",
+  "evidence": [
+    "Issue 描述：'It probably makes sense to have `so.Nominal` scales (including inferred ones) do this too.'",
+    "Issue 明确列出了分类轴的三个预期行为。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "Nominal",
+    "kind": "class",
+    "source_path": "seaborn/_core/scales.py",
+    "reason": "Issue 的核心是关于 Nominal 比例尺的行为。"
+  },
+  {
+    "name": "Plotter._finalize_figure",
+    "kind": "method",
+    "source_path": "seaborn/_core/plot.py",
+    "reason": "Issue 提到网格显示可能需要在 `Plotter._finalize_figure` 中处理。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相关测试 1-4 使用 Nominal 进行数据转换和标签测试。",
+    "target_pattern": "使用 Nominal 比例尺创建实际的 seaborn 绘图（例如，通过 so.Plot API），并检查轴范围、网格和轴反转。",
+    "reason": "Issue 关注的是 Nominal 在完整绘图上下文中的行为，而不仅仅是数据转换。",
+    "confidence": "medium"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "相关测试 5 使用分类数据（字符串列表）作为输入。",
+    "target_pattern": "配置绘图使用 `so.Nominal` 比例尺（显式或推断），并可能应用不同的主题设置以观察网格行为。",
+    "reason": "Issue 提到网格显示可能与主题相关，且需要测试 Nominal 比例尺的推断情况。",
+    "confidence": "low"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "state",
+    "expression_hint": "ax.get_xlim() 或 ax.get_ylim()",
+    "reason": "Issue 提到轴范围应扩展到 +/- 0.5，观察轴限制可以验证这一点。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "ax.yaxis_inverted() 或 ax.get_ylim() 的顺序",
+    "reason": "Issue 提到 y 轴应被反转，观察轴方向可以验证这一点。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "ax.xaxis.grid 或 ax.yaxis.grid 的状态",
+    "reason": "Issue 提到网格不应显示（在某些情况下），观察网格线可以验证这一点。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证使用 Nominal 比例尺时，轴范围从第一个刻度延伸到最后一个刻度之外 +/- 0.5。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言精确的刻度位置或标签，除非它们与轴范围直接相关。",
+    "reason": "轴范围扩展是 Issue 中明确提到的核心行为之一。"
+  },
+  {
+    "assertion_goal": "验证当使用 Nominal 比例尺在 y 轴上时，轴是反转的（即值从上到下递减）。",
+    "preferred_assertion_style": "before_after_relation",
+    "avoid": "断言特定的反转实现细节。",
+    "reason": "轴反转是 Issue 中明确提到的另一个核心行为。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要 matplotlib 的 Figure 和 Axes 对象，以及 seaborn 的 so.Plot 或类似的高级绘图接口。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要设置特定的 seaborn 主题以观察网格行为。",
+    "source": "inference",
+    "confidence": "low"
+  }
+]
+
+uncertainties:
+[
+  "Issue 中提到的实现细节（如使用不可见艺术家和粘性边缘）的确切位置和方式尚不明确。",
+  "网格显示的逻辑具体在哪里实现（在 Scale 对象中还是在 _finalize_figure 中）以及如何与主题交互尚不确定。",
+  "y 轴反转的最佳实现位置（在 Nominal 类中还是在其他地方）尚不确定。",
+  "如何精确地“推断” Nominal 比例尺（即何时自动使用它）尚不完全清楚。"
+]

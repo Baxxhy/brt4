@@ -1,0 +1,90 @@
+{
+  "issue_summary": "pylint 的短选项 -v 错误地要求参数，而长选项 --verbose 工作正常。",
+  "trigger_condition": {
+    "text": "使用 pylint 命令并指定短选项 -v，例如 pylint mytest.py -v。",
+    "evidence": ["Issue 中 Command used 部分：pylint mytest.py -v"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "程序报错并退出，提示 argument --verbose/-v: expected one argument。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 中 Pylint output 部分：pylint: error: argument --verbose/-v: expected one argument"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "短选项 -v 应与长选项 --verbose 行为一致，即不要求参数，正常执行 pylint。",
+    "evidence": ["Issue 中 Expected behavior 部分：Similar behaviour to the long option.", "Issue 中描述：The long option works ok & doesn't expect an argument: pylint mytest.py --verbose"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "Run",
+      "kind": "class",
+      "source_path": "",
+      "reason": "相关测试代码中使用了 Run 类来模拟 pylint 命令行执行，与触发条件直接相关。"
+    }
+  ],
+  "suspected_bug_locations": [],
+  "related_test_seeds": [
+    {
+      "test_name": "TestCallbackOptions.test_verbose",
+      "test_file": "tests/test_self.py",
+      "why_relevant": "该测试直接测试了 --verbose 标志，与 Issue 中涉及的 verbose 选项相关。",
+      "reusable_parts": ["imports", "Run 类的使用", "pytest.raises(SystemExit) 的上下文管理"],
+      "possible_gap": "该测试只测试了长选项 --verbose，没有测试短选项 -v，因此无法复现短选项的问题。"
+    },
+    {
+      "test_name": "test_verbose_output_no_config",
+      "test_file": "tests/config/test_find_default_config_files.py",
+      "why_relevant": "该测试也使用了 --verbose 选项，并检查了 verbose 模式下的输出。",
+      "reusable_parts": ["Run([\"--verbose\"]) 的调用模式", "capsys fixture 用于捕获输出"],
+      "possible_gap": "该测试同样只使用了长选项，且测试焦点在配置查找的日志输出，而非选项参数解析本身。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "Run([\"--verbose\"])",
+      "target_pattern": "Run([\"-v\"])",
+      "reason": "Issue 表明短选项 -v 会触发错误，而相似测试中使用的是长选项 --verbose。将输入从长选项变异为短选项可能触发缺陷路径。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "是否抛出 SystemExit 异常，以及异常消息是否包含 expected one argument",
+      "reason": "Issue 中的错误症状是程序因参数错误而退出，并输出特定错误信息。观测异常类型和消息可以判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "使用短选项 -v 时，程序不应因参数错误而退出，应能正常执行或按预期退出（如无文件）。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言完整的异常消息字符串相等，因为消息可能因版本或本地化而不同。",
+      "reason": "Issue 的核心是短选项错误地要求参数。修复后，使用 -v 不应再抛出关于缺少参数的异常。因此，断言不应出现特定异常（或异常消息不包含特定片段）更稳定。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "可能需要一个简单的 Python 文件（如 mytest.py）作为 pylint 的分析目标。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "使用 pytest 的 capsys fixture 来捕获标准输出和错误。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "使用 pytest.raises 上下文管理器来捕获 SystemExit。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "导致短选项 -v 要求参数的具体代码位置未知。",
+    "修复后，使用 -v 时程序是正常执行完成，还是会因其他原因（如无输入文件）而退出？",
+    "Run 类的具体实现和参数解析逻辑未知。"
+  ]
+}

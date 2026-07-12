@@ -1,0 +1,613 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+bug in is_subset(Reals)
+Solving issue #19513 has given rise to another bug.
+Now:
+```
+In [8]: S1 = imageset(Lambda(n, n + (n - 1)*(n + 1)*I), S.Integers)
+
+In [9]: S1
+Out[9]: {n + ⅈ⋅(n - 1)⋅(n + 1) │ n ∊ ℤ}
+
+In [10]: 2 in S1
+Out[10]: False
+
+In [11]: 2 in S1.intersect(Reals)
+Out[11]: True
+```
+This output is incorrect.
+
+Correct output is:
+```
+In [4]: S1
+Out[4]: {n + ⅈ⋅(n - 1)⋅(n + 1) │ n ∊ ℤ}
+
+In [5]: 2 in S1
+Out[5]: False
+
+In [6]: 2 in S1.intersect(Reals)
+Out[6]: False
+
+In [7]: S2 = Reals
+
+In [8]: S1.intersect(S2)
+Out[8]: {-1, 1}
+```
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/sets/sets.py
+对象名称：imageset
+节点类型：top-level function
+父节点：sets
+行号范围：2190-2316
+代码：
+def imageset(*args):
+    r"""
+    Return an image of the set under transformation ``f``.
+
+    Explanation
+    ===========
+
+    If this function can't compute the image, it returns an
+    unevaluated ImageSet object.
+
+    .. math::
+        \{ f(x) \mid x \in \mathrm{self} \}
+
+    Examples
+    ========
+
+    >>> from sympy import S, Interval, imageset, sin, Lambda
+    >>> from sympy.abc import x
+
+    >>> imageset(x, 2*x, Interval(0, 2))
+    Interval(0, 4)
+
+    >>> imageset(lambda x: 2*x, Interval(0, 2))
+    Interval(0, 4)
+
+    >>> imageset(Lambda(x, sin(x)), Interval(-2, 1))
+    ImageSet(Lambda(x, sin(x)), Interval(-2, 1))
+
+    >>> imageset(sin, Interval(-2, 1))
+    ImageSet(Lambda(x, sin(x)), Interval(-2, 1))
+    >>> imageset(lambda y: x + y, Interval(-2, 1))
+    ImageSet(Lambda(y, x + y), Interval(-2, 1))
+
+    Expressions applied to the set of Integers are simplified
+    to show as few negatives as possible and linear expressions
+    are converted to a canonical form. If this is not desirable
+    then the unevaluated ImageSet should be used.
+
+    >>> imageset(x, -2*x + 5, S.Integers)
+    ImageSet(Lambda(x, 2*x + 1), Integers)
+
+    See Also
+    ========
+
+    sympy.sets.fancysets.ImageSet
+
+    """
+    from sympy.core import Lambda
+    from sympy.sets.fancysets import ImageSet
+    from sympy.sets.setexpr import set_function
+
+    if len(args) < 2:
+        raise ValueError('imageset expects at least 2 args, got: %s' % len(args))
+
+    if isinstance(args[0], (Symbol, tuple)) and len(args) > 2:
+        f = Lambda(args[0], args[1])
+        set_list = args[2:]
+    else:
+        f = args[0]
+        set_list = args[1:]
+
+    if isinstance(f, Lambda):
+        pass
+    elif callable(f):
+        nargs = getattr(f, 'nargs', {})
+        if nargs:
+            if len(nargs) != 1:
+                raise NotImplementedError(filldedent('''
+                    This function can take more than 1 arg
+                    but the potentially complicated set input
+                    has not been analyzed at this point to
+                    know its dimensions. TODO
+                    '''))
+            N = nargs.args[0]
+            if N == 1:
+                s = 'x'
+            else:
+                s = [Symbol('x%i' % i) for i in range(1, N + 1)]
+        else:
+            s = inspect.signature(f).parameters
+
+        dexpr = _sympify(f(*[Dummy() for i in s]))
+        var = tuple(uniquely_named_symbol(
+            Symbol(i), dexpr) for i in s)
+        f = Lambda(var, f(*var))
+    else:
+        raise TypeError(filldedent('''
+            expecting lambda, Lambda, or FunctionClass,
+            not \'%s\'.''' % func_name(f)))
+
+    if any(not isinstance(s, Set) for s in set_list):
+        name = [func_name(s) for s in set_list]
+        raise ValueError(
+            'arguments after mapping should be sets, not %s' % name)
+
+    if len(set_list) == 1:
+        set = set_list[0]
+        try:
+            # TypeError if arg count != set dimensions
+            r = set_function(f, set)
+            if r is None:
+                raise TypeError
+            if not r:
+                return r
+        except TypeError:
+            r = ImageSet(f, set)
+        if isinstance(r, ImageSet):
+            f, set = r.args
+
+        if f.variables[0] == f.expr:
+            return set
+
+        if isinstance(set, ImageSet):
+            # XXX: Maybe this should just be:
+            # f2 = set.lambda
+            # fun = Lambda(f2.signature, f(*f2.expr))
+            # return imageset(fun, *set.base_sets)
+            if len(set.lamda.variables) == 1 and len(f.variables) == 1:
+                x = set.lamda.variables[0]
+                y = f.variables[0]
+                return imageset(
+                    Lambda(x, f.expr.subs(y, set.lamda.expr)), *set.base_sets)
+
+        if r is not None:
+            return r
+
+    return ImageSet(f, *set_list)
+
+
+【源码片段 2】
+文件路径：sympy/core/function.py
+对象名称：Lambda
+节点类型：class
+父节点：function
+行号范围：1950-2105
+代码：
+class Lambda(Expr):
+    """
+    Lambda(x, expr) represents a lambda function similar to Python's
+    'lambda x: expr'. A function of several variables is written as
+    Lambda((x, y, ...), expr).
+
+    Examples
+    ========
+
+    A simple example:
+
+    >>> from sympy import Lambda
+    >>> from sympy.abc import x
+    >>> f = Lambda(x, x**2)
+    >>> f(4)
+    16
+
+    For multivariate functions, use:
+
+    >>> from sympy.abc import y, z, t
+    >>> f2 = Lambda((x, y, z, t), x + y**z + t**z)
+    >>> f2(1, 2, 3, 4)
+    73
+
+    It is also possible to unpack tuple arguments:
+
+    >>> f = Lambda( ((x, y), z) , x + y + z)
+    >>> f((1, 2), 3)
+    6
+
+    A handy shortcut for lots of arguments:
+
+    >>> p = x, y, z
+    >>> f = Lambda(p, x + y*z)
+    >>> f(*p)
+    x + y*z
+
+    """
+    is_Function = True
+    def __new__(cls, signature, expr):
+    @classmethod
+    def _check_signature(cls, sig):
+    @property
+    def signature(self):
+    @property
+    def expr(self):
+    @property
+    def variables(self):
+    @property
+    def nargs(self):
+    bound_symbols = variables
+    @property
+    def free_symbols(self):
+    def __call__(self, *args):
+    def _match_signature(self, sig, args):
+
+    @property
+    def is_identity(self):
+    def _eval_evalf(self, prec):
+
+
+【源码片段 3】
+文件路径：sympy/sets/__init__.py
+对象名称：Integers
+节点类型：global_var
+父节点：__init__
+行号范围：17-17
+代码：
+Integers = S.Integers
+
+
+【源码片段 4】
+文件路径：sympy/sets/sets.py
+对象名称：is_subset
+节点类型：class_function
+父节点：Set
+行号范围：350-397
+代码：
+    def is_subset(self, other):
+        """
+        Returns True if ``self`` is a subset of ``other``.
+
+        Examples
+        ========
+
+        >>> from sympy import Interval
+        >>> Interval(0, 0.5).is_subset(Interval(0, 1))
+        True
+        >>> Interval(0, 1).is_subset(Interval(0, 1, left_open=True))
+        False
+
+        """
+        if not isinstance(other, Set):
+            raise ValueError("Unknown argument '%s'" % other)
+
+        # Handle the trivial cases
+        if self == other:
+            return True
+        is_empty = self.is_empty
+        if is_empty is True:
+            return True
+        elif fuzzy_not(is_empty) and other.is_empty:
+            return False
+        if self.is_finite_set is False and other.is_finite_set:
+            return False
+
+        # Dispatch on subclass rules
+        ret = self._eval_is_subset(other)
+        if ret is not None:
+            return ret
+        ret = other._eval_is_superset(self)
+        if ret is not None:
+            return ret
+
+        # Use pairwise rules from multiple dispatch
+        from sympy.sets.handlers.issubset import is_subset_sets
+        ret = is_subset_sets(self, other)
+        if ret is not None:
+            return ret
+
+        # Fall back on computing the intersection
+        # XXX: We shouldn't do this. A query like this should be handled
+        # without evaluating new Set objects. It should be the other way round
+        # so that the intersect method uses is_subset for evaluation.
+        if self.intersect(other) == self:
+            return True
+
+
+【源码片段 5】
+文件路径：sympy/sets/__init__.py
+对象名称：Reals
+节点类型：global_var
+父节点：__init__
+行号范围：12-12
+代码：
+Reals = S.Reals
+
+
+【源码片段 6】
+文件路径：sympy/sets/sets.py
+对象名称：intersect
+节点类型：class_function
+父节点：Set
+行号范围：116-135
+代码：
+    def intersect(self, other):
+        """
+        Returns the intersection of 'self' and 'other'.
+
+        Examples
+        ========
+
+        >>> from sympy import Interval
+
+        >>> Interval(1, 3).intersect(Interval(1, 2))
+        Interval(1, 2)
+
+        >>> from sympy import imageset, Lambda, symbols, S
+        >>> n, m = symbols('n m')
+        >>> a = imageset(Lambda(n, 2*n), S.Integers)
+        >>> a.intersect(imageset(Lambda(m, 2*m + 1), S.Integers))
+        EmptySet
+
+        """
+        return Intersection(self, other)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/sets/tests/test_fancysets.py
+测试名称：test_imageset_intersect_real
+测试代码：
+def test_imageset_intersect_real():
+    from sympy import I
+    from sympy.abc import n
+    assert imageset(Lambda(n, n + (n - 1)*(n + 1)*I), S.Integers).intersect(S.Reals) == Complement(S.Integers, FiniteSet((-1, 1)))
+    s = ImageSet(
+        Lambda(n, -I*(I*(2*pi*n - pi/4) + log(Abs(sqrt(-I))))),
+        S.Integers)
+    # s is unevaluated, but after intersection the result
+    # should be canonical
+    assert s.intersect(S.Reals) == imageset(
+        Lambda(n, 2*n*pi - pi/4), S.Integers) == ImageSet(
+        Lambda(n, 2*pi*n + pi*Rational(7, 4)), S.Integers)
+
+【相关测试 2】
+测试文件：sympy/sets/tests/test_fancysets.py
+测试名称：test_imageset_intersection
+测试代码：
+def test_imageset_intersection():
+    n = Dummy()
+    s = ImageSet(Lambda(n, -I*(I*(2*pi*n - pi/4) +
+        log(Abs(sqrt(-I))))), S.Integers)
+    assert s.intersect(S.Reals) == ImageSet(
+        Lambda(n, 2*pi*n + pi*Rational(7, 4)), S.Integers)
+
+【相关测试 3】
+测试文件：sympy/sets/tests/test_sets.py
+测试名称：test_is_subset
+测试代码：
+def test_is_subset():
+    assert Interval(0, 1).is_subset(Interval(0, 2)) is True
+    assert Interval(0, 3).is_subset(Interval(0, 2)) is False
+    assert Interval(0, 1).is_subset(FiniteSet(0, 1)) is False
+
+    assert FiniteSet(1, 2).is_subset(FiniteSet(1, 2, 3, 4))
+    assert FiniteSet(4, 5).is_subset(FiniteSet(1, 2, 3, 4)) is False
+    assert FiniteSet(1).is_subset(Interval(0, 2))
+    assert FiniteSet(1, 2).is_subset(Interval(0, 2, True, True)) is False
+    assert (Interval(1, 2) + FiniteSet(3)).is_subset(
+        Interval(0, 2, False, True) + FiniteSet(2, 3))
+
+    assert Interval(3, 4).is_subset(Union(Interval(0, 1), Interval(2, 5))) is True
+    assert Interval(3, 6).is_subset(Union(Interval(0, 1), Interval(2, 5))) is False
+
+    assert FiniteSet(1, 2, 3, 4).is_subset(Interval(0, 5)) is True
+    assert S.EmptySet.is_subset(FiniteSet(1, 2, 3)) is True
+
+    assert Interval(0, 1).is_subset(S.EmptySet) is False
+    assert S.EmptySet.is_subset(S.EmptySet) is True
+
+    raises(ValueError, lambda: S.EmptySet.is_subset(1))
+
+    # tests for the issubset alias
+    assert FiniteSet(1, 2, 3, 4).issubset(Interval(0, 5)) is True
+    assert S.EmptySet.issubset(FiniteSet(1, 2, 3)) is True
+
+    assert S.Naturals.is_subset(S.Integers)
+    assert S.Naturals0.is_subset(S.Integers)
+
+    assert FiniteSet(x).is_subset(FiniteSet(y)) is None
+    assert FiniteSet(x).is_subset(FiniteSet(y).subs(y, x)) is True
+    assert FiniteSet(x).is_subset(FiniteSet(y).subs(y, x+1)) is False
+
+    assert Interval(0, 1).is_subset(Interval(0, 1, left_open=True)) is False
+    assert Interval(-2, 3).is_subset(Union(Interval(-oo, -2), Interval(3, oo))) is False
+
+    n = Symbol('n', integer=True)
+    assert Range(-3, 4, 1).is_subset(FiniteSet(-10, 10)) is False
+    assert Range(S(10)**100).is_subset(FiniteSet(0, 1, 2)) is False
+    assert Range(6, 0, -2).is_subset(FiniteSet(2, 4, 6)) is True
+    assert Range(1, oo).is_subset(FiniteSet(1, 2)) is False
+    assert Range(-oo, 1).is_subset(FiniteSet(1)) is False
+    assert Range(3).is_subset(FiniteSet(0, 1, n)) is None
+    assert Range(n, n + 2).is_subset(FiniteSet(n, n + 1)) is True
+    assert Range(5).is_subset(Interval(0, 4, right_open=True)) is False
+    #issue 19513
+    assert imageset(Lambda(n, 1/n), S.Integers).is_subset(S.Reals) is None
+
+【相关测试 4】
+测试文件：sympy/sets/tests/test_fancysets.py
+测试名称：test_imageset_intersect_diophantine
+测试代码：
+def test_imageset_intersect_diophantine():
+    from sympy.abc import m, n
+    # Check that same lambda variable for both ImageSets is handled correctly
+    img1 = ImageSet(Lambda(n, 2*n + 1), S.Integers)
+    img2 = ImageSet(Lambda(n, 4*n + 1), S.Integers)
+    assert img1.intersect(img2) == img2
+    # Empty solution set returned by diophantine:
+    assert ImageSet(Lambda(n, 2*n), S.Integers).intersect(
+            ImageSet(Lambda(n, 2*n + 1), S.Integers)) == S.EmptySet
+    # Check intersection with S.Integers:
+    assert ImageSet(Lambda(n, 9/n + 20*n/3), S.Integers).intersect(
+            S.Integers) == FiniteSet(-61, -23, 23, 61)
+    # Single solution (2, 3) for diophantine solution:
+    assert ImageSet(Lambda(n, (n - 2)**2), S.Integers).intersect(
+            ImageSet(Lambda(n, -(n - 3)**2), S.Integers)) == FiniteSet(0)
+    # Single parametric solution for diophantine solution:
+    assert ImageSet(Lambda(n, n**2 + 5), S.Integers).intersect(
+            ImageSet(Lambda(m, 2*m), S.Integers)).dummy_eq(ImageSet(
+            Lambda(n, 4*n**2 + 4*n + 6), S.Integers))
+    # 4 non-parametric solution couples for dioph. equation:
+    assert ImageSet(Lambda(n, n**2 - 9), S.Integers).intersect(
+            ImageSet(Lambda(m, -m**2), S.Integers)) == FiniteSet(-9, 0)
+    # Double parametric solution for diophantine solution:
+    assert ImageSet(Lambda(m, m**2 + 40), S.Integers).intersect(
+            ImageSet(Lambda(n, 41*n), S.Integers)).dummy_eq(Intersection(
+            ImageSet(Lambda(m, m**2 + 40), S.Integers),
+            ImageSet(Lambda(n, 41*n), S.Integers)))
+    # Check that diophantine returns *all* (8) solutions (permute=True)
+    assert ImageSet(Lambda(n, n**4 - 2**4), S.Integers).intersect(
+            ImageSet(Lambda(m, -m**4 + 3**4), S.Integers)) == FiniteSet(0, 65)
+    assert ImageSet(Lambda(n, pi/12 + n*5*pi/12), S.Integers).intersect(
+            ImageSet(Lambda(n, 7*pi/12 + n*11*pi/12), S.Integers)).dummy_eq(ImageSet(
+            Lambda(n, 55*pi*n/12 + 17*pi/4), S.Integers))
+    # TypeError raised by diophantine (#18081)
+    assert ImageSet(Lambda(n, n*log(2)), S.Integers).intersection(
+        S.Integers).dummy_eq(Intersection(ImageSet(
+        Lambda(n, n*log(2)), S.Integers), S.Integers))
+    # NotImplementedError raised by diophantine (no solver for cubic_thue)
+    assert ImageSet(Lambda(n, n**3 + 1), S.Integers).intersect(
+            ImageSet(Lambda(n, n**3), S.Integers)).dummy_eq(Intersection(
+            ImageSet(Lambda(n, n**3 + 1), S.Integers),
+            ImageSet(Lambda(n, n**3), S.Integers)))
+
+【相关测试 5】
+测试文件：sympy/sets/tests/test_fancysets.py
+测试名称：test_intersections
+测试代码：
+def test_intersections():
+    assert S.Integers.intersect(S.Reals) == S.Integers
+    assert 5 in S.Integers.intersect(S.Reals)
+    assert 5 in S.Integers.intersect(S.Reals)
+    assert -5 not in S.Naturals.intersect(S.Reals)
+    assert 5.5 not in S.Integers.intersect(S.Reals)
+    assert 5 in S.Integers.intersect(Interval(3, oo))
+    assert -5 in S.Integers.intersect(Interval(-oo, 3))
+    assert all(x.is_Integer
+            for x in take(10, S.Integers.intersect(Interval(3, oo)) ))
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

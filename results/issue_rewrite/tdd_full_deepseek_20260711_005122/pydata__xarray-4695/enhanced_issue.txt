@@ -1,0 +1,124 @@
+instance_id: pydata__xarray-4695
+
+issue_summary: 当维度名称为 'method' 时，调用 .loc 方法会抛出 ValueError 异常。
+
+trigger_condition:
+{
+  "text": "创建一个 DataArray，其维度名称包含 'method'，然后使用 .loc 方法通过字典选择器访问该维度。",
+  "evidence": [
+    "Issue 中的代码示例：D2 = DataArray(empty, dims=['dim1', 'method'], coords={'dim1':['x', 'y'], 'method':['a', 'b']})",
+    "Issue 中的代码示例：print(D2.loc[dict(dim1='x', method='a')])"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "抛出 ValueError: Invalid fill method. Expecting pad (ffill), backfill (bfill) or nearest.",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中的错误信息：ValueError: Invalid fill method. Expecting pad (ffill), backfill (bfill) or nearest."
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "维度名称 'method' 不应影响 .loc 方法的正常功能，应能像其他维度名称一样成功选择数据。",
+  "evidence": [
+    "Issue 描述：The name of the dimension should be irrelevant.",
+    "Issue 中的对比示例：D1.loc[dict(dim1='x', dim2='a')] 正常工作。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "DataArray.loc",
+    "kind": "method",
+    "source_path": "xarray/core/dataarray.py",
+    "reason": "Issue 直接涉及调用 .loc 方法时出错。"
+  },
+  {
+    "name": "DataArray.__init__",
+    "kind": "method",
+    "source_path": "xarray/core/dataarray.py",
+    "reason": "用于创建具有特定维度名称的 DataArray 对象。"
+  },
+  {
+    "name": "_LocIndexer",
+    "kind": "class",
+    "source_path": "",
+    "reason": "DataArray.loc 属性返回的对象，负责处理基于标签的索引。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "input",
+    "current_pattern": "相似测试中使用常规维度名称（如 'x', 'y', 'dim3'）构造 DataArray 或 Dataset。",
+    "target_pattern": "将其中一个维度名称改为 'method'。",
+    "reason": "Issue 表明维度名称 'method' 是触发条件，这可能导致内部处理字典键时与 'method' 参数发生冲突。",
+    "confidence": "high"
+  },
+  {
+    "slot": "argument",
+    "current_pattern": "相似测试中 .loc 调用传入的字典键是常规维度名（如 {'x': 'b'} 或 {'dim3': 'a'}）。",
+    "target_pattern": "将字典键改为 'method'，对应值为有效的坐标标签。",
+    "reason": "直接复现 Issue 中触发错误的 API 调用模式。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "调用 D2.loc[dict(dim1='x', method='a')] 时是否抛出 ValueError。",
+    "reason": "Issue 的核心现象是抛出特定异常，观测异常是判断缺陷是否触发的直接方式。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "成功调用 .loc 后返回的 DataArray 对象及其值。",
+    "reason": "修复后应能正常返回选择结果，观测返回值可以验证功能是否正常。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当维度名为 'method' 时，.loc 选择器应能正常工作，不抛出异常。",
+    "preferred_assertion_style": "raises",
+    "avoid": "断言完整的异常消息字符串，因为消息可能在不同版本中变化。",
+    "reason": "Issue 的核心是异常不应被抛出。使用 pytest.raises 或类似上下文管理器来断言没有异常发生，是验证修复的稳定方式。"
+  },
+  {
+    "assertion_goal": "使用维度 'method' 的 .loc 选择结果应与使用其他维度名的类似选择在语义上等价。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言内部数据结构或私有属性的完全相等。",
+    "reason": "验证功能正确性，而不依赖于实现细节。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要导入 numpy 和 xarray.DataArray。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "可以使用类似现有测试中的 DataArray 构造模式，但修改维度名称。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "错误具体发生在 _LocIndexer 的哪个方法中，以及 'method' 是如何被误解析为填充方法参数的。",
+  "除了 'method' 之外，是否还有其他保留字或参数名作为维度名称时会触发类似错误。",
+  "修复后的确切行为细节，例如是否所有 .loc 的功能（切片、列表选择等）都对 'method' 维度正常工作。"
+]

@@ -1,0 +1,362 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+"show_save_as_new" in admin can add without this permission
+Description
+	 
+		(last modified by Mariusz Felisiak)
+	 
+At "django/contrib/admin/templatetags/admin_modify.py" file, line 102, I think you must put one more verification for this tag: "and has_add_permission", because "save_as_new" is a add modification.
+I rewrite this for my project:
+			"show_save_as_new": not is_popup
+			and has_add_permission # This line that I put!!!
+			and has_change_permission
+			and change
+			and save_as,
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/contrib/admin/templatetags/admin_modify.py
+对象名称：admin_modify
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+【源码片段 2】
+文件路径：django/contrib/admin/options.py
+对象名称：has_add_permission
+节点类型：class_function
+父节点：BaseModelAdmin
+行号范围：538-545
+代码：
+    def has_add_permission(self, request):
+        """
+        Return True if the given request has permission to add an object.
+        Can be overridden by the user in subclasses.
+        """
+        opts = self.opts
+        codename = get_permission_codename("add", opts)
+        return request.user.has_perm("%s.%s" % (opts.app_label, codename))
+
+
+【源码片段 3】
+文件路径：django/contrib/admin/options.py
+对象名称：has_change_permission
+节点类型：class_function
+父节点：BaseModelAdmin
+行号范围：547-560
+代码：
+    def has_change_permission(self, request, obj=None):
+        """
+        Return True if the given request has permission to change the given
+        Django model instance, the default implementation doesn't examine the
+        `obj` parameter.
+
+        Can be overridden by the user in subclasses. In such case it should
+        return True if the given request has permission to change the `obj`
+        model instance. If `obj` is None, this should return True if the given
+        request has permission to change *any* object of the given type.
+        """
+        opts = self.opts
+        codename = get_permission_codename("change", opts)
+        return request.user.has_perm("%s.%s" % (opts.app_label, codename))
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/admin_views/tests.py
+测试名称：AdminViewPermissionsTest.test_change_view_save_as_new
+测试代码：
+@override_settings(
+    ROOT_URLCONF="admin_views.urls",
+    # Test with the admin's documented list of required context processors.
+    TEMPLATES=[
+        {
+            "BACKEND": "django.template.backends.django.DjangoTemplates",
+            "APP_DIRS": True,
+            "OPTIONS": {
+                "context_processors": [
+                    "django.template.context_processors.request",
+                    "django.contrib.auth.context_processors.auth",
+                    "django.contrib.messages.context_processors.messages",
+                ],
+            },
+        }
+    ],
+)
+class AdminViewPermissionsTest(TestCase):
+    def test_change_view_save_as_new(self):
+        """
+        'Save as new' should raise PermissionDenied for users without the 'add'
+        permission.
+        """
+        change_dict_save_as_new = {
+            "_saveasnew": "Save as new",
+            "title": "Ikke fordømt",
+            "content": "<p>edited article</p>",
+            "date_0": "2008-03-18",
+            "date_1": "10:54:39",
+            "section": self.s1.pk,
+        }
+        article_change_url = reverse(
+            "admin:admin_views_article_change", args=(self.a1.pk,)
+        )
+
+        # Add user can perform "Save as new".
+        article_count = Article.objects.count()
+        self.client.force_login(self.adduser)
+        post = self.client.post(article_change_url, change_dict_save_as_new)
+        self.assertRedirects(post, self.index_url)
+        self.assertEqual(Article.objects.count(), article_count + 1)
+        self.client.logout()
+
+        # Change user cannot perform "Save as new" (no 'add' permission).
+        article_count = Article.objects.count()
+        self.client.force_login(self.changeuser)
+        post = self.client.post(article_change_url, change_dict_save_as_new)
+        self.assertEqual(post.status_code, 403)
+        self.assertEqual(Article.objects.count(), article_count)
+
+        # User with both add and change permissions should be redirected to the
+        # change page for the newly created object.
+        article_count = Article.objects.count()
+        self.client.force_login(self.superuser)
+        post = self.client.post(article_change_url, change_dict_save_as_new)
+        self.assertEqual(Article.objects.count(), article_count + 1)
+        new_article = Article.objects.latest("id")
+        self.assertRedirects(
+            post, reverse("admin:admin_views_article_change", args=(new_article.pk,))
+        )
+
+【相关测试 2】
+测试文件：tests/admin_views/test_templatetags.py
+测试名称：AdminTemplateTagsTest.test_override_show_save_and_add_another
+测试代码：
+class AdminTemplateTagsTest(AdminViewBasicTestCase):
+    def test_override_show_save_and_add_another(self):
+        request = self.request_factory.get(
+            reverse("admin:auth_user_change", args=[self.superuser.pk]),
+        )
+        request.user = self.superuser
+        admin = UserAdmin(User, site)
+        for extra_context, expected_flag in (
+            ({}, True),  # Default.
+            ({"show_save_and_add_another": False}, False),
+        ):
+            with self.subTest(show_save_and_add_another=expected_flag):
+                response = admin.change_view(
+                    request,
+                    str(self.superuser.pk),
+                    extra_context=extra_context,
+                )
+                template_context = submit_row(response.context_data)
+                self.assertIs(
+                    template_context["show_save_and_add_another"], expected_flag
+                )
+
+【相关测试 3】
+测试文件：tests/admin_views/test_templatetags.py
+测试名称：AdminTemplateTagsTest.test_submit_row
+测试代码：
+class AdminTemplateTagsTest(AdminViewBasicTestCase):
+    def test_submit_row(self):
+        """
+        submit_row template tag should pass whole context.
+        """
+        request = self.request_factory.get(
+            reverse("admin:auth_user_change", args=[self.superuser.pk])
+        )
+        request.user = self.superuser
+        admin = UserAdmin(User, site)
+        extra_context = {"extra": True}
+        response = admin.change_view(
+            request, str(self.superuser.pk), extra_context=extra_context
+        )
+        template_context = submit_row(response.context_data)
+        self.assertIs(template_context["extra"], True)
+        self.assertIs(template_context["show_save"], True)
+
+【相关测试 4】
+测试文件：tests/admin_views/tests.py
+测试名称：AdminViewPermissionsTest.test_conditionally_show_add_section_link
+测试代码：
+@override_settings(
+    ROOT_URLCONF="admin_views.urls",
+    # Test with the admin's documented list of required context processors.
+    TEMPLATES=[
+        {
+            "BACKEND": "django.template.backends.django.DjangoTemplates",
+            "APP_DIRS": True,
+            "OPTIONS": {
+                "context_processors": [
+                    "django.template.context_processors.request",
+                    "django.contrib.auth.context_processors.auth",
+                    "django.contrib.messages.context_processors.messages",
+                ],
+            },
+        }
+    ],
+)
+class AdminViewPermissionsTest(TestCase):
+    def test_conditionally_show_add_section_link(self):
+        """
+        The foreign key widget should only show the "add related" button if the
+        user has permission to add that related item.
+        """
+        self.client.force_login(self.adduser)
+        # The user can't add sections yet, so they shouldn't see the "add section" link.
+        url = reverse("admin:admin_views_article_add")
+        add_link_text = "add_id_section"
+        response = self.client.get(url)
+        self.assertNotContains(response, add_link_text)
+        # Allow the user to add sections too. Now they can see the "add section" link.
+        user = User.objects.get(username="adduser")
+        perm = get_perm(Section, get_permission_codename("add", Section._meta))
+        user.user_permissions.add(perm)
+        response = self.client.get(url)
+        self.assertContains(response, add_link_text)
+
+【相关测试 5】
+测试文件：tests/modeladmin/tests.py
+测试名称：ModelAdminPermissionTests.test_has_add_permission
+测试代码：
+class ModelAdminPermissionTests(SimpleTestCase):
+    def test_has_add_permission(self):
+        """
+        has_add_permission returns True for users who can add objects and
+        False for users who can't.
+        """
+        ma = ModelAdmin(Band, AdminSite())
+        request = MockRequest()
+        request.user = self.MockViewUser()
+        self.assertFalse(ma.has_add_permission(request))
+        request.user = self.MockAddUser()
+        self.assertTrue(ma.has_add_permission(request))
+        request.user = self.MockChangeUser()
+        self.assertFalse(ma.has_add_permission(request))
+        request.user = self.MockDeleteUser()
+        self.assertFalse(ma.has_add_permission(request))
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

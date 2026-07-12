@@ -1,0 +1,285 @@
+{
+  "instance_id": "scikit-learn__scikit-learn-12585",
+  "issue_summary": "当 estimator 的参数是 estimator 类（而非实例）时，clone 函数会失败。",
+  "trigger_condition": {
+    "text": "调用 clone 函数，其参数是一个 estimator 实例，但该实例的某个构造参数是一个 estimator 类（例如 StandardScaler）。",
+    "evidence": [
+      "Issue 中 Steps/Code to Reproduce: `clone(StandardScaler(with_mean=StandardScaler))`",
+      "Issue 描述: `clone` fails when one or more instance parameters are estimator types (i.e. not instances, but classes)."
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "抛出 TypeError: get_params() missing 1 required positional argument: 'self'。",
+    "symptom_type": "exception",
+    "evidence": [
+      "Issue 中 Actual Results 部分显示了完整的异常堆栈，包含错误信息。",
+      "源码片段 1 显示 clone 函数会递归调用 `clone(param, safe=False)`，其中 param 可能是一个类。",
+      "源码片段 3 显示 get_params 是一个实例方法，需要 self 参数。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "clone 函数应能正确处理参数为 estimator 类的情况，不抛出异常，并返回一个克隆后的新 estimator 对象。",
+    "evidence": [
+      "Issue 中 Expected Results: No error.",
+      "Issue 中 Possible fix 暗示了期望行为是 clone 能处理 estimator 类参数。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "sklearn.base.clone",
+      "kind": "function",
+      "source_path": "sklearn/base.py",
+      "reason": "Issue 直接报告此函数在特定输入下失败。"
+    },
+    {
+      "name": "sklearn.preprocessing.StandardScaler",
+      "kind": "class",
+      "source_path": "sklearn/preprocessing/data.py",
+      "reason": "Issue 中用于复现的示例使用了此类，且其构造参数被设置为一个 estimator 类。"
+    },
+    {
+      "name": "sklearn.base.BaseEstimator.get_params",
+      "kind": "method",
+      "source_path": "sklearn/base.py",
+      "reason": "错误堆栈指向此方法，因为 clone 函数试图在一个类（而非实例）上调用它。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sklearn/base.py",
+      "object": "clone",
+      "lines": "30-74",
+      "reason": "Issue 中错误堆栈指向此函数，且其 Possible fix 建议修改此文件第 51 行附近的逻辑。源码片段 1 显示 clone 函数在递归调用 `clone(param, safe=False)` 前，没有检查 param 是否是一个类（type）。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_clone",
+      "test_file": "sklearn/tests/test_base.py",
+      "why_relevant": "它直接测试 clone 函数的基本功能，包括参数复制和对象身份验证。",
+      "reusable_parts": [
+        "imports (from sklearn.base import clone)",
+        "基本的 clone 调用模式",
+        "使用 assert 比较克隆前后的参数"
+      ],
+      "possible_gap": "现有测试只使用 estimator 实例作为参数，没有测试参数是 estimator 类的情况。"
+    },
+    {
+      "test_name": "test_clone_buggy",
+      "test_file": "sklearn/tests/test_base.py",
+      "why_relevant": "它测试 clone 函数对异常输入（如 buggy estimator）的处理，展示了如何断言 clone 会引发特定异常。",
+      "reusable_parts": [
+        "使用 assert_raises 来验证异常",
+        "构造特殊测试对象（如 Buggy, NoEstimator）的模式"
+      ],
+      "possible_gap": "它测试的是 clone 对不符合 estimator 协议的对象的处理，而非对 estimator 类参数的处理。"
+    },
+    {
+      "test_name": "test_kernel_clone",
+      "test_file": "sklearn/gaussian_process/tests/test_kernels.py",
+      "why_relevant": "它测试 clone 在特定对象（kernels）上的工作，展示了参数比较和对象身份检查。",
+      "reusable_parts": [
+        "clone 调用和参数比较模式",
+        "使用 assert_equal 和 assert_not_equal"
+      ],
+      "possible_gap": "它测试的是 kernel 对象，其参数不太可能是 estimator 类。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "相似测试中 clone 的参数是一个 estimator 实例，其构造参数是普通值（如 alpha=0.1）或其他 estimator 实例。",
+      "target_pattern": "clone 的参数是一个 estimator 实例，但其某个构造参数是一个 estimator 类（例如 with_mean=StandardScaler）。",
+      "reason": "Issue 表明当 estimator 的参数是 estimator 类时，clone 的递归逻辑会尝试在类上调用实例方法 get_params，从而触发错误。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "调用 clone(estimator_with_class_param) 时是否抛出 TypeError，以及异常信息是否包含 \"get_params() missing 1 required positional argument: 'self'\"。",
+      "reason": "这是 Issue 中观察到的直接错误现象。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "如果 clone 调用成功，观察返回的新 estimator 对象及其参数（通过 get_params() 获取），特别是那个 estimator 类参数是否被正确保留。",
+      "reason": "修复后，clone 应能正常工作并返回一个包含正确参数的新对象。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 clone 函数在输入包含 estimator 类参数时，不会抛出 TypeError 异常。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言完整的异常消息字符串，因为修复后的实现可能改变错误信息。",
+      "reason": "Issue 的核心是异常的出现，修复后应消除此异常。"
+    },
+    {
+      "assertion_goal": "验证 clone 成功返回一个新对象，且其参数与原始对象一致（包括 estimator 类参数）。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言返回对象的完整 repr 或 id 相等。",
+      "reason": "修复后 clone 应能正确复制所有参数，包括 estimator 类。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 sklearn.base.clone 和 sklearn.preprocessing.StandardScaler（或其他 estimator 类）。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能在一个继承自 unittest.TestCase 的类中，或者使用 pytest。现有相关测试使用了 assert_raises 和 assert_equal 等断言。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "Issue 中建议的修复（修改 base.py 第 51 行）是否完整且正确，是否会影响 clone 函数的其他行为。",
+    "除了 StandardScaler，其他 estimator 类作为参数是否也会触发相同错误。",
+    "修复后，estimator 类参数在克隆后的对象中应如何表示（是保持为类，还是需要特殊处理）。"
+  ],
+  "raw": {
+    "issue_summary": "当 estimator 的参数是 estimator 类（而非实例）时，clone 函数会失败。",
+    "trigger_condition": {
+      "text": "调用 clone 函数，其参数是一个 estimator 实例，但该实例的某个构造参数是一个 estimator 类（例如 StandardScaler）。",
+      "evidence": [
+        "Issue 中 Steps/Code to Reproduce: `clone(StandardScaler(with_mean=StandardScaler))`",
+        "Issue 描述: `clone` fails when one or more instance parameters are estimator types (i.e. not instances, but classes)."
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: get_params() missing 1 required positional argument: 'self'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中 Actual Results 部分显示了完整的异常堆栈，包含错误信息。",
+        "源码片段 1 显示 clone 函数会递归调用 `clone(param, safe=False)`，其中 param 可能是一个类。",
+        "源码片段 3 显示 get_params 是一个实例方法，需要 self 参数。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "clone 函数应能正确处理参数为 estimator 类的情况，不抛出异常，并返回一个克隆后的新 estimator 对象。",
+      "evidence": [
+        "Issue 中 Expected Results: No error.",
+        "Issue 中 Possible fix 暗示了期望行为是 clone 能处理 estimator 类参数。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sklearn.base.clone",
+        "kind": "function",
+        "source_path": "sklearn/base.py",
+        "reason": "Issue 直接报告此函数在特定输入下失败。"
+      },
+      {
+        "name": "sklearn.preprocessing.StandardScaler",
+        "kind": "class",
+        "source_path": "sklearn/preprocessing/data.py",
+        "reason": "Issue 中用于复现的示例使用了此类，且其构造参数被设置为一个 estimator 类。"
+      },
+      {
+        "name": "sklearn.base.BaseEstimator.get_params",
+        "kind": "method",
+        "source_path": "sklearn/base.py",
+        "reason": "错误堆栈指向此方法，因为 clone 函数试图在一个类（而非实例）上调用它。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/base.py",
+        "object": "clone",
+        "lines": "30-74",
+        "reason": "Issue 中错误堆栈指向此函数，且其 Possible fix 建议修改此文件第 51 行附近的逻辑。源码片段 1 显示 clone 函数在递归调用 `clone(param, safe=False)` 前，没有检查 param 是否是一个类（type）。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_clone",
+        "test_file": "sklearn/tests/test_base.py",
+        "why_relevant": "它直接测试 clone 函数的基本功能，包括参数复制和对象身份验证。",
+        "reusable_parts": [
+          "imports (from sklearn.base import clone)",
+          "基本的 clone 调用模式",
+          "使用 assert 比较克隆前后的参数"
+        ],
+        "possible_gap": "现有测试只使用 estimator 实例作为参数，没有测试参数是 estimator 类的情况。"
+      },
+      {
+        "test_name": "test_clone_buggy",
+        "test_file": "sklearn/tests/test_base.py",
+        "why_relevant": "它测试 clone 函数对异常输入（如 buggy estimator）的处理，展示了如何断言 clone 会引发特定异常。",
+        "reusable_parts": [
+          "使用 assert_raises 来验证异常",
+          "构造特殊测试对象（如 Buggy, NoEstimator）的模式"
+        ],
+        "possible_gap": "它测试的是 clone 对不符合 estimator 协议的对象的处理，而非对 estimator 类参数的处理。"
+      },
+      {
+        "test_name": "test_kernel_clone",
+        "test_file": "sklearn/gaussian_process/tests/test_kernels.py",
+        "why_relevant": "它测试 clone 在特定对象（kernels）上的工作，展示了参数比较和对象身份检查。",
+        "reusable_parts": [
+          "clone 调用和参数比较模式",
+          "使用 assert_equal 和 assert_not_equal"
+        ],
+        "possible_gap": "它测试的是 kernel 对象，其参数不太可能是 estimator 类。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中 clone 的参数是一个 estimator 实例，其构造参数是普通值（如 alpha=0.1）或其他 estimator 实例。",
+        "target_pattern": "clone 的参数是一个 estimator 实例，但其某个构造参数是一个 estimator 类（例如 with_mean=StandardScaler）。",
+        "reason": "Issue 表明当 estimator 的参数是 estimator 类时，clone 的递归逻辑会尝试在类上调用实例方法 get_params，从而触发错误。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 clone(estimator_with_class_param) 时是否抛出 TypeError，以及异常信息是否包含 \"get_params() missing 1 required positional argument: 'self'\"。",
+        "reason": "这是 Issue 中观察到的直接错误现象。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "如果 clone 调用成功，观察返回的新 estimator 对象及其参数（通过 get_params() 获取），特别是那个 estimator 类参数是否被正确保留。",
+        "reason": "修复后，clone 应能正常工作并返回一个包含正确参数的新对象。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 clone 函数在输入包含 estimator 类参数时，不会抛出 TypeError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为修复后的实现可能改变错误信息。",
+        "reason": "Issue 的核心是异常的出现，修复后应消除此异常。"
+      },
+      {
+        "assertion_goal": "验证 clone 成功返回一个新对象，且其参数与原始对象一致（包括 estimator 类参数）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言返回对象的完整 repr 或 id 相等。",
+        "reason": "修复后 clone 应能正确复制所有参数，包括 estimator 类。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sklearn.base.clone 和 sklearn.preprocessing.StandardScaler（或其他 estimator 类）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能在一个继承自 unittest.TestCase 的类中，或者使用 pytest。现有相关测试使用了 assert_raises 和 assert_equal 等断言。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中建议的修复（修改 base.py 第 51 行）是否完整且正确，是否会影响 clone 函数的其他行为。",
+      "除了 StandardScaler，其他 estimator 类作为参数是否也会触发相同错误。",
+      "修复后，estimator 类参数在克隆后的对象中应如何表示（是保持为类，还是需要特殊处理）。"
+    ]
+  }
+}

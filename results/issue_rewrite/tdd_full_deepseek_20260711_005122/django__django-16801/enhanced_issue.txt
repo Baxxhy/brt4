@@ -1,0 +1,134 @@
+instance_id: django__django-16801
+
+issue_summary: ImageField 在未设置 width_field/height_field 时仍会添加一个无用的 post_init 信号处理器，导致模型初始化性能下降。
+
+trigger_condition:
+{
+  "text": "使用 ImageField 但未设置 width_field 和 height_field 参数，然后从数据库获取模型实例。",
+  "evidence": [
+    "Issue 描述：'we were using ImageField' 和 'we don't use the width_field / height_field'。",
+    "源码片段 1 显示 ImageField.__init__ 接受 width_field 和 height_field 参数。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "模型初始化（从数据库获取后）性能显著下降，大量时间花费在评估 post_init 信号上，而该信号处理器是空操作。",
+  "symptom_type": "performance",
+  "evidence": [
+    "Issue 描述：'30% of the time was being spent on evaluating post_init signals' 和 'Removing this signal handler gave us a 30-40% speedup'。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当 ImageField 未设置 width_field 和 height_field 时，不应添加 post_init 信号处理器，从而避免不必要的性能开销。",
+  "evidence": [
+    "Issue 描述：'If width_field and height_field are not set, removing the post_init signal should have no effect since the signal handler will return right away.'"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "ImageField",
+    "kind": "class",
+    "source_path": "django/db/models/fields/files.py",
+    "reason": "Issue 的核心是关于 ImageField 的行为。"
+  },
+  {
+    "name": "ImageField.__init__",
+    "kind": "method",
+    "source_path": "django/db/models/fields/files.py",
+    "reason": "该方法初始化 ImageField，包括 width_field 和 height_field 参数。"
+  },
+  {
+    "name": "ImageField.contribute_to_class",
+    "kind": "method",
+    "source_path": "django/db/models/fields/files.py",
+    "reason": "该方法可能负责将字段添加到模型类，可能包括信号连接。"
+  },
+  {
+    "name": "post_init",
+    "kind": "global_var",
+    "source_path": "django/db/models/signals.py",
+    "reason": "Issue 中提到的性能问题与 post_init 信号相关。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "在相关测试中，ImageField 可能配置了 width_field 和 height_field（通过 TestImageFieldFile 和 check_dimensions 推断）。",
+    "target_pattern": "创建一个 ImageField 但不设置 width_field 和 height_field 参数。",
+    "reason": "Issue 指出只有当这些字段未设置时，post_init 信号处理器才是无用的。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "测试通常创建模型实例、保存、然后从数据库获取。",
+    "target_pattern": "在从数据库获取模型实例后，测量或观察 post_init 信号处理器的调用开销。",
+    "reason": "Issue 的性能问题在从数据库初始化模型时显现。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "state",
+    "expression_hint": "模型实例化后，检查其 _state 或信号接收器列表，确认 post_init 信号是否被连接。",
+    "reason": "可以验证当 width_field/height_field 未设置时，post_init 信号是否被不必要地添加。"
+  },
+  {
+    "kind": "performance",
+    "expression_hint": "测量从数据库获取模型实例并初始化所需的时间，或统计 post_init 信号回调的执行次数。",
+    "reason": "Issue 的核心是性能下降，观测执行时间或信号调用频率可以量化问题。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当 ImageField 未设置 width_field 和 height_field 时，post_init 信号不应被连接到该字段的模型。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "断言具体的性能时间数值（可能因环境而异）。",
+    "reason": "Issue 期望的是没有不必要的信号连接，而不是具体的性能提升数值。"
+  },
+  {
+    "assertion_goal": "从数据库获取模型实例时，不应触发与 ImageField 相关的 post_init 信号处理逻辑（如果 width_field/height_field 未设置）。",
+    "preferred_assertion_style": "before_after_relation",
+    "avoid": "断言完整的信号接收器列表字符串相等。",
+    "reason": "可以比较信号连接前后的状态，确保没有多余的连接。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要一个 Django 测试用例（TestCase），并配置数据库。可能需要使用 skipIf 来跳过 Pillow 缺失的情况。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要创建一个包含 ImageField 的模型，该字段不设置 width_field 和 height_field。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要模拟或使用真实的图像文件来赋值给 ImageField。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "post_init 信号处理器在 ImageField 中的具体实现代码位置和逻辑。",
+  "性能下降的确切度量方法（是每次实例化的时间，还是信号回调内的操作耗时）。",
+  "是否还有其他字段或配置也会导致类似的 unnecessary signal 问题。"
+]

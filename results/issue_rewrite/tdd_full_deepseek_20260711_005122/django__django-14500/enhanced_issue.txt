@@ -1,0 +1,152 @@
+instance_id: django__django-14500
+
+issue_summary: 当回滚一个 squashed migration 且被替换的 migration 文件仍然存在时，MigrationExecutor 错误地将 squashed migration 也标记为未应用。
+
+trigger_condition:
+{
+  "text": "在存在被替换的 migration 文件的情况下，对 squashed migration 执行回滚（unapply）操作。",
+  "evidence": [
+    "Issue 描述：\"When unapplying a squashed migration and the replaced migration files are still around, the MigrationExecutor mark the squash migration as unapplied, too, not only the replaced migrations.\""
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "squashed migration 被错误地标记为未应用（unapplied）。",
+  "symptom_type": "state_not_updated",
+  "evidence": [
+    "Issue 描述：\"the MigrationExecutor mark the squash migration as unapplied, too, not only the replaced migrations.\""
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "回滚 squashed migration 时，只有被替换的 migrations 应被标记为未应用，squashed migration 本身不应被标记为未应用。",
+  "evidence": [
+    "Issue 描述暗示了只有被替换的 migrations 应被标记为未应用。",
+    "相关测试 1 (test_apply_all_replaced_marks_replacement_as_applied) 展示了正向应用时，当所有被替换的 migrations 被应用后，squashed migration 应被标记为已应用。反向逻辑应成立。"
+  ],
+  "confidence": "medium"
+}
+
+target_apis:
+[
+  {
+    "name": "MigrationExecutor.unapply_migration",
+    "kind": "method",
+    "source_path": "django/db/migrations/executor.py",
+    "reason": "Issue 直接提到了 MigrationExecutor 在回滚时的行为，该方法负责执行回滚操作。"
+  },
+  {
+    "name": "MigrationExecutor.migrate",
+    "kind": "method",
+    "source_path": "django/db/migrations/executor.py",
+    "reason": "这是执行迁移（包括回滚）的主要入口方法。"
+  },
+  {
+    "name": "MigrationRecorder.record_applied",
+    "kind": "method",
+    "source_path": "",
+    "reason": "用于记录 migration 的应用状态，是观察错误症状的关键。"
+  },
+  {
+    "name": "MigrationRecorder.applied_migrations",
+    "kind": "method",
+    "source_path": "",
+    "reason": "用于检查哪些 migrations 被标记为已应用，是验证预期行为的关键。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "相似测试中，初始状态通常是部分或全部被替换的 migrations 已应用，squashed migration 未应用。",
+    "target_pattern": "初始状态设置为：squashed migration 已应用，同时被替换的 migration 文件也存在（可能部分或全部已应用）。然后执行回滚操作。",
+    "reason": "Issue 描述的场景是回滚一个已应用的 squashed migration，且被替换的文件还在。这需要设置不同的初始数据库状态。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "相似测试通常调用 executor.migrate 应用迁移到某个目标。",
+    "target_pattern": "调用 executor.migrate 回滚到 squashed migration 被应用之前的状态（例如，目标为被替换的 migration 之一或 None）。",
+    "reason": "为了触发回滚逻辑，需要指定一个回滚目标，使得 squashed migration 在回滚计划中。",
+    "confidence": "high"
+  },
+  {
+    "slot": "config",
+    "current_pattern": "相似测试使用 override_settings 设置 MIGRATION_MODULES 指向包含 squashed migration 的模块。",
+    "target_pattern": "确保 MIGRATION_MODULES 指向的模块同时包含 squashed migration 文件和被它替换的原始 migration 文件。",
+    "reason": "Issue 明确要求“被替换的 migration 文件仍然存在”，这是触发条件的关键部分。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "state",
+    "expression_hint": "recorder.applied_migrations() 在回滚操作前后的内容。",
+    "reason": "Issue 的核心是 squashed migration 是否被错误地从已应用列表中移除。这是最直接的观测点。"
+  },
+  {
+    "kind": "order",
+    "expression_hint": "executor.migration_plan 在回滚时生成的计划，特别是 squashed migration 是否出现在计划中以及其方向（forward/backward）。",
+    "reason": "可以观察回滚计划是否包含了 squashed migration 本身，这可能解释了为什么它会被标记为未应用。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "MigrationLoader 在回滚前后构建的图中，squashed migration 节点的状态。",
+    "reason": "MigrationLoader 维护了迁移的应用状态图，观察其变化可以辅助理解内部状态。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证回滚操作后，squashed migration 仍然在已应用迁移列表中。",
+    "preferred_assertion_style": "contains_fragment",
+    "avoid": "避免断言完整的 applied_migrations() 列表完全等于某个固定集合，因为被替换的 migrations 的状态可能变化。",
+    "reason": "Issue 的预期是 squashed migration 不应被标记为未应用。断言其仍在列表中直接对应预期行为。"
+  },
+  {
+    "assertion_goal": "验证回滚操作后，被替换的 migrations 已从已应用迁移列表中移除（如果它们之前是已应用的）。",
+    "preferred_assertion_style": "not_contains_fragment",
+    "avoid": "避免断言完整的 applied_migrations() 列表完全等于某个固定集合。",
+    "reason": "Issue 描述“not only the replaced migrations”暗示被替换的 migrations 应该被标记为未应用。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 MigrationTestBase 或类似的测试基类，它提供了数据库连接和清理功能。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要使用 override_settings 来设置 MIGRATION_MODULES，指向一个包含 squashed migration 和其被替换 migrations 的测试模块。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要使用 MigrationRecorder 来记录和查询迁移的应用状态。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能需要使用 fake=True 参数来执行迁移，以避免实际修改数据库模式，只测试状态记录逻辑。",
+    "source": "retrieved_test",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "被替换的 migrations 的初始应用状态（全部已应用、部分已应用、全部未应用）是否会影响 bug 的触发？",
+  "回滚的目标（target）具体是什么（例如，回滚到 squashed migration 之前的一个点，还是回滚所有）？",
+  "bug 的确切位置是在 unapply_migration 方法中，还是在其他协调方法（如 _migrate_all_backwards）中？",
+  "MigrationExecutor.check_replacements() 或 detect_soft_applied() 方法在此 bug 中扮演什么角色？"
+]

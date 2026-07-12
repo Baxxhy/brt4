@@ -1,0 +1,265 @@
+{
+  "instance_id": "django__django-11239",
+  "issue_summary": "dbshell 命令不支持 PostgreSQL 数据库配置中的客户端证书和密钥参数。",
+  "trigger_condition": {
+    "text": "当使用包含 `sslcert` 和 `sslkey` 等 SSL 选项的 PostgreSQL 数据库配置运行 `dbshell` 命令时。",
+    "evidence": [
+      "Issue 描述：\"However the dbshell command does not support the client cert params.\"",
+      "Issue 中给出的配置示例包含 `'sslcert': ...` 和 `'sslkey': ...`。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "`dbshell` 命令生成的命令行参数中缺少 PostgreSQL 客户端 SSL 证书和密钥的对应选项，可能导致连接失败或无法建立安全的 TLS 连接。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 描述：\"Should be a trivial fix to add in support for the other 'ssl' parameters required here.\"",
+      "相关测试 1 显示 MySQL 的 `dbshell` 支持 `--ssl-cert` 和 `--ssl-key` 参数，暗示 PostgreSQL 可能缺少类似支持。"
+    ],
+    "confidence": "medium"
+  },
+  "expected_behavior": {
+    "text": "`dbshell` 命令应能读取 PostgreSQL 数据库配置中的 `sslcert` 和 `sslkey` 等 SSL 选项，并将其正确转换为 `psql` 命令行参数（如 `--ssl-cert` 和 `--ssl-key` 或等效参数）。",
+    "evidence": [
+      "Issue 描述：\"Should be a trivial fix to add in support for the other 'ssl' parameters required here.\"",
+      "相关测试 1 展示了 MySQL 后端对类似 SSL 参数的支持模式。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "django.core.management.commands.dbshell.Command",
+      "kind": "class",
+      "source_path": "django/core/management/commands/dbshell.py",
+      "reason": "这是 `dbshell` 命令的实现类，负责处理数据库连接参数并生成命令行。"
+    },
+    {
+      "name": "django.db.backends.postgresql.client.DatabaseClient.runshell",
+      "kind": "method",
+      "source_path": "",
+      "reason": "PostgreSQL 后端可能有一个 `runshell` 方法负责构建 `psql` 命令参数，Issue 暗示其可能未处理 SSL 客户端参数。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/core/management/commands/dbshell.py",
+      "object": "Command",
+      "lines": "",
+      "reason": "这是 `dbshell` 命令的入口点，负责调用后端特定的客户端方法。"
+    },
+    {
+      "path": "django/db/backends/postgresql/client.py",
+      "object": "DatabaseClient",
+      "lines": "",
+      "reason": "PostgreSQL 后端的客户端类负责构建 `psql` 命令行参数，可能缺少对 SSL 客户端证书和密钥参数的处理。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "PostgreSqlDbshellCommandTestCase.test_basic",
+      "test_file": "tests/dbshell/test_postgresql.py",
+      "why_relevant": "这是 PostgreSQL `dbshell` 的基础测试，展示了如何调用 `_run_it` 方法并验证生成的 `psql` 命令行参数。",
+      "reusable_parts": [
+        "测试类结构",
+        "`_run_it` 方法的调用模式",
+        "assert 风格（比较返回的元组）"
+      ],
+      "possible_gap": "当前测试没有包含 `OPTIONS` 中的 SSL 配置，因此无法触发 Issue 描述的问题。"
+    },
+    {
+      "test_name": "MySqlDbshellCommandTestCase.test_ssl_certificate_is_added",
+      "test_file": "tests/dbshell/test_mysql.py",
+      "why_relevant": "这个测试直接验证了 MySQL 后端 `dbshell` 对 SSL 证书参数（ca, cert, key）的支持，为 PostgreSQL 的类似功能提供了参考模式。",
+      "reusable_parts": [
+        "在 `OPTIONS` 中配置 SSL 参数的字典结构",
+        "验证命令行参数包含 SSL 相关选项的 assert 模式"
+      ],
+      "possible_gap": "它是针对 MySQL 的，命令行参数格式（`--ssl-cert=`）与 PostgreSQL 的 `psql` 可能不同。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "相关测试 2-5 中的数据库配置字典不包含 `OPTIONS` 或 SSL 相关键。",
+      "target_pattern": "在数据库配置字典的 `OPTIONS` 键下添加 `'sslcert': 'path/to/cert'` 和 `'sslkey': 'path/to/key'` 等条目。",
+      "reason": "Issue 表明当前 `dbshell` 未处理这些配置项，添加它们可能触发缺陷路径（即参数未被传递）。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "测试调用 `_run_it` 或类似方法，传入基本连接参数（database, user, host, port）。",
+      "target_pattern": "在调用时，确保包含 SSL 选项的完整配置字典被传递到命令处理逻辑中。",
+      "reason": "需要确保 SSL 配置能从 settings 传递到构建命令行的底层函数。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "`_run_it` 方法返回的元组中的第一个元素（命令行参数列表）。",
+      "reason": "观察生成的 `psql` 命令行参数列表中是否包含与 `sslcert` 和 `sslkey` 对应的选项（如 `--ssl-cert` 或 `-c sslcert=...`）。"
+    },
+    {
+      "kind": "config",
+      "expression_hint": "传递给命令或数据库客户端的配置字典（特别是 `OPTIONS` 部分）。",
+      "reason": "确认 SSL 客户端证书和密钥的配置值是否正确地从输入传递到了处理逻辑。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证当数据库配置包含 `sslcert` 和 `sslkey` 时，生成的 `psql` 命令行参数列表中也包含相应的 SSL 客户端参数。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免断言完整的、硬编码的命令行字符串，因为参数顺序或格式可能变化。",
+      "reason": "Issue 的核心是支持这些参数，因此断言它们出现在参数列表中（无论具体格式）是稳定且与目标对齐的。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 `SimpleTestCase` 或类似的测试基类，并模拟数据库配置，无需真实数据库连接。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要导入 `django.core.management.commands.dbshell` 模块中的 `Command` 类或其方法。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "PostgreSQL 的 `psql` 命令行工具接受客户端 SSL 证书和密钥的确切参数名称是什么（例如，是 `--ssl-cert` 还是其他格式）？",
+    "SSL 相关参数（`sslmode`, `sslrootcert`, `sslcert`, `sslkey`）是全部需要支持，还是仅 `sslcert` 和 `sslkey`？Issue 提到“other 'ssl' parameters”，但未明确列出。",
+    "缺陷的确切位置是在 `dbshell.py` 的命令类中，还是在 PostgreSQL 后端的 `client.py` 的 `DatabaseClient` 中？"
+  ],
+  "raw": {
+    "issue_summary": "dbshell 命令不支持 PostgreSQL 数据库配置中的客户端证书和密钥参数。",
+    "trigger_condition": {
+      "text": "当使用包含 `sslcert` 和 `sslkey` 等 SSL 选项的 PostgreSQL 数据库配置运行 `dbshell` 命令时。",
+      "evidence": [
+        "Issue 描述：\"However the dbshell command does not support the client cert params.\"",
+        "Issue 中给出的配置示例包含 `'sslcert': ...` 和 `'sslkey': ...`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "`dbshell` 命令生成的命令行参数中缺少 PostgreSQL 客户端 SSL 证书和密钥的对应选项，可能导致连接失败或无法建立安全的 TLS 连接。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：\"Should be a trivial fix to add in support for the other 'ssl' parameters required here.\"",
+        "相关测试 1 显示 MySQL 的 `dbshell` 支持 `--ssl-cert` 和 `--ssl-key` 参数，暗示 PostgreSQL 可能缺少类似支持。"
+      ],
+      "confidence": "medium"
+    },
+    "expected_behavior": {
+      "text": "`dbshell` 命令应能读取 PostgreSQL 数据库配置中的 `sslcert` 和 `sslkey` 等 SSL 选项，并将其正确转换为 `psql` 命令行参数（如 `--ssl-cert` 和 `--ssl-key` 或等效参数）。",
+      "evidence": [
+        "Issue 描述：\"Should be a trivial fix to add in support for the other 'ssl' parameters required here.\"",
+        "相关测试 1 展示了 MySQL 后端对类似 SSL 参数的支持模式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.core.management.commands.dbshell.Command",
+        "kind": "class",
+        "source_path": "django/core/management/commands/dbshell.py",
+        "reason": "这是 `dbshell` 命令的实现类，负责处理数据库连接参数并生成命令行。"
+      },
+      {
+        "name": "django.db.backends.postgresql.client.DatabaseClient.runshell",
+        "kind": "method",
+        "source_path": "",
+        "reason": "PostgreSQL 后端可能有一个 `runshell` 方法负责构建 `psql` 命令参数，Issue 暗示其可能未处理 SSL 客户端参数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/commands/dbshell.py",
+        "object": "Command",
+        "lines": "",
+        "reason": "这是 `dbshell` 命令的入口点，负责调用后端特定的客户端方法。"
+      },
+      {
+        "path": "django/db/backends/postgresql/client.py",
+        "object": "DatabaseClient",
+        "lines": "",
+        "reason": "PostgreSQL 后端的客户端类负责构建 `psql` 命令行参数，可能缺少对 SSL 客户端证书和密钥参数的处理。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "PostgreSqlDbshellCommandTestCase.test_basic",
+        "test_file": "tests/dbshell/test_postgresql.py",
+        "why_relevant": "这是 PostgreSQL `dbshell` 的基础测试，展示了如何调用 `_run_it` 方法并验证生成的 `psql` 命令行参数。",
+        "reusable_parts": [
+          "测试类结构",
+          "`_run_it` 方法的调用模式",
+          "assert 风格（比较返回的元组）"
+        ],
+        "possible_gap": "当前测试没有包含 `OPTIONS` 中的 SSL 配置，因此无法触发 Issue 描述的问题。"
+      },
+      {
+        "test_name": "MySqlDbshellCommandTestCase.test_ssl_certificate_is_added",
+        "test_file": "tests/dbshell/test_mysql.py",
+        "why_relevant": "这个测试直接验证了 MySQL 后端 `dbshell` 对 SSL 证书参数（ca, cert, key）的支持，为 PostgreSQL 的类似功能提供了参考模式。",
+        "reusable_parts": [
+          "在 `OPTIONS` 中配置 SSL 参数的字典结构",
+          "验证命令行参数包含 SSL 相关选项的 assert 模式"
+        ],
+        "possible_gap": "它是针对 MySQL 的，命令行参数格式（`--ssl-cert=`）与 PostgreSQL 的 `psql` 可能不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 2-5 中的数据库配置字典不包含 `OPTIONS` 或 SSL 相关键。",
+        "target_pattern": "在数据库配置字典的 `OPTIONS` 键下添加 `'sslcert': 'path/to/cert'` 和 `'sslkey': 'path/to/key'` 等条目。",
+        "reason": "Issue 表明当前 `dbshell` 未处理这些配置项，添加它们可能触发缺陷路径（即参数未被传递）。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试调用 `_run_it` 或类似方法，传入基本连接参数（database, user, host, port）。",
+        "target_pattern": "在调用时，确保包含 SSL 选项的完整配置字典被传递到命令处理逻辑中。",
+        "reason": "需要确保 SSL 配置能从 settings 传递到构建命令行的底层函数。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "`_run_it` 方法返回的元组中的第一个元素（命令行参数列表）。",
+        "reason": "观察生成的 `psql` 命令行参数列表中是否包含与 `sslcert` 和 `sslkey` 对应的选项（如 `--ssl-cert` 或 `-c sslcert=...`）。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "传递给命令或数据库客户端的配置字典（特别是 `OPTIONS` 部分）。",
+        "reason": "确认 SSL 客户端证书和密钥的配置值是否正确地从输入传递到了处理逻辑。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当数据库配置包含 `sslcert` 和 `sslkey` 时，生成的 `psql` 命令行参数列表中也包含相应的 SSL 客户端参数。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、硬编码的命令行字符串，因为参数顺序或格式可能变化。",
+        "reason": "Issue 的核心是支持这些参数，因此断言它们出现在参数列表中（无论具体格式）是稳定且与目标对齐的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 `SimpleTestCase` 或类似的测试基类，并模拟数据库配置，无需真实数据库连接。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 `django.core.management.commands.dbshell` 模块中的 `Command` 类或其方法。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "PostgreSQL 的 `psql` 命令行工具接受客户端 SSL 证书和密钥的确切参数名称是什么（例如，是 `--ssl-cert` 还是其他格式）？",
+      "SSL 相关参数（`sslmode`, `sslrootcert`, `sslcert`, `sslkey`）是全部需要支持，还是仅 `sslcert` 和 `sslkey`？Issue 提到“other 'ssl' parameters”，但未明确列出。",
+      "缺陷的确切位置是在 `dbshell.py` 的命令类中，还是在 PostgreSQL 后端的 `client.py` 的 `DatabaseClient` 中？"
+    ]
+  }
+}

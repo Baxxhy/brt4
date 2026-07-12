@@ -1,0 +1,468 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Dagger() * IdentityOperator() is not simplified
+As discussed on the mailing list the following does not work.
+```
+from sympy.physics.quantum.dagger import Dagger
+from sympy.physics.quantum.operator import Operator
+from sympy.physics.quantum import IdentityOperator
+A = Operators('A')
+Identity = IdentityOperator()
+A * Identity #This gives A, correctly
+B = Dagger(A)
+B * Identity #This returns A^\dagger I 
+```
+
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/physics/secondquant.py
+对象名称：Dagger
+节点类型：class
+父节点：secondquant
+行号范围：83-147
+代码：
+class Dagger(Expr):
+    """
+    Hermitian conjugate of creation/annihilation operators.
+
+    Examples
+    ========
+
+    >>> from sympy import I
+    >>> from sympy.physics.secondquant import Dagger, B, Bd
+    >>> Dagger(2*I)
+    -2*I
+    >>> Dagger(B(0))
+    CreateBoson(0)
+    >>> Dagger(Bd(0))
+    AnnihilateBoson(0)
+
+    """
+    def __new__(cls, arg):
+    @classmethod
+    def eval(cls, arg):
+    def _dagger_(self):
+
+
+【源码片段 2】
+文件路径：sympy/physics/quantum/operator.py
+对象名称：IdentityOperator
+节点类型：class
+父节点：operator
+行号范围：249-325
+代码：
+class IdentityOperator(Operator):
+    """An identity operator I that satisfies op * I == I * op == op for any
+    operator op.
+
+    Parameters
+    ==========
+
+    N : Integer
+        Optional parameter that specifies the dimension of the Hilbert space
+        of operator. This is used when generating a matrix representation.
+
+    Examples
+    ========
+
+    >>> from sympy.physics.quantum import IdentityOperator
+    >>> IdentityOperator()
+    I
+    """
+    @property
+    def dimension(self):
+    @classmethod
+    def default_args(self):
+    def __init__(self, *args, **hints):
+    def _eval_commutator(self, other, **hints):
+    def _eval_anticommutator(self, other, **hints):
+    def _eval_inverse(self):
+    def _eval_adjoint(self):
+    def _apply_operator(self, ket, **options):
+    def _eval_power(self, exp):
+    def _print_contents(self, printer, *args):
+    def _print_contents_pretty(self, printer, *args):
+    def _print_contents_latex(self, printer, *args):
+    def __mul__(self, other):
+
+    def _represent_default_basis(self, **options):
+
+
+【源码片段 3】
+文件路径：sympy/physics/quantum/operator.py
+对象名称：Operator
+节点类型：class
+父节点：operator
+行号范围：34-184
+代码：
+class Operator(QExpr):
+    """Base class for non-commuting quantum operators.
+
+    An operator maps between quantum states [1]_. In quantum mechanics,
+    observables (including, but not limited to, measured physical values) are
+    represented as Hermitian operators [2]_.
+
+    Parameters
+    ==========
+
+    args : tuple
+        The list of numbers or parameters that uniquely specify the
+        operator. For time-dependent operators, this will include the time.
+
+    Examples
+    ========
+
+    Create an operator and examine its attributes::
+
+        >>> from sympy.physics.quantum import Operator
+        >>> from sympy import I
+        >>> A = Operator('A')
+        >>> A
+        A
+        >>> A.hilbert_space
+        H
+        >>> A.label
+        (A,)
+        >>> A.is_commutative
+        False
+
+    Create another operator and do some arithmetic operations::
+
+        >>> B = Operator('B')
+        >>> C = 2*A*A + I*B
+        >>> C
+        2*A**2 + I*B
+
+    Operators don't commute::
+
+        >>> A.is_commutative
+        False
+        >>> B.is_commutative
+        False
+        >>> A*B == B*A
+        False
+
+    Polymonials of operators respect the commutation properties::
+
+        >>> e = (A+B)**3
+        >>> e.expand()
+        A*B*A + A*B**2 + A**2*B + A**3 + B*A*B + B*A**2 + B**2*A + B**3
+
+    Operator inverses are handle symbolically::
+
+        >>> A.inv()
+        A**(-1)
+        >>> A*A.inv()
+        1
+
+    References
+    ==========
+
+    .. [1] https://en.wikipedia.org/wiki/Operator_%28physics%29
+    .. [2] https://en.wikipedia.org/wiki/Observable
+    """
+    @classmethod
+    def default_args(self):
+    _label_separator = ','
+    def _print_operator_name(self, printer, *args):
+    _print_operator_name_latex = _print_operator_name
+    def _print_operator_name_pretty(self, printer, *args):
+    def _print_contents(self, printer, *args):
+    def _print_contents_pretty(self, printer, *args):
+    def _print_contents_latex(self, printer, *args):
+    def _eval_commutator(self, other, **options):
+    def _eval_anticommutator(self, other, **options):
+    def _apply_operator(self, ket, **options):
+    def matrix_element(self, *args):
+    def inverse(self):
+    inv = inverse
+    def _eval_inverse(self):
+    def __mul__(self, other):
+
+
+
+【源码片段 4】
+文件路径：sympy/physics/quantum/operator.py
+对象名称：__mul__
+节点类型：class_function
+父节点：IdentityOperator
+行号范围：308-313
+代码：
+    def __mul__(self, other):
+
+        if isinstance(other, Operator):
+            return other
+
+        return Mul(self, other)
+
+
+【源码片段 5】
+文件路径：sympy/physics/quantum/operator.py
+对象名称：__mul__
+节点类型：class_function
+父节点：Operator
+行号范围：179-184
+代码：
+    def __mul__(self, other):
+
+        if isinstance(other, IdentityOperator):
+            return self
+
+        return Mul(self, other)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/physics/quantum/tests/test_operator.py
+测试名称：test_identity
+测试代码：
+def test_identity():
+    I = IdentityOperator()
+    O = Operator('O')
+    x = Symbol("x")
+
+    assert isinstance(I, IdentityOperator)
+    assert isinstance(I, Operator)
+
+    assert I * O == O
+    assert O * I == O
+    assert isinstance(I * I, IdentityOperator)
+    assert isinstance(3 * I, Mul)
+    assert isinstance(I * x, Mul)
+    assert I.inv() == I
+    assert Dagger(I) == I
+    assert qapply(I * O) == O
+    assert qapply(O * I) == O
+
+    for n in [2, 3, 5]:
+        assert represent(IdentityOperator(n)) == eye(n)
+
+【相关测试 2】
+测试文件：sympy/physics/quantum/tests/test_operator.py
+测试名称：test_operator_dagger
+测试代码：
+def test_operator_dagger():
+    A = Operator('A')
+    B = Operator('B')
+    assert Dagger(A*B) == Dagger(B)*Dagger(A)
+    assert Dagger(A + B) == Dagger(A) + Dagger(B)
+    assert Dagger(A**2) == Dagger(A)**2
+
+【相关测试 3】
+测试文件：sympy/physics/quantum/tests/test_dagger.py
+测试名称：test_scalars
+测试代码：
+def test_scalars():
+    x = symbols('x', complex=True)
+    assert Dagger(x) == conjugate(x)
+    assert Dagger(I*x) == -I*conjugate(x)
+
+    i = symbols('i', real=True)
+    assert Dagger(i) == i
+
+    p = symbols('p')
+    assert isinstance(Dagger(p), adjoint)
+
+    i = Integer(3)
+    assert Dagger(i) == i
+
+    A = symbols('A', commutative=False)
+    assert Dagger(A).is_commutative is False
+
+【相关测试 4】
+测试文件：sympy/physics/quantum/tests/test_operator.py
+测试名称：test_operator
+测试代码：
+def test_operator():
+    A = Operator('A')
+    B = Operator('B')
+    C = Operator('C')
+
+    assert isinstance(A, Operator)
+    assert isinstance(A, QExpr)
+
+    assert A.label == (Symbol('A'),)
+    assert A.is_commutative is False
+    assert A.hilbert_space == HilbertSpace()
+
+    assert A*B != B*A
+
+    assert (A*(B + C)).expand() == A*B + A*C
+    assert ((A + B)**2).expand() == A**2 + A*B + B*A + B**2
+
+    assert t_op.label[0] == Symbol(t_op.default_args()[0])
+
+    assert Operator() == Operator("O")
+    assert A*IdentityOperator() == A
+
+【相关测试 5】
+测试文件：sympy/physics/tests/test_secondquant.py
+测试名称：test_commutation
+测试代码：
+def test_commutation():
+    n, m = symbols("n,m", above_fermi=True)
+    c = Commutator(B(0), Bd(0))
+    assert c == 1
+    c = Commutator(Bd(0), B(0))
+    assert c == -1
+    c = Commutator(B(n), Bd(0))
+    assert c == KroneckerDelta(n, 0)
+    c = Commutator(B(0), B(0))
+    assert c == 0
+    c = Commutator(B(0), Bd(0))
+    e = simplify(apply_operators(c*BKet([n])))
+    assert e == BKet([n])
+    c = Commutator(B(0), B(1))
+    e = simplify(apply_operators(c*BKet([n, m])))
+    assert e == 0
+
+    c = Commutator(F(m), Fd(m))
+    assert c == +1 - 2*NO(Fd(m)*F(m))
+    c = Commutator(Fd(m), F(m))
+    assert c.expand() == -1 + 2*NO(Fd(m)*F(m))
+
+    C = Commutator
+    X, Y, Z = symbols('X,Y,Z', commutative=False)
+    assert C(C(X, Y), Z) != 0
+    assert C(C(X, Z), Y) != 0
+    assert C(Y, C(X, Z)) != 0
+
+    i, j, k, l = symbols('i,j,k,l', below_fermi=True)
+    a, b, c, d = symbols('a,b,c,d', above_fermi=True)
+    p, q, r, s = symbols('p,q,r,s')
+    D = KroneckerDelta
+
+    assert C(Fd(a), F(i)) == -2*NO(F(i)*Fd(a))
+    assert C(Fd(j), NO(Fd(a)*F(i))).doit(wicks=True) == -D(j, i)*Fd(a)
+    assert C(Fd(a)*F(i), Fd(b)*F(j)).doit(wicks=True) == 0
+
+    c1 = Commutator(F(a), Fd(a))
+    assert Commutator.eval(c1, c1) == 0
+    c = Commutator(Fd(a)*F(i),Fd(b)*F(j))
+    assert latex(c) == r'\left[a^\dagger_{a} a_{i},a^\dagger_{b} a_{j}\right]'
+    assert repr(c) == 'Commutator(CreateFermion(a)*AnnihilateFermion(i),CreateFermion(b)*AnnihilateFermion(j))'
+    assert str(c) == '[CreateFermion(a)*AnnihilateFermion(i),CreateFermion(b)*AnnihilateFermion(j)]'
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

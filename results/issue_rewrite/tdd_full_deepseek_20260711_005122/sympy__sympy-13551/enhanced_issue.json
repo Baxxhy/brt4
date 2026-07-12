@@ -1,0 +1,311 @@
+{
+  "instance_id": "sympy__sympy-13551",
+  "issue_summary": "Product(n + 1 / 2**k, [k, 0, n-1]) 计算结果错误，未正确表达 q-Pochhammer 符号。",
+  "trigger_condition": {
+    "text": "调用 Product(n + 1 / 2**k, (k, 0, n-1)).doit() 并简化或代入具体数值。",
+    "evidence": [
+      "Issue 中给出了调用示例：p = Product(n + 1 / 2**k, [k, 0, n-1]).doit()",
+      "Issue 中通过 p.subs(n,2) 得到错误结果 9/2"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "计算结果与预期不符。例如，当 n=2 时，计算结果为 9/2，但正确结果应为 15/2。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 中明确说明：'This is incorrect- for example, the product for `n=2` is `(2 + 2^0) * (2 + 2^(-1)) = 15/2`'",
+      "Issue 中展示了错误的计算结果：'print(p.subs(n,2)) 9/2'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "Product(n + 1 / 2**k, (k, 0, n-1)).doit() 应返回一个与 q-Pochhammer 符号相关的正确表达式，且代入具体数值（如 n=2）应得到正确结果 15/2。",
+    "evidence": [
+      "Issue 中给出了正确的手动计算结果：'(2 + 2^0) * (2 + 2^(-1)) = 15/2'",
+      "Issue 中提到了正确的表达式应涉及 q-Pochhammer 符号"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "Product",
+      "kind": "class",
+      "source_path": "sympy/concrete/products.py",
+      "reason": "Issue 直接调用了 Product 类来构造乘积表达式。"
+    },
+    {
+      "name": "Product.doit",
+      "kind": "method",
+      "source_path": "sympy/concrete/products.py",
+      "reason": "Issue 中调用了 .doit() 方法来计算乘积。"
+    },
+    {
+      "name": "simplify",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 中使用了 simplify 函数处理计算结果。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/concrete/products.py",
+      "object": "Product._eval_product",
+      "lines": "",
+      "reason": "Product.doit() 方法会调用 _eval_product 来计算乘积，该方法是乘积计算的核心逻辑，错误可能源于此。"
+    },
+    {
+      "path": "sympy/concrete/products.py",
+      "object": "Product.doit",
+      "lines": "208-226",
+      "reason": "doit 方法负责执行乘积计算，并处理上下限和化简，是触发计算的主要入口。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_simple_products",
+      "test_file": "sympy/concrete/tests/test_products.py",
+      "why_relevant": "它测试了 product 函数（Product 的快捷方式）的基本功能，包括乘积计算和极限处理，与 Issue 中测试的 Product 类直接相关。",
+      "reusable_parts": [
+        "from sympy import product, Product, factorial, rf, cos, Rational, oo",
+        "assert 风格：直接使用 assert product(...) == ...",
+        "使用了符号变量 k, n, a"
+      ],
+      "possible_gap": "该测试主要使用 product 快捷函数，且测试用例是简单的多项式或阶乘，没有测试形如 n + 1/2**k 的混合项乘积。"
+    },
+    {
+      "test_name": "test_rational_products",
+      "test_file": "sympy/concrete/tests/test_products.py",
+      "why_relevant": "它测试了涉及有理函数的乘积，例如 product(1 + 1/k, (k, 1, n))，其形式与 Issue 中的 n + 1/2**k 有相似之处（都是有理表达式）。",
+      "reusable_parts": [
+        "测试了乘积表达式与上升阶乘 rf 的关系",
+        "使用了符号变量 n, k"
+      ],
+      "possible_gap": "测试用例是 1 + 1/k，其分母是变量 k，而 Issue 中是 1/2**k，分母是指数函数，计算逻辑可能不同。"
+    },
+    {
+      "test_name": "test_rational_products",
+      "test_file": "sympy/concrete/tests/test_sums_products.py",
+      "why_relevant": "它测试了更复杂的乘积化简，使用了 simplify 函数，这与 Issue 中调用 simplify(p) 的行为一致。",
+      "reusable_parts": [
+        "使用了 simplify 函数包裹 product 调用",
+        "测试了包含 gamma 函数的表达式",
+        "使用了符号变量 n, a, b"
+      ],
+      "possible_gap": "测试用例是 n+1, (n+1)/(n-1) 等，没有涉及指数项 2**k。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "product(1 + 1/k, (k, 1, n))",
+      "target_pattern": "Product(n + 1 / 2**k, (k, 0, n-1))",
+      "reason": "将测试中的简单有理项 1/k 替换为 Issue 中的复杂项 1/2**k，并加上常数项 n，同时调整求和上下限。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "product(..., (k, 1, n))",
+      "target_pattern": "Product(..., (k, 0, n-1))",
+      "reason": "Issue 中的乘积下限是 0，上限是 n-1，这与许多测试中下限为 1 或 a 的模式不同，可能影响计算逻辑。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "p = Product(n + 1 / 2**k, (k, 0, n-1)).doit(); p_simplified = simplify(p); p_substituted = p.subs(n, 2)",
+      "reason": "Issue 的核心错误是计算结果错误，观察 doit() 的原始结果、简化后的表达式以及代入具体数值后的结果，可以直接与预期值对比。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "type(p), p.free_symbols",
+      "reason": "观察返回结果的类型和所含符号，有助于理解计算过程是否生成了预期的表达式结构（如是否包含 q-Pochhammer 符号）。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "当 n=2 时，乘积的计算结果应等于 15/2。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的符号表达式字符串相等，因为正确的符号表达式可能形式多样。",
+      "reason": "Issue 明确给出了 n=2 时的具体正确数值，这是一个稳定且明确的断言目标。"
+    },
+    {
+      "assertion_goal": "乘积的符号表达式在简化后不应是 Issue 中给出的错误表达式 2**(n*(-n + 1)/2) + n**n。",
+      "preferred_assertion_style": "not_contains_fragment",
+      "avoid": "避免断言表达式完全等于某个猜测的正确符号形式，因为正确的 q-Pochhammer 符号表示可能未知。",
+      "reason": "Issue 明确指出了错误的符号结果，断言结果不包含这个错误片段是稳定且与 Issue 对齐的。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要导入 sympy 和符号变量：from sympy import Product, simplify; from sympy.abc import n, k",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能需要在已有的测试类或文件中运行，遵循现有的测试框架（如 pytest）。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "正确的符号表达式具体是什么形式（q-Pochhammer 符号在 SymPy 中的表示）。",
+    "bug 的确切位置是在 _eval_product 的某个特例处理中，还是在 doit 的化简逻辑中。",
+    "除了 n=2 之外，其他 n 值（如 n=1, n=3）的正确结果是什么，以用于更全面的断言。"
+  ],
+  "raw": {
+    "issue_summary": "Product(n + 1 / 2**k, [k, 0, n-1]) 计算结果错误，未正确表达 q-Pochhammer 符号。",
+    "trigger_condition": {
+      "text": "调用 Product(n + 1 / 2**k, (k, 0, n-1)).doit() 并简化或代入具体数值。",
+      "evidence": [
+        "Issue 中给出了调用示例：p = Product(n + 1 / 2**k, [k, 0, n-1]).doit()",
+        "Issue 中通过 p.subs(n,2) 得到错误结果 9/2"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "计算结果与预期不符。例如，当 n=2 时，计算结果为 9/2，但正确结果应为 15/2。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中明确说明：'This is incorrect- for example, the product for `n=2` is `(2 + 2^0) * (2 + 2^(-1)) = 15/2`'",
+        "Issue 中展示了错误的计算结果：'print(p.subs(n,2)) 9/2'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Product(n + 1 / 2**k, (k, 0, n-1)).doit() 应返回一个与 q-Pochhammer 符号相关的正确表达式，且代入具体数值（如 n=2）应得到正确结果 15/2。",
+      "evidence": [
+        "Issue 中给出了正确的手动计算结果：'(2 + 2^0) * (2 + 2^(-1)) = 15/2'",
+        "Issue 中提到了正确的表达式应涉及 q-Pochhammer 符号"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Product",
+        "kind": "class",
+        "source_path": "sympy/concrete/products.py",
+        "reason": "Issue 直接调用了 Product 类来构造乘积表达式。"
+      },
+      {
+        "name": "Product.doit",
+        "kind": "method",
+        "source_path": "sympy/concrete/products.py",
+        "reason": "Issue 中调用了 .doit() 方法来计算乘积。"
+      },
+      {
+        "name": "simplify",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中使用了 simplify 函数处理计算结果。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/concrete/products.py",
+        "object": "Product._eval_product",
+        "lines": "",
+        "reason": "Product.doit() 方法会调用 _eval_product 来计算乘积，该方法是乘积计算的核心逻辑，错误可能源于此。"
+      },
+      {
+        "path": "sympy/concrete/products.py",
+        "object": "Product.doit",
+        "lines": "208-226",
+        "reason": "doit 方法负责执行乘积计算，并处理上下限和化简，是触发计算的主要入口。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_simple_products",
+        "test_file": "sympy/concrete/tests/test_products.py",
+        "why_relevant": "它测试了 product 函数（Product 的快捷方式）的基本功能，包括乘积计算和极限处理，与 Issue 中测试的 Product 类直接相关。",
+        "reusable_parts": [
+          "from sympy import product, Product, factorial, rf, cos, Rational, oo",
+          "assert 风格：直接使用 assert product(...) == ...",
+          "使用了符号变量 k, n, a"
+        ],
+        "possible_gap": "该测试主要使用 product 快捷函数，且测试用例是简单的多项式或阶乘，没有测试形如 n + 1/2**k 的混合项乘积。"
+      },
+      {
+        "test_name": "test_rational_products",
+        "test_file": "sympy/concrete/tests/test_products.py",
+        "why_relevant": "它测试了涉及有理函数的乘积，例如 product(1 + 1/k, (k, 1, n))，其形式与 Issue 中的 n + 1/2**k 有相似之处（都是有理表达式）。",
+        "reusable_parts": [
+          "测试了乘积表达式与上升阶乘 rf 的关系",
+          "使用了符号变量 n, k"
+        ],
+        "possible_gap": "测试用例是 1 + 1/k，其分母是变量 k，而 Issue 中是 1/2**k，分母是指数函数，计算逻辑可能不同。"
+      },
+      {
+        "test_name": "test_rational_products",
+        "test_file": "sympy/concrete/tests/test_sums_products.py",
+        "why_relevant": "它测试了更复杂的乘积化简，使用了 simplify 函数，这与 Issue 中调用 simplify(p) 的行为一致。",
+        "reusable_parts": [
+          "使用了 simplify 函数包裹 product 调用",
+          "测试了包含 gamma 函数的表达式",
+          "使用了符号变量 n, a, b"
+        ],
+        "possible_gap": "测试用例是 n+1, (n+1)/(n-1) 等，没有涉及指数项 2**k。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "product(1 + 1/k, (k, 1, n))",
+        "target_pattern": "Product(n + 1 / 2**k, (k, 0, n-1))",
+        "reason": "将测试中的简单有理项 1/k 替换为 Issue 中的复杂项 1/2**k，并加上常数项 n，同时调整求和上下限。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "product(..., (k, 1, n))",
+        "target_pattern": "Product(..., (k, 0, n-1))",
+        "reason": "Issue 中的乘积下限是 0，上限是 n-1，这与许多测试中下限为 1 或 a 的模式不同，可能影响计算逻辑。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "p = Product(n + 1 / 2**k, (k, 0, n-1)).doit(); p_simplified = simplify(p); p_substituted = p.subs(n, 2)",
+        "reason": "Issue 的核心错误是计算结果错误，观察 doit() 的原始结果、简化后的表达式以及代入具体数值后的结果，可以直接与预期值对比。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "type(p), p.free_symbols",
+        "reason": "观察返回结果的类型和所含符号，有助于理解计算过程是否生成了预期的表达式结构（如是否包含 q-Pochhammer 符号）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 n=2 时，乘积的计算结果应等于 15/2。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的符号表达式字符串相等，因为正确的符号表达式可能形式多样。",
+        "reason": "Issue 明确给出了 n=2 时的具体正确数值，这是一个稳定且明确的断言目标。"
+      },
+      {
+        "assertion_goal": "乘积的符号表达式在简化后不应是 Issue 中给出的错误表达式 2**(n*(-n + 1)/2) + n**n。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言表达式完全等于某个猜测的正确符号形式，因为正确的 q-Pochhammer 符号表示可能未知。",
+        "reason": "Issue 明确指出了错误的符号结果，断言结果不包含这个错误片段是稳定且与 Issue 对齐的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 和符号变量：from sympy import Product, simplify; from sympy.abc import n, k",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在已有的测试类或文件中运行，遵循现有的测试框架（如 pytest）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "正确的符号表达式具体是什么形式（q-Pochhammer 符号在 SymPy 中的表示）。",
+      "bug 的确切位置是在 _eval_product 的某个特例处理中，还是在 doit 的化简逻辑中。",
+      "除了 n=2 之外，其他 n 值（如 n=1, n=3）的正确结果是什么，以用于更全面的断言。"
+    ]
+  }
+}

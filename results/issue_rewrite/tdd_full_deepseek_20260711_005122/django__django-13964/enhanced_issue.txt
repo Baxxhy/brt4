@@ -1,0 +1,141 @@
+instance_id: django__django-13964
+
+issue_summary: 当父对象的外键指向一个主键为非自增字符字段的子对象，且子对象在赋值给父对象后才设置主键值时，父对象保存时外键字段错误地保持为空字符串，导致数据丢失或外键约束违反。
+
+trigger_condition:
+{
+  "text": "在事务中，创建一个父对象（如Order），将一个未保存且主键字段（如sku）初始为空的子对象（如Product）赋值给父对象的外键属性，然后设置子对象的主键值并保存子对象，最后保存父对象。",
+  "evidence": [
+    "Issue 中给出的代码示例：order = Order(); order.product = Product(); order.product.sku = \"foo\"; order.product.save(); order.save();"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "父对象的外键字段（product_id）被错误地设置为空字符串，而不是子对象的主键值（\"foo\"）。这导致断言 Order.objects.filter(product_id=\"\").exists() 成功，而 Order.objects.filter(product=order.product).exists() 失败。事务提交时会因外键约束违反而失败。",
+  "symptom_type": "state_not_updated",
+  "evidence": [
+    "Issue 中的断言：assert Order.objects.filter(product_id=\"\").exists() # Succeeds, but shouldn't",
+    "Issue 中的断言：assert Order.objects.filter(product=order.product).exists() # Fails",
+    "Issue 描述：Instead of product_id being populated with product.sku, it is set to emptystring."
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "父对象保存后，其外键字段应正确引用已保存子对象的主键值，使得通过外键字段或相关对象查询都能找到对应的父对象记录。",
+  "evidence": [
+    "Issue 中给出的正确行为示例：order.product = Product(sku=\"foo\"); order.product.save(); order.save(); assert Order.objects.filter(product=order.product).exists() # succeeds"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "Order",
+    "kind": "class",
+    "source_path": "",
+    "reason": "Issue 中定义的父模型，包含指向 Product 的外键。"
+  },
+  {
+    "name": "Product",
+    "kind": "class",
+    "source_path": "",
+    "reason": "Issue 中定义的子模型，其主键为 CharField。"
+  },
+  {
+    "name": "ForeignKey",
+    "kind": "class",
+    "source_path": "django/db/models/fields/related.py",
+    "reason": "Issue 涉及外键关系的处理，特别是当相关对象主键为非自增字段时的赋值和保存逻辑。"
+  },
+  {
+    "name": "transaction.atomic",
+    "kind": "function",
+    "source_path": "django/db/transaction.py",
+    "reason": "Issue 中的操作步骤和测试代码都使用了事务上下文管理器。"
+  },
+  {
+    "name": "save",
+    "kind": "method",
+    "source_path": "",
+    "reason": "Issue 的核心操作是调用父对象和子对象的 save 方法。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "在赋值给父对象的外键属性时，相关子对象的主键字段已经设置好（例如 Product(sku=\"foo\")）。",
+    "target_pattern": "在赋值给父对象的外键属性时，相关子对象的主键字段为空，赋值后才设置（例如 order.product = Product(); order.product.sku = \"foo\";）。",
+    "reason": "Issue 表明，这种状态变化顺序是触发缺陷的关键。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "先保存父对象，再保存子对象（例如 test_save_nullable_fk_after_parent）。",
+    "target_pattern": "先设置子对象主键并保存子对象，再保存父对象，但父对象的外键赋值发生在子对象主键设置之前。",
+    "reason": "Issue 中的缺陷触发步骤是：赋值空子对象 -> 设置子对象主键 -> 保存子对象 -> 保存父对象。",
+    "confidence": "high"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "state",
+    "expression_hint": "父对象保存后，其 _state 或 _meta 中存储的外键字段值（例如 order.product_id）。",
+    "reason": "Issue 的核心是父对象的外键字段值在保存后是否更新为子对象的主键值。"
+  },
+  {
+    "kind": "sql",
+    "expression_hint": "保存父对象时生成的 INSERT SQL 语句，特别是外键字段的值。",
+    "reason": "可以确认数据库实际接收到的外键值是空字符串还是正确的值。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "事务提交时是否引发 ForeignKeyViolation 异常。",
+    "reason": "Issue 提到事务提交会因外键约束违反而失败，这是错误症状的最终表现。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "父对象保存后，通过其外键字段（product_id）查询应能成功找到该对象，且该字段值等于子对象的主键值。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的 SQL 字符串或完整的 repr 输出。",
+    "reason": "直接验证外键字段的最终状态，这是 Issue 期望的正确行为。"
+  },
+  {
+    "assertion_goal": "父对象保存后，通过其相关对象（product）查询应能成功找到该对象。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言不相关的对象属性或数量。",
+    "reason": "验证外键关系的完整性，确保父对象正确关联到子对象。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 TestCase 类，并可能涉及数据库事务。模型定义应包含一个主键为 CharField 的模型和一个指向它的外键模型。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试应在事务中运行，以观察最终的外键约束违反或隔离副作用。",
+    "source": "issue",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "缺陷的确切源码位置和触发机制（例如，是 ForeignKey 赋值逻辑、缓存更新时机还是保存时的字段值获取问题）。",
+  "该缺陷是否也影响其他类型的关系（如 OneToOneField）或其他非标准主键类型。",
+  "在非事务上下文中，行为是否相同，或者错误是否立即显现。"
+]

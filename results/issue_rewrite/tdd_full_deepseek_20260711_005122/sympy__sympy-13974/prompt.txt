@@ -1,0 +1,466 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Evaluating powers of `TensorProduct`
+Powers of tensor product expressions are not possible to evaluate with either `expand(tensorproduct=True)` method nor the `tensor_product_simp`function.
+
+This is an example session showing the issue
+```
+In [1]: from sympy import *
+        from sympy.physics.quantum import TensorProduct as tp
+        from sympy.physics.quantum import tensor_product_simp as tps
+        from sympy.physics.paulialgebra import Pauli
+        a = Symbol('a', commutative=False)
+
+In [2]: t1 = tp(1,1)*tp(1,1)
+        t1
+Out[2]: 1x1**2
+
+In [3]: tps(t1)
+Out[3]: 1x1**2
+
+In [4]: t1.expand(tensorproduct=True)
+Out[4]: 1x1**2
+
+In [5]: tps(tp(1,1)*tp(1,a)).subs(a, 1)
+Out[5]: 1x1
+
+In [6]: t2 = tp(1,Pauli(3))*tp(1,Pauli(3))
+        t2
+Out[6]: 1xsigma3**2
+
+In [7]: tps(t2)
+Out[7]: 1xsigma3**2
+
+In [8]: t2.expand(tensorproduct=True)
+Out[8]: 1xsigma3**2
+
+In [9]: tps(tp(1,Pauli(3))*tp(1,a)).subs(a, Pauli(3))
+Out[9]: 1x1
+```
+where `[5]` and `[9]` shows expected result for `t1` and `t2` respectively.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sympy/physics/quantum/tensorproduct.py
+对象名称：TensorProduct
+节点类型：class
+父节点：tensorproduct
+行号范围：49-268
+代码：
+class TensorProduct(Expr):
+    """The tensor product of two or more arguments.
+
+    For matrices, this uses ``matrix_tensor_product`` to compute the Kronecker
+    or tensor product matrix. For other objects a symbolic ``TensorProduct``
+    instance is returned. The tensor product is a non-commutative
+    multiplication that is used primarily with operators and states in quantum
+    mechanics.
+
+    Currently, the tensor product distinguishes between commutative and non-
+    commutative arguments.  Commutative arguments are assumed to be scalars and
+    are pulled out in front of the ``TensorProduct``. Non-commutative arguments
+    remain in the resulting ``TensorProduct``.
+
+    Parameters
+    ==========
+
+    args : tuple
+        A sequence of the objects to take the tensor product of.
+
+    Examples
+    ========
+
+    Start with a simple tensor product of sympy matrices::
+
+        >>> from sympy import I, Matrix, symbols
+        >>> from sympy.physics.quantum import TensorProduct
+
+        >>> m1 = Matrix([[1,2],[3,4]])
+        >>> m2 = Matrix([[1,0],[0,1]])
+        >>> TensorProduct(m1, m2)
+        Matrix([
+        [1, 0, 2, 0],
+        [0, 1, 0, 2],
+        [3, 0, 4, 0],
+        [0, 3, 0, 4]])
+        >>> TensorProduct(m2, m1)
+        Matrix([
+        [1, 2, 0, 0],
+        [3, 4, 0, 0],
+        [0, 0, 1, 2],
+        [0, 0, 3, 4]])
+
+    We can also construct tensor products of non-commutative symbols:
+
+        >>> from sympy import Symbol
+        >>> A = Symbol('A',commutative=False)
+        >>> B = Symbol('B',commutative=False)
+        >>> tp = TensorProduct(A, B)
+        >>> tp
+        AxB
+
+    We can take the dagger of a tensor product (note the order does NOT reverse
+    like the dagger of a normal product):
+
+        >>> from sympy.physics.quantum import Dagger
+        >>> Dagger(tp)
+        Dagger(A)xDagger(B)
+
+    Expand can be used to distribute a tensor product across addition:
+
+        >>> C = Symbol('C',commutative=False)
+        >>> tp = TensorProduct(A+B,C)
+        >>> tp
+        (A + B)xC
+        >>> tp.expand(tensorproduct=True)
+        AxC + BxC
+    """
+    is_commutative = False
+    def __new__(cls, *args):
+    @classmethod
+    def flatten(cls, args):
+    def _eval_adjoint(self):
+    def _eval_rewrite(self, pattern, rule, **hints):
+    def _sympystr(self, printer, *args):
+    def _pretty(self, printer, *args):
+
+    def _latex(self, printer, *args):
+
+    def doit(self, **hints):
+    def _eval_expand_tensorproduct(self, **hints):
+    def _eval_trace(self, **kwargs):
+
+
+【源码片段 2】
+文件路径：sympy/parsing/sympy_parser.py
+对象名称：expand
+节点类型：class_function
+父节点：AppliedFunction
+行号范围：96-101
+代码：
+    def expand(self):
+        """Return a list of tokens representing the function"""
+        result = []
+        result.append(self.function)
+        result.extend(self.args)
+        return result
+
+
+【源码片段 3】
+文件路径：sympy/physics/quantum/tensorproduct.py
+对象名称：tensor_product_simp
+节点类型：top-level function
+父节点：tensorproduct
+行号范围：348-393
+代码：
+def tensor_product_simp(e, **hints):
+    """Try to simplify and combine TensorProducts.
+
+    In general this will try to pull expressions inside of ``TensorProducts``.
+    It currently only works for relatively simple cases where the products have
+    only scalars, raw ``TensorProducts``, not ``Add``, ``Pow``, ``Commutators``
+    of ``TensorProducts``. It is best to see what it does by showing examples.
+
+    Examples
+    ========
+
+    >>> from sympy.physics.quantum import tensor_product_simp
+    >>> from sympy.physics.quantum import TensorProduct
+    >>> from sympy import Symbol
+    >>> A = Symbol('A',commutative=False)
+    >>> B = Symbol('B',commutative=False)
+    >>> C = Symbol('C',commutative=False)
+    >>> D = Symbol('D',commutative=False)
+
+    First see what happens to products of tensor products:
+
+    >>> e = TensorProduct(A,B)*TensorProduct(C,D)
+    >>> e
+    AxB*CxD
+    >>> tensor_product_simp(e)
+    (A*C)x(B*D)
+
+    This is the core logic of this function, and it works inside, powers, sums,
+    commutators and anticommutators as well:
+
+    >>> tensor_product_simp(e**2)
+    (A*C)x(B*D)**2
+
+    """
+    if isinstance(e, Add):
+        return Add(*[tensor_product_simp(arg) for arg in e.args])
+    elif isinstance(e, Pow):
+        return tensor_product_simp(e.base) ** e.exp
+    elif isinstance(e, Mul):
+        return tensor_product_simp_Mul(e)
+    elif isinstance(e, Commutator):
+        return Commutator(*[tensor_product_simp(arg) for arg in e.args])
+    elif isinstance(e, AntiCommutator):
+        return AntiCommutator(*[tensor_product_simp(arg) for arg in e.args])
+    else:
+        return e
+
+
+【源码片段 4】
+文件路径：sympy/physics/paulialgebra.py
+对象名称：Pauli
+节点类型：class
+父节点：paulialgebra
+行号范围：66-134
+代码：
+class Pauli(Symbol):
+    """The class representing algebraic properties of Pauli matrices
+
+    If the left multiplication of symbol or number with Pauli matrix is needed,
+    please use parentheses  to separate Pauli and symbolic multiplication
+    (for example: 2*I*(Pauli(3)*Pauli(2)))
+
+    Another variant is to use evaluate_pauli_product function to evaluate
+    the product of Pauli matrices and other symbols (with commutative
+    multiply rules)
+
+    See Also
+    =======
+    evaluate_pauli_product
+
+    Examples
+    ========
+
+    >>> from sympy.physics.paulialgebra import Pauli
+    >>> Pauli(1)
+    sigma1
+    >>> Pauli(1)*Pauli(2)
+    I*sigma3
+    >>> Pauli(1)*Pauli(1)
+    1
+    >>> Pauli(3)**4
+    1
+    >>> Pauli(1)*Pauli(2)*Pauli(3)
+    I
+
+    >>> from sympy import I
+    >>> I*(Pauli(2)*Pauli(3))
+    -sigma1
+
+    >>> from sympy.physics.paulialgebra import evaluate_pauli_product
+    >>> f = I*Pauli(2)*Pauli(3)
+    >>> f
+    I*sigma2*sigma3
+    >>> evaluate_pauli_product(f)
+    -sigma1
+
+    """
+    __slots__ = ["i"]
+    def __new__(cls, i):
+    def __getnewargs__(self):
+    def __mul__(self, other):
+    def _eval_power(b, e):
+
+
+【源码片段 5】
+文件路径：sympy/assumptions/tests/test_query.py
+对象名称：Symbol
+节点类型：class_function
+父节点：MyAskHandler
+行号范围：2011-2012
+代码：
+        def Symbol(expr, assumptions):
+            return True
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：sympy/physics/quantum/tests/test_tensorproduct.py
+测试名称：test_tensor_product_simp
+测试代码：
+def test_tensor_product_simp():
+    assert tensor_product_simp(TP(A, B)*TP(B, C)) == TP(A*B, B*C)
+
+【相关测试 2】
+测试文件：sympy/physics/quantum/tests/test_tensorproduct.py
+测试名称：test_tensor_product_expand
+测试代码：
+def test_tensor_product_expand():
+    assert TP(A + B, B + C).expand(tensorproduct=True) == \
+        TP(A, B) + TP(A, C) + TP(B, B) + TP(B, C)
+
+【相关测试 3】
+测试文件：sympy/physics/tests/test_paulialgebra.py
+测试名称：test_evaluate_pauli_product
+测试代码：
+def test_evaluate_pauli_product():
+    from sympy.physics.paulialgebra import evaluate_pauli_product
+
+    assert evaluate_pauli_product(I*sigma2*sigma3) == -sigma1
+
+    # Check issue 6471
+    assert evaluate_pauli_product(-I*4*sigma1*sigma2) == 4*sigma3
+
+    assert evaluate_pauli_product(
+        1 + I*sigma1*sigma2*sigma1*sigma2 + \
+        I*sigma1*sigma2*tau1*sigma1*sigma3 + \
+        ((tau1**2).subs(tau1, I*sigma1)) + \
+        sigma3*((tau1**2).subs(tau1, I*sigma1)) + \
+        TensorProduct(I*sigma1*sigma2*sigma1*sigma2, 1)
+    ) == 1 -I + I*sigma3*tau1*sigma2 - 1 - sigma3 - I*TensorProduct(1,1)
+
+【相关测试 4】
+测试文件：sympy/tensor/tests/test_functions.py
+测试名称：test_TensorProduct_construction
+测试代码：
+def test_TensorProduct_construction():
+    assert TensorProduct(3, 4) == 12
+    assert isinstance(TensorProduct(A, A), TensorProduct)
+
+    expr = TensorProduct(TensorProduct(x, y), z)
+    assert expr == x*y*z
+
+    expr = TensorProduct(TensorProduct(A, B), C)
+    assert expr == TensorProduct(A, B, C)
+
+    expr = TensorProduct(Matrix.eye(2), [[0, -1], [1, 0]])
+    assert expr == Array([
+        [
+            [[0, -1], [1, 0]],
+            [[0, 0], [0, 0]]
+        ],
+        [
+            [[0, 0], [0, 0]],
+            [[0, -1], [1, 0]]
+        ]
+    ])
+
+【相关测试 5】
+测试文件：sympy/physics/quantum/tests/test_tensorproduct.py
+测试名称：test_tensor_product_abstract
+测试代码：
+def test_tensor_product_abstract():
+
+    assert TP(x*A, 2*B) == x*2*TP(A, B)
+    assert TP(A, B) != TP(B, A)
+    assert TP(A, B).is_commutative is False
+    assert isinstance(TP(A, B), TP)
+    assert TP(A, B).subs(A, C) == TP(C, B)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

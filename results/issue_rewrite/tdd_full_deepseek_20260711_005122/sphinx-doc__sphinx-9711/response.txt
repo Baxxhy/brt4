@@ -1,0 +1,110 @@
+{
+  "issue_summary": "needs_extensions 版本检查使用字符串比较导致版本号大于9时错误拒绝有效版本。",
+  "trigger_condition": {
+    "text": "配置中指定了扩展的最低版本（例如 '0.6.0'），但实际安装的扩展版本号包含大于9的数字（例如 '0.10.0'）。",
+    "evidence": ["Issue 描述：'needs_extensions' check is handy for verifying minimum extension versions, but it only checks versions in a 'string-like' manner. This means any version >9 is not allowed for any check of something >1.", "Issue 重现步骤：安装 sphinx-gallery==0.10 后运行 make -C doc html 触发错误。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "Sphinx 抛出 VersionRequirementError 异常，提示扩展版本不够新，尽管实际版本高于要求的最低版本。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 错误输出：'Sphinx version error: This project needs the extension sphinx_gallery.gen_gallery at least in version 0.6.0 and therefore cannot be built with the loaded version (0.10.0).'"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当实际扩展版本（如 0.10.0）高于或等于配置中指定的最低版本（如 0.6.0）时，版本检查应通过，允许构建。",
+    "evidence": ["Issue 预期行为：'sphinx-gallery 0.10.0 should be accepted if 0.6 is the minimum specified.'"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "needs_extensions",
+      "kind": "unknown",
+      "source_path": "",
+      "reason": "Issue 直接提及的配置项，用于检查扩展版本。"
+    },
+    {
+      "name": "is_allowed_version",
+      "kind": "function",
+      "source_path": "",
+      "reason": "相关测试 1 测试了版本检查逻辑，可能与 needs_extensions 内部使用的检查函数相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "",
+      "object": "needs_extensions 版本检查逻辑",
+      "lines": "",
+      "reason": "Issue 指出版本检查使用字符串比较，导致 '0.10.0' 在字符串比较中小于 '0.6.0'。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_is_allowed_version",
+      "test_file": "tests/test_ext_doctest.py",
+      "why_relevant": "直接测试了版本检查函数 is_allowed_version，该函数可能被用于实现 needs_extensions 的检查逻辑。",
+      "reusable_parts": ["assert 风格", "版本号字符串输入模式", "预期布尔结果"],
+      "possible_gap": "该测试用例未覆盖版本号包含两位数字（如 '0.10'）与一位数字（如 '0.6'）进行字符串比较的场景。"
+    },
+    {
+      "test_name": "test_needs_sphinx",
+      "test_file": "tests/test_config.py",
+      "why_relevant": "测试了类似的配置项 needs_sphinx 的版本检查行为，包括微版本、次版本和主版本的比较。",
+      "reusable_parts": ["confoverrides 配置模式", "make_app fixture", "VersionRequirementError 异常检查"],
+      "possible_gap": "测试的是 Sphinx 核心版本检查，而非扩展版本检查（needs_extensions）。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "测试用例中的版本号多为一位数字（如 '3.3', '3.4'）。",
+      "target_pattern": "使用包含两位数字的版本号（如 '0.10.0'）与一位数字的最低版本（如 '0.6.0'）进行比较。",
+      "reason": "Issue 表明当版本号大于9时，字符串比较会出错（'0.10' < '0.6'）。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "test_needs_sphinx 中通过 confoverrides 设置 needs_sphinx。",
+      "target_pattern": "通过 confoverrides 设置 needs_extensions 为包含扩展名和最低版本号的字典，例如 {'sphinx_gallery.gen_gallery': '0.6.0'}。",
+      "reason": "Issue 触发条件涉及 needs_extensions 配置项。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception",
+      "expression_hint": "VersionRequirementError 是否被引发。",
+      "reason": "Issue 中观察到的错误现象是抛出 VersionRequirementError 异常。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "内部版本比较函数（如 is_allowed_version）的返回值。",
+      "reason": "需要确认对于 '0.10.0' >= '0.6.0' 的比较，返回值是 True（正确）还是 False（缺陷）。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "当实际扩展版本（0.10.0）高于要求的最低版本（0.6.0）时，构建过程应正常进行，不抛出 VersionRequirementError。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言完整的异常消息字符串，因为消息可能因版本号变化。",
+      "reason": "Issue 的核心是异常被错误地抛出。修复后，在有效版本下不应抛出此异常。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "可能需要一个包含 needs_extensions 配置的 Sphinx 应用（app）fixture，类似于 test_needs_sphinx 中的 make_app_with_empty_project。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    },
+    {
+      "hint": "可能需要模拟或实际安装一个版本号包含两位数字的扩展（如 sphinx-gallery 0.10.0）。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "needs_extensions 配置项的确切格式和内部实现调用的具体函数。",
+    "is_allowed_version 函数是否确实被 needs_extensions 使用。",
+    "触发缺陷的确切代码路径和源码文件位置。"
+  ]
+}

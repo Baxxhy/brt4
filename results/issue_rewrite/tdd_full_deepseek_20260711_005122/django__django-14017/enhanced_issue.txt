@@ -1,0 +1,141 @@
+instance_id: django__django-14017
+
+issue_summary: Q 对象与 Exists 对象使用 & 运算符时顺序不满足交换律，Q() & Exists(...) 会抛出 TypeError，而 Exists(...) & Q() 正常。
+
+trigger_condition:
+{
+  "text": "使用 & 运算符连接一个 Q 对象和一个 Exists 对象，且 Q 对象在运算符左侧，Exists 对象在右侧。",
+  "evidence": [
+    "Issue 中示例：Q() & Exists(Product.objects.all())",
+    "Issue 描述：Q(...) & Exists(...) raises a TypeError"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "执行 Q() & Exists(...) 时抛出 TypeError，异常信息为 Exists 对象。",
+  "symptom_type": "exception",
+  "evidence": [
+    "Issue 中 Traceback 显示 TypeError: <django.db.models.expressions.Exists object at 0x7fc18dd21400>",
+    "源码 _combine 方法中 raise TypeError(other)"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "& 运算符在 Q 对象和 Exists 对象之间应满足交换律，即 Q() & Exists(...) 应与 Exists(...) & Q() 一样正常执行并返回组合后的对象。",
+  "evidence": [
+    "Issue 描述：The & (and |) operators should be commutative on Q-Exists pairs, but it's not",
+    "Issue 中示例显示 Exists(...) & Q() 正常返回 <Q: (AND: ...)>"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "Q.__and__",
+    "kind": "method",
+    "source_path": "django/db/models/query_utils.py",
+    "reason": "Issue 中错误发生在 Q 对象的 & 运算符处理中。"
+  },
+  {
+    "name": "Q._combine",
+    "kind": "method",
+    "source_path": "django/db/models/query_utils.py",
+    "reason": "__and__ 调用 _combine，_combine 中进行了类型检查并抛出 TypeError。"
+  },
+  {
+    "name": "Exists",
+    "kind": "class",
+    "source_path": "django/db/models/expressions.py",
+    "reason": "Issue 中涉及的另一个操作对象是 Exists。"
+  },
+  {
+    "name": "Combinable.__rand__",
+    "kind": "method",
+    "source_path": "django/db/models/expressions.py",
+    "reason": "Issue 推测可能缺少 __rand__ 定义，且检索出的源码显示 Combinable 有 __rand__ 但抛出 NotImplementedError。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "operator",
+    "current_pattern": "相似测试 test_combine_not_q_object 中使用普通 object 作为 other 参数。",
+    "target_pattern": "使用 Exists 对象（例如 Exists(Product.objects.all())）作为 other 参数。",
+    "reason": "Issue 表明当 other 是 Exists 对象时，Q.__and__ 会出错，而普通 object 也会出错，但 Exists 可能应有特殊处理。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "在 test_reversed_and 中，测试 object() & Combinable() 会触发 Combinable.__rand__。",
+    "target_pattern": "测试 Q() & Exists(...)，这可能会触发 Exists 的 __rand__（如果存在）或 Q 的 __and__。",
+    "reason": "Issue 表明 Q() & Exists(...) 的调用链可能未正确处理，需要考察反向运算符的调用。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "exception",
+    "expression_hint": "执行 Q() & Exists(...) 时是否抛出 TypeError 及其异常信息。",
+    "reason": "Issue 的核心错误现象是抛出 TypeError，观测此异常可直接判断缺陷是否触发。"
+  },
+  {
+    "kind": "type",
+    "expression_hint": "Exists(...) & Q() 和 Q() & Exists(...) 的返回结果类型。",
+    "reason": "Issue 表明前者返回 Q 对象，后者抛出异常，观测类型差异可验证行为是否一致。"
+  },
+  {
+    "kind": "repr",
+    "expression_hint": "Exists(...) & Q() 成功组合后的对象的 repr 表示。",
+    "reason": "Issue 中显示了成功组合后的 repr 片段，可作为正常行为的参考。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "验证 Q() & Exists(...) 不应抛出 TypeError，而应返回一个组合对象。",
+    "preferred_assertion_style": "not raises",
+    "avoid": "断言完整的 repr 字符串相等，因为内部对象地址可能变化。",
+    "reason": "Issue 的期望是运算符可交换，因此核心是左侧为 Q 时也能正常组合，不抛异常。"
+  },
+  {
+    "assertion_goal": "验证 Q() & Exists(...) 与 Exists(...) & Q() 返回的组合对象在逻辑上应等价。",
+    "preferred_assertion_style": "before_after_relation",
+    "avoid": "直接使用 == 比较两个对象，除非其 __eq__ 已定义并可靠。",
+    "reason": "交换律意味着两种顺序的结果应代表相同的逻辑组合。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要一个简单的 Django 模型（如 Product）来创建 QuerySet 供 Exists 使用。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能继承自 django.test.TestCase 或 SimpleTestCase，以支持数据库操作。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要设置并迁移测试数据库。",
+    "source": "inference",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "Exists 类或其父类是否应该定义 __rand__ 来支持反向 & 运算，或者 Q._combine 是否应该接受 Exists 对象。",
+  "修复后 Q() & Exists(...) 返回的具体对象结构（除了是 Q 实例外）是否与 Exists(...) & Q() 完全相同。",
+  "除了 & 运算符，| 运算符是否也存在同样的非交换性问题。"
+]

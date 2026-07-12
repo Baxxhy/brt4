@@ -1,0 +1,629 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+Render error when combining multiple input parameters in docstring
+**Describe the bug & Reproduce**
+
+My team is writing a function in Python, which contains 3 inputs that are similar, so we want to put them in the same line in the docstring. 
+
+As described in 4. Parameters in [numpydoc docstring guide](https://numpydoc.readthedocs.io/en/latest/format.html#sections), this is possible if you write something like this:
+
+```
+x1, x2 : array_like
+    Input arrays, description of `x1`, `x2`.
+```
+
+However, this produces:
+
+<img width="406" alt="图片" src="https://user-images.githubusercontent.com/20618587/83668496-566d3680-a5d0-11ea-8a15-5596f77b6c20.png">
+
+Even worse, when added "optional", the rendered HTML stays the same as the screenshot above, so there is no way to tell whether it is optional:
+
+```
+x1, x2 : array_like, optional
+    Input arrays, description of `x1`, `x2`.
+```
+
+**Expected behavior**
+Something like 
+
+- x1, x2 (_array_like, optional_)  -  Input arrays, description of x1, x2.
+
+**Environment info**
+- OS: macOS 10.15.5 (19F101)
+- Python version: 3.7.7
+- Sphinx version: 3.0.3.
+- Extra tools: browser: Firefox 79.0a1 or Safari 13.1.1
+- Sphinx extensions:  
+
+```
+extensions = [
+    "sphinx.ext.autodoc",
+    "sphinx.ext.todo",
+    "sphinx.ext.coverage",
+    "sphinx.ext.extlinks",
+    "sphinx.ext.intersphinx",
+    "sphinx.ext.mathjax",
+    "sphinx.ext.viewcode",
+    "sphinx.ext.napoleon",
+    "nbsphinx",
+    "sphinx.ext.mathjax",
+    "sphinxcontrib.bibtex",
+    "sphinx.ext.doctest",
+]
+```
+
+
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：sphinx/util/inspect.py
+对象名称：parameters
+节点类型：class_function
+父节点：Signature
+行号范围：717-721
+代码：
+    def parameters(self) -> Mapping:
+        if self.partialmethod_with_noargs:
+            return {}
+        else:
+            return self.signature.parameters
+
+
+【源码片段 2】
+文件路径：sphinx/ext/napoleon/docstring.py
+对象名称：docstring
+节点类型：file
+父节点：repo_root
+行号范围：-1--1
+代码：
+file_content
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/test_ext_napoleon_docstring.py
+测试名称：NumpyDocstringTest.test_parameter_types
+测试代码：
+class NumpyDocstringTest(BaseDocstringTest):
+    def test_parameter_types(self):
+        docstring = dedent("""\
+            Parameters
+            ----------
+            param1 : DataFrame
+                the data to work on
+            param2 : int or float or None, optional
+                a parameter with different types
+            param3 : dict-like, optional
+                a optional mapping
+            param4 : int or float or None, optional
+                a optional parameter with different types
+            param5 : {"F", "C", "N"}, optional
+                a optional parameter with fixed values
+            param6 : int, default None
+                different default format
+            param7 : mapping of hashable to str, optional
+                a optional mapping
+            param8 : ... or Ellipsis
+                ellipsis
+        """)
+        expected = dedent("""\
+            :param param1: the data to work on
+            :type param1: :class:`DataFrame`
+            :param param2: a parameter with different types
+            :type param2: :class:`int` or :class:`float` or :obj:`None`, *optional*
+            :param param3: a optional mapping
+            :type param3: :term:`dict-like <mapping>`, *optional*
+            :param param4: a optional parameter with different types
+            :type param4: :class:`int` or :class:`float` or :obj:`None`, *optional*
+            :param param5: a optional parameter with fixed values
+            :type param5: ``{"F", "C", "N"}``, *optional*
+            :param param6: different default format
+            :type param6: :class:`int`, *default* :obj:`None`
+            :param param7: a optional mapping
+            :type param7: :term:`mapping` of :term:`hashable` to :class:`str`, *optional*
+            :param param8: ellipsis
+            :type param8: :obj:`... <Ellipsis>` or :obj:`Ellipsis`
+        """)
+        translations = {
+            "dict-like": ":term:`dict-like <mapping>`",
+            "mapping": ":term:`mapping`",
+            "hashable": ":term:`hashable`",
+        }
+        config = Config(
+            napoleon_use_param=True,
+            napoleon_use_rtype=True,
+            napoleon_type_aliases=translations,
+        )
+        actual = str(NumpyDocstring(docstring, config))
+        self.assertEqual(expected, actual)
+
+【相关测试 2】
+测试文件：tests/test_ext_napoleon_docstring.py
+测试名称：NumpyDocstringTest.test_parameters_without_class_reference
+测试代码：
+class NumpyDocstringTest(BaseDocstringTest):
+    def test_parameters_without_class_reference(self):
+        docstring = """\
+Parameters
+----------
+param1 : MyClass instance
+
+"""
+
+        config = Config(napoleon_use_param=False)
+        actual = str(NumpyDocstring(docstring, config))
+        expected = """\
+:Parameters: **param1** (:class:`MyClass instance`)
+"""
+        self.assertEqual(expected, actual)
+
+        config = Config(napoleon_use_param=True)
+        actual = str(NumpyDocstring(dedent(docstring), config))
+        expected = """\
+:param param1:
+:type param1: :class:`MyClass instance`
+"""
+        self.assertEqual(expected, actual)
+
+【相关测试 3】
+测试文件：tests/test_ext_napoleon_docstring.py
+测试名称：NumpyDocstringTest.test_list_in_parameter_description
+测试代码：
+class NumpyDocstringTest(BaseDocstringTest):
+    def test_list_in_parameter_description(self):
+        docstring = """One line summary.
+
+Parameters
+----------
+no_list : int
+one_bullet_empty : int
+    *
+one_bullet_single_line : int
+    - first line
+one_bullet_two_lines : int
+    +   first line
+        continued
+two_bullets_single_line : int
+    -  first line
+    -  second line
+two_bullets_two_lines : int
+    * first line
+      continued
+    * second line
+      continued
+one_enumeration_single_line : int
+    1.  first line
+one_enumeration_two_lines : int
+    1)   first line
+         continued
+two_enumerations_one_line : int
+    (iii) first line
+    (iv) second line
+two_enumerations_two_lines : int
+    a. first line
+       continued
+    b. second line
+       continued
+one_definition_one_line : int
+    item 1
+        first line
+one_definition_two_lines : int
+    item 1
+        first line
+        continued
+two_definitions_one_line : int
+    item 1
+        first line
+    item 2
+        second line
+two_definitions_two_lines : int
+    item 1
+        first line
+        continued
+    item 2
+        second line
+        continued
+one_definition_blank_line : int
+    item 1
+
+        first line
+
+        extra first line
+
+two_definitions_blank_lines : int
+    item 1
+
+        first line
+
+        extra first line
+
+    item 2
+
+        second line
+
+        extra second line
+
+definition_after_normal_text : int
+    text line
+
+    item 1
+        first line
+"""
+
+        expected = """One line summary.
+
+:param no_list:
+:type no_list: :class:`int`
+:param one_bullet_empty:
+                         *
+:type one_bullet_empty: :class:`int`
+:param one_bullet_single_line:
+                               - first line
+:type one_bullet_single_line: :class:`int`
+:param one_bullet_two_lines:
+                             +   first line
+                                 continued
+:type one_bullet_two_lines: :class:`int`
+:param two_bullets_single_line:
+                                -  first line
+                                -  second line
+:type two_bullets_single_line: :class:`int`
+:param two_bullets_two_lines:
+                              * first line
+                                continued
+                              * second line
+                                continued
+:type two_bullets_two_lines: :class:`int`
+:param one_enumeration_single_line:
+                                    1.  first line
+:type one_enumeration_single_line: :class:`int`
+:param one_enumeration_two_lines:
+                                  1)   first line
+                                       continued
+:type one_enumeration_two_lines: :class:`int`
+:param two_enumerations_one_line:
+                                  (iii) first line
+                                  (iv) second line
+:type two_enumerations_one_line: :class:`int`
+:param two_enumerations_two_lines:
+                                   a. first line
+                                      continued
+                                   b. second line
+                                      continued
+:type two_enumerations_two_lines: :class:`int`
+:param one_definition_one_line:
+                                item 1
+                                    first line
+:type one_definition_one_line: :class:`int`
+:param one_definition_two_lines:
+                                 item 1
+                                     first line
+                                     continued
+:type one_definition_two_lines: :class:`int`
+:param two_definitions_one_line:
+                                 item 1
+                                     first line
+                                 item 2
+                                     second line
+:type two_definitions_one_line: :class:`int`
+:param two_definitions_two_lines:
+                                  item 1
+                                      first line
+                                      continued
+                                  item 2
+                                      second line
+                                      continued
+:type two_definitions_two_lines: :class:`int`
+:param one_definition_blank_line:
+                                  item 1
+
+                                      first line
+
+                                      extra first line
+:type one_definition_blank_line: :class:`int`
+:param two_definitions_blank_lines:
+                                    item 1
+
+                                        first line
+
+                                        extra first line
+
+                                    item 2
+
+                                        second line
+
+                                        extra second line
+:type two_definitions_blank_lines: :class:`int`
+:param definition_after_normal_text: text line
+
+                                     item 1
+                                         first line
+:type definition_after_normal_text: :class:`int`
+"""
+        config = Config(napoleon_use_param=True)
+        actual = str(NumpyDocstring(docstring, config))
+        self.assertEqual(expected, actual)
+
+        expected = """One line summary.
+
+:Parameters: * **no_list** (:class:`int`)
+             * **one_bullet_empty** (:class:`int`) --
+
+               *
+             * **one_bullet_single_line** (:class:`int`) --
+
+               - first line
+             * **one_bullet_two_lines** (:class:`int`) --
+
+               +   first line
+                   continued
+             * **two_bullets_single_line** (:class:`int`) --
+
+               -  first line
+               -  second line
+             * **two_bullets_two_lines** (:class:`int`) --
+
+               * first line
+                 continued
+               * second line
+                 continued
+             * **one_enumeration_single_line** (:class:`int`) --
+
+               1.  first line
+             * **one_enumeration_two_lines** (:class:`int`) --
+
+               1)   first line
+                    continued
+             * **two_enumerations_one_line** (:class:`int`) --
+
+               (iii) first line
+               (iv) second line
+             * **two_enumerations_two_lines** (:class:`int`) --
+
+               a. first line
+                  continued
+               b. second line
+                  continued
+             * **one_definition_one_line** (:class:`int`) --
+
+               item 1
+                   first line
+             * **one_definition_two_lines** (:class:`int`) --
+
+               item 1
+                   first line
+                   continued
+             * **two_definitions_one_line** (:class:`int`) --
+
+               item 1
+                   first line
+               item 2
+                   second line
+             * **two_definitions_two_lines** (:class:`int`) --
+
+               item 1
+                   first line
+                   continued
+               item 2
+                   second line
+                   continued
+             * **one_definition_blank_line** (:class:`int`) --
+
+               item 1
+
+                   first line
+
+                   extra first line
+             * **two_definitions_blank_lines** (:class:`int`) --
+
+               item 1
+
+                   first line
+
+                   extra first line
+
+               item 2
+
+                   second line
+
+                   extra second line
+             * **definition_after_normal_text** (:class:`int`) -- text line
+
+               item 1
+                   first line
+"""
+        config = Config(napoleon_use_param=False)
+        actual = str(NumpyDocstring(docstring, config))
+        self.assertEqual(expected, actual)
+
+【相关测试 4】
+测试文件：tests/test_ext_napoleon_docstring.py
+测试名称：NumpyDocstringTest.test_tokenize_type_spec
+测试代码：
+class NumpyDocstringTest(BaseDocstringTest):
+    def test_tokenize_type_spec(self):
+        specs = (
+            "str",
+            "defaultdict",
+            "int, float, or complex",
+            "int or float or None, optional",
+            '{"F", "C", "N"}',
+            "{'F', 'C', 'N'}, default: 'F'",
+            "{'F', 'C', 'N or C'}, default 'F'",
+            "str, default: 'F or C'",
+            "int, default: None",
+            "int, default None",
+            "int, default :obj:`None`",
+            '"ma{icious"',
+            r"'with \'quotes\''",
+        )
+
+        tokens = (
+            ["str"],
+            ["defaultdict"],
+            ["int", ", ", "float", ", or ", "complex"],
+            ["int", " or ", "float", " or ", "None", ", ", "optional"],
+            ["{", '"F"', ", ", '"C"', ", ", '"N"', "}"],
+            ["{", "'F'", ", ", "'C'", ", ", "'N'", "}", ", ", "default", ": ", "'F'"],
+            ["{", "'F'", ", ", "'C'", ", ", "'N or C'", "}", ", ", "default", " ", "'F'"],
+            ["str", ", ", "default", ": ", "'F or C'"],
+            ["int", ", ", "default", ": ", "None"],
+            ["int", ", " , "default", " ", "None"],
+            ["int", ", ", "default", " ", ":obj:`None`"],
+            ['"ma{icious"'],
+            [r"'with \'quotes\''"],
+        )
+
+        for spec, expected in zip(specs, tokens):
+            actual = _tokenize_type_spec(spec)
+            self.assertEqual(expected, actual)
+
+【相关测试 5】
+测试文件：tests/test_ext_napoleon_docstring.py
+测试名称：NumpyDocstringTest.test_parameters_with_class_reference
+测试代码：
+class NumpyDocstringTest(BaseDocstringTest):
+    def test_parameters_with_class_reference(self):
+        docstring = """\
+Parameters
+----------
+param1 : :class:`MyClass <name.space.MyClass>` instance
+
+"""
+
+        config = Config(napoleon_use_param=False)
+        actual = str(NumpyDocstring(docstring, config))
+        expected = """\
+:Parameters: **param1** (:class:`MyClass <name.space.MyClass>` instance)
+"""
+        self.assertEqual(expected, actual)
+
+        config = Config(napoleon_use_param=True)
+        actual = str(NumpyDocstring(docstring, config))
+        expected = """\
+:param param1:
+:type param1: :class:`MyClass <name.space.MyClass>` instance
+"""
+        self.assertEqual(expected, actual)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

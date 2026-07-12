@@ -1,0 +1,150 @@
+instance_id: scikit-learn__scikit-learn-11578
+
+issue_summary: LogisticRegressionCV 在使用 multi_class='multinomial' 和概率评分器（如 neg_log_loss）时，内部评分函数使用了错误的 OvR 概率计算方法，而非指定的 multinomial 方法。
+
+trigger_condition:
+{
+  "text": "调用 LogisticRegressionCV 时设置 multi_class='multinomial'，并使用依赖于 predict_proba 的概率评分器（如 'neg_log_loss'）进行交叉验证评分。",
+  "evidence": [
+    "Issue 描述指出问题出现在使用 `multi_class='multinomial'` 和 `neg_log_loss` 等评分器时。",
+    "Issue 中的最小复现示例明确使用了 `multi_class='multinomial'` 和 `scorer = 'neg_log_loss'`。",
+    "源码片段 4 显示 `_log_reg_scoring_path` 函数接收 `multi_class` 参数，并在内部创建 LogisticRegression 对象用于评分。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "LogisticRegressionCV 返回的交叉验证分数（例如 neg_log_loss）是基于 OvR 方法计算的概率，而不是基于指定的 multinomial (softmax) 方法计算的概率，导致分数不准确。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 中通过计算和比较证明，`_log_reg_scoring_path` 返回的分数与 OvR 方法计算的分数一致，与 multinomial 方法计算的分数不同。",
+    "Issue 中的代码输出显示 `score returned by _log_reg_scoring_path` 与 `score calculated via OvR method` 一致，而与 `score calculated via multinomial method` 不同。"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "当 LogisticRegressionCV 的 multi_class 参数设置为 'multinomial' 时，其内部用于评分的 LogisticRegression 实例也应使用相同的 multi_class 设置，以确保概率计算和评分与指定的 multinomial 方法一致。",
+  "evidence": [
+    "Issue 描述中建议的修复是将 `multi_class` 参数传递给内部创建的 LogisticRegression 对象。",
+    "源码片段 4 中 `_log_reg_scoring_path` 函数的参数签名包含 `multi_class`，表明其意图是支持该选项。",
+    "源码片段 3 显示 LogisticRegression 的 `predict_proba` 方法会根据 `self.multi_class` 的值选择 OvR 或 multinomial (softmax) 计算方式。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "LogisticRegressionCV",
+    "kind": "class",
+    "source_path": "sklearn/linear_model/logistic.py",
+    "reason": "Issue 报告的核心缺陷类，其交叉验证评分逻辑存在问题。"
+  },
+  {
+    "name": "_log_reg_scoring_path",
+    "kind": "function",
+    "source_path": "sklearn/linear_model/logistic.py",
+    "reason": "该函数是 LogisticRegressionCV 内部用于计算评分路径的核心函数，其中创建了有缺陷的 LogisticRegression 实例。"
+  },
+  {
+    "name": "LogisticRegression",
+    "kind": "class",
+    "source_path": "sklearn/linear_model/logistic.py",
+    "reason": "其 `predict_proba` 方法的行为取决于 `multi_class` 参数，是缺陷表现的关键。"
+  },
+  {
+    "name": "softmax",
+    "kind": "function",
+    "source_path": "sklearn/neural_network/_base.py",
+    "reason": "用于 multinomial 模式下的概率计算，是预期行为的核心。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "config",
+    "current_pattern": "相关测试中，LogisticRegressionCV 通常使用默认评分器（如 'accuracy'）或不指定评分器。",
+    "target_pattern": "将 LogisticRegressionCV 的 `scoring` 参数设置为依赖于 `predict_proba` 的概率评分器，如 'neg_log_loss'。",
+    "reason": "缺陷仅在评分器调用模型的 `predict_proba` 方法时显现，而 'accuracy' 评分器调用的是 `predict`。",
+    "confidence": "high"
+  },
+  {
+    "slot": "argument",
+    "current_pattern": "相关测试中，LogisticRegressionCV 可能使用默认的 `multi_class='ovr'` 或不指定。",
+    "target_pattern": "显式设置 LogisticRegressionCV 的 `multi_class` 参数为 'multinomial'。",
+    "reason": "缺陷仅在 `multi_class='multinomial'` 时发生，因为内部创建的 LogisticRegression 对象错误地使用了默认的 'ovr'。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "相似测试通常直接调用 `fit` 和 `score` 或检查 `coef_` 等属性。",
+    "target_pattern": "在测试中，需要触发交叉验证的内部评分循环，这可能通过调用 `fit` 并检查 `scores_` 属性，或直接调用 `cross_val_score` 与 LogisticRegressionCV 模型来实现。",
+    "reason": "缺陷发生在交叉验证过程中，内部函数 `_log_reg_scoring_path` 被调用以计算每个 fold 和 Cs 的分数。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "LogisticRegressionCV.fit() 后 `scores_` 属性中的分数值，或 `cross_val_score` 的返回值。",
+    "reason": "缺陷导致这些分数是基于错误的概率计算方法得出的，与预期值不符。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "内部 LogisticRegression 对象（在 `_log_reg_scoring_path` 中创建）的 `predict_proba` 方法的输出。",
+    "reason": "可以直接观察其输出的概率是 OvR 格式还是 multinomial (softmax) 格式，这是缺陷的直接表现。"
+  },
+  {
+    "kind": "config",
+    "expression_hint": "内部 LogisticRegression 对象（在 `_log_reg_scoring_path` 中创建）的 `multi_class` 属性值。",
+    "reason": "缺陷根源在于该对象错误地使用了默认的 'ovr' 设置，而非传入的 'multinomial'。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "当使用 `multi_class='multinomial'` 和概率评分器时，LogisticRegressionCV 计算出的分数应与基于 multinomial (softmax) 概率计算出的预期分数一致（或非常接近），而不是与基于 OvR 概率计算出的分数一致。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言完整的分数数组完全相等，因为交叉验证的随机性可能导致微小差异。应使用近似相等断言（如 `assert_array_almost_equal`）并设置合理的精度。",
+    "reason": "Issue 通过计算证明了两种方法会产生不同的分数值。修复后，实际分数应趋近于 multinomial 方法计算出的分数。"
+  },
+  {
+    "assertion_goal": "在 `_log_reg_scoring_path` 函数内部创建的用于评分的 LogisticRegression 实例，其 `multi_class` 参数值应与传入函数的 `multi_class` 参数值相同。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言不相关的属性或完整的对象表示。",
+    "reason": "这是 Issue 指出的根本原因，修复后应确保参数传递正确。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要生成一个多类分类数据集（n_classes > 2），因为 multinomial 与 OvR 在二分类时可能等价。",
+    "source": "issue",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要使用 `np.random.RandomState` 或设置全局随机种子以确保测试的可重复性。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "测试可能涉及直接调用 `_log_reg_scoring_path` 函数以进行更细粒度的观察，但这需要从模块内部导入。",
+    "source": "issue",
+    "confidence": "medium"
+  }
+]
+
+uncertainties:
+[
+  "除了 `multi_class` 参数，`_log_reg_scoring_path` 中创建 LogisticRegression 对象时是否还有其他参数（如 `solver`）也需要正确传递以避免其他潜在问题？Issue 的 PR 描述提到了“other similar parameters”。",
+  "缺陷是否会影响 LogisticRegressionCV 的所有评分器，还是仅影响那些调用 `predict_proba` 的评分器（如 'neg_log_loss', 'roc_auc_ovr' 等）？",
+  "在修复后，对于 `multi_class='ovr'` 的情况，行为是否应保持不变？这需要确认以确保修复的针对性。"
+]

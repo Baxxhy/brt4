@@ -1,0 +1,109 @@
+{
+  "issue_summary": "itermonomials 函数在使用 min_degrees 参数时返回了错误的单项式集合，遗漏了总次数等于 min_degrees 但非纯幂次的单项式。",
+  "trigger_condition": {
+    "text": "调用 itermonomials(variables, max_degrees, min_degrees=min_degrees)，其中 max_degrees 和 min_degrees 都是整数且相等（例如都为 3），且变量列表长度大于 1。",
+    "evidence": ["Issue 中的示例代码：`itermonomials(states, max_degrees, min_degrees=min_degrees)`，其中 `max_degrees = 3`，`min_degrees = 3`，`states = [x1, x2, x3]`。", "源码片段 1 中 `total_degree` 分支处理整数 `max_degree` 和 `min_degree` 的逻辑。"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "返回的单项式列表不完整，只包含了每个变量的纯幂次项（如 x1**3, x2**3, x3**3），而遗漏了总次数为 3 的混合项（如 x1*x2**2, x2*x3**2 等）。",
+    "symptom_type": "wrong_return",
+    "evidence": ["Issue 描述：代码返回 `[x3**3, x2**3, x1**3]`，但应该也返回 `x1*x2**2, x2*x3**2, etc...`。", "Issue 引用文档说明：`min_degree <= total_degree(monom) <= max_degree`。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "itermonomials 应返回所有满足 `min_degree <= total_degree(monom) <= max_degree` 的单项式，包括总次数等于 min_degree 的所有组合（纯幂次和混合项）。",
+    "evidence": ["Issue 引用的文档字符串：`A generator of all monomials monom is returned, such that either min_degree <= total_degree(monom) <= max_degree...`。", "相关测试 1 中 `assert set(itermonomials([x, y], 2, 1)) == {x, y, x**2, x*y, y**2}` 展示了当 min_degree=1 时包含了混合项 x*y。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "sympy.polys.monomials.itermonomials",
+      "kind": "function",
+      "source_path": "sympy/polys/monomials.py",
+      "reason": "这是 Issue 直接报告有缺陷的函数。"
+    },
+    {
+      "name": "sympy.polys.orderings.monomial_key",
+      "kind": "function",
+      "source_path": "sympy/polys/orderings.py",
+      "reason": "Issue 示例中用于对返回的单项式进行排序。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "sympy/polys/monomials.py",
+      "object": "itermonomials",
+      "lines": "15-152",
+      "reason": "Issue 明确指出该函数在 min_degrees 参数下行为不正确。源码中 `total_degree` 分支（当 max_degrees 和 min_degrees 为整数时）的逻辑可能是缺陷所在，特别是过滤条件 `if max(powers.values()) >= min_degree:` 可能错误地使用了 `max` 而不是检查总次数。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_monomials",
+      "test_file": "sympy/polys/tests/test_monomials.py",
+      "why_relevant": "这是针对 itermonomials 函数的专门测试，包含了大量使用整数和列表形式的 max_degrees/min_degrees 参数的测试用例，可以作为生成新测试的模板。",
+      "reusable_parts": ["导入模式：`from sympy.polys.monomials import itermonomials`。", "使用 `set()` 收集生成器结果并进行断言比较的测试风格。", "使用 `symbols` 创建变量。", "测试了整数和列表形式的 min_degrees/max_degrees。"],
+      "possible_gap": "现有测试似乎没有专门针对 `max_degrees == min_degrees` 且变量数 > 1 的情况来验证是否返回了所有总次数等于该值的混合项。现有测试如 `itermonomials([x, y], 2, 1)` 验证了 min_degree=1 的情况，但 max_degree 不同。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "相似测试中常见的模式是 `itermonomials(vars, max_deg)` 或 `itermonomials(vars, max_deg, min_deg)`，其中 min_deg 通常小于 max_deg 或为 0。",
+      "target_pattern": "将 `min_degrees` 参数设置为与 `max_degrees` 相等的整数，且变量列表包含多个变量。",
+      "reason": "Issue 表明当 `max_degrees == min_degrees` 时，函数错误地过滤掉了混合项。现有测试可能未覆盖此边界情况。",
+      "confidence": "high"
+    },
+    {
+      "slot": "input",
+      "current_pattern": "相似测试中变量列表通常为 [x, y] 或 [x, y, z]。",
+      "target_pattern": "使用三个或更多变量，如 Issue 中的 [x1, x2, x3]。",
+      "reason": "更多变量能产生更多混合项，更容易暴露遗漏问题。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "`set(itermonomials(variables, max_degrees, min_degrees=min_degrees))` 的结果集合。",
+      "reason": "直接观察函数返回的单项式集合是否完整，是否包含了所有总次数在 [min_degree, max_degree] 范围内的单项式，特别是总次数恰好等于 min_degree 的混合项。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "单项式的 `total_degree()` 或通过 `expr.as_poly(*variables).total_degree()` 计算其总次数。",
+      "reason": "验证每个返回的单项式的总次数是否确实满足 `min_degree <= total_degree <= max_degree`，并检查是否有满足条件的单项式缺失。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "断言返回的单项式集合包含所有总次数等于 min_degree（也等于 max_degree）的单项式，包括混合项。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言返回列表的精确顺序，因为顺序可能依赖排序键。应使用集合比较。避免断言单项式的字符串表示完全匹配特定格式，应比较数学等价性。",
+      "reason": "Issue 的核心是集合的完整性，而非顺序。使用集合相等断言可以稳定地验证是否包含了所有预期的单项式。"
+    },
+    {
+      "assertion_goal": "断言返回集合中每个单项式的总次数都在 [min_degree, max_degree] 范围内。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免对集合大小进行硬编码断言，因为正确的数量可能随变量数和次数变化。",
+      "reason": "这是一个更弱的、但稳定的完整性检查，确保没有违规项被包含，尽管可能仍有缺失。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要从 sympy 导入 symbols、itermonomials，可能还需要 monomial_key 用于排序演示。",
+      "source": "issue|retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可以放在现有的 test_monomials.py 文件中，遵循其现有的测试函数结构和断言风格。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "缺陷的确切代码位置和逻辑错误：是 `max(powers.values()) >= min_degree` 这个条件错误，还是生成 `item` 的组合/乘积逻辑有问题？",
+    "当变量包含非交换变量时，该缺陷是否以同样方式表现？Issue 示例使用的是交换变量。",
+    "当 max_degrees > min_degrees 时，Issue 说“monomials are also missing”，但具体缺失哪些项不确定。"
+  ]
+}

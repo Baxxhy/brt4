@@ -1,0 +1,333 @@
+你是一个软件测试和缺陷复现测试生成专家。你的任务是阅读一个 GitHub Issue、iCoRe 检索出的相关源代码片段、iCoRe 检索出的相关测试代码片段，并将它们转换成结构化的缺陷行为目标。
+
+你的输出会被后续模块用于：
+1. 选择相似测试作为起点；
+2. 根据 Issue 对相似测试做小变异；
+3. 插入运行时观测点；
+4. 生成稳定的 assert 断言。
+
+你必须遵守：
+1. 不要编造 Issue、源码或测试中没有依据的信息；
+2. 要区分 Issue 明确说明的事实和根据代码/测试上下文推断出的内容；
+3. 输出必须是单个合法 JSON 对象；
+4. 不要输出 markdown；
+5. 不要输出解释性文字；
+6. 不要生成测试代码；
+7. 不要使用 patched version、golden patch 或 golden test 的信息。
+
+请分析下面这个缺陷复现任务。
+
+你的目标不是润色 Issue，而是将原始 Issue 与 iCoRe 检索出的相关源码、相关测试对齐，提取后续生成 Bug Reproduction Test 所需的信息。
+
+====================
+【原始 Issue】
+The value of a TextChoices/IntegerChoices field has a differing type
+Description
+	
+If we create an instance of a model having a CharField or IntegerField with the keyword choices pointing to IntegerChoices or TextChoices, the value returned by the getter of the field will be of the same type as the one created by enum.Enum (enum value).
+For example, this model:
+from django.db import models
+from django.utils.translation import gettext_lazy as _
+class MyChoice(models.TextChoices):
+	FIRST_CHOICE = "first", _("The first choice, it is")
+	SECOND_CHOICE = "second", _("The second choice, it is")
+class MyObject(models.Model):
+	my_str_value = models.CharField(max_length=10, choices=MyChoice.choices)
+Then this test:
+from django.test import TestCase
+from testing.pkg.models import MyObject, MyChoice
+class EnumTest(TestCase):
+	def setUp(self) -> None:
+		self.my_object = MyObject.objects.create(my_str_value=MyChoice.FIRST_CHOICE)
+	def test_created_object_is_str(self):
+		my_object = self.my_object
+		self.assertIsInstance(my_object.my_str_value, str)
+		self.assertEqual(str(my_object.my_str_value), "first")
+	def test_retrieved_object_is_str(self):
+		my_object = MyObject.objects.last()
+		self.assertIsInstance(my_object.my_str_value, str)
+		self.assertEqual(str(my_object.my_str_value), "first")
+And then the results:
+(django30-venv) ➜ django30 ./manage.py test
+Creating test database for alias 'default'...
+System check identified no issues (0 silenced).
+F.
+======================================================================
+FAIL: test_created_object_is_str (testing.tests.EnumTest)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+ File "/Users/mikailkocak/Development/django30/testing/tests.py", line 14, in test_created_object_is_str
+	self.assertEqual(str(my_object.my_str_value), "first")
+AssertionError: 'MyChoice.FIRST_CHOICE' != 'first'
+- MyChoice.FIRST_CHOICE
++ first
+----------------------------------------------------------------------
+Ran 2 tests in 0.002s
+FAILED (failures=1)
+We notice when invoking __str__(...) we don't actually get the value property of the enum value which can lead to some unexpected issues, especially when communicating to an external API with a freshly created instance that will send MyEnum.MyValue, and the one that was retrieved would send my_value.
+
+
+====================
+【iCoRe 检索出的相关源代码】
+【源码片段 1】
+文件路径：django/db/models/enums.py
+对象名称：TextChoices
+节点类型：class
+父节点：enums
+行号范围：71-75
+代码：
+class TextChoices(str, Choices):
+    """Class for creating enumerated string choices."""
+    def _generate_next_value_(name, start, count, last_values):
+
+
+【源码片段 2】
+文件路径：django/db/models/enums.py
+对象名称：IntegerChoices
+节点类型：class
+父节点：enums
+行号范围：66-68
+代码：
+class IntegerChoices(int, Choices):
+    """Class for creating enumerated integer choices."""
+
+
+【源码片段 3】
+文件路径：django/db/models/fields/__init__.py
+对象名称：CharField
+节点类型：class
+父节点：__init__
+行号范围：968-1028
+代码：
+class CharField(Field):
+    description = _("String (up to %(max_length)s)")
+    def __init__(self, *args, **kwargs):
+    def check(self, **kwargs):
+    def _check_max_length_attribute(self, **kwargs):
+    def cast_db_type(self, connection):
+    def get_internal_type(self):
+    def to_python(self, value):
+    def get_prep_value(self, value):
+    def formfield(self, **kwargs):
+
+
+【源码片段 4】
+文件路径：django/db/models/fields/__init__.py
+对象名称：IntegerField
+节点类型：class
+父节点：__init__
+行号范围：1701-1785
+代码：
+class IntegerField(Field):
+    empty_strings_allowed = False
+    default_error_messages = {
+        'invalid': _('“%(value)s” value must be an integer.'),
+    }
+    description = _("Integer")
+    def check(self, **kwargs):
+    def _check_max_length_warning(self):
+    @cached_property
+    def validators(self):
+    def get_prep_value(self, value):
+    def get_internal_type(self):
+    def to_python(self, value):
+    def formfield(self, **kwargs):
+
+
+【源码片段 5】
+文件路径：django/db/models/enums.py
+对象名称：choices
+节点类型：class_function
+父节点：ChoicesMeta
+行号范围：48-50
+代码：
+    def choices(cls):
+        empty = [(None, cls.__empty__)] if hasattr(cls, '__empty__') else []
+        return empty + [(member.value, member.label) for member in cls]
+
+
+【源码片段 6】
+文件路径：django/contrib/admin/filters.py
+对象名称：create
+节点类型：class_function
+父节点：FieldListFilter
+行号范围：156-159
+代码：
+    def create(cls, field, request, params, model, model_admin, field_path):
+        for test, list_filter_class in cls._field_list_filters:
+            if test(field):
+                return list_filter_class(field, request, params, model, model_admin, field_path=field_path)
+
+
+
+====================
+【iCoRe 检索出的相关测试代码】
+【相关测试 1】
+测试文件：tests/model_fields/test_charfield.py
+测试名称：TestCharField.test_assignment_from_choice_enum
+测试代码：
+class TestCharField(TestCase):
+    def test_assignment_from_choice_enum(self):
+        class Event(models.TextChoices):
+            C = 'Carnival!'
+            F = 'Festival!'
+
+        p1 = Post.objects.create(title=Event.C, body=Event.F)
+        p1.refresh_from_db()
+        self.assertEqual(p1.title, 'Carnival!')
+        self.assertEqual(p1.body, 'Festival!')
+        self.assertEqual(p1.title, Event.C)
+        self.assertEqual(p1.body, Event.F)
+        p2 = Post.objects.get(title='Carnival!')
+        self.assertEqual(p1, p2)
+        self.assertEqual(p2.title, Event.C)
+
+【相关测试 2】
+测试文件：tests/model_fields/test_charfield.py
+测试名称：ValidationTests.test_enum_choices_cleans_valid_string
+测试代码：
+class ValidationTests(SimpleTestCase):
+    def test_enum_choices_cleans_valid_string(self):
+        f = models.CharField(choices=self.Choices.choices, max_length=1)
+        self.assertEqual(f.clean('c', None), 'c')
+
+【相关测试 3】
+测试文件：tests/model_fields/test_integerfield.py
+测试名称：ValidationTests.test_enum_choices_cleans_valid_string
+测试代码：
+class ValidationTests(SimpleTestCase):
+    def test_enum_choices_cleans_valid_string(self):
+        f = models.IntegerField(choices=self.Choices.choices)
+        self.assertEqual(f.clean('1', None), 1)
+
+【相关测试 4】
+测试文件：tests/model_enums/tests.py
+测试名称：ChoicesTests.test_textchoices
+测试代码：
+class ChoicesTests(SimpleTestCase):
+    def test_textchoices(self):
+        self.assertEqual(YearInSchool.choices, [
+            ('FR', 'Freshman'), ('SO', 'Sophomore'), ('JR', 'Junior'), ('SR', 'Senior'), ('GR', 'Graduate'),
+        ])
+        self.assertEqual(YearInSchool.labels, ['Freshman', 'Sophomore', 'Junior', 'Senior', 'Graduate'])
+        self.assertEqual(YearInSchool.values, ['FR', 'SO', 'JR', 'SR', 'GR'])
+        self.assertEqual(YearInSchool.names, ['FRESHMAN', 'SOPHOMORE', 'JUNIOR', 'SENIOR', 'GRADUATE'])
+
+        self.assertEqual(repr(YearInSchool.FRESHMAN), "<YearInSchool.FRESHMAN: 'FR'>")
+        self.assertEqual(YearInSchool.FRESHMAN.label, 'Freshman')
+        self.assertEqual(YearInSchool.FRESHMAN.value, 'FR')
+        self.assertEqual(YearInSchool['FRESHMAN'], YearInSchool.FRESHMAN)
+        self.assertEqual(YearInSchool('FR'), YearInSchool.FRESHMAN)
+
+        self.assertIsInstance(YearInSchool, type(models.Choices))
+        self.assertIsInstance(YearInSchool.FRESHMAN, YearInSchool)
+        self.assertIsInstance(YearInSchool.FRESHMAN.label, Promise)
+        self.assertIsInstance(YearInSchool.FRESHMAN.value, str)
+
+【相关测试 5】
+测试文件：tests/model_fields/test_charfield.py
+测试名称：ValidationTests.test_enum_choices_invalid_input
+测试代码：
+class ValidationTests(SimpleTestCase):
+    def test_enum_choices_invalid_input(self):
+        f = models.CharField(choices=self.Choices.choices, max_length=1)
+        with self.assertRaises(ValidationError):
+            f.clean('a', None)
+
+
+====================
+
+请只输出一个合法 JSON 对象，字段必须严格如下：
+
+{
+  "issue_summary": "用一句话概括这个 Issue 报告的问题。",
+  "trigger_condition": {
+    "text": "可能触发 bug 的输入、状态、配置、API 调用或操作步骤。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "error_symptom": {
+    "text": "Issue 中观察到的错误现象，例如异常、warning 缺失、返回值错误、类型错误、SQL 错误、顺序错误、状态未更新等。",
+    "symptom_type": "exception|warning|wrong_return|wrong_type|wrong_sql|wrong_order|state_not_updated|serialization_error|performance|unknown",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "expected_behavior": {
+    "text": "修复后应该满足的正确行为。",
+    "evidence": ["来自 Issue、源码或测试的依据。"],
+    "confidence": "high|medium|low"
+  },
+  "target_apis": [
+    {
+      "name": "后续测试中可能需要调用的函数、方法、类或模块名。",
+      "kind": "function|method|class|module|unknown",
+      "source_path": "如果知道源码路径就填写，否则为空字符串。",
+      "reason": "为什么这个 API 和 Issue 相关。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "相关源码文件路径。",
+      "object": "相关函数、类或方法名。",
+      "lines": "如果知道行号范围就填写，例如 10-30，否则为空字符串。",
+      "reason": "为什么这里可能和缺陷有关。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "相关测试名称。",
+      "test_file": "相关测试所在文件路径。",
+      "why_relevant": "这个测试为什么可以作为相似测试起点。",
+      "reusable_parts": ["可以复用的部分，例如 imports、fixture、class、setup、对象构造、API 调用、assert 风格。"],
+      "possible_gap": "这个相似测试为什么可能还不能直接复现当前 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input|argument|object_state|mock|config|call_chain|operator|boundary_value|unknown",
+      "current_pattern": "相似测试中已有的正常模式。",
+      "target_pattern": "根据 Issue 需要变异成的触发模式。",
+      "reason": "为什么这个变异可能让测试走向缺陷路径。",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "exception|warning|return_value|type|repr|str|sql|order|state|cache|config|file_output|serialization|unknown",
+      "expression_hint": "后续插桩时建议观察的表达式，例如 str(query)、type(result)、warnings、before/after state。",
+      "reason": "为什么这个观测点能帮助判断 Issue 是否被触发。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "最终 assert 应该验证的语义目标。",
+      "preferred_assertion_style": "contains_fragment|not_contains_fragment|equals|isinstance|raises|warns|before_after_relation|order_equals|unknown",
+      "avoid": "需要避免的脆弱或无关断言，例如完整 SQL 字符串相等、完整 repr 相等、无关数量断言。",
+      "reason": "为什么这种断言更稳定且与 Issue 对齐。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+      "source": "issue|retrieved_test|retrieved_source|inference",
+      "confidence": "high|medium|low"
+    }
+  ],
+  "uncertainties": [
+    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+  ]
+}
+
+规则：
+1. 所有字段都必须出现；
+2. 如果某个字段没有足够依据，填写空数组、空字符串或 confidence=low；
+3. 不要复制大段代码到 JSON 里；
+4. 不要输出 markdown；
+5. 不要输出 JSON 之外的任何解释；
+6. 不要生成测试代码；
+7. 不要假设已经有真实修复补丁；
+8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
+9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
+   not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
+10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+11. 输出必须能被 Python 的 json.loads 直接解析。

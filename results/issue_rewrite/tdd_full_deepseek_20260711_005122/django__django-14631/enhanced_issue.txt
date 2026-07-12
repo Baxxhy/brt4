@@ -1,0 +1,140 @@
+instance_id: django__django-14631
+
+issue_summary: BaseForm._clean_fields() 和 BaseForm.changed_data 未通过 BoundField 对象访问值，导致与 form[name].initial 不一致。
+
+trigger_condition:
+{
+  "text": "创建一个包含 disabled 字段的表单，该字段的 initial 是一个可调用对象（如 lambda），然后调用 _clean_fields() 或访问 changed_data。",
+  "evidence": [
+    "Issue 描述：'form._clean_fields() can return a different value from form[name].initial when they should be the same'",
+    "相关测试 1 和 3 使用了 disabled=True 和 initial=lambda: ... 的字段。"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "form._clean_fields() 返回的值与 form[name].initial 不同，而它们本应相同。",
+  "symptom_type": "wrong_return",
+  "evidence": [
+    "Issue 描述：'form._clean_fields() can return a different value from form[name].initial when they should be the same'"
+  ],
+  "confidence": "high"
+}
+
+expected_behavior:
+{
+  "text": "BaseForm._clean_fields() 和 BaseForm.changed_data 应通过 BoundField 对象访问字段值，确保与 form[name].initial 的一致性。",
+  "evidence": [
+    "Issue 描述：'It would be better for consistency if they did'",
+    "Issue 建议将 changed_data 逻辑移至 BoundField.bf.did_change() 方法。"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "BaseForm._clean_fields",
+    "kind": "method",
+    "source_path": "django/forms/forms.py",
+    "reason": "Issue 明确指出该方法未通过 BoundField 访问值，是问题源头之一。"
+  },
+  {
+    "name": "BaseForm.changed_data",
+    "kind": "method",
+    "source_path": "django/forms/forms.py",
+    "reason": "Issue 明确指出该方法未通过 BoundField 访问值，是问题源头之一。"
+  },
+  {
+    "name": "BoundField.initial",
+    "kind": "method",
+    "source_path": "django/forms/boundfield.py",
+    "reason": "Issue 期望通过 BoundField 访问值，BoundField.initial 是获取初始值的正确途径。"
+  },
+  {
+    "name": "BaseForm.get_initial_for_field",
+    "kind": "method",
+    "source_path": "django/forms/forms.py",
+    "reason": "源码片段 2 和 5 显示，_clean_fields 和 BoundField.initial 都调用了此方法来获取初始值。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "object_state",
+    "current_pattern": "相关测试中，disabled 字段的 initial 通常是静态值（如字符串、日期）或可调用对象，但测试断言的是最终 cleaned_data 或 changed_data。",
+    "target_pattern": "构造一个场景，在 _clean_fields() 过程中，比较其内部获取的 disabled 字段值与通过 form[name].initial 获取的值。",
+    "reason": "Issue 的核心是两种访问路径结果不一致，需要直接比较它们。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "测试通常调用 form.is_valid() 或访问 form.changed_data，间接触发内部方法。",
+    "target_pattern": "在测试中直接调用 form._clean_fields()，并观测其内部为 disabled 字段计算的值。",
+    "reason": "直接触发有问题的代码路径，便于观测不一致性。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "return_value",
+    "expression_hint": "在 _clean_fields() 方法内部，为 disabled 字段获取的 value（通过 self.get_initial_for_field）与通过 form[name].initial 获取的值。",
+    "reason": "直接比较 Issue 中指出的两个本应相同但实际可能不同的值。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "form.cleaned_data 中 disabled 字段的值与 form[name].initial 的值。",
+    "reason": "cleaned_data 是 _clean_fields() 的产出，应与 BoundField.initial 一致。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "form.changed_data 的返回列表。",
+    "reason": "changed_data 的计算可能因访问路径问题而错误地将未改变的字段包含在内或排除在外。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "对于 disabled 字段，在 _clean_fields() 过程中获取的值应与通过对应的 BoundField.initial 获取的值相等。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免断言完整的 cleaned_data 字典，除非专门测试此场景。",
+    "reason": "直接验证 Issue 描述的核心不一致问题。"
+  },
+  {
+    "assertion_goal": "对于 disabled 且 initial 为可调用对象的字段，changed_data 应正确识别数据未改变（即返回空列表或排除该字段）。",
+    "preferred_assertion_style": "equals",
+    "avoid": "避免依赖具体的异常消息或内部属性名。",
+    "reason": "验证 changed_data 的行为符合预期，与通过 BoundField 访问值的理念一致。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "使用 SimpleTestCase 作为测试基类。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "需要导入 forms 模块及相关的 Field 类（如 CharField, DateTimeField）。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "构造表单时，为字段设置 disabled=True 和 initial 为一个返回特定值（如 datetime 对象）的可调用对象。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "不一致性是否只在 initial 为可调用对象时发生，还是更普遍的情况？",
+  "除了 disabled 字段，show_hidden_initial 字段是否也存在类似问题？",
+  "具体在哪种数据输入组合下，不一致性会显现？"
+]

@@ -1,0 +1,131 @@
+```json
+{
+    "issue_summary": "SparseCoder 在使用 lasso_cd 算法时没有暴露 Lasso 的 max_iter 参数，导致默认值 1000 可能不足并引发收敛警告。",
+    "trigger_condition": {
+        "text": "使用 SparseCoder 并设置 transform_algorithm='lasso_cd'，在特定数据下进行 transform 操作。",
+        "evidence": ["Issue 提到 SparseCoder 使用 Lasso 如果算法设置为 lasso_cd，但没有设置 max_iter 参数。", "源码片段 1 显示 transform_algorithm 参数支持 'lasso_cd' 选项。", "相关测试 1 展示了使用 transform_algorithm='lasso_lars' 的调用模式。"],
+        "confidence": "high"
+    },
+    "error_symptom": {
+        "text": "出现 ConvergenceWarning，抱怨估计器没有收敛。",
+        "symptom_type": "warning",
+        "evidence": ["Issue 明确说明 'This results in a warning... complaining that the estimator has not converged.'", "相关测试 3 和 4 展示了如何捕获 ConvergenceWarning。"],
+        "confidence": "high"
+    },
+    "expected_behavior": {
+        "text": "用户应该能够通过 SparseCoder 指定底层 Lasso 估计器的 max_iter 参数，以避免在默认迭代次数下不收敛。",
+        "evidence": ["Issue 作者猜测 'there should be a way for the user to specify other parameters of the estimator used in SparseCoder'。", "源码片段 3 显示 Lasso 类本身有 max_iter 参数。"],
+        "confidence": "medium"
+    },
+    "target_apis": [
+        {
+            "name": "SparseCoder",
+            "kind": "class",
+            "source_path": "sklearn/decomposition/dict_learning.py",
+            "reason": "Issue 报告的核心类，其 __init__ 方法缺少 max_iter 参数传递。"
+        },
+        {
+            "name": "SparseCoder.transform",
+            "kind": "method",
+            "source_path": "sklearn/decomposition/dict_learning.py",
+            "reason": "触发警告的操作是调用 transform 方法。"
+        },
+        {
+            "name": "Lasso",
+            "kind": "class",
+            "source_path": "sklearn/linear_model/coordinate_descent.py",
+            "reason": "SparseCoder 在 lasso_cd 模式下内部使用的估计器，其 max_iter 参数未被暴露。"
+        }
+    ],
+    "suspected_bug_locations": [
+        {
+            "path": "sklearn/decomposition/dict_learning.py",
+            "object": "SparseCoder.__init__",
+            "lines": "992-1000",
+            "reason": "__init__ 方法参数列表缺少 max_iter，且调用的 _set_sparse_coding_params 可能也未处理此参数。"
+        },
+        {
+            "path": "sklearn/decomposition/dict_learning.py",
+            "object": "SparseCoder._set_sparse_coding_params",
+            "lines": "",
+            "reason": "该方法负责设置稀疏编码参数，可能负责将参数传递给内部算法，但未处理 max_iter。"
+        }
+    ],
+    "related_test_seeds": [
+        {
+            "test_name": "test_sparse_coder_estimator",
+            "test_file": "sklearn/decomposition/tests/test_dict_learning.py",
+            "why_relevant": "它直接测试了 SparseCoder 的 transform 方法，使用了 lasso_lars 算法，与触发条件类似。",
+            "reusable_parts": ["SparseCoder 的构造方式（dictionary, transform_algorithm, transform_alpha）", "transform 方法的调用", "assert 风格（assert not np.all, assert_less）"],
+            "possible_gap": "它使用的是 lasso_lars 算法，而非触发 bug 的 lasso_cd 算法。它没有检查警告，也没有涉及 max_iter 参数。"
+        },
+        {
+            "test_name": "test_convergence_warnings",
+            "test_file": "sklearn/linear_model/tests/test_coordinate_descent.py",
+            "why_relevant": "它专门测试了收敛警告（ConvergenceWarning）的触发，这正是 Issue 中观察到的症状。",
+            "reusable_parts": ["使用 pytest.warns 捕获 ConvergenceWarning 的模式", "构造导致不收敛数据/参数的方法（如 max_iter=1, tol=0）"],
+            "possible_gap": "它测试的是 MultiTaskElasticNet 和 Lasso 类本身，而不是 SparseCoder 包装器。"
+        }
+    ],
+    "mutation_hints": [
+        {
+            "slot": "config",
+            "current_pattern": "test_sparse_coder_estimator 中使用 transform_algorithm='lasso_lars'。",
+            "target_pattern": "将 transform_algorithm 改为 'lasso_cd'。",
+            "reason": "Issue 明确指出问题发生在使用 lasso_cd 算法时。",
+            "confidence": "high"
+        },
+        {
+            "slot": "argument",
+            "current_pattern": "SparseCoder 构造时没有 max_iter 参数。",
+            "target_pattern": "需要一种方式（可能通过 **kwargs 或新参数）将 max_iter 传递给底层 Lasso 估计器。但当前 API 不支持，因此测试需模拟默认值不足的场景。",
+            "reason": "Issue 的核心是用户无法通过 SparseCoder 设置 max_iter，导致使用默认值 1000。",
+            "confidence": "high"
+        },
+        {
+            "slot": "input",
+            "current_pattern": "相关测试 1 中使用随机数据。",
+            "target_pattern": "构造或寻找一个在 max_iter=1000 下 Lasso 无法收敛的数据集。",
+            "reason": "为了触发 ConvergenceWarning，需要数据/参数组合使得默认的 1000 次迭代不足。",
+            "confidence": "medium"
+        }
+    ],
+    "observation_points": [
+        {
+            "kind": "warning",
+            "expression_hint": "warnings.catch_warnings 或 pytest.warns(ConvergenceWarning)",
+            "reason": "Issue 的核心症状是出现 ConvergenceWarning，观测警告是判断缺陷是否触发的直接方式。"
+        },
+        {
+            "kind": "return_value",
+            "expression_hint": "code = coder.transform(X) 的结果",
+            "reason": "即使有警告，transform 可能仍会返回一个结果，可以观察其属性（如稀疏性、重构误差）。"
+        }
+    ],
+    "assertion_hints": [
+        {
+            "assertion_goal": "当使用 lasso_cd 算法且默认 max_iter 不足时，调用 transform 应触发 ConvergenceWarning。",
+            "preferred_assertion_style": "warns",
+            "avoid": "断言具体的警告消息文本，因为消息可能变化。避免断言返回的稀疏编码矩阵的精确值。",
+            "reason": "Issue 明确描述了警告现象，使用 warns 断言可以稳定地捕获这一行为，而不依赖于实现细节。"
+        }
+    ],
+    "setup_hints": [
+        {
+            "hint": "需要导入 SparseCoder、ConvergenceWarning、pytest/numpy。可能需要构造一个字典（dictionary）和测试数据 X。",
+            "source": "retrieved_test",
+            "confidence": "high"
+        },
+        {
+            "hint": "可能需要调整数据或 transform_alpha 参数，使得 Lasso 在 1000 次迭代内难以收敛。",
+            "source": "inference",
+            "confidence": "medium"
+        }
+    ],
+    "uncertainties": [
+        "具体什么样的数据/transform_alpha 组合能可靠地在 max_iter=1000 下触发 Lasso 的 ConvergenceWarning。",
+        "SparseCoder 内部调用 Lasso 的确切位置和参数传递机制（_set_sparse_coding_params 的具体实现）。",
+        "除了 max_iter，是否还有其他 Lasso 参数（如 tol）也未被 SparseCoder 暴露。"
+    ]
+}
+```

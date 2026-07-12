@@ -1,0 +1,121 @@
+{
+  "issue_summary": "当表名是 SQL 关键字时，loaddata 在 SQLite 后端上崩溃。",
+  "trigger_condition": {
+    "text": "使用名为 'order'（SQL 保留字）的模型创建 fixture，并通过 manage.py loaddata 加载该 fixture。",
+    "evidence": ["Issue 描述：'Create a Model called Order. (order is a SQL reserved word) Create fixtures for the model Use manage.py loaddata to load the fixture.'"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "执行 'PRAGMA foreign_key_check(order)' 时出现 sqlite3.OperationalError: near \"order\": syntax error。",
+    "symptom_type": "exception",
+    "evidence": ["Issue 中的错误信息：'sqlite3.OperationalError: near \"order\": syntax error'", "Issue 中根因分析指向 check_constraints 函数中未对表名添加引号。"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "即使表名是 SQL 保留字，loaddata 命令也应能成功加载 fixture，而不引发语法错误。",
+    "evidence": ["Issue 描述指出失败是因为表名 'order' 没有被正确引用。", "相关测试 SchemaTests.test_creation_deletion_reserved_names 表明 Django 旨在支持 SQL 保留字作为表名。"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "check_constraints",
+      "kind": "method",
+      "source_path": "django/db/backends/sqlite3/base.py",
+      "reason": "Issue 明确指出该函数中的 SQL 语句 'PRAGMA foreign_key_check(%s)' 缺少对表名的引号，导致语法错误。"
+    },
+    {
+      "name": "loaddata",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 中触发 bug 的操作是使用 manage.py loaddata 命令。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/backends/sqlite3/base.py",
+      "object": "DatabaseWrapper.check_constraints",
+      "lines": "327-333",
+      "reason": "Issue 根因分析指向该函数中 'PRAGMA foreign_key_check(%s)' 和 'PRAGMA foreign_key_list(%s)' 的字符串格式化未对表名添加引号。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "SchemaTests.test_creation_deletion_reserved_names",
+      "test_file": "tests/schema/tests.py",
+      "why_relevant": "该测试专门处理 SQL 保留字作为表名的情况，并使用了 connection.schema_editor 和 Thing 模型（其表名是 SQL 保留字）。",
+      "reusable_parts": ["Thing 模型（表名为 SQL 保留字）", "使用 connection.schema_editor", "使用 TransactionTestCase"],
+      "possible_gap": "该测试侧重于表的创建和删除，没有测试 loaddata 或 check_constraints 函数在约束检查时的行为。"
+    },
+    {
+      "test_name": "ReservedNameTests.test_simple",
+      "test_file": "tests/reserved_names/tests.py",
+      "why_relevant": "该测试使用名为 Thing 的模型，其字段名是 SQL 保留字（如 'when', 'where'），展示了 Django 对保留字的处理。",
+      "reusable_parts": ["Thing 模型定义", "使用保留字作为字段名", "基本的对象创建和断言"],
+      "possible_gap": "该测试不涉及表名是保留字的情况，也不涉及 loaddata 或 check_constraints。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "input",
+      "current_pattern": "相关测试使用字段名为保留字的 Thing 模型。",
+      "target_pattern": "创建一个表名（模型名）为 SQL 保留字（如 'Order'）的模型，并为其创建 fixture 数据。",
+      "reason": "Issue 触发条件是表名为 SQL 保留字，而现有测试只覆盖了字段名为保留字的情况。",
+      "confidence": "high"
+    },
+    {
+      "slot": "call_chain",
+      "current_pattern": "相关测试直接操作模型对象或使用 schema_editor。",
+      "target_pattern": "通过调用 loaddata 命令或直接触发 check_constraints 函数（例如在事务中插入数据后禁用/启用约束检查）来执行。",
+      "reason": "Issue 是在 loaddata 过程中触发的，这涉及到数据库约束检查的代码路径。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "sql",
+      "expression_hint": "cursor.execute 调用时生成的 SQL 查询字符串，特别是包含表名的 PRAGMA 语句。",
+      "reason": "错误是 SQL 语法错误，观察生成的 SQL 语句可以确认表名是否被正确引用。"
+    },
+    {
+      "kind": "exception",
+      "expression_hint": "在执行可能触发 check_constraints 的操作时捕获的 sqlite3.OperationalError。",
+      "reason": "Issue 中观察到的直接错误现象是 sqlite3.OperationalError。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证当表名为 SQL 保留字时，相关数据库操作（如 loaddata 或显式调用 check_constraints）不会引发 sqlite3.OperationalError。",
+      "preferred_assertion_style": "raises",
+      "avoid": "断言完整的 SQL 字符串或错误信息完全匹配，因为修复可能改变引号风格（如使用反引号或双引号）。",
+      "reason": "修复后应消除语法错误，因此断言不引发特定异常是稳定且与 Issue 对齐的目标。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要一个 Django 项目设置，使用 SQLite 数据库后端。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要定义一个模型，其对应的数据库表名是 SQL 保留字（如 'order'）。",
+      "source": "issue",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要为该模型创建 fixture 数据文件。",
+      "source": "issue",
+      "confidence": "medium"
+    },
+    {
+      "hint": "测试可能需要继承自 TransactionTestCase 以控制事务和约束检查。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "触发 bug 的确切代码路径：是 loaddata 命令内部哪个步骤调用了 check_constraints？",
+    "修复后表名应该被引用成什么风格（反引号、双引号）？",
+    "除了 'order'，还有哪些 SQL 保留字会触发此问题？",
+    "是否只有在启用外键约束检查（PRAGMA foreign_keys=ON）时才会触发？"
+  ]
+}

@@ -1,0 +1,136 @@
+instance_id: django__django-13741
+
+issue_summary: ReadOnlyPasswordHashField 默认未设置 disabled 属性，导致需要额外实现 clean_password 方法来防止密码被意外修改。
+
+trigger_condition:
+{
+  "text": "使用 ReadOnlyPasswordHashField 但不实现 clean_password 方法，或者用户篡改表单提交的密码字段值。",
+  "evidence": [
+    "Issue 提到：'the potential pitfall when using the ReadOnlyPasswordHashField without implementing clean_password'",
+    "Issue 提到：'Even if a user tampers with the field’s value submitted to the server, it will be ignored in favor of the value from the form’s initial data.'"
+  ],
+  "confidence": "high"
+}
+
+error_symptom:
+{
+  "text": "如果未实现 clean_password，用户提交的密码字段值可能被错误地处理，导致密码被意外修改。",
+  "symptom_type": "state_not_updated",
+  "evidence": [
+    "Issue 提到：'prevent (accidental) changes to the password value'",
+    "Issue 提到：'the potential pitfall when using the ReadOnlyPasswordHashField without implementing clean_password is removed.'"
+  ],
+  "confidence": "medium"
+}
+
+expected_behavior:
+{
+  "text": "ReadOnlyPasswordHashField 应默认设置 disabled=True，使得该字段在 HTML 中不可编辑，且服务器端会忽略用户提交的篡改值，始终使用初始值。",
+  "evidence": [
+    "Issue 提到：'this property could be set to True be default on the ReadOnlyPasswordHashField'",
+    "Issue 提到：'This way the clean_password is no longer necessary'"
+  ],
+  "confidence": "high"
+}
+
+target_apis:
+[
+  {
+    "name": "ReadOnlyPasswordHashField",
+    "kind": "class",
+    "source_path": "django/contrib/auth/forms.py",
+    "reason": "Issue 的核心是建议修改此字段的默认 disabled 属性。"
+  },
+  {
+    "name": "UserChangeForm.clean_password",
+    "kind": "method",
+    "source_path": "django/contrib/auth/forms.py",
+    "reason": "Issue 认为如果 ReadOnlyPasswordHashField 默认 disabled，此方法将不再必要。"
+  },
+  {
+    "name": "Field.__init__",
+    "kind": "method",
+    "source_path": "django/forms/fields.py",
+    "reason": "Field 基类定义了 disabled 参数，ReadOnlyPasswordHashField 继承自 Field。"
+  },
+  {
+    "name": "Field.has_changed",
+    "kind": "method",
+    "source_path": "django/forms/fields.py",
+    "reason": "相关测试表明 disabled 字段的 has_changed 行为是关键的。"
+  }
+]
+
+mutation_hints:
+[
+  {
+    "slot": "argument",
+    "current_pattern": "field = ReadOnlyPasswordHashField()",
+    "target_pattern": "field = ReadOnlyPasswordHashField(disabled=True) 或检查其默认值",
+    "reason": "Issue 建议该字段默认 disabled=True，变异后可以测试其 has_changed 行为是否符合 disabled 字段的特性。",
+    "confidence": "high"
+  },
+  {
+    "slot": "call_chain",
+    "current_pattern": "field.has_changed('aaa', 'bbb')",
+    "target_pattern": "在表单提交场景中调用 has_changed，其中 data 参数为用户可能篡改的值。",
+    "reason": "Issue 的核心是防止用户篡改值被接受，has_changed 是判断数据是否变化的关键方法。",
+    "confidence": "medium"
+  }
+]
+
+observation_points:
+[
+  {
+    "kind": "state",
+    "expression_hint": "ReadOnlyPasswordHashField 实例的 disabled 属性值",
+    "reason": "确认该字段是否默认设置了 disabled=True。"
+  },
+  {
+    "kind": "return_value",
+    "expression_hint": "ReadOnlyPasswordHashField.has_changed(initial, data) 的返回值",
+    "reason": "如果 disabled=True，无论 data 是什么，has_changed 应始终返回 False。"
+  },
+  {
+    "kind": "state",
+    "expression_hint": "UserChangeForm.clean_password 方法是否被调用或其返回值",
+    "reason": "如果字段已 disabled，clean_password 方法可能不再需要。"
+  }
+]
+
+assertion_hints:
+[
+  {
+    "assertion_goal": "ReadOnlyPasswordHashField 实例的 disabled 属性应为 True。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言完整的 repr 或无关属性。",
+    "reason": "直接验证 Issue 建议的核心修改点。"
+  },
+  {
+    "assertion_goal": "对于 disabled 的 ReadOnlyPasswordHashField，has_changed 方法在任何用户输入下都应返回 False。",
+    "preferred_assertion_style": "equals",
+    "avoid": "断言特定的初始值和数据字符串。",
+    "reason": "验证 disabled 字段的核心行为：忽略提交的数据。"
+  }
+]
+
+setup_hints:
+[
+  {
+    "hint": "需要使用 SimpleTestCase 或 TestCase，可能需要创建 User 实例用于 UserChangeForm。",
+    "source": "retrieved_test",
+    "confidence": "high"
+  },
+  {
+    "hint": "可能需要导入 ReadOnlyPasswordHashField, UserChangeForm, User 等。",
+    "source": "retrieved_source",
+    "confidence": "high"
+  }
+]
+
+uncertainties:
+[
+  "ReadOnlyPasswordHashField.__init__ 当前是否已经接收或设置了 disabled 参数？",
+  "如果设置了 disabled=True，UserChangeForm.clean_password 方法是否真的可以安全移除？",
+  "除了 has_changed 行为，disabled 属性是否还会影响表单验证、数据绑定和清理的其他环节？"
+]

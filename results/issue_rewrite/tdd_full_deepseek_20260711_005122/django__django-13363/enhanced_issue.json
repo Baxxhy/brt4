@@ -1,0 +1,393 @@
+{
+  "instance_id": "django__django-13363",
+  "issue_summary": "TruncDate 和 TruncTime 的 tzinfo 参数被忽略，导致聚合查询在非默认时区下结果错误。",
+  "trigger_condition": {
+    "text": "当 USE_TZ=True 时，使用 TruncDate 或 TruncTime 并传入一个非默认时区的 tzinfo 参数进行查询。",
+    "evidence": [
+      "Issue 描述：'attempting to aggregate by date doesn't work for timezones other than the global django.utils.timezone'",
+      "Issue 示例代码：`TruncDate(\"start_at\", tzinfo=tz)`",
+      "源码片段 2 显示 __init__ 接收 tzinfo 参数。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "查询结果错误，返回的日期/时间值是基于默认时区（get_current_timezone_name()）计算的，而不是传入的 tzinfo 参数指定的时区。",
+    "symptom_type": "wrong_return",
+    "evidence": [
+      "Issue 描述：'the results are wrong for any timezone other than the one returned by django.utils.timezone'",
+      "Issue 示例代码期望工作但结果错误。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "TruncDate 和 TruncTime 应使用传入的 tzinfo 参数进行时区转换和截断计算，返回基于该时区的正确日期或时间值。",
+    "evidence": [
+      "Issue 描述：'I would expect this to work'",
+      "Issue 提到 TruncBase 继承 TimezoneMixin，暗示应支持 tzinfo。",
+      "相关测试 2 显示 TruncYear 使用 tzinfo 参数能产生预期结果。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "TruncDate",
+      "kind": "class",
+      "source_path": "django/db/models/functions/datetime.py",
+      "reason": "Issue 明确指出 TruncDate 的 tzinfo 参数被忽略。"
+    },
+    {
+      "name": "TruncTime",
+      "kind": "class",
+      "source_path": "django/db/models/functions/datetime.py",
+      "reason": "Issue 指出类似问题也发生在 TruncTime 上。"
+    },
+    {
+      "name": "TruncBase.as_sql",
+      "kind": "method",
+      "source_path": "django/db/models/functions/datetime.py",
+      "reason": "Issue 链接到第 295 行，该行在 as_sql 方法中，可能未正确使用 tzinfo。"
+    },
+    {
+      "name": "get_current_timezone_name",
+      "kind": "function",
+      "source_path": "django/utils/timezone.py",
+      "reason": "Issue 提到该方法被无条件使用，而忽略了传入的 tzinfo。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/functions/datetime.py",
+      "object": "TruncBase.as_sql",
+      "lines": "192-203",
+      "reason": "Issue 链接到第 295 行（在 as_sql 方法内），该方法可能未使用 self.tzinfo 而是调用了 get_current_timezone_name()。"
+    },
+    {
+      "path": "django/db/models/functions/datetime.py",
+      "object": "TruncDate.as_sql",
+      "lines": "287-297",
+      "reason": "TruncDate 继承 TruncBase，其 as_sql 方法可能未正确处理 DateField 的时区转换。"
+    },
+    {
+      "path": "django/db/models/functions/datetime.py",
+      "object": "TruncTime.as_sql",
+      "lines": "300-310",
+      "reason": "Issue 指出类似问题发生在 TruncTime 上。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "DateFunctionWithTimeZoneTests.test_trunc_func_with_timezone",
+      "test_file": "tests/db_functions/datetime/test_extract_trunc.py",
+      "why_relevant": "该测试使用 Trunc 函数并传入 tzinfo 参数，测试了多种截断类型（包括 date、time、datetime），与 Issue 场景高度相似。",
+      "reusable_parts": [
+        "imports (Trunc, DateTimeField, DateField, TimeField)",
+        "fixture (DTModel, create_model)",
+        "时区对象构造 (pytz.timezone)",
+        "assertQuerysetEqual 断言风格",
+        "USE_TZ=True 的设置"
+      ],
+      "possible_gap": "该测试主要使用通用的 Trunc 类，并指定 output_field，可能未直接测试 TruncDate 和 TruncTime 类。同时，它可能使用了正确的行为（如果 bug 未修复，测试可能失败）。"
+    },
+    {
+      "test_name": "DateFunctionWithTimeZoneTests.test_trunc_timezone_applied_before_truncation",
+      "test_file": "tests/db_functions/datetime/test_extract_trunc.py",
+      "why_relevant": "该测试直接使用 TruncYear（继承自 TruncBase）并传入不同的 tzinfo 参数，验证时区在截断前被应用。",
+      "reusable_parts": [
+        "时区对象构造 (melb, pacific)",
+        "使用 TruncYear 并传入 tzinfo",
+        "assertEqual 比较截断结果",
+        "USE_TZ=True 的设置"
+      ],
+      "possible_gap": "它测试的是 TruncYear（针对 DateTimeField），而 Issue 聚焦于 TruncDate（针对 DateField）和 TruncTime（针对 TimeField）。"
+    },
+    {
+      "test_name": "DateFunctionTests.test_trunc_date_func",
+      "test_file": "tests/db_functions/datetime/test_extract_trunc.py",
+      "why_relevant": "该测试直接测试 TruncDate 类，但未使用时区（USE_TZ=False）。",
+      "reusable_parts": [
+        "TruncDate 的直接调用",
+        "assertQuerysetEqual 断言风格",
+        "DTModel fixture"
+      ],
+      "possible_gap": "它在 USE_TZ=False 下运行，未测试 tzinfo 参数，因此无法复现 Issue。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "相似测试中，Trunc 或 TruncYear 调用时传入了 tzinfo 参数（如 melb）。",
+      "target_pattern": "使用 TruncDate 或 TruncTime 并传入一个与默认时区（如 UTC）不同的 tzinfo 参数（如 America/New_York）。",
+      "reason": "Issue 的核心是 TruncDate/TruncTime 忽略传入的 tzinfo，变异 API 调用可以触发该路径。",
+      "confidence": "high"
+    },
+    {
+      "slot": "config",
+      "current_pattern": "相关测试在 USE_TZ=True 和 TIME_ZONE='UTC' 下运行。",
+      "target_pattern": "保持 USE_TZ=True，但传入的 tzinfo 参数与 TIME_ZONE 设置不同（例如 TIME_ZONE='UTC', tzinfo=America/New_York）。",
+      "reason": "Issue 描述当应用使用 UTC 而传入纽约时区时失败，这种配置差异是触发条件。",
+      "confidence": "high"
+    },
+    {
+      "slot": "input",
+      "current_pattern": "测试中使用 DateTimeField 字段进行截断。",
+      "target_pattern": "使用 DateTimeField 作为输入，但通过 TruncDate 或 TruncTime 分别截取日期或时间部分。",
+      "reason": "Issue 示例使用 DateTimeField 和 TruncDate，需要确保输入字段类型匹配。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "查询结果中 TruncDate 或 TruncTime 注解字段的值。",
+      "reason": "直接观察返回的日期或时间值是否基于传入的 tzinfo 时区，而不是默认时区。"
+    },
+    {
+      "kind": "sql",
+      "expression_hint": "生成的 SQL 查询字符串，特别是其中与日期/时间转换和时区相关的部分。",
+      "reason": "可以检查 SQL 中是否使用了正确的时区名称（如 'America/New_York'）或错误地使用了默认时区。"
+    },
+    {
+      "kind": "warning",
+      "expression_hint": "运行时是否有任何关于时区或参数被忽略的警告。",
+      "reason": "如果 tzinfo 被静默忽略，可能没有警告，但值得观察。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "使用指定 tzinfo 时，TruncDate/TruncTime 返回的日期/时间值应与将该时区应用于原始 datetime 后计算出的日期/时间相匹配。",
+      "preferred_assertion_style": "equals",
+      "avoid": "避免断言完整的 SQL 字符串或完整的 repr 字符串，因为它们可能因数据库后端而异。",
+      "reason": "Issue 是关于返回值错误，直接比较计算出的预期值与实际返回值最稳定且与 Issue 对齐。"
+    },
+    {
+      "assertion_goal": "当使用不同 tzinfo 参数时，TruncDate/TruncTime 的结果应不同（如果原始 datetime 在不同时区下属于不同日期/时间）。",
+      "preferred_assertion_style": "before_after_relation",
+      "avoid": "避免断言无关的数量或字段类型。",
+      "reason": "这可以验证 tzinfo 参数确实影响了计算，而不是被忽略。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 USE_TZ=True 的 Django 测试设置，可能还需要 TIME_ZONE='UTC'。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要一个包含 DateTimeField 的测试模型（如 DTModel）。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "需要导入 pytz 或 django.utils.timezone 来创建时区对象。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能需要创建具有特定日期时间的模型实例。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "TruncBase.as_sql 方法中具体哪一行代码导致 tzinfo 被忽略（是第 295 行还是其他逻辑）。",
+    "对于 DateField 和 TimeField 类型的输出字段，时区转换在 SQL 层面是如何处理的（可能涉及 date_trunc_sql 和 time_trunc_sql 操作）。",
+    "是否所有数据库后端（PostgreSQL, MySQL, SQLite 等）都存在相同的行为。",
+    "除了 TruncDate 和 TruncTime，其他继承自 TruncBase 的类（如 TruncYear, TruncHour 等）是否也受此影响（Issue 仅提及这两个）。"
+  ],
+  "raw": {
+    "issue_summary": "TruncDate 和 TruncTime 的 tzinfo 参数被忽略，导致聚合查询在非默认时区下结果错误。",
+    "trigger_condition": {
+      "text": "当 USE_TZ=True 时，使用 TruncDate 或 TruncTime 并传入一个非默认时区的 tzinfo 参数进行查询。",
+      "evidence": [
+        "Issue 描述：'attempting to aggregate by date doesn't work for timezones other than the global django.utils.timezone'",
+        "Issue 示例代码：`TruncDate(\"start_at\", tzinfo=tz)`",
+        "源码片段 2 显示 __init__ 接收 tzinfo 参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "查询结果错误，返回的日期/时间值是基于默认时区（get_current_timezone_name()）计算的，而不是传入的 tzinfo 参数指定的时区。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'the results are wrong for any timezone other than the one returned by django.utils.timezone'",
+        "Issue 示例代码期望工作但结果错误。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "TruncDate 和 TruncTime 应使用传入的 tzinfo 参数进行时区转换和截断计算，返回基于该时区的正确日期或时间值。",
+      "evidence": [
+        "Issue 描述：'I would expect this to work'",
+        "Issue 提到 TruncBase 继承 TimezoneMixin，暗示应支持 tzinfo。",
+        "相关测试 2 显示 TruncYear 使用 tzinfo 参数能产生预期结果。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "TruncDate",
+        "kind": "class",
+        "source_path": "django/db/models/functions/datetime.py",
+        "reason": "Issue 明确指出 TruncDate 的 tzinfo 参数被忽略。"
+      },
+      {
+        "name": "TruncTime",
+        "kind": "class",
+        "source_path": "django/db/models/functions/datetime.py",
+        "reason": "Issue 指出类似问题也发生在 TruncTime 上。"
+      },
+      {
+        "name": "TruncBase.as_sql",
+        "kind": "method",
+        "source_path": "django/db/models/functions/datetime.py",
+        "reason": "Issue 链接到第 295 行，该行在 as_sql 方法中，可能未正确使用 tzinfo。"
+      },
+      {
+        "name": "get_current_timezone_name",
+        "kind": "function",
+        "source_path": "django/utils/timezone.py",
+        "reason": "Issue 提到该方法被无条件使用，而忽略了传入的 tzinfo。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/functions/datetime.py",
+        "object": "TruncBase.as_sql",
+        "lines": "192-203",
+        "reason": "Issue 链接到第 295 行（在 as_sql 方法内），该方法可能未使用 self.tzinfo 而是调用了 get_current_timezone_name()。"
+      },
+      {
+        "path": "django/db/models/functions/datetime.py",
+        "object": "TruncDate.as_sql",
+        "lines": "287-297",
+        "reason": "TruncDate 继承 TruncBase，其 as_sql 方法可能未正确处理 DateField 的时区转换。"
+      },
+      {
+        "path": "django/db/models/functions/datetime.py",
+        "object": "TruncTime.as_sql",
+        "lines": "300-310",
+        "reason": "Issue 指出类似问题发生在 TruncTime 上。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "DateFunctionWithTimeZoneTests.test_trunc_func_with_timezone",
+        "test_file": "tests/db_functions/datetime/test_extract_trunc.py",
+        "why_relevant": "该测试使用 Trunc 函数并传入 tzinfo 参数，测试了多种截断类型（包括 date、time、datetime），与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "imports (Trunc, DateTimeField, DateField, TimeField)",
+          "fixture (DTModel, create_model)",
+          "时区对象构造 (pytz.timezone)",
+          "assertQuerysetEqual 断言风格",
+          "USE_TZ=True 的设置"
+        ],
+        "possible_gap": "该测试主要使用通用的 Trunc 类，并指定 output_field，可能未直接测试 TruncDate 和 TruncTime 类。同时，它可能使用了正确的行为（如果 bug 未修复，测试可能失败）。"
+      },
+      {
+        "test_name": "DateFunctionWithTimeZoneTests.test_trunc_timezone_applied_before_truncation",
+        "test_file": "tests/db_functions/datetime/test_extract_trunc.py",
+        "why_relevant": "该测试直接使用 TruncYear（继承自 TruncBase）并传入不同的 tzinfo 参数，验证时区在截断前被应用。",
+        "reusable_parts": [
+          "时区对象构造 (melb, pacific)",
+          "使用 TruncYear 并传入 tzinfo",
+          "assertEqual 比较截断结果",
+          "USE_TZ=True 的设置"
+        ],
+        "possible_gap": "它测试的是 TruncYear（针对 DateTimeField），而 Issue 聚焦于 TruncDate（针对 DateField）和 TruncTime（针对 TimeField）。"
+      },
+      {
+        "test_name": "DateFunctionTests.test_trunc_date_func",
+        "test_file": "tests/db_functions/datetime/test_extract_trunc.py",
+        "why_relevant": "该测试直接测试 TruncDate 类，但未使用时区（USE_TZ=False）。",
+        "reusable_parts": [
+          "TruncDate 的直接调用",
+          "assertQuerysetEqual 断言风格",
+          "DTModel fixture"
+        ],
+        "possible_gap": "它在 USE_TZ=False 下运行，未测试 tzinfo 参数，因此无法复现 Issue。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中，Trunc 或 TruncYear 调用时传入了 tzinfo 参数（如 melb）。",
+        "target_pattern": "使用 TruncDate 或 TruncTime 并传入一个与默认时区（如 UTC）不同的 tzinfo 参数（如 America/New_York）。",
+        "reason": "Issue 的核心是 TruncDate/TruncTime 忽略传入的 tzinfo，变异 API 调用可以触发该路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试在 USE_TZ=True 和 TIME_ZONE='UTC' 下运行。",
+        "target_pattern": "保持 USE_TZ=True，但传入的 tzinfo 参数与 TIME_ZONE 设置不同（例如 TIME_ZONE='UTC', tzinfo=America/New_York）。",
+        "reason": "Issue 描述当应用使用 UTC 而传入纽约时区时失败，这种配置差异是触发条件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "测试中使用 DateTimeField 字段进行截断。",
+        "target_pattern": "使用 DateTimeField 作为输入，但通过 TruncDate 或 TruncTime 分别截取日期或时间部分。",
+        "reason": "Issue 示例使用 DateTimeField 和 TruncDate，需要确保输入字段类型匹配。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "查询结果中 TruncDate 或 TruncTime 注解字段的值。",
+        "reason": "直接观察返回的日期或时间值是否基于传入的 tzinfo 时区，而不是默认时区。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，特别是其中与日期/时间转换和时区相关的部分。",
+        "reason": "可以检查 SQL 中是否使用了正确的时区名称（如 'America/New_York'）或错误地使用了默认时区。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "运行时是否有任何关于时区或参数被忽略的警告。",
+        "reason": "如果 tzinfo 被静默忽略，可能没有警告，但值得观察。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用指定 tzinfo 时，TruncDate/TruncTime 返回的日期/时间值应与将该时区应用于原始 datetime 后计算出的日期/时间相匹配。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 SQL 字符串或完整的 repr 字符串，因为它们可能因数据库后端而异。",
+        "reason": "Issue 是关于返回值错误，直接比较计算出的预期值与实际返回值最稳定且与 Issue 对齐。"
+      },
+      {
+        "assertion_goal": "当使用不同 tzinfo 参数时，TruncDate/TruncTime 的结果应不同（如果原始 datetime 在不同时区下属于不同日期/时间）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言无关的数量或字段类型。",
+        "reason": "这可以验证 tzinfo 参数确实影响了计算，而不是被忽略。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 USE_TZ=True 的 Django 测试设置，可能还需要 TIME_ZONE='UTC'。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要一个包含 DateTimeField 的测试模型（如 DTModel）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 pytz 或 django.utils.timezone 来创建时区对象。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要创建具有特定日期时间的模型实例。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "TruncBase.as_sql 方法中具体哪一行代码导致 tzinfo 被忽略（是第 295 行还是其他逻辑）。",
+      "对于 DateField 和 TimeField 类型的输出字段，时区转换在 SQL 层面是如何处理的（可能涉及 date_trunc_sql 和 time_trunc_sql 操作）。",
+      "是否所有数据库后端（PostgreSQL, MySQL, SQLite 等）都存在相同的行为。",
+      "除了 TruncDate 和 TruncTime，其他继承自 TruncBase 的类（如 TruncYear, TruncHour 等）是否也受此影响（Issue 仅提及这两个）。"
+    ]
+  }
+}

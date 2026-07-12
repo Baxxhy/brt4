@@ -1,0 +1,98 @@
+{
+  "issue_summary": "使用 --runxfail 选项时，pytest.mark.skip 的 skip location 报告错误地指向了 pytest 内部文件而非测试文件。",
+  "trigger_condition": {
+    "text": "运行一个被 @pytest.mark.skip 或 @pytest.mark.skipif 标记的测试，并同时使用 `--runxfail` 命令行选项。",
+    "evidence": ["Issue 描述：'However, adding `pytest -rs --runxfail` breaks this:'", "Issue 描述：'The `--runxfail` is only about xfail and should not affect this at all.'"],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "skip location 报告错误地指向了 `src/_pytest/skipping.py:238`，而不是测试文件本身（例如 `test_it.py:3`）。",
+    "symptom_type": "wrong_order",
+    "evidence": ["Issue 描述：'SKIPPED [1] src/_pytest/skipping.py:238: unconditional skip'", "Issue 描述：'the expected skip location reported should point to the item itself'"],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "无论是否使用 `--runxfail` 选项，被 `@pytest.mark.skip` 标记的测试的 skip location 报告都应指向测试定义的位置（例如 `test_it.py:3`）。",
+    "evidence": ["Issue 描述：'the expected skip location reported should point to the item itself, and this is indeed what happens when running with `pytest -rs`:'", "Issue 描述：'SKIPPED [1] test_it.py:3: unconditional skip'"],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "pytest.mark.skip",
+      "kind": "function",
+      "source_path": "",
+      "reason": "Issue 的核心是关于使用此标记的测试的 skip location 报告。"
+    },
+    {
+      "name": "pytest_runtest_makereport",
+      "kind": "function",
+      "source_path": "src/_pytest/skipping.py",
+      "reason": "Issue 提示缺陷位于此 hook 中。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "src/_pytest/skipping.py",
+      "object": "pytest_runtest_makereport",
+      "lines": "261-305",
+      "reason": "Issue 提示 'the bug is in `src/_pytest/skipping.py`, the `pytest_runtest_makereport` hook.'，且相关源码片段 2 显示该函数处理 skip 报告逻辑。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "TestSkip.test_strict_and_skip",
+      "test_file": "testing/test_skipping.py",
+      "why_relevant": "它测试了使用 @pytest.mark.skip 标记的测试，并检查了 skip 报告。",
+      "reusable_parts": ["使用 testdir fixture", "使用 `@pytest.mark.skip` 装饰器", "使用 `testdir.runpytest('-rs')` 运行并检查输出"],
+      "possible_gap": "它没有使用 `--runxfail` 选项，而这是触发 bug 的必要条件。"
+    },
+    {
+      "test_name": "test_skipped_reasons_functional",
+      "test_file": "testing/test_skipping.py",
+      "why_relevant": "它测试了 skip 报告的 location 是否正确指向测试文件，并使用了 `-rs` 选项。",
+      "reusable_parts": ["使用 testdir fixture", "检查 stdout 输出中的 location 信息", "使用 `-rs` 选项"],
+      "possible_gap": "它没有使用 `--runxfail` 选项，且测试场景更复杂（涉及 conftest 和 setup_function）。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "config",
+      "current_pattern": "相似测试中使用 `testdir.runpytest('-rs')`。",
+      "target_pattern": "在运行命令中添加 `--runxfail` 选项，即 `testdir.runpytest('-rs', '--runxfail')`。",
+      "reason": "Issue 明确指出添加 `--runxfail` 选项会破坏 skip location 报告。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "file_output",
+      "expression_hint": "测试运行结果（result.stdout）中关于 SKIPPED 行的内容，特别是 location 部分（冒号前的文件路径和行号）。",
+      "reason": "Issue 的核心错误是 location 报告错误，通过观察 stdout 输出可以判断是否触发 bug。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证当使用 `--runxfail` 时，skip location 报告仍然指向测试文件（例如包含 'test_' 的文件名），而不是指向 pytest 内部文件（如 `src/_pytest/skipping.py`）。",
+      "preferred_assertion_style": "contains_fragment",
+      "avoid": "避免断言完整的、硬编码的 location 字符串（如 `'test_it.py:3'`），因为测试文件名可能变化。",
+      "reason": "Issue 关注的是 location 指向是否正确（测试文件 vs 内部文件），而不是具体的行号。断言包含测试文件名片段更稳定。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "使用 `testdir` fixture 来创建临时测试文件和运行 pytest。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试文件应包含一个使用 `@pytest.mark.skip` 装饰的简单测试函数。",
+      "source": "issue",
+      "confidence": "high"
+    }
+  ],
+  "uncertainties": [
+    "`pytest_runtest_makereport` 函数中 `item.config.option.runxfail` 条件分支的确切影响逻辑。",
+    "除了 `--runxfail` 外，是否还有其他配置或条件组合会触发此 bug。",
+    "`src/_pytest/skipping.py:238` 这个具体行号在 Issue 报告时是准确的，但代码可能已变动。"
+  ]
+}

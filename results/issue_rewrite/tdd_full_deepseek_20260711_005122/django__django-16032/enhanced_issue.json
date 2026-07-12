@@ -1,0 +1,327 @@
+{
+  "instance_id": "django__django-16032",
+  "issue_summary": "在 QuerySet 上使用 annotate() 后接着使用 alias() 时，__in 过滤器在子查询的右侧未能清除已选择的字段，导致子查询返回的列数多于预期。",
+  "trigger_condition": {
+    "text": "对一个 QuerySet 先调用 annotate() 添加注解，再调用 alias() 添加别名，然后将这个 QuerySet 用作 __in 过滤器的参数（子查询）。",
+    "evidence": [
+      "Issue 中的测试用例展示了 Book.objects.filter(pages__gt=400).annotate(book_annotate=Value(1)).alias(book_alias=Value(1)) 被用于 Publisher.objects.filter(book__in=long_books_qs)。",
+      "相关测试 1-3 展示了 annotate 和 alias 的组合使用。"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "执行查询时抛出 django.db.utils.OperationalError: sub-select returns 10 columns - expected 1。",
+    "symptom_type": "exception",
+    "evidence": [
+      "Issue 中明确给出了错误信息：'django.db.utils.OperationalError: sub-select returns 10 columns - expected 1'。"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "当使用 annotate() 后接 alias() 构建的 QuerySet 作为 __in 子查询时，子查询应只返回主键（或相关字段）一列，查询应正常执行并返回正确结果。",
+    "evidence": [
+      "Issue 中测试用例的 assertCountEqual 期望返回包含四个出版社名称的列表，这暗示了在正确行为下，查询应能成功执行并过滤出符合条件的出版社。",
+      "相关测试 4 展示了使用 Subquery 和 __in 进行过滤的正常模式。"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "QuerySet.alias",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 的核心涉及 alias() 方法在特定顺序下的行为。"
+    },
+    {
+      "name": "QuerySet.annotate",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 中 bug 的触发需要在 alias() 之前调用 annotate()。"
+    },
+    {
+      "name": "QuerySet.filter",
+      "kind": "method",
+      "source_path": "django/db/models/query.py",
+      "reason": "Issue 中使用了 __in 过滤器，并且 filter 是构建查询链的关键方法。"
+    },
+    {
+      "name": "Value",
+      "kind": "class",
+      "source_path": "",
+      "reason": "Issue 和多个相关测试中使用 Value 表达式进行注解和别名。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "django/db/models/query.py",
+      "object": "QuerySet._annotate",
+      "lines": "",
+      "reason": "源码片段显示 annotate 和 alias 都调用 _annotate 方法，只是 select 参数不同（True vs False）。当 alias 在 annotate 之后调用时，可能未能正确清理用于子查询的字段选择。"
+    },
+    {
+      "path": "django/db/models/query.py",
+      "object": "QuerySet._filter_or_exclude",
+      "lines": "",
+      "reason": "处理 __in 过滤器时，可能涉及将 QuerySet 转换为子查询的逻辑，该逻辑可能未正确处理经过 annotate 和 alias 后的 QuerySet 的字段选择状态。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "AliasTests.test_alias_after_annotation",
+      "test_file": "tests/annotations/tests.py",
+      "why_relevant": "它直接测试了在 annotate 之后使用 alias 的场景，与 Issue 的触发条件高度相似。",
+      "reusable_parts": [
+        "AliasTests 测试类",
+        "Book.objects 模型的使用",
+        "Value 表达式的使用",
+        "hasattr 断言风格"
+      ],
+      "possible_gap": "该测试只检查了结果对象的属性，没有将 QuerySet 用作 __in 子查询，因此不会触发 SQL 错误。"
+    },
+    {
+      "test_name": "NonAggregateAnnotationTestCase.test_annotation_filter_with_subquery",
+      "test_file": "tests/annotations/tests.py",
+      "why_relevant": "它测试了包含注解和子查询的复杂过滤场景，使用了 Subquery 和 __in 的类似逻辑。",
+      "reusable_parts": [
+        "Publisher 和 Book 模型的使用",
+        "使用 filter 和 annotate 构建查询链",
+        "assertCountEqual 断言风格",
+        "子查询的构造模式"
+      ],
+      "possible_gap": "它使用了 Subquery 包装和特定的聚合（Count），而不是直接使用 __in 和一个经过 annotate/alias 的 QuerySet。"
+    },
+    {
+      "test_name": "ToFieldTests.test_in_subquery",
+      "test_file": "tests/queries/tests.py",
+      "why_relevant": "它直接测试了 __in 过滤器与子查询的基本用法。",
+      "reusable_parts": [
+        "filter(food__in=...) 的调用模式",
+        "使用 values() 控制子查询输出列",
+        "使用 assertEqual 和 set 进行结果比较"
+      ],
+      "possible_gap": "它没有涉及 annotate 或 alias 操作，模型也不同。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "call_chain",
+      "current_pattern": "相关测试 1 的模式：Book.objects.annotate(...).alias(...)，然后检查对象属性。",
+      "target_pattern": "将 annotate(...).alias(...) 构建的 QuerySet 直接用作另一个 QuerySet 的 __in 过滤器的参数。",
+      "reason": "Issue 表明，只有当该 QuerySet 被用作 __in 子查询时，错误的列选择问题才会暴露为 SQL 错误。",
+      "confidence": "high"
+    },
+    {
+      "slot": "argument",
+      "current_pattern": "相关测试 4 在 filter 中使用的是 Subquery 对象和特定 output_field。",
+      "target_pattern": "在 filter 中直接使用 QuerySet（如 book__in=queryset），而不使用 Subquery 包装。",
+      "reason": "Issue 中的错误是在直接使用 QuerySet 作为 __in 参数时发生的，这可能触发了不同的子查询生成逻辑。",
+      "confidence": "medium"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "sql",
+      "expression_hint": "生成的 SQL 查询字符串，特别是子查询部分。",
+      "reason": "错误信息表明子查询返回了错误的列数，检查 SQL 可以确认子查询是否包含了多余的注解/别名字段。"
+    },
+    {
+      "kind": "exception",
+      "expression_hint": "执行 publisher_books_qs 查询时（例如通过迭代或评估）是否抛出 django.db.utils.OperationalError。",
+      "reason": "这是 Issue 中直接报告的错误现象，是判断缺陷是否触发的明确信号。"
+    },
+    {
+      "kind": "return_value",
+      "expression_hint": "Publisher.objects.filter(book__in=...).values('name') 的查询结果。",
+      "reason": "与 Issue 中的预期结果比较，可以验证在修复后或正常情况下的行为是否正确。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "查询应成功执行，不抛出 OperationalError，并返回预期的出版社名称集合。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的、具体的 SQL 字符串。避免断言不相关的对象属性（如 hasattr）。",
+      "reason": "Issue 的核心是功能正确性（查询结果）而非具体的 SQL 实现。使用集合或排序列表比较可以稳定地验证结果。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要使用 Django 测试框架的 TestCase，并加载包含 Book 和 Publisher 模型的 fixtures（或创建测试数据）。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "测试可能需要在支持子查询的数据库后端上运行。",
+      "source": "inference",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "导致子查询列数错误的精确内部逻辑（是在 _annotate、子查询转换还是其他地方）。",
+    "除了 Value(1) 之外，其他类型的注解或别名表达式是否也会触发此问题。",
+    "是否只有 __in 过滤器受影响，还是其他需要子查询的操作（如 __gt=Subquery(...)）也有类似问题。",
+    "在 alias() 之后是否还需要其他操作（如 values()）才会暴露问题。"
+  ],
+  "raw": {
+    "issue_summary": "在 QuerySet 上使用 annotate() 后接着使用 alias() 时，__in 过滤器在子查询的右侧未能清除已选择的字段，导致子查询返回的列数多于预期。",
+    "trigger_condition": {
+      "text": "对一个 QuerySet 先调用 annotate() 添加注解，再调用 alias() 添加别名，然后将这个 QuerySet 用作 __in 过滤器的参数（子查询）。",
+      "evidence": [
+        "Issue 中的测试用例展示了 Book.objects.filter(pages__gt=400).annotate(book_annotate=Value(1)).alias(book_alias=Value(1)) 被用于 Publisher.objects.filter(book__in=long_books_qs)。",
+        "相关测试 1-3 展示了 annotate 和 alias 的组合使用。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行查询时抛出 django.db.utils.OperationalError: sub-select returns 10 columns - expected 1。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中明确给出了错误信息：'django.db.utils.OperationalError: sub-select returns 10 columns - expected 1'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当使用 annotate() 后接 alias() 构建的 QuerySet 作为 __in 子查询时，子查询应只返回主键（或相关字段）一列，查询应正常执行并返回正确结果。",
+      "evidence": [
+        "Issue 中测试用例的 assertCountEqual 期望返回包含四个出版社名称的列表，这暗示了在正确行为下，查询应能成功执行并过滤出符合条件的出版社。",
+        "相关测试 4 展示了使用 Subquery 和 __in 进行过滤的正常模式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.alias",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 的核心涉及 alias() 方法在特定顺序下的行为。"
+      },
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中 bug 的触发需要在 alias() 之前调用 annotate()。"
+      },
+      {
+        "name": "QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中使用了 __in 过滤器，并且 filter 是构建查询链的关键方法。"
+      },
+      {
+        "name": "Value",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 和多个相关测试中使用 Value 表达式进行注解和别名。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet._annotate",
+        "lines": "",
+        "reason": "源码片段显示 annotate 和 alias 都调用 _annotate 方法，只是 select 参数不同（True vs False）。当 alias 在 annotate 之后调用时，可能未能正确清理用于子查询的字段选择。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet._filter_or_exclude",
+        "lines": "",
+        "reason": "处理 __in 过滤器时，可能涉及将 QuerySet 转换为子查询的逻辑，该逻辑可能未正确处理经过 annotate 和 alias 后的 QuerySet 的字段选择状态。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AliasTests.test_alias_after_annotation",
+        "test_file": "tests/annotations/tests.py",
+        "why_relevant": "它直接测试了在 annotate 之后使用 alias 的场景，与 Issue 的触发条件高度相似。",
+        "reusable_parts": [
+          "AliasTests 测试类",
+          "Book.objects 模型的使用",
+          "Value 表达式的使用",
+          "hasattr 断言风格"
+        ],
+        "possible_gap": "该测试只检查了结果对象的属性，没有将 QuerySet 用作 __in 子查询，因此不会触发 SQL 错误。"
+      },
+      {
+        "test_name": "NonAggregateAnnotationTestCase.test_annotation_filter_with_subquery",
+        "test_file": "tests/annotations/tests.py",
+        "why_relevant": "它测试了包含注解和子查询的复杂过滤场景，使用了 Subquery 和 __in 的类似逻辑。",
+        "reusable_parts": [
+          "Publisher 和 Book 模型的使用",
+          "使用 filter 和 annotate 构建查询链",
+          "assertCountEqual 断言风格",
+          "子查询的构造模式"
+        ],
+        "possible_gap": "它使用了 Subquery 包装和特定的聚合（Count），而不是直接使用 __in 和一个经过 annotate/alias 的 QuerySet。"
+      },
+      {
+        "test_name": "ToFieldTests.test_in_subquery",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "它直接测试了 __in 过滤器与子查询的基本用法。",
+        "reusable_parts": [
+          "filter(food__in=...) 的调用模式",
+          "使用 values() 控制子查询输出列",
+          "使用 assertEqual 和 set 进行结果比较"
+        ],
+        "possible_gap": "它没有涉及 annotate 或 alias 操作，模型也不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 的模式：Book.objects.annotate(...).alias(...)，然后检查对象属性。",
+        "target_pattern": "将 annotate(...).alias(...) 构建的 QuerySet 直接用作另一个 QuerySet 的 __in 过滤器的参数。",
+        "reason": "Issue 表明，只有当该 QuerySet 被用作 __in 子查询时，错误的列选择问题才会暴露为 SQL 错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 4 在 filter 中使用的是 Subquery 对象和特定 output_field。",
+        "target_pattern": "在 filter 中直接使用 QuerySet（如 book__in=queryset），而不使用 Subquery 包装。",
+        "reason": "Issue 中的错误是在直接使用 QuerySet 作为 __in 参数时发生的，这可能触发了不同的子查询生成逻辑。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，特别是子查询部分。",
+        "reason": "错误信息表明子查询返回了错误的列数，检查 SQL 可以确认子查询是否包含了多余的注解/别名字段。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "执行 publisher_books_qs 查询时（例如通过迭代或评估）是否抛出 django.db.utils.OperationalError。",
+        "reason": "这是 Issue 中直接报告的错误现象，是判断缺陷是否触发的明确信号。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "Publisher.objects.filter(book__in=...).values('name') 的查询结果。",
+        "reason": "与 Issue 中的预期结果比较，可以验证在修复后或正常情况下的行为是否正确。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "查询应成功执行，不抛出 OperationalError，并返回预期的出版社名称集合。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的、具体的 SQL 字符串。避免断言不相关的对象属性（如 hasattr）。",
+        "reason": "Issue 的核心是功能正确性（查询结果）而非具体的 SQL 实现。使用集合或排序列表比较可以稳定地验证结果。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 Django 测试框架的 TestCase，并加载包含 Book 和 Publisher 模型的 fixtures（或创建测试数据）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在支持子查询的数据库后端上运行。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "导致子查询列数错误的精确内部逻辑（是在 _annotate、子查询转换还是其他地方）。",
+      "除了 Value(1) 之外，其他类型的注解或别名表达式是否也会触发此问题。",
+      "是否只有 __in 过滤器受影响，还是其他需要子查询的操作（如 __gt=Subquery(...)）也有类似问题。",
+      "在 alias() 之后是否还需要其他操作（如 values()）才会暴露问题。"
+    ]
+  }
+}

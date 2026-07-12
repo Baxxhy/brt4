@@ -1,0 +1,265 @@
+{
+  "instance_id": "pydata__xarray-3993",
+  "issue_summary": "DataArray.integrate 方法的参数名 'dim' 与 Dataset.integrate 和 DataArray.differentiate 的参数名 'coord' 不一致，导致 API 语法不统一。",
+  "trigger_condition": {
+    "text": "调用 DataArray.integrate 方法时，使用参数名 'dim' 而非 'coord'。",
+    "evidence": [
+      "Issue 中的代码示例：`da.integrate(dim='x')`",
+      "Issue 描述：'The API syntax is inconsistent'"
+    ],
+    "confidence": "high"
+  },
+  "error_symptom": {
+    "text": "API 语法不一致，DataArray.integrate 使用 'dim' 参数，而 Dataset.integrate 和 DataArray.differentiate 使用 'coord' 参数。",
+    "symptom_type": "unknown",
+    "evidence": [
+      "Issue 中的代码示例对比了 ds.differentiate(coord='x'), da.differentiate(coord='x'), ds.integrate(coord='x'), da.integrate(dim='x')",
+      "Issue 描述：'why dim??'"
+    ],
+    "confidence": "high"
+  },
+  "expected_behavior": {
+    "text": "DataArray.integrate 方法的参数名应与 Dataset.integrate 和 DataArray.differentiate 保持一致，使用 'coord'。",
+    "evidence": [
+      "Issue 描述：'It should definitely be `coord`'",
+      "Issue 中引用的 PR 讨论似乎也同意这一点"
+    ],
+    "confidence": "high"
+  },
+  "target_apis": [
+    {
+      "name": "DataArray.integrate",
+      "kind": "method",
+      "source_path": "",
+      "reason": "Issue 明确指出 DataArray.integrate 的参数名 'dim' 与其他方法不一致。"
+    },
+    {
+      "name": "Dataset.integrate",
+      "kind": "method",
+      "source_path": "xarray/core/dataset.py",
+      "reason": "Issue 中作为对比，Dataset.integrate 使用 'coord' 参数。"
+    },
+    {
+      "name": "DataArray.differentiate",
+      "kind": "method",
+      "source_path": "",
+      "reason": "Issue 中作为对比，DataArray.differentiate 使用 'coord' 参数。"
+    },
+    {
+      "name": "Dataset.differentiate",
+      "kind": "method",
+      "source_path": "xarray/core/dataset.py",
+      "reason": "Issue 中作为对比，Dataset.differentiate 使用 'coord' 参数。"
+    }
+  ],
+  "suspected_bug_locations": [
+    {
+      "path": "",
+      "object": "DataArray.integrate",
+      "lines": "",
+      "reason": "Issue 明确指出 DataArray.integrate 的参数名应为 'coord' 而非 'dim'，但相关源码片段未提供 DataArray.integrate 的实现。"
+    }
+  ],
+  "related_test_seeds": [
+    {
+      "test_name": "test_integrate",
+      "test_file": "xarray/tests/test_dataset.py",
+      "why_relevant": "该测试调用了 DataArray.integrate 和 Dataset.integrate，并比较了它们的结果，直接涉及相关 API。",
+      "reusable_parts": [
+        "DataArray 和 Dataset 的构造",
+        "integrate 方法的调用",
+        "assert_allclose 和 assert_equal 断言风格"
+      ],
+      "possible_gap": "该测试目前使用字符串（如 'x'）作为参数，没有显式指定参数名（如 `dim='x'` 或 `coord='x'`），因此无法直接触发 API 不一致的问题。"
+    },
+    {
+      "test_name": "test_differentiate",
+      "test_file": "xarray/tests/test_dataset.py",
+      "why_relevant": "该测试调用了 DataArray.differentiate 和 Dataset.differentiate，展示了它们使用 'coord' 参数的一致性。",
+      "reusable_parts": [
+        "DataArray 和 Dataset 的构造",
+        "differentiate 方法的调用",
+        "assert_equal 断言风格"
+      ],
+      "possible_gap": "该测试关注的是 differentiate 的功能正确性，而非 integrate 的参数名问题。"
+    }
+  ],
+  "mutation_hints": [
+    {
+      "slot": "argument",
+      "current_pattern": "在 test_integrate 中，调用 da.integrate('x') 时使用位置参数。",
+      "target_pattern": "改为使用关键字参数调用 da.integrate(dim='x')。",
+      "reason": "Issue 表明使用关键字参数 `dim='x'` 是当前不一致的 API 用法。",
+      "confidence": "high"
+    }
+  ],
+  "observation_points": [
+    {
+      "kind": "return_value",
+      "expression_hint": "da.integrate(dim='x') 的返回值与 ds.integrate(coord='x')['var'] 的返回值是否一致。",
+      "reason": "Issue 的核心是 API 不一致，但功能应相同。比较返回值可以验证即使参数名不同，功能是否等价。"
+    },
+    {
+      "kind": "type",
+      "expression_hint": "检查 da.integrate 方法的签名或参数列表，确认参数名是 'dim' 还是 'coord'。",
+      "reason": "直接观察 API 签名是确认不一致性的最直接方式。"
+    }
+  ],
+  "assertion_hints": [
+    {
+      "assertion_goal": "验证 DataArray.integrate 方法接受 'dim' 参数（当前行为），且其功能结果与 Dataset.integrate 的 'coord' 参数调用结果一致。",
+      "preferred_assertion_style": "equals",
+      "avoid": "断言完整的 repr 字符串相等，因为可能包含无关的元数据差异。",
+      "reason": "Issue 关注的是参数名不一致，但未质疑功能正确性。断言数值结果相等可以隔离 API 语法问题。"
+    }
+  ],
+  "setup_hints": [
+    {
+      "hint": "需要构造包含坐标的 DataArray 和 Dataset 对象。",
+      "source": "retrieved_test",
+      "confidence": "high"
+    },
+    {
+      "hint": "可能需要使用 pytest 的参数化来测试不同场景（如 dask）。",
+      "source": "retrieved_test",
+      "confidence": "medium"
+    }
+  ],
+  "uncertainties": [
+    "DataArray.integrate 方法的确切源码位置和实现细节未知。",
+    "是否已经存在一个接受 'coord' 参数的 DataArray.integrate 方法，或者 'dim' 是唯一的参数名。",
+    "如果参数名从 'dim' 改为 'coord'，是否会导致向后兼容性问题，以及是否需要弃用周期。"
+  ],
+  "raw": {
+    "issue_summary": "DataArray.integrate 方法的参数名 'dim' 与 Dataset.integrate 和 DataArray.differentiate 的参数名 'coord' 不一致，导致 API 语法不统一。",
+    "trigger_condition": {
+      "text": "调用 DataArray.integrate 方法时，使用参数名 'dim' 而非 'coord'。",
+      "evidence": [
+        "Issue 中的代码示例：`da.integrate(dim='x')`",
+        "Issue 描述：'The API syntax is inconsistent'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "API 语法不一致，DataArray.integrate 使用 'dim' 参数，而 Dataset.integrate 和 DataArray.differentiate 使用 'coord' 参数。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 中的代码示例对比了 ds.differentiate(coord='x'), da.differentiate(coord='x'), ds.integrate(coord='x'), da.integrate(dim='x')",
+        "Issue 描述：'why dim??'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "DataArray.integrate 方法的参数名应与 Dataset.integrate 和 DataArray.differentiate 保持一致，使用 'coord'。",
+      "evidence": [
+        "Issue 描述：'It should definitely be `coord`'",
+        "Issue 中引用的 PR 讨论似乎也同意这一点"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "DataArray.integrate",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 明确指出 DataArray.integrate 的参数名 'dim' 与其他方法不一致。"
+      },
+      {
+        "name": "Dataset.integrate",
+        "kind": "method",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 中作为对比，Dataset.integrate 使用 'coord' 参数。"
+      },
+      {
+        "name": "DataArray.differentiate",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中作为对比，DataArray.differentiate 使用 'coord' 参数。"
+      },
+      {
+        "name": "Dataset.differentiate",
+        "kind": "method",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 中作为对比，Dataset.differentiate 使用 'coord' 参数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "DataArray.integrate",
+        "lines": "",
+        "reason": "Issue 明确指出 DataArray.integrate 的参数名应为 'coord' 而非 'dim'，但相关源码片段未提供 DataArray.integrate 的实现。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_integrate",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "该测试调用了 DataArray.integrate 和 Dataset.integrate，并比较了它们的结果，直接涉及相关 API。",
+        "reusable_parts": [
+          "DataArray 和 Dataset 的构造",
+          "integrate 方法的调用",
+          "assert_allclose 和 assert_equal 断言风格"
+        ],
+        "possible_gap": "该测试目前使用字符串（如 'x'）作为参数，没有显式指定参数名（如 `dim='x'` 或 `coord='x'`），因此无法直接触发 API 不一致的问题。"
+      },
+      {
+        "test_name": "test_differentiate",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "该测试调用了 DataArray.differentiate 和 Dataset.differentiate，展示了它们使用 'coord' 参数的一致性。",
+        "reusable_parts": [
+          "DataArray 和 Dataset 的构造",
+          "differentiate 方法的调用",
+          "assert_equal 断言风格"
+        ],
+        "possible_gap": "该测试关注的是 differentiate 的功能正确性，而非 integrate 的参数名问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "在 test_integrate 中，调用 da.integrate('x') 时使用位置参数。",
+        "target_pattern": "改为使用关键字参数调用 da.integrate(dim='x')。",
+        "reason": "Issue 表明使用关键字参数 `dim='x'` 是当前不一致的 API 用法。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "da.integrate(dim='x') 的返回值与 ds.integrate(coord='x')['var'] 的返回值是否一致。",
+        "reason": "Issue 的核心是 API 不一致，但功能应相同。比较返回值可以验证即使参数名不同，功能是否等价。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "检查 da.integrate 方法的签名或参数列表，确认参数名是 'dim' 还是 'coord'。",
+        "reason": "直接观察 API 签名是确认不一致性的最直接方式。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 DataArray.integrate 方法接受 'dim' 参数（当前行为），且其功能结果与 Dataset.integrate 的 'coord' 参数调用结果一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 repr 字符串相等，因为可能包含无关的元数据差异。",
+        "reason": "Issue 关注的是参数名不一致，但未质疑功能正确性。断言数值结果相等可以隔离 API 语法问题。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要构造包含坐标的 DataArray 和 Dataset 对象。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 pytest 的参数化来测试不同场景（如 dask）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "DataArray.integrate 方法的确切源码位置和实现细节未知。",
+      "是否已经存在一个接受 'coord' 参数的 DataArray.integrate 方法，或者 'dim' 是唯一的参数名。",
+      "如果参数名从 'dim' 改为 'coord'，是否会导致向后兼容性问题，以及是否需要弃用周期。"
+    ]
+  }
+}
