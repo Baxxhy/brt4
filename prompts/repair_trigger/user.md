@@ -32,5 +32,10 @@ Verifier 反馈：{verifier_feedback}
 10. 对缺失日志，使用 assertLogs/caplog 观测修复后应出现的日志；不得 patch buggy
     源码中不存在的 logger 属性。
 11. 禁止 skip/提前 return、恒真断言、吞异常，以及 mock/patch target API 来绕过真实路径。
-12. Issue 给出的 MWE 字面输入、参数、operator 和调用顺序是路径约束；修复时不得将其
-    简化为只覆盖普通路径的替代案例。
+	12. Issue 给出的 MWE 字面输入、参数、operator 和调用顺序是路径约束；修复时不得将其
+	    简化为只覆盖普通路径的替代案例。
+	13. 若 Verifier 反馈或 counterfactual evidence 指出 runtime target miss、负向对照和正例
+	    出现同一失败，优先修复 trigger：保留 setup 和 oracle，只调整能使 target API/生命周期
+	    真实触发 Issue 的输入、状态、配置、operator 或调用顺序。
+	14. 若负向对照 abstain/unknown，不要把候选降到最低质量；回到 BehaviorTarget 和源码证据
+	    修复 trigger。

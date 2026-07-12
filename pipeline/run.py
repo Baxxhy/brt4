@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from ..core.config import (
+    DEFAULT_COUNTERFACTUAL_SHADOW_MODE,
     DEFAULT_MAX_FEEDBACK_ROUNDS,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MAX_WORKERS,
@@ -22,6 +23,7 @@ from ..core.config import (
 )
 from ..execution.feedback import run_instance_pipeline
 from ..io.io_utils import build_instance_context, load_issue_data
+from ..llm.call_logger import model_call_context
 from ..llm.llm_client import LLMClient
 from ..core.utils import ensure_dir, safe_json_dump
 from ..runtime.conda_env_manager import default_env_name
@@ -75,6 +77,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable_seed_mutation", type=_parse_bool, default=True)
     parser.add_argument("--enable_observation_oracle", type=_parse_bool, default=True)
     parser.add_argument("--enable_strict_semantic_verifier", type=_parse_bool, default=True)
+    parser.add_argument("--counterfactual_shadow_mode", type=_parse_bool, default=DEFAULT_COUNTERFACTUAL_SHADOW_MODE)
+    parser.add_argument("--enable_bidirectional_counterfactual_validation", type=_parse_bool, default=True)
+    parser.add_argument("--enable_negative_control", type=_parse_bool, default=True)
+    parser.add_argument("--max_negative_control_attempts", type=int, default=1)
+    parser.add_argument("--max_negative_control_ast_edits", type=int, default=1)
+    parser.add_argument("--enable_runtime_target_reachability", type=_parse_bool, default=True)
+    parser.add_argument("--enable_contrastive_observation_oracle", type=_parse_bool, default=True)
+    parser.add_argument("--min_valid_surrogate_patches_for_consensus", type=int, default=2)
+    parser.add_argument("--surrogate_consensus_threshold", type=float, default=0.67)
+    parser.add_argument(
+        "--counterfactual_evidence_mode",
+        choices=["soft", "strict"],
+        default="soft",
+    )
     return parser
 
 
@@ -150,7 +166,10 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
         conda_env = args.conda_env or _default_env_name(issue_row)
         # Editable installs and compiled extensions are environment-global. Two
         # instances sharing an env must not prepare or execute concurrently.
-        with _conda_env_lock(conda_env if not args.no_conda else ""):
+        with model_call_context(
+            instance_id=instance_id,
+            repo=str(issue_row.get("repo") or ""),
+        ), _conda_env_lock(conda_env if not args.no_conda else ""):
             result = run_instance_pipeline(
                 context,
                 client,
@@ -168,6 +187,16 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
                 enable_seed_mutation=args.enable_seed_mutation,
                 enable_observation_oracle=args.enable_observation_oracle,
                 enable_strict_semantic_verifier=args.enable_strict_semantic_verifier,
+                counterfactual_shadow_mode=args.counterfactual_shadow_mode,
+                enable_bidirectional_counterfactual_validation=args.enable_bidirectional_counterfactual_validation,
+                enable_negative_control=args.enable_negative_control,
+                max_negative_control_attempts=args.max_negative_control_attempts,
+                max_negative_control_ast_edits=args.max_negative_control_ast_edits,
+                enable_runtime_target_reachability=args.enable_runtime_target_reachability,
+                enable_contrastive_observation_oracle=args.enable_contrastive_observation_oracle,
+                min_valid_surrogate_patches_for_consensus=args.min_valid_surrogate_patches_for_consensus,
+                surrogate_consensus_threshold=args.surrogate_consensus_threshold,
+                counterfactual_evidence_mode=args.counterfactual_evidence_mode,
             )
         return {"instance_id": instance_id, "status": result.status, "summary": result.to_dict()}
     except Exception as exc:  # noqa: BLE001
@@ -181,6 +210,16 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
             "seed_mutation_enabled": args.enable_seed_mutation,
             "observation_oracle_enabled": args.enable_observation_oracle,
             "strict_verifier_enabled": args.enable_strict_semantic_verifier,
+            "counterfactual_shadow_mode": args.counterfactual_shadow_mode,
+            "enable_bidirectional_counterfactual_validation": args.enable_bidirectional_counterfactual_validation,
+            "enable_negative_control": args.enable_negative_control,
+            "max_negative_control_attempts": args.max_negative_control_attempts,
+            "max_negative_control_ast_edits": args.max_negative_control_ast_edits,
+            "enable_runtime_target_reachability": args.enable_runtime_target_reachability,
+            "enable_contrastive_observation_oracle": args.enable_contrastive_observation_oracle,
+            "min_valid_surrogate_patches_for_consensus": args.min_valid_surrogate_patches_for_consensus,
+            "surrogate_consensus_threshold": args.surrogate_consensus_threshold,
+            "counterfactual_evidence_mode": args.counterfactual_evidence_mode,
             "selected_seed_file": "",
             "selected_seed_name": "",
             "seed_fallback_used": False,
@@ -263,6 +302,16 @@ def main() -> None:
             "enable_seed_mutation": args.enable_seed_mutation,
             "enable_observation_oracle": args.enable_observation_oracle,
             "enable_strict_semantic_verifier": args.enable_strict_semantic_verifier,
+            "counterfactual_shadow_mode": args.counterfactual_shadow_mode,
+            "enable_bidirectional_counterfactual_validation": args.enable_bidirectional_counterfactual_validation,
+            "enable_negative_control": args.enable_negative_control,
+            "max_negative_control_attempts": args.max_negative_control_attempts,
+            "max_negative_control_ast_edits": args.max_negative_control_ast_edits,
+            "enable_runtime_target_reachability": args.enable_runtime_target_reachability,
+            "enable_contrastive_observation_oracle": args.enable_contrastive_observation_oracle,
+            "min_valid_surrogate_patches_for_consensus": args.min_valid_surrogate_patches_for_consensus,
+            "surrogate_consensus_threshold": args.surrogate_consensus_threshold,
+            "counterfactual_evidence_mode": args.counterfactual_evidence_mode,
         },
     }
     safe_json_dump(summary, str(Path(args.output_dir) / "summary.json"))

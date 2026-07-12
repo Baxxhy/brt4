@@ -14,6 +14,8 @@ TEMPERATURE=${TEMPERATURE:-0.1}
 INSTANCES_PATH=${INSTANCES_PATH:-"$PROJECT_ROOT/data/issues/swt276_issues.json"}
 CODE_RETRIEVAL_PATH=${CODE_RETRIEVAL_PATH:-"$PROJECT_ROOT/retrieval_results/code/code_retrieval_results_gpt.json"}
 TEST_RETRIEVAL_PATH=${TEST_RETRIEVAL_PATH:-"$PROJECT_ROOT/retrieval_results/test/icore/gpt/related_tests.json"}
+LIMIT=${LIMIT:-""}
+RESUME=${RESUME:-false}
 
 mkdir -p "$OUTPUT_DIR/logs"
 cmd=(
@@ -26,6 +28,12 @@ cmd=(
   --temperature "$TEMPERATURE"
   --max_workers "$WORKERS"
 )
+if [[ -n "$LIMIT" ]]; then
+  cmd+=(--limit "$LIMIT")
+fi
+if [[ "$RESUME" == "true" ]]; then
+  cmd+=(--resume)
+fi
 
 printf '%q ' "${cmd[@]}" | tee "$OUTPUT_DIR/command.txt"
 printf '\n' | tee -a "$OUTPUT_DIR/command.txt"

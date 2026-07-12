@@ -47,3 +47,9 @@ OBSERVATION_ORACLE_REBIND_PROMPT = load_prompt("observation_oracle", "rebind")
 
 STRICT_SEMANTIC_VERIFIER_SYSTEM_PROMPT = load_prompt("strict_semantic_verifier", "system")
 STRICT_SEMANTIC_VERIFIER_USER_PROMPT = load_prompt("strict_semantic_verifier", "user")
+
+COUNTERFACTUAL_PLAN_SYSTEM_PROMPT = load_prompt("counterfactual_plan", "system")
+COUNTERFACTUAL_PLAN_USER_PROMPT = load_prompt("counterfactual_plan", "user")
+
+NEGATIVE_CONTROL_SYSTEM_PROMPT = load_prompt("negative_control", "system")
+NEGATIVE_CONTROL_USER_PROMPT = load_prompt("negative_control", "user")

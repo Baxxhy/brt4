@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ..core.config import DEFAULT_MAX_TOKENS, DEFAULT_MAX_WORKERS, DEFAULT_TEMPERATURE, DEFAULT_TOP_CODE, DEFAULT_TOP_TESTS
 from ..io.io_utils import build_instance_context, load_issue_data
+from ..llm.call_logger import model_call_context
 from ..issue.issue_rewriter import rewrite_issue
 from ..llm.llm_client import LLMClient
 from ..core.utils import ensure_dir, safe_json_dump
@@ -54,7 +55,11 @@ def run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dict
         max_tokens=args.max_tokens,
     )
     try:
-        rewrite_issue(context, client, str(out_dir))
+        with model_call_context(
+            instance_id=instance_id,
+            repo=str(issue_row.get("repo") or ""),
+        ):
+            rewrite_issue(context, client, str(out_dir))
         return {"instance_id": instance_id, "status": "OK"}
     except Exception as exc:  # noqa: BLE001
         return {"instance_id": instance_id, "status": "ERROR", "error": str(exc), "traceback": traceback.format_exc()}

@@ -10,6 +10,7 @@ import urllib.error
 import urllib.request
 
 from .api_pool import configured_apis
+from .call_logger import record_model_call
 from ..core.config import (
     DEFAULT_LLM_BACKOFF_BASE,
     DEFAULT_LLM_MAX_ATTEMPTS,
@@ -142,14 +143,41 @@ class LLMClient:
             url = self._chat_url(self.base_url)
             headers["Authorization"] = f"Bearer {self.api_key}"
             req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+            started = time.time()
             try:
                 with urllib.request.urlopen(req, timeout=self.request_timeout) as resp:  # noqa: S310
                     body = resp.read().decode("utf-8")
                 parsed = json.loads(body)
-                return parsed["choices"][0]["message"]["content"]
+                content = parsed["choices"][0]["message"]["content"]
+                record_model_call(
+                    {
+                        "status": "success",
+                        "attempt": attempt + 1,
+                        "max_attempts": max_attempts,
+                        "model": self.model,
+                        "base_url": self.base_url,
+                        "prompt_chars": len(system_prompt) + len(user_prompt),
+                        "response_chars": len(content),
+                        "duration": time.time() - started,
+                    }
+                )
+                return content
             except urllib.error.HTTPError as exc:
                 body = exc.read().decode("utf-8", errors="replace")
                 last_error = RuntimeError(f"LLM HTTP {exc.code}: {body[:500]}")
+                record_model_call(
+                    {
+                        "status": "http_error",
+                        "attempt": attempt + 1,
+                        "max_attempts": max_attempts,
+                        "model": self.model,
+                        "base_url": self.base_url,
+                        "http_status": exc.code,
+                        "prompt_chars": len(system_prompt) + len(user_prompt),
+                        "response_chars": 0,
+                        "duration": time.time() - started,
+                    }
+                )
                 if exc.code in {401, 403, 429}:
                     self._rotate_api()
                 if exc.code == 429 and attempt < max_attempts - 1:
@@ -166,6 +194,19 @@ class LLMClient:
                     continue
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
+                record_model_call(
+                    {
+                        "status": "error",
+                        "attempt": attempt + 1,
+                        "max_attempts": max_attempts,
+                        "model": self.model,
+                        "base_url": self.base_url,
+                        "error_type": type(exc).__name__,
+                        "prompt_chars": len(system_prompt) + len(user_prompt),
+                        "response_chars": 0,
+                        "duration": time.time() - started,
+                    }
+                )
             if attempt < max_attempts - 1:
                 time.sleep(min(self.backoff_base * (2**attempt), 180.0))
         raise RuntimeError(f"LLM request failed after {max_attempts} attempts: {last_error}")

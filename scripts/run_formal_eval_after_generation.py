@@ -44,6 +44,7 @@ def main() -> int:
     parser.add_argument("--log_path", default="")
     parser.add_argument("--summary_path", default="")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--compute_patch_coverage", type=parse_bool, default=True)
     parser.add_argument(
         "--use_generated_worktrees",
         action="store_true",
@@ -101,6 +102,8 @@ def main() -> int:
         command.extend(["--eval_worktree_root", str(eval_worktree_root)])
     if args.use_generated_worktrees:
         command.append("--use_generated_worktrees")
+    if args.compute_patch_coverage:
+        command.extend(["--compute_patch_coverage", "true"])
     if not args.patch_file and not all(row.get("patch") for row in completed):
         command.append("--use_swebench_lite")
     if args.resume:
@@ -140,6 +143,18 @@ def main() -> int:
         "completed": len(completed),
         "missing": missing,
         "metrics": metrics,
+        "patch_coverage": {
+            "enabled": bool(metrics.get("patch_cov_enabled")),
+            "applicable": metrics.get("patch_cov_applicable", 0),
+            "success": metrics.get("patch_cov_success", 0),
+            "patch_cov_at_1": metrics.get("patch_cov_at_1", 0),
+            "patch_cov_at_1_percent": metrics.get("patch_cov_at_1_percent", 0),
+            "target_lines": metrics.get("patch_cov_target_lines", 0),
+            "covered_lines": metrics.get("patch_cov_covered_lines", 0),
+            "line_coverage": metrics.get("patch_line_coverage", 0),
+            "line_coverage_percent": metrics.get("patch_line_coverage_percent", 0),
+            "by_status": metrics.get("patch_cov_by_status", {}),
+        },
         "formal_categories": normalized,
         "log": str(log_path),
         "eval_clone_root": str(eval_clone_root),

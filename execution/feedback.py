@@ -25,6 +25,13 @@ from ..context.host_context import build_host_context, rank_related_tests, selec
 from ..context.protocol_recovery import audit_recovered_protocol, recover_test_protocol
 from ..mutation.seed_mutator import build_mutation_plan
 from ..generation.observation_oracle import rebind_observation_oracle
+from ..generation.counterfactual import (
+    build_counterfactual_evidence,
+    build_counterfactual_plan,
+    collect_target_reachability,
+    counterfactual_summary,
+    generate_negative_control,
+)
 from ..validation.strict_semantic_verifier import verify_strict_semantics
 from ..retrieval.icore_runtime import (
     dump_spec,
@@ -178,6 +185,201 @@ def _risk_adjusted_score(
     return max(0, base_score - penalty), list(dict.fromkeys(reasons))
 
 
+def _oracle_complexity(code: str) -> int:
+    lowered = code.lower()
+    return len(re.findall(r"\bassert\b", lowered)) + lowered.count("assert")
+
+
+def _status_rank(value: str, mapping: dict[str, int], default: int = 0) -> int:
+    return mapping.get(str(value or "").upper(), default)
+
+
+def _build_evidence_rank(
+    execution: ExecutionResult,
+    decision: VerifierDecision,
+    oracle_risk: dict[str, Any],
+    candidate_code: str,
+    counterfactual_evidence: dict[str, Any] | None,
+    protocol_valid: bool = True,
+) -> tuple[dict[str, Any], list[int], int]:
+    evidence = counterfactual_evidence or {}
+    trigger = evidence.get("trigger_necessity") if isinstance(evidence, dict) else {}
+    repair = evidence.get("repair_sufficiency") if isinstance(evidence, dict) else {}
+    oracle_stability = evidence.get("oracle_stability") if isinstance(evidence, dict) else {}
+    bidirectional = evidence.get("bidirectional_support") if isinstance(evidence, dict) else {}
+    positive = evidence.get("positive_buggy") if isinstance(evidence, dict) else {}
+    runtime_target_hit = str(
+        (positive or {}).get("runtime_target_hit")
+        or execution.runtime_target_hit
+        or "unknown"
+    )
+    evidence_rank = {
+        "protocol_valid": protocol_valid,
+        "runtime_target_hit": runtime_target_hit,
+        "semantic_accept": decision.decision == "accept",
+        "buggy_issue_fail": (
+            decision.decision == "accept"
+            or execution.status == "ISSUE_ALIGNED_FAIL"
+        ),
+        "trigger_necessity": str((trigger or {}).get("status") or "UNKNOWN"),
+        "repair_sufficiency": str((repair or {}).get("status") or "UNKNOWN"),
+        "oracle_stability": str((oracle_stability or {}).get("status") or "UNKNOWN"),
+        "bidirectional_support": str((bidirectional or {}).get("status") or "UNKNOWN"),
+        "oracle_risk": str(oracle_risk.get("level") or "low").upper(),
+        "oracle_complexity": _oracle_complexity(candidate_code),
+        "test_edit_distance": 0,
+    }
+    key = [
+        1 if evidence_rank["protocol_valid"] else 0,
+        1 if execution.status not in {"SETUP_ERROR", "SYNTAX_ERROR", "COLLECT_ERROR", "TIMEOUT"} else 0,
+        1 if evidence_rank["buggy_issue_fail"] else 0,
+        _status_rank(
+            evidence_rank["runtime_target_hit"],
+            {"TRUE": 2, "UNKNOWN": 1, "FALSE": 0},
+            1,
+        ),
+        _status_rank(
+            evidence_rank["bidirectional_support"],
+            {"STRONG": 3, "PARTIAL": 2, "UNKNOWN": 1, "NONE": 0},
+            1,
+        ),
+        _status_rank(
+            evidence_rank["trigger_necessity"],
+            {"SUPPORTED": 3, "WEAK": 2, "UNKNOWN": 1, "UNSUPPORTED": 0},
+            1,
+        ),
+        _status_rank(
+            evidence_rank["repair_sufficiency"],
+            {"SUPPORTED": 3, "WEAK": 2, "UNKNOWN": 1, "UNSUPPORTED": 0},
+            1,
+        ),
+        _status_rank(
+            evidence_rank["oracle_stability"],
+            {"STABLE": 2, "UNKNOWN": 1, "UNSTABLE": 0},
+            1,
+        ),
+        1 if evidence_rank["semantic_accept"] else 0,
+        _status_rank(
+            evidence_rank["oracle_risk"],
+            {"LOW": 2, "MEDIUM": 1, "HIGH": 0},
+            2,
+        ),
+        -int(evidence_rank["oracle_complexity"]),
+        -int(evidence_rank["test_edit_distance"]),
+    ]
+    bonus = 0
+    if evidence_rank["bidirectional_support"] == "STRONG":
+        bonus += 40
+    elif evidence_rank["bidirectional_support"] == "PARTIAL":
+        bonus += 15
+    if evidence_rank["trigger_necessity"] == "SUPPORTED":
+        bonus += 10
+    if evidence_rank["repair_sufficiency"] == "SUPPORTED":
+        bonus += 10
+    if evidence_rank["oracle_stability"] == "STABLE":
+        bonus += 5
+    return evidence_rank, key, bonus
+
+
+def _counterfactual_checkpoint_order_key(checkpoint: CandidateCheckpoint) -> tuple[int, ...]:
+    return tuple(
+        [checkpoint.legacy_score or checkpoint.selector_score_after_risk or checkpoint.score]
+        + [int(item) for item in checkpoint.evidence_rank_key]
+        + [-int(checkpoint.round_id)]
+    )
+
+
+def _legacy_checkpoint_order_key(checkpoint: CandidateCheckpoint) -> tuple[int, int]:
+    return (
+        int(checkpoint.legacy_score or checkpoint.selector_score_after_risk or checkpoint.score),
+        -int(checkpoint.round_id),
+    )
+
+
+def _counterfactual_guided_decision(
+    decision: VerifierDecision,
+    execution: ExecutionResult,
+    runtime_target_hit: str,
+    evidence: dict[str, Any] | None,
+    mode: str,
+) -> VerifierDecision:
+    if execution.status in {"SETUP_ERROR", "SYNTAX_ERROR", "COLLECT_ERROR"}:
+        return decision
+    if execution.returncode == 0 and decision.decision != "repair_setup":
+        return VerifierDecision(
+            instance_id=decision.instance_id,
+            decision="repair_trigger",
+            reason=decision.reason + " Counterfactual guidance: buggy source passed, so the trigger remains insufficient.",
+            focus=["trigger"],
+            next_action="repair_trigger",
+        )
+    if runtime_target_hit == "false" and execution.returncode != 0:
+        return VerifierDecision(
+            instance_id=decision.instance_id,
+            decision="repair_trigger",
+            reason=decision.reason + " Counterfactual guidance: runtime evidence says target path was not reached.",
+            focus=["trigger"],
+            next_action="repair_trigger",
+        )
+    if not evidence:
+        return decision
+    trigger_status = str(
+        (evidence.get("trigger_necessity") or {}).get("status") or "UNKNOWN"
+    )
+    repair_status = str(
+        (evidence.get("repair_sufficiency") or {}).get("status") or "UNKNOWN"
+    )
+    if mode == "strict" and trigger_status == "SUPPORTED" and repair_status == "SUPPORTED":
+        if decision.decision in {"reject", "repair_oracle"} and execution.returncode != 0:
+            return VerifierDecision(
+                instance_id=decision.instance_id,
+                decision="accept",
+                reason=decision.reason + " Strict counterfactual mode: bidirectional evidence supports acceptance.",
+                focus=["accept"],
+                next_action="accept",
+            )
+    if decision.decision == "reject" and trigger_status in {"SUPPORTED", "WEAK"}:
+        return VerifierDecision(
+            instance_id=decision.instance_id,
+            decision="repair_oracle",
+            reason=decision.reason + " Counterfactual guidance: trigger evidence exists, so repair oracle instead of rejecting.",
+            focus=["oracle"],
+            next_action="repair_oracle",
+        )
+    return decision
+
+
+def _contrastive_observation_context(
+    evidence: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not evidence:
+        return {}
+    surrogate_runs = evidence.get("surrogate_runs")
+    if not isinstance(surrogate_runs, list):
+        surrogate_runs = []
+    positive_surrogates = []
+    negative_surrogates = []
+    for run in surrogate_runs:
+        if not isinstance(run, dict):
+            continue
+        positive = run.get("positive_result") if isinstance(run.get("positive_result"), dict) else {}
+        negative = run.get("negative_result") if isinstance(run.get("negative_result"), dict) else {}
+        if positive:
+            positive_surrogates.append(positive.get("public_observations") or positive)
+        if negative:
+            negative_surrogates.append(negative.get("public_observations") or negative)
+    positive_buggy = evidence.get("positive_buggy") if isinstance(evidence.get("positive_buggy"), dict) else {}
+    negative_buggy = evidence.get("negative_buggy") if isinstance(evidence.get("negative_buggy"), dict) else {}
+    context = {
+        "positive_buggy_observation": positive_buggy.get("public_observations") or positive_buggy,
+        "negative_buggy_observation": negative_buggy.get("public_observations") or negative_buggy,
+        "positive_surrogate_observations": positive_surrogates,
+        "negative_surrogate_observations": negative_surrogates,
+        "counterfactual_evidence": evidence,
+    }
+    return context if any(value for value in context.values()) else {}
+
+
 def _save_checkpoint(
     output_dir: str,
     attempt_id: int,
@@ -188,6 +390,10 @@ def _save_checkpoint(
     behavior: Any | None = None,
     issue_text: str = "",
     retrieved_paths: set[str] | None = None,
+    counterfactual_evidence: dict[str, Any] | None = None,
+    counterfactual_summary_data: dict[str, Any] | None = None,
+    protocol_valid: bool = True,
+    counterfactual_shadow_mode: bool = True,
 ) -> CandidateCheckpoint:
     checkpoint_dir = ensure_dir(Path(output_dir) / "checkpoints")
     code_path = str(Path(checkpoint_dir) / f"candidate_attempt_{attempt_id}.py")
@@ -207,11 +413,19 @@ def _save_checkpoint(
     adjusted_score, penalty_reasons = _risk_adjusted_score(
         score, oracle_risk, surrogate_risk
     )
+    evidence_rank, evidence_rank_key, evidence_bonus = _build_evidence_rank(
+        execution,
+        decision,
+        oracle_risk,
+        candidate.code,
+        counterfactual_evidence,
+        protocol_valid,
+    )
     checkpoint = CandidateCheckpoint(
         instance_id=candidate.instance_id,
         round_id=attempt_id,
         code_path=code_path,
-        score=adjusted_score,
+        score=adjusted_score if counterfactual_shadow_mode else adjusted_score + evidence_bonus,
         reason=reason,
         oracle_risk=oracle_risk,
         surrogate_risk=surrogate_risk,
@@ -221,6 +435,12 @@ def _save_checkpoint(
         execution=execution.to_dict(),
         verifier=decision.to_dict(),
         surrogate=dual.to_dict() if dual else {},
+        legacy_score=adjusted_score,
+        evidence_rank=evidence_rank,
+        evidence_rank_key=evidence_rank_key,
+        counterfactual_evidence_rank=evidence_rank,
+        counterfactual_evidence=counterfactual_evidence or {},
+        counterfactual_summary=counterfactual_summary_data or {},
     )
     checkpoint.save_json(
         str(Path(checkpoint_dir) / f"candidate_attempt_{attempt_id}.json")
@@ -264,6 +484,15 @@ def _best_checkpoint_from_summary(seed_dir: Path) -> dict[str, Any]:
     return checkpoints[-1] if checkpoints else {}
 
 
+def _checkpoint_legacy_score(checkpoint: dict[str, Any]) -> int:
+    return int(
+        checkpoint.get("legacy_score")
+        or checkpoint.get("selector_score_after_risk")
+        or checkpoint.get("score")
+        or 0
+    )
+
+
 def _seed_result_score(summary: dict[str, Any], checkpoint: dict[str, Any]) -> int:
     status = str(summary.get("status") or "")
     dual = summary.get("dual_version_result") if isinstance(summary.get("dual_version_result"), dict) else {}
@@ -272,7 +501,7 @@ def _seed_result_score(summary: dict[str, Any], checkpoint: dict[str, Any]) -> i
     if status == "ISSUE_ALIGNED_FAIL" or summary.get("strict_failure_class") == "issue_aligned":
         return 200
     if checkpoint:
-        return int(checkpoint.get("score") or 0)
+        return _checkpoint_legacy_score(checkpoint)
     buggy = summary.get("buggy_execution") if isinstance(summary.get("buggy_execution"), dict) else {}
     if buggy.get("returncode") not in {None, 0} and buggy.get("status") not in {"SETUP_ERROR", "SYNTAX_ERROR", "COLLECT_ERROR", "TIMEOUT"}:
         return 100
@@ -310,7 +539,7 @@ def _should_try_next_seed(
     strict = summary.get("strict_verifier_decision")
     if strict == "repair_trigger" and summary.get("strict_failure_class") == "target_not_hit":
         return True, "strict verifier target_hit=false"
-    if int(checkpoint.get("score") or 0) < 100:
+    if _checkpoint_legacy_score(checkpoint) < 100:
         return True, "best candidate score below executable buggy fail"
     return False, "current seed is competitive"
 
@@ -589,6 +818,16 @@ def run_instance_pipeline(
     enable_seed_mutation: bool = True,
     enable_observation_oracle: bool = True,
     enable_strict_semantic_verifier: bool = True,
+    counterfactual_shadow_mode: bool = True,
+    enable_bidirectional_counterfactual_validation: bool = True,
+    enable_negative_control: bool = True,
+    max_negative_control_attempts: int = 1,
+    max_negative_control_ast_edits: int = 1,
+    enable_runtime_target_reachability: bool = True,
+    enable_contrastive_observation_oracle: bool = True,
+    min_valid_surrogate_patches_for_consensus: int = 2,
+    surrogate_consensus_threshold: float = 0.67,
+    counterfactual_evidence_mode: str = "soft",
     _adaptive_disabled: bool = False,
     _forced_seed_index: int | None = None,
     _prepared_repo_path: str = "",
@@ -631,6 +870,16 @@ def run_instance_pipeline(
                     enable_seed_mutation,
                     enable_observation_oracle,
                     enable_strict_semantic_verifier,
+                    counterfactual_shadow_mode,
+                    enable_bidirectional_counterfactual_validation,
+                    enable_negative_control,
+                    max_negative_control_attempts,
+                    max_negative_control_ast_edits,
+                    enable_runtime_target_reachability,
+                    enable_contrastive_observation_oracle,
+                    min_valid_surrogate_patches_for_consensus,
+                    surrogate_consensus_threshold,
+                    counterfactual_evidence_mode,
                     _adaptive_disabled=True,
                     _forced_seed_index=None,
                 )
@@ -665,6 +914,16 @@ def run_instance_pipeline(
                         seed_mutation_enabled=enable_seed_mutation,
                         observation_oracle_enabled=enable_observation_oracle,
                         strict_verifier_enabled=enable_strict_semantic_verifier,
+                        enable_bidirectional_counterfactual_validation=enable_bidirectional_counterfactual_validation,
+                        counterfactual_shadow_mode=counterfactual_shadow_mode,
+                        enable_negative_control=enable_negative_control,
+                        max_negative_control_attempts=max_negative_control_attempts,
+                        max_negative_control_ast_edits=max_negative_control_ast_edits,
+                        enable_runtime_target_reachability=enable_runtime_target_reachability,
+                        enable_contrastive_observation_oracle=enable_contrastive_observation_oracle,
+                        min_valid_surrogate_patches_for_consensus=min_valid_surrogate_patches_for_consensus,
+                        surrogate_consensus_threshold=surrogate_consensus_threshold,
+                        counterfactual_evidence_mode=counterfactual_evidence_mode,
                         final_reason="repository worktree/setup failed before BRT generation",
                         seed_mode="adaptive_top3",
                     )
@@ -699,6 +958,16 @@ def run_instance_pipeline(
                     enable_seed_mutation,
                     enable_observation_oracle,
                     enable_strict_semantic_verifier,
+                    counterfactual_shadow_mode,
+                    enable_bidirectional_counterfactual_validation,
+                    enable_negative_control,
+                    max_negative_control_attempts,
+                    max_negative_control_ast_edits,
+                    enable_runtime_target_reachability,
+                    enable_contrastive_observation_oracle,
+                    min_valid_surrogate_patches_for_consensus,
+                    surrogate_consensus_threshold,
+                    counterfactual_evidence_mode,
                     _adaptive_disabled=True,
                     _forced_seed_index=seed_index,
                     _prepared_repo_path=prepared_repo_path,
@@ -748,6 +1017,8 @@ def run_instance_pipeline(
                 "protocol_recovery.json",
                 "candidate_ranking.json",
                 "dual_version_result.json",
+                "counterfactual_summary.json",
+                "counterfactual",
                 "repo_prepare.json",
                 "icore_exec_spec.json",
                 "worktree",
@@ -770,6 +1041,9 @@ def run_instance_pipeline(
                     or {},
                     "final_surrogate_risk": selected_summary.get("final_surrogate_risk")
                     or selected_checkpoint.get("surrogate_risk")
+                    or {},
+                    "counterfactual_summary": selected_summary.get("counterfactual_summary")
+                    or selected_checkpoint.get("counterfactual_summary")
                     or {},
                 }
             )
@@ -802,6 +1076,17 @@ def run_instance_pipeline(
                 selected_seed_reason=str(selected_summary.get("selected_seed_reason") or ""),
                 final_oracle_risk=selected_summary.get("final_oracle_risk") or {},
                 final_surrogate_risk=selected_summary.get("final_surrogate_risk") or {},
+                counterfactual_summary=selected_summary.get("counterfactual_summary") or {},
+                enable_bidirectional_counterfactual_validation=enable_bidirectional_counterfactual_validation,
+                counterfactual_shadow_mode=counterfactual_shadow_mode,
+                enable_negative_control=enable_negative_control,
+                max_negative_control_attempts=max_negative_control_attempts,
+                max_negative_control_ast_edits=max_negative_control_ast_edits,
+                enable_runtime_target_reachability=enable_runtime_target_reachability,
+                enable_contrastive_observation_oracle=enable_contrastive_observation_oracle,
+                min_valid_surrogate_patches_for_consensus=min_valid_surrogate_patches_for_consensus,
+                surrogate_consensus_threshold=surrogate_consensus_threshold,
+                counterfactual_evidence_mode=counterfactual_evidence_mode,
                 final_reason=str(selected_summary.get("final_reason") or ""),
             )
         if not generate_only:
@@ -828,13 +1113,23 @@ def run_instance_pipeline(
                     behavior_target={},
                     host_context={},
                     observation_report={},
-                notes="repository worktree/setup failed before BRT generation",
-                protocol_recovery_enabled=enable_protocol_recovery,
-                seed_mutation_enabled=enable_seed_mutation,
-                observation_oracle_enabled=enable_observation_oracle,
-                strict_verifier_enabled=enable_strict_semantic_verifier,
-                final_reason="repository worktree/setup failed before BRT generation",
-            )
+                    notes="repository worktree/setup failed before BRT generation",
+                    protocol_recovery_enabled=enable_protocol_recovery,
+                    seed_mutation_enabled=enable_seed_mutation,
+                    observation_oracle_enabled=enable_observation_oracle,
+                    strict_verifier_enabled=enable_strict_semantic_verifier,
+                    enable_bidirectional_counterfactual_validation=enable_bidirectional_counterfactual_validation,
+                    counterfactual_shadow_mode=counterfactual_shadow_mode,
+                    enable_negative_control=enable_negative_control,
+                    max_negative_control_attempts=max_negative_control_attempts,
+                    max_negative_control_ast_edits=max_negative_control_ast_edits,
+                    enable_runtime_target_reachability=enable_runtime_target_reachability,
+                    enable_contrastive_observation_oracle=enable_contrastive_observation_oracle,
+                    min_valid_surrogate_patches_for_consensus=min_valid_surrogate_patches_for_consensus,
+                    surrogate_consensus_threshold=surrogate_consensus_threshold,
+                    counterfactual_evidence_mode=counterfactual_evidence_mode,
+                    final_reason="repository worktree/setup failed before BRT generation",
+                )
                 result.save_json(str(Path(output_dir) / "summary.json"))
                 return result
         else:
@@ -948,6 +1243,16 @@ def run_instance_pipeline(
                 seed_mutation_enabled=enable_seed_mutation,
                 observation_oracle_enabled=enable_observation_oracle,
                 strict_verifier_enabled=enable_strict_semantic_verifier,
+                enable_bidirectional_counterfactual_validation=enable_bidirectional_counterfactual_validation,
+                counterfactual_shadow_mode=counterfactual_shadow_mode,
+                enable_negative_control=enable_negative_control,
+                max_negative_control_attempts=max_negative_control_attempts,
+                max_negative_control_ast_edits=max_negative_control_ast_edits,
+                enable_runtime_target_reachability=enable_runtime_target_reachability,
+                enable_contrastive_observation_oracle=enable_contrastive_observation_oracle,
+                min_valid_surrogate_patches_for_consensus=min_valid_surrogate_patches_for_consensus,
+                surrogate_consensus_threshold=surrogate_consensus_threshold,
+                counterfactual_evidence_mode=counterfactual_evidence_mode,
                 selected_seed_file=related_test.file if related_test else "",
                 selected_seed_name=related_test.name if related_test else "",
                 seed_fallback_used=seed_fallback_used,
@@ -1016,6 +1321,16 @@ def run_instance_pipeline(
                 seed_mutation_enabled=enable_seed_mutation,
                 observation_oracle_enabled=enable_observation_oracle,
                 strict_verifier_enabled=enable_strict_semantic_verifier,
+                enable_bidirectional_counterfactual_validation=enable_bidirectional_counterfactual_validation,
+                counterfactual_shadow_mode=counterfactual_shadow_mode,
+                enable_negative_control=enable_negative_control,
+                max_negative_control_attempts=max_negative_control_attempts,
+                max_negative_control_ast_edits=max_negative_control_ast_edits,
+                enable_runtime_target_reachability=enable_runtime_target_reachability,
+                enable_contrastive_observation_oracle=enable_contrastive_observation_oracle,
+                min_valid_surrogate_patches_for_consensus=min_valid_surrogate_patches_for_consensus,
+                surrogate_consensus_threshold=surrogate_consensus_threshold,
+                counterfactual_evidence_mode=counterfactual_evidence_mode,
                 selected_seed_file=related_test.file if related_test else "",
                 selected_seed_name=related_test.name if related_test else "",
                 seed_fallback_used=seed_fallback_used,
@@ -1032,7 +1347,7 @@ def run_instance_pipeline(
             # has its own budget above and must not expand this checkpoint loop.
             max_brt_attempts = 1 + max(0, brt_budget)
             checkpoints: list[CandidateCheckpoint] = []
-            best_score = -1
+            best_key: tuple[int, ...] | None = None
             best_index = -1
             best_candidate = None
             best_execution = None
@@ -1040,6 +1355,8 @@ def run_instance_pipeline(
             best_dual = None
             best_observation = None
             best_strict_result = None
+            best_counterfactual_summary: dict[str, Any] = {}
+            best_counterfactual_evidence: dict[str, Any] = {}
             while brt_attempt < max_brt_attempts:
                 if brt_attempt > 0 or execution is None:
                     execution = run_command_in_conda(candidate.command, context.buggy_repo_path, conda_env, timeout, no_conda, behavior, context.instance_id)
@@ -1048,11 +1365,23 @@ def run_instance_pipeline(
                 effective_source = format_effective_source_context(
                     behavior, context.retrieved_code, context.buggy_repo_path
                 )
+                reachability = (
+                    collect_target_reachability(behavior, candidate, execution)
+                    if enable_runtime_target_reachability
+                    else None
+                )
+                runtime_target_hit = (
+                    reachability.target_hit if reachability is not None else "unknown"
+                )
                 if enable_strict_semantic_verifier:
                     decision, strict_result = verify_strict_semantics(
                         context.issue_text, behavior, protocol, candidate,
                         execution, effective_source, llm_client, output_dir,
                         brt_attempt,
+                        runtime_target_hit=runtime_target_hit,
+                        runtime_target_evidence=(
+                            reachability.to_dict() if reachability else {}
+                        ),
                     )
                 else:
                     decision = verify_buggy_only(
@@ -1061,6 +1390,78 @@ def run_instance_pipeline(
                     )
                 safe_json_dump(decision.to_dict(), str(Path(output_dir) / f"verifier_round_{brt_attempt}.json"))
                 candidate_dual = None
+                negative_candidate = None
+                negative_execution = None
+                negative_metadata = None
+                negative_reachability = None
+                cf_evidence: dict[str, Any] | None = None
+                cf_summary = counterfactual_summary(
+                    enable_bidirectional_counterfactual_validation,
+                    None,
+                    None,
+                    selected_candidate_id=str(brt_attempt),
+                    fallback_used=not enable_bidirectional_counterfactual_validation,
+                    shadow_mode=counterfactual_shadow_mode,
+                )
+                cf_attempt_dir = (
+                    Path(output_dir) / "counterfactual" / f"attempt_{brt_attempt}"
+                )
+                if enable_bidirectional_counterfactual_validation:
+                    ensure_dir(cf_attempt_dir)
+                    safe_json_dump(
+                        execution.to_dict(),
+                        str(cf_attempt_dir / "positive_buggy_execution.json"),
+                    )
+                    if reachability is not None:
+                        safe_json_dump(
+                            reachability.to_dict(),
+                            str(cf_attempt_dir / "target_reachability.json"),
+                        )
+                    if enable_negative_control and max_negative_control_attempts > 0:
+                        plan = build_counterfactual_plan(
+                            behavior,
+                            candidate,
+                            str(cf_attempt_dir),
+                            max_negative_control_ast_edits,
+                        )
+                        negative_candidate, negative_metadata = generate_negative_control(
+                            behavior,
+                            plan,
+                            candidate,
+                            str(cf_attempt_dir),
+                            context.repo,
+                            str(context.metadata.get("version") or ""),
+                        )
+                        if (
+                            negative_candidate is not None
+                            and negative_metadata is not None
+                            and negative_metadata.status == "VALID"
+                        ):
+                            negative_execution = run_command_in_conda(
+                                negative_candidate.command,
+                                context.buggy_repo_path,
+                                conda_env,
+                                timeout,
+                                no_conda,
+                                behavior,
+                                context.instance_id,
+                            )
+                            safe_json_dump(
+                                negative_execution.to_dict(),
+                                str(cf_attempt_dir / "negative_buggy_execution.json"),
+                            )
+                            negative_reachability = (
+                                collect_target_reachability(
+                                    behavior, negative_candidate, negative_execution
+                                )
+                                if enable_runtime_target_reachability
+                                else None
+                            )
+                            if negative_reachability is not None:
+                                safe_json_dump(
+                                    negative_reachability.to_dict(),
+                                    str(cf_attempt_dir / "negative_target_reachability.json"),
+                                )
                 if decision.decision == "accept":
                     if validation_mode == "surrogate_patch":
                         validation_dir = str(
@@ -1082,6 +1483,7 @@ def run_instance_pipeline(
                             timeout,
                             no_conda,
                             max_patch_rounds,
+                            negative_candidate=negative_candidate,
                         )
                     else:
                         candidate_dual = DualVersionResult(
@@ -1092,6 +1494,56 @@ def run_instance_pipeline(
                             "SKIPPED",
                             "Only buggy source was executed.",
                         )
+                if enable_bidirectional_counterfactual_validation:
+                    semantic_target_hit = (
+                        strict_result.semantic_target_hit
+                        if strict_result is not None
+                        else ("true" if decision.decision == "accept" else "unknown")
+                    )
+                    cf_evidence_obj = build_counterfactual_evidence(
+                        behavior,
+                        execution,
+                        negative_execution,
+                        negative_metadata,
+                        reachability,
+                        semantic_target_hit,
+                        candidate_dual,
+                        min_valid_surrogate_patches_for_consensus,
+                        surrogate_consensus_threshold,
+                        positive_issue_aligned=(
+                            decision.decision == "accept"
+                            or (strict_result is not None and strict_result.failure_class == "issue_aligned")
+                        ),
+                        negative_reachability=negative_reachability,
+                    )
+                    cf_evidence = cf_evidence_obj.to_dict()
+                    safe_json_dump(
+                        cf_evidence,
+                        str(cf_attempt_dir / "counterfactual_evidence.json"),
+                    )
+                    cf_summary = counterfactual_summary(
+                        True,
+                        negative_metadata,
+                        cf_evidence_obj,
+                        selected_candidate_id=str(brt_attempt),
+                        shadow_mode=counterfactual_shadow_mode,
+                    )
+                    safe_json_dump(
+                        cf_summary,
+                        str(cf_attempt_dir / "counterfactual_summary.json"),
+                    )
+                    if not counterfactual_shadow_mode:
+                        decision = _counterfactual_guided_decision(
+                            decision,
+                            execution,
+                            runtime_target_hit,
+                            cf_evidence,
+                            counterfactual_evidence_mode,
+                        )
+                    safe_json_dump(
+                        decision.to_dict(),
+                        str(Path(output_dir) / f"verifier_round_{brt_attempt}.json"),
+                    )
                 checkpoint = _save_checkpoint(
                     output_dir,
                     brt_attempt,
@@ -1102,10 +1554,19 @@ def run_instance_pipeline(
                     behavior,
                     context.issue_text,
                     {item.path for item in context.retrieved_code if item.path},
+                    counterfactual_evidence=cf_evidence,
+                    counterfactual_summary_data=cf_summary,
+                    protocol_valid=not bool(protocol and protocol.protocol_risks),
+                    counterfactual_shadow_mode=counterfactual_shadow_mode,
                 )
                 checkpoints.append(checkpoint)
-                if checkpoint.score > best_score:
-                    best_score = checkpoint.score
+                checkpoint_key = (
+                    _legacy_checkpoint_order_key(checkpoint)
+                    if counterfactual_shadow_mode
+                    else _counterfactual_checkpoint_order_key(checkpoint)
+                )
+                if best_key is None or checkpoint_key > best_key:
+                    best_key = checkpoint_key
                     best_index = len(checkpoints) - 1
                     best_candidate = copy.deepcopy(candidate)
                     best_execution = copy.deepcopy(execution)
@@ -1113,6 +1574,8 @@ def run_instance_pipeline(
                     best_dual = copy.deepcopy(candidate_dual)
                     best_observation = copy.deepcopy(observation)
                     best_strict_result = copy.deepcopy(strict_result)
+                    best_counterfactual_summary = copy.deepcopy(cf_summary)
+                    best_counterfactual_evidence = copy.deepcopy(cf_evidence or {})
                 if decision.decision == "accept":
                     if (
                         validation_mode != "surrogate_patch"
@@ -1166,6 +1629,8 @@ def run_instance_pipeline(
                             llm_client, output_dir, context.buggy_repo_path,
                             conda_env, timeout, no_conda, context.repo,
                             str(context.metadata.get("version") or ""), next_round,
+                            contrastive_context=_contrastive_observation_context(cf_evidence),
+                            enable_contrastive_observation=enable_contrastive_observation_oracle,
                         )
                         final_code = candidate.code
                         oracle_rebound = True
@@ -1237,7 +1702,57 @@ def run_instance_pipeline(
                 final_code = candidate.code
                 write_text(candidate.candidate_file_path, candidate.code)
                 _refresh_candidate_command(context, candidate)
+                legacy_order = sorted(
+                    checkpoints,
+                    key=_legacy_checkpoint_order_key,
+                    reverse=True,
+                )
+                counterfactual_order = sorted(
+                    checkpoints,
+                    key=_counterfactual_checkpoint_order_key,
+                    reverse=True,
+                )
+                legacy_best = legacy_order[0]
+                counterfactual_would_best = counterfactual_order[0]
+                ranking_changed = (
+                    counterfactual_would_best.round_id != legacy_best.round_id
+                )
+                legacy_rank_by_round = {
+                    item.round_id: index + 1
+                    for index, item in enumerate(legacy_order)
+                }
+                for item in checkpoints:
+                    item.legacy_rank = legacy_rank_by_round.get(item.round_id, 0)
+                    item.legacy_selected = item.round_id == legacy_best.round_id
+                    item.counterfactual_would_select = (
+                        item.round_id == counterfactual_would_best.round_id
+                    )
+                    item.ranking_changed_in_shadow = (
+                        counterfactual_shadow_mode and ranking_changed
+                    )
+                    item.ranking_change_reason = (
+                        "counterfactual evidence rank would select a different candidate"
+                        if item.ranking_changed_in_shadow
+                        else ""
+                    )
+                best_counterfactual_summary = dict(best_counterfactual_summary or {})
+                best_counterfactual_summary.update(
+                    {
+                        "shadow_mode": counterfactual_shadow_mode,
+                        "ranking_changed": (False if counterfactual_shadow_mode else ranking_changed),
+                        "selected_candidate_id": str(checkpoints[best_index].round_id),
+                        "legacy_selected_candidate_id": str(legacy_best.round_id),
+                        "counterfactual_would_select_candidate_id": str(counterfactual_would_best.round_id),
+                        "ranking_changed_in_shadow": (
+                            counterfactual_shadow_mode and ranking_changed
+                        ),
+                    }
+                )
                 checkpoints[best_index].selected = True
+                checkpoints[best_index].selection_changed_by_counterfactual = (
+                    False if counterfactual_shadow_mode else ranking_changed
+                )
+                checkpoints[best_index].counterfactual_summary = best_counterfactual_summary
                 checkpoints[best_index].save_json(
                     str(
                         Path(output_dir)
@@ -1248,14 +1763,39 @@ def run_instance_pipeline(
                 safe_json_dump(
                     {
                         "selection_policy": (
-                            "risk-adjusted: surrogate_f2p > verifier_accept > "
-                            "executable_buggy_fail > buggy_pass > environment_failure; "
-                            "earliest wins ties"
+                            "shadow mode uses the legacy P0 selector for final choice; "
+                            "counterfactual evidence rank is recorded as would-select evidence"
+                            if counterfactual_shadow_mode
+                            else (
+                                "legacy risk-adjusted score remains the base score; "
+                                "counterfactual evidence rank adds soft tie-breaking/bonus "
+                                "without penalizing UNKNOWN or ABSTAIN negative controls"
+                            )
                         ),
+                        "counterfactual_shadow_mode": counterfactual_shadow_mode,
+                        "legacy_selected_attempt": legacy_best.round_id,
+                        "counterfactual_would_select_attempt": counterfactual_would_best.round_id,
                         "selected_attempt": checkpoints[best_index].round_id,
+                        "selection_changed_by_counterfactual": (
+                            False if counterfactual_shadow_mode else ranking_changed
+                        ),
+                        "ranking_changed_in_shadow": (
+                            counterfactual_shadow_mode and ranking_changed
+                        ),
+                        "ranking_change_reason": (
+                            "counterfactual evidence rank would select a different candidate"
+                            if counterfactual_shadow_mode and ranking_changed
+                            else ""
+                        ),
+                        "selected_reason": checkpoints[best_index].reason,
+                        "selected_evidence_rank": checkpoints[best_index].evidence_rank,
                         "checkpoints": [item.to_dict() for item in checkpoints],
                     },
                     str(Path(output_dir) / "candidate_ranking.json"),
+                )
+                safe_json_dump(
+                    best_counterfactual_summary,
+                    str(Path(output_dir) / "counterfactual_summary.json"),
                 )
         assert candidate is not None and execution is not None
         if dual is not None:
@@ -1369,6 +1909,17 @@ def run_instance_pipeline(
             placement_dir=placement_dir,
             runner_kind=context.repo.split("/")[-1],
             selector=candidate_selector,
+            counterfactual_summary=best_counterfactual_summary,
+            enable_bidirectional_counterfactual_validation=enable_bidirectional_counterfactual_validation,
+            counterfactual_shadow_mode=counterfactual_shadow_mode,
+            enable_negative_control=enable_negative_control,
+            max_negative_control_attempts=max_negative_control_attempts,
+            max_negative_control_ast_edits=max_negative_control_ast_edits,
+            enable_runtime_target_reachability=enable_runtime_target_reachability,
+            enable_contrastive_observation_oracle=enable_contrastive_observation_oracle,
+            min_valid_surrogate_patches_for_consensus=min_valid_surrogate_patches_for_consensus,
+            surrogate_consensus_threshold=surrogate_consensus_threshold,
+            counterfactual_evidence_mode=counterfactual_evidence_mode,
         )
         result.save_json(str(Path(output_dir) / "summary.json"))
         return result
@@ -1382,6 +1933,12 @@ def run_instance_pipeline(
             "seed_mutation_enabled": enable_seed_mutation,
             "observation_oracle_enabled": enable_observation_oracle,
             "strict_verifier_enabled": enable_strict_semantic_verifier,
+            "enable_bidirectional_counterfactual_validation": enable_bidirectional_counterfactual_validation,
+            "counterfactual_shadow_mode": counterfactual_shadow_mode,
+            "enable_negative_control": enable_negative_control,
+            "enable_runtime_target_reachability": enable_runtime_target_reachability,
+            "enable_contrastive_observation_oracle": enable_contrastive_observation_oracle,
+            "counterfactual_evidence_mode": counterfactual_evidence_mode,
             "selected_seed_file": "",
             "selected_seed_name": "",
             "seed_fallback_used": False,

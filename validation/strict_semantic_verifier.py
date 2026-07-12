@@ -24,6 +24,33 @@ _FAILURE_CLASSES = {
 }
 
 
+def _combined_target_hit(runtime_target_hit: str, semantic_target_hit: str) -> str:
+    runtime = str(runtime_target_hit or "unknown").lower()
+    semantic = str(semantic_target_hit or "unknown").lower()
+    if runtime == "true":
+        return "true"
+    if runtime == "false":
+        return "false"
+    if semantic in {"true", "false"}:
+        return semantic
+    return "unknown"
+
+
+def _attach_target_hit_fields(
+    result: StrictVerifierResult,
+    runtime_target_hit: str,
+    runtime_target_evidence: dict[str, Any] | None,
+) -> StrictVerifierResult:
+    result.runtime_target_hit = runtime_target_hit or "unknown"
+    result.semantic_target_hit = "true" if result.target_hit else "false"
+    result.combined_target_hit = _combined_target_hit(
+        result.runtime_target_hit,
+        result.semantic_target_hit,
+    )
+    result.target_hit_evidence = runtime_target_evidence or {}
+    return result
+
+
 def _private_or_brittle_oracle(code: str) -> str:
     try:
         tree = ast.parse(code)
@@ -64,6 +91,9 @@ def verify_strict_semantics(
     llm_client: Any,
     output_dir: str,
     round_id: int,
+    runtime_target_hit: str = "unknown",
+    runtime_target_evidence: dict[str, Any] | None = None,
+    counterfactual_evidence: dict[str, Any] | None = None,
 ) -> tuple[VerifierDecision, StrictVerifierResult]:
     forced = _forced_result(candidate.instance_id, execution, execution.status)
     semantic_problem = audit_candidate(behavior, candidate.code)
@@ -89,6 +119,9 @@ def verify_strict_semantics(
             execution_status=execution.status,
             execution_log=truncate_text(execution.stdout + "\n" + execution.stderr, 16000),
             source_context=truncate_text(source_context, 18000),
+            runtime_target_hit=runtime_target_hit,
+            runtime_target_evidence_json=json.dumps(runtime_target_evidence or {}, ensure_ascii=False),
+            counterfactual_evidence_json=json.dumps(counterfactual_evidence or {}, ensure_ascii=False),
         )
         write_text(str(Path(output_dir) / "prompts" / f"strict_verifier_round_{round_id}.txt"), STRICT_SEMANTIC_VERIFIER_SYSTEM_PROMPT + "\n\n" + prompt)
         response = llm_client.chat(STRICT_SEMANTIC_VERIFIER_SYSTEM_PROMPT, prompt)
@@ -100,27 +133,35 @@ def verify_strict_semantics(
             candidate.instance_id,
             decision if decision in _DECISIONS else "repair_trigger",
             failure if failure in _FAILURE_CLASSES else "side_path",
-            bool(data.get("target_hit")),
+            bool(data.get("target_hit", data.get("semantic_target_hit"))),
             bool(data.get("oracle_grounded_in_issue")),
             bool(data.get("uses_public_behavior")),
             str(data.get("reason") or ""),
             str(data.get("next_action") or decision),
         )
+        result = _attach_target_hit_fields(
+            result, runtime_target_hit, runtime_target_evidence
+        )
+        target_hit_for_accept = result.combined_target_hit == "true"
         if result.decision == "accept" and not (
             execution.returncode != 0
             and execution.status not in {"SETUP_ERROR", "SYNTAX_ERROR", "COLLECT_ERROR", "TIMEOUT"}
             and result.failure_class == "issue_aligned"
-            and result.target_hit
+            and target_hit_for_accept
             and result.oracle_grounded_in_issue
             and result.uses_public_behavior
         ):
-            if not result.target_hit:
+            if not target_hit_for_accept:
                 result.decision, result.failure_class = "repair_trigger", "target_not_hit"
             else:
                 result.decision = "repair_oracle"
                 result.failure_class = "oracle_wrong" if not result.oracle_grounded_in_issue else "oracle_too_strong"
             result.next_action = result.decision
             result.reason = "严格 accept 条件未全部满足。" + result.reason
+    if forced is not None or semantic_problem or brittle_problem:
+        result = _attach_target_hit_fields(
+            result, runtime_target_hit, runtime_target_evidence
+        )
     safe_json_dump(result.to_dict(), str(Path(output_dir) / f"strict_verifier_round_{round_id}.json"))
     decision = VerifierDecision(
         instance_id=candidate.instance_id,

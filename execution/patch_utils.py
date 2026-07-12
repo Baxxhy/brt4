@@ -178,6 +178,22 @@ def _validate_patch_items(
             or Path(path).name == "conftest.py"
         ):
             return [], f"surrogate patch attempted to modify test/config file: {path}"
+        if (
+            Path(path).name
+            in {
+                "pyproject.toml",
+                "setup.py",
+                "setup.cfg",
+                "tox.ini",
+                "requirements.txt",
+                "requirements-dev.txt",
+                "environment.yml",
+                "environment.yaml",
+            }
+            or "/requirements/" in f"/{lowered}"
+            or "/requirements-" in f"/{lowered}"
+        ):
+            return [], f"surrogate patch attempted to modify config/dependency file: {path}"
         if allowed and path not in allowed:
             return [], f"path is not in retrieved source context: {path}"
         if not search or search == replace:
@@ -239,26 +255,28 @@ def validate_surrogate_patch_candidate(
     patch_candidate: SurrogatePatchCandidate,
     retrieved_code: list[RetrievedCode],
     candidate: CandidateTest,
+    negative_candidate: CandidateTest | None,
     buggy_repo: str,
     conda_env: str,
     timeout: int,
     no_conda: bool,
-) -> tuple[SurrogatePatchCandidate, ExecutionResult | None]:
+) -> tuple[SurrogatePatchCandidate, ExecutionResult | None, ExecutionResult | None]:
     patch_items, error = _validate_patch_items(
         patch_candidate, retrieved_code, candidate.candidate_repo_path
     )
     if error:
         patch_candidate.status = "REJECTED"
         patch_candidate.reason = error
-        return patch_candidate, None
-    with tempfile.TemporaryDirectory(prefix="brt3_surrogate_") as temp_dir:
+        return patch_candidate, None, None
+    temp_dir = tempfile.mkdtemp(prefix="brt3_surrogate_")
+    try:
         repo_copy = os.path.join(temp_dir, "repo")
         _copy_repo(buggy_repo, repo_copy)
         applied_paths, diff, error = _apply_patch_items(repo_copy, patch_items)
         if error:
             patch_candidate.status = "APPLY_ERROR"
             patch_candidate.reason = error
-            return patch_candidate, None
+            return patch_candidate, None, None
         patch_candidate.applied_paths = applied_paths
         patch_candidate.diff = diff
         patch_candidate.patches = patch_items
@@ -272,7 +290,20 @@ def validate_surrogate_patch_candidate(
             None,
             candidate.instance_id,
         )
-        return patch_candidate, execution
+        negative_execution = None
+        if negative_candidate is not None:
+            negative_execution = run_command_in_conda(
+                negative_candidate.command,
+                repo_copy,
+                conda_env,
+                timeout,
+                no_conda,
+                None,
+                negative_candidate.instance_id,
+            )
+        return patch_candidate, execution, negative_execution
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def run_surrogate_patch_loop(
@@ -288,6 +319,7 @@ def run_surrogate_patch_loop(
     timeout: int,
     no_conda: bool,
     max_rounds: int = 3,
+    negative_candidate: CandidateTest | None = None,
 ) -> DualVersionResult:
     effective_code = _effective_surrogate_sources(
         behavior, retrieved_code, buggy_repo
@@ -315,6 +347,9 @@ def run_surrogate_patch_loop(
                 "round_id": round_id,
                 "status": "GENERATION_ERROR",
                 "reason": str(exc),
+                "execution": {},
+                "negative_execution": {},
+                "negative_skip_reason": "surrogate patch generation failed",
             }
             attempts.append(attempt)
             safe_json_dump(
@@ -330,6 +365,8 @@ def run_surrogate_patch_loop(
             patch_candidate.reason = "model repeated a previous surrogate patch"
             attempt = patch_candidate.to_dict()
             attempt["execution"] = {}
+            attempt["negative_execution"] = {}
+            attempt["negative_skip_reason"] = "surrogate patch duplicate; no repo execution"
             attempts.append(attempt)
             safe_json_dump(
                 attempt,
@@ -337,10 +374,11 @@ def run_surrogate_patch_loop(
             )
             continue
         seen_patch_signatures.add(signature)
-        patch_candidate, execution = validate_surrogate_patch_candidate(
+        patch_candidate, execution, negative_execution = validate_surrogate_patch_candidate(
             patch_candidate,
             effective_code,
             candidate,
+            negative_candidate,
             buggy_repo,
             conda_env,
             timeout,
@@ -350,6 +388,16 @@ def run_surrogate_patch_loop(
         latest_execution = execution
         attempt = patch_candidate.to_dict()
         attempt["execution"] = execution.to_dict() if execution else {}
+        attempt["negative_execution"] = (
+            negative_execution.to_dict() if negative_execution else {}
+        )
+        if negative_execution is None:
+            if negative_candidate is None:
+                attempt["negative_skip_reason"] = "negative control unavailable or invalid"
+            elif execution is None:
+                attempt["negative_skip_reason"] = "surrogate patch was not executable"
+            else:
+                attempt["negative_skip_reason"] = "negative execution not run"
         attempts.append(attempt)
         safe_json_dump(
             attempt,

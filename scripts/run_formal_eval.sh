@@ -26,6 +26,8 @@ RESUME=${RESUME:-true}
 EVAL_COMPLETED_ONLY=${EVAL_COMPLETED_ONLY:-false}
 TMPDIR=${TMPDIR:-"$RUN_DIR/tmp/formal_eval"}
 export TMPDIR
+USE_GENERATED_WORKTREES=${USE_GENERATED_WORKTREES:-false}
+COMPUTE_PATCH_COVERAGE=${COMPUTE_PATCH_COVERAGE:-true}
 
 mkdir -p "$EVALUATION_DIR" "$RUN_DIR/logs" "$TMPDIR"
 cmd=(
@@ -39,9 +41,13 @@ cmd=(
   --max_workers "$WORKERS"
   --timeout "$TIMEOUT"
   --eval_completed_only "$EVAL_COMPLETED_ONLY"
+  --compute_patch_coverage "$COMPUTE_PATCH_COVERAGE"
 )
 if [[ "$RESUME" == "true" || "$RESUME" == "1" || "$RESUME" == "yes" ]]; then
   cmd+=(--resume)
+fi
+if [[ "$USE_GENERATED_WORKTREES" == "true" ]]; then
+  cmd+=(--use_generated_worktrees)
 fi
 
 printf '%q ' "${cmd[@]}" | tee "$RUN_DIR/logs/formal_eval.command.txt"

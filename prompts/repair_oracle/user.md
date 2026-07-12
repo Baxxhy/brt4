@@ -14,5 +14,9 @@ Exception 或因为路径中偶然出现单个字符而成立/失败的脆弱断
 观测结果：{observation_json}
 Verifier 反馈：{verifier_feedback}
 
-必须优先完成 Verifier 反馈中的 oracle 修复目标；返回代码必须对断言产生实质修改，
-不能原样返回当前测试。
+	必须优先完成 Verifier 反馈中的 oracle 修复目标；返回代码必须对断言产生实质修改，
+	不能原样返回当前测试。
+	若 Verifier 反馈或 counterfactual evidence 表明正例和负向对照相同失败、surrogate 上仍为
+	AssertionError、或 oracle_stability=UNSTABLE，优先使用公开行为的对比观察重新绑定 oracle。
+	不要修改 setup、trigger 或 target API；不要把负向对照写入最终测试。若对比观察不可用，
+	回退到当前 buggy-only Observation Oracle。

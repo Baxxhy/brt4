@@ -85,17 +85,63 @@
       "reason": "为什么这种断言更稳定且与 Issue 对齐。"
     }}
   ],
-  "setup_hints": [
-    {{
-      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
-      "source": "issue|retrieved_test|retrieved_source|inference",
-      "confidence": "high|medium|low"
-    }}
-  ],
-  "uncertainties": [
-    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
-  ]
-}}
+	  "setup_hints": [
+	    {{
+	      "hint": "运行测试可能需要的上下文，例如 fixture、TestCase、settings、database、tmp_path、monkeypatch、mock。",
+	      "source": "issue|retrieved_test|retrieved_source|inference",
+	      "confidence": "high|medium|low"
+	    }}
+	  ],
+	  "essential_trigger_factors": [
+	    {{
+	      "factor_id": "T1",
+	      "description": "一个可最小消融的 issue-specific trigger factor。",
+	      "factor_type": "argument|operator|state|configuration|call_sequence|lifecycle|boundary|input_shape|other",
+	      "positive_form": "当前触发形式，必须来自 Issue、源码或相似测试依据。",
+	      "negative_control_form": "删除或反转该条件后的形式；没有可靠依据则留空。",
+	      "evidence": "来自 Issue、retrieved code 或 retrieved test 的依据。",
+	      "target_api_preserved": true,
+	      "necessity_confidence": 0.0
+	    }}
+	  ],
+	  "trigger_ablation_rules": [
+	    {{
+	      "factor_id": "T1",
+	      "operation": "ARG_VALUE_REPLACE|OPERATOR_FLIP|STATE_RESET|CONFIG_RESET|CALL_REMOVAL|BOUNDARY_NORMALIZE|OTHER",
+	      "positive_form": "与正例候选中应出现的触发形式一致。",
+	      "negative_control_form": "负向对照中的替代形式。",
+	      "max_ast_edits": 1,
+	      "preserve_setup": true,
+	      "preserve_oracle": true,
+	      "preserve_target_api": true
+	    }}
+	  ],
+	  "trace_targets": [
+	    {{
+	      "module": "",
+	      "class_name": "",
+	      "function_name": "",
+	      "source_file": "",
+	      "required": true
+	    }}
+	  ],
+	  "public_observation_schema": [
+	    "exception_type",
+	    "return_value",
+	    "return_type",
+	    "warning_type",
+	    "public_state",
+	    "serialization",
+	    "render_output",
+	    "ordering",
+	    "sql_tokens",
+	    "shape",
+	    "dtype"
+	  ],
+	  "uncertainties": [
+	    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
+	  ]
+	}}
 
 规则：
 1. 所有字段都必须出现；
@@ -108,5 +154,8 @@
 8. expected_behavior 必须描述修复后成立的正向语义，不能复述当前 buggy 行为；
 9. assertion_hints 的极性必须与 expected_behavior 一致：应该存在/支持/包含的能力不能建议
    not hasattr、not in 或“保持缺失”；当前会抛异常但修复后应正常时不能建议 raises；
-10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
-11. 输出必须能被 Python 的 json.loads 直接解析。
+	10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
+	11. essential_trigger_factors 和 trigger_ablation_rules 只填写有证据且可最小消融的因素；
+	    如果没有可靠负向对照形式，填写空数组或空字符串，不能为了完整而编造；
+	12. trace_targets 只填写源码或 target_apis 能支持的目标函数/类/文件；
+	13. 输出必须能被 Python 的 json.loads 直接解析。

@@ -24,6 +24,10 @@ REQUIRED_FIELDS = [
     "observation_points",
     "assertion_hints",
     "setup_hints",
+    "essential_trigger_factors",
+    "trigger_ablation_rules",
+    "trace_targets",
+    "public_observation_schema",
     "uncertainties",
 ]
 
@@ -31,9 +35,23 @@ REQUIRED_FIELDS = [
 def behavior_from_dict(instance_id: str, data: dict[str, Any]) -> BehaviorTarget:
     normalized = {k: data.get(k) for k in REQUIRED_FIELDS}
     normalized.setdefault("issue_summary", "")
-    for key in ["target_apis", "suspected_bug_locations", "related_test_seeds", "mutation_hints", "observation_points", "assertion_hints", "setup_hints", "uncertainties"]:
+    for key in [
+        "target_apis",
+        "suspected_bug_locations",
+        "related_test_seeds",
+        "mutation_hints",
+        "observation_points",
+        "assertion_hints",
+        "setup_hints",
+        "essential_trigger_factors",
+        "trigger_ablation_rules",
+        "trace_targets",
+        "uncertainties",
+    ]:
         if not isinstance(normalized.get(key), list):
             normalized[key] = []
+    if not isinstance(normalized.get("public_observation_schema"), list):
+        normalized["public_observation_schema"] = []
     for key in ["trigger_condition", "error_symptom", "expected_behavior"]:
         if not isinstance(normalized.get(key), dict):
             normalized[key] = {}
@@ -71,6 +89,18 @@ def save_enhanced_issue_copy(behavior: BehaviorTarget, output_dir: str) -> None:
         "",
         "setup_hints:",
         json_dumps_for_text(behavior.setup_hints),
+        "",
+        "essential_trigger_factors:",
+        json_dumps_for_text(behavior.essential_trigger_factors),
+        "",
+        "trigger_ablation_rules:",
+        json_dumps_for_text(behavior.trigger_ablation_rules),
+        "",
+        "trace_targets:",
+        json_dumps_for_text(behavior.trace_targets),
+        "",
+        "public_observation_schema:",
+        json_dumps_for_text(behavior.public_observation_schema),
         "",
         "uncertainties:",
         json_dumps_for_text(behavior.uncertainties),

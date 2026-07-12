@@ -65,6 +65,10 @@ class BehaviorTarget(JsonMixin):
     observation_points: list[dict[str, Any]] = field(default_factory=list)
     assertion_hints: list[dict[str, Any]] = field(default_factory=list)
     setup_hints: list[dict[str, Any]] = field(default_factory=list)
+    essential_trigger_factors: list[dict[str, Any]] = field(default_factory=list)
+    trigger_ablation_rules: list[dict[str, Any]] = field(default_factory=list)
+    trace_targets: list[dict[str, Any]] = field(default_factory=list)
+    public_observation_schema: list[str] = field(default_factory=list)
     uncertainties: list[str] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -130,6 +134,127 @@ class MutationPlan(JsonMixin):
 
 
 @dataclass
+class CounterfactualPlan(JsonMixin):
+    instance_id: str = ""
+    positive_trigger_factors: list[str] = field(default_factory=list)
+    selected_ablation_factor: str = ""
+    negative_control_goal: str = ""
+    negative_control_operation: str = ""
+    expected_buggy_effect: str = "UNKNOWN"
+    frozen_regions: list[str] = field(
+        default_factory=lambda: [
+            "imports",
+            "fixtures",
+            "decorators",
+            "class_context",
+            "setup",
+            "runner",
+            "oracle",
+        ]
+    )
+    preserve_target_api: bool = True
+    max_ast_edits: int = 1
+    abstain: bool = False
+    abstain_reason: str = ""
+
+
+@dataclass
+class NegativeControlMetadata(JsonMixin):
+    instance_id: str = ""
+    status: str = "ABSTAIN"
+    selected_factor_id: str = ""
+    changed_ast_nodes: list[str] = field(default_factory=list)
+    frozen_region_changed: bool = False
+    target_api_preserved: bool = True
+    oracle_preserved: bool = True
+    setup_preserved: bool = True
+    test_entry_preserved: bool = True
+    validation_reasons: list[str] = field(default_factory=list)
+    ast_edit_count: int = 0
+    max_ast_edits: int = 1
+    retry_count: int = 0
+    cache_key: str = ""
+    generation_method: str = ""
+
+
+@dataclass
+class TargetReachability(JsonMixin):
+    instance_id: str = ""
+    target_hit: str = "unknown"
+    hit_functions: list[str] = field(default_factory=list)
+    hit_files: list[str] = field(default_factory=list)
+    traceback_frames: list[dict[str, Any]] = field(default_factory=list)
+    covered_target_lines: list[str] = field(default_factory=list)
+    target_call_count: int = 0
+    reachability_source: list[str] = field(default_factory=list)
+    confidence: float = 0.0
+    evidence_complete: bool = False
+
+
+@dataclass
+class FailureSignature(JsonMixin):
+    instance_id: str = ""
+    outcome: str = "UNKNOWN"
+    exception_type: str = ""
+    exception_message_normalized: str = ""
+    failure_location: str = ""
+    top_project_frame: str = ""
+    normalized_failure_signature: str = ""
+    runtime_target_hit: str = "unknown"
+    semantic_target_hit: str = "unknown"
+
+
+@dataclass
+class CounterfactualSurrogateRun(JsonMixin):
+    patch_id: str = ""
+    patch_valid: bool = False
+    positive_result: dict[str, Any] = field(default_factory=dict)
+    negative_result: dict[str, Any] = field(default_factory=dict)
+    negative_skip_reason: str = ""
+
+
+@dataclass
+class CounterfactualEvidence(JsonMixin):
+    instance_id: str = ""
+    positive_buggy: dict[str, Any] = field(default_factory=dict)
+    negative_buggy: dict[str, Any] = field(default_factory=dict)
+    surrogate_runs: list[dict[str, Any]] = field(default_factory=list)
+    trigger_necessity: dict[str, Any] = field(
+        default_factory=lambda: {
+            "status": "UNKNOWN",
+            "score": 0.0,
+            "reason": "",
+        }
+    )
+    repair_sufficiency: dict[str, Any] = field(
+        default_factory=lambda: {
+            "status": "UNKNOWN",
+            "valid_patch_count": 0,
+            "positive_pass_count": 0,
+            "supported_patch_count": 0,
+            "conflicting_patch_count": 0,
+            "invalid_patch_count": 0,
+            "paired_support_score": 0.0,
+            "score": 0.0,
+            "reason": "",
+        }
+    )
+    oracle_stability: dict[str, Any] = field(
+        default_factory=lambda: {
+            "status": "UNKNOWN",
+            "score": 0.0,
+            "reason": "",
+        }
+    )
+    bidirectional_support: dict[str, Any] = field(
+        default_factory=lambda: {
+            "status": "UNKNOWN",
+            "reason": "",
+        }
+    )
+
+
+@dataclass
 class StrictVerifierResult(JsonMixin):
     instance_id: str
     decision: str = "reject"
@@ -139,6 +264,10 @@ class StrictVerifierResult(JsonMixin):
     uses_public_behavior: bool = False
     reason: str = ""
     next_action: str = "reject"
+    runtime_target_hit: str = "unknown"
+    semantic_target_hit: str = "unknown"
+    combined_target_hit: str = "unknown"
+    target_hit_evidence: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -171,6 +300,18 @@ class CandidateCheckpoint(JsonMixin):
     execution: dict[str, Any] = field(default_factory=dict)
     verifier: dict[str, Any] = field(default_factory=dict)
     surrogate: dict[str, Any] = field(default_factory=dict)
+    legacy_score: int = 0
+    legacy_rank: int = 0
+    legacy_selected: bool = False
+    evidence_rank: dict[str, Any] = field(default_factory=dict)
+    evidence_rank_key: list[int] = field(default_factory=list)
+    counterfactual_evidence_rank: dict[str, Any] = field(default_factory=dict)
+    counterfactual_would_select: bool = False
+    counterfactual_evidence: dict[str, Any] = field(default_factory=dict)
+    counterfactual_summary: dict[str, Any] = field(default_factory=dict)
+    selection_changed_by_counterfactual: bool = False
+    ranking_changed_in_shadow: bool = False
+    ranking_change_reason: str = ""
     selected: bool = False
 
 
@@ -186,6 +327,16 @@ class ExecutionResult(JsonMixin):
     timeout: bool = False
     status: str = "PASS"
     error_reason: str = ""
+    outcome: str = ""
+    exception_type: str = ""
+    exception_message_normalized: str = ""
+    failure_location: str = ""
+    top_project_frame: str = ""
+    normalized_failure_signature: str = ""
+    runtime_target_hit: str = "unknown"
+    semantic_target_hit: str = "unknown"
+    public_observations: dict[str, Any] = field(default_factory=dict)
+    return_code: int = 0
 
 
 @dataclass
@@ -273,3 +424,14 @@ class FinalResult(JsonMixin):
     placement_dir: str = ""
     runner_kind: str = ""
     selector: str = ""
+    counterfactual_summary: dict[str, Any] = field(default_factory=dict)
+    enable_bidirectional_counterfactual_validation: bool = False
+    counterfactual_shadow_mode: bool = True
+    enable_negative_control: bool = False
+    max_negative_control_attempts: int = 1
+    max_negative_control_ast_edits: int = 1
+    enable_runtime_target_reachability: bool = False
+    enable_contrastive_observation_oracle: bool = False
+    min_valid_surrogate_patches_for_consensus: int = 2
+    surrogate_consensus_threshold: float = 0.67
+    counterfactual_evidence_mode: str = "soft"

@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import re
+import os
 import shlex
 import subprocess
 import time
 from pathlib import Path
 
 from ..core.schema import BehaviorTarget, ExecutionResult
+
+
+DEFAULT_CONDA_SH = (
+    "/root/conda/ENTER/etc/profile.d/conda.sh"
+    if Path("/root/conda/ENTER/etc/profile.d/conda.sh").is_file()
+    else "/root/miniconda3/etc/profile.d/conda.sh"
+)
+CONDA_SH = os.environ.get("BRT3_CONDA_SH", DEFAULT_CONDA_SH)
 
 
 def _pythonpath_export(cwd: str) -> str:
@@ -136,6 +145,58 @@ def classify_execution(returncode: int, stdout: str, stderr: str, timeout: bool,
     return "UNRELATED_FAIL"
 
 
+def _normalize_log_fragment(text: str) -> str:
+    text = re.sub(r"/tmp/[^\s:]+", "<tmp>", text)
+    text = re.sub(r"/var/folders/[^\s:]+", "<tmp>", text)
+    text = re.sub(r"brt3_surrogate_[A-Za-z0-9_/-]+", "brt_surrogate", text)
+    text = re.sub(r"0x[0-9a-fA-F]+", "0xADDR", text)
+    text = re.sub(r"\b\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?\b", "<timestamp>", text)
+    text = re.sub(r"line \d+", "line N", text)
+    text = re.sub(r":\d+(?::\d+)?", ":N", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:500]
+
+
+def _execution_failure_fields(status: str, stdout: str, stderr: str) -> dict[str, str]:
+    text = f"{stdout}\n{stderr}"
+    exception_type = ""
+    exception_message = ""
+    failure_location = ""
+    top_project_frame = ""
+    for raw in reversed(text.splitlines()):
+        line = raw.strip()
+        match = re.match(r"([A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception|Warning|Failure)):\s*(.*)", line)
+        if match:
+            exception_type = match.group(1).rsplit(".", 1)[-1]
+            exception_message = _normalize_log_fragment(match.group(2))
+            break
+    frame_pattern = re.compile(r'File "([^"]+)", line \d+(?:, in ([A-Za-z_][A-Za-z0-9_]*))?')
+    for match in frame_pattern.finditer(text):
+        path = match.group(1)
+        function = match.group(2) or ""
+        normalized = _normalize_log_fragment(f"{path}::{function}")
+        if not failure_location:
+            failure_location = normalized
+        if "site-packages" not in path and "dist-packages" not in path:
+            top_project_frame = normalized
+            break
+    signature_parts = [
+        status,
+        exception_type,
+        exception_message,
+        top_project_frame or failure_location,
+    ]
+    return {
+        "exception_type": exception_type,
+        "exception_message_normalized": exception_message,
+        "failure_location": failure_location,
+        "top_project_frame": top_project_frame,
+        "normalized_failure_signature": "|".join(
+            part for part in signature_parts if part
+        )[:1000],
+    }
+
+
 def run_command_in_conda(
     command: str,
     cwd: str,
@@ -151,7 +212,7 @@ def run_command_in_conda(
         shell_cmd = f"bash -lc {shlex.quote(pythonpath + ' && ' + command)}"
     else:
         activated = (
-            "source /root/miniconda3/etc/profile.d/conda.sh && "
+            f"source {shlex.quote(CONDA_SH)} && "
             f"conda activate {shlex.quote(conda_env)} && "
             f"{pythonpath} && "
             f"{command}"
@@ -172,6 +233,7 @@ def run_command_in_conda(
         timed_out = True
         stdout = exc.stdout if isinstance(exc.stdout, str) else (exc.stdout or b"").decode("utf-8", errors="replace")
         stderr = exc.stderr if isinstance(exc.stderr, str) else (exc.stderr or b"").decode("utf-8", errors="replace")
+        failure_fields = _execution_failure_fields("TIMEOUT", stdout, stderr)
         return ExecutionResult(
             instance_id=instance_id,
             command=shell_cmd,
@@ -183,12 +245,15 @@ def run_command_in_conda(
             timeout=True,
             status="TIMEOUT",
             error_reason="command timed out",
+            outcome="TIMEOUT",
+            return_code=124,
+            **failure_fields,
         )
     except FileNotFoundError:
         fallback = (
             f"{pythonpath} && {command}"
             if no_conda or not conda_env
-            else f"source ~/miniconda3/etc/profile.d/conda.sh && conda activate {shlex.quote(conda_env)} && {pythonpath} && {command}"
+            else f"source {shlex.quote(CONDA_SH)} && conda activate {shlex.quote(conda_env)} && {pythonpath} && {command}"
         )
         proc = subprocess.run(
             ["bash", "-lc", fallback],
@@ -200,6 +265,7 @@ def run_command_in_conda(
         )
         shell_cmd = fallback
     status = classify_execution(proc.returncode, proc.stdout, proc.stderr, timed_out, behavior)
+    failure_fields = _execution_failure_fields(status, proc.stdout, proc.stderr)
     return ExecutionResult(
         instance_id=instance_id,
         command=shell_cmd,
@@ -215,4 +281,7 @@ def run_command_in_conda(
             if proc.returncode == 0
             else (proc.stdout + "\n" + proc.stderr)[-4000:]
         ),
+        outcome=status,
+        return_code=proc.returncode,
+        **failure_fields,
     )

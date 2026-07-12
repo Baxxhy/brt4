@@ -22,7 +22,10 @@ from ..core.utils import clean_code_block, safe_json_dump, truncate_text, write_
 ORACLE_TYPES = {
     "NO_EXCEPTION", "EXCEPTION_TYPE", "WARNING", "LOGGING", "EXACT_VALUE",
     "TYPE_OR_SHAPE", "STATE_CHANGE", "SQL_VALIDITY", "SERIALIZATION",
-    "RENDER_OUTPUT", "ORDERING",
+    "RENDER_OUTPUT", "ORDERING", "EQUAL", "NOT_EQUAL", "CONTAINS",
+    "NOT_CONTAINS", "TYPE_IS", "SHAPE_IS", "STATE_EQUALS",
+    "ORDER_BEFORE", "WARNING_TYPE", "LOG_CONTAINS",
+    "SERIALIZATION_PROPERTY",
 }
 
 MAX_ORACLE_PROMPT_STRING = 4_000
@@ -114,6 +117,8 @@ def rebind_observation_oracle(
     repo: str,
     version: str,
     round_id: int,
+    contrastive_context: dict[str, Any] | None = None,
+    enable_contrastive_observation: bool = True,
 ) -> tuple[CandidateTest, ObservationReport, str]:
     protocol_json = json.dumps(protocol.to_dict() if protocol else {}, ensure_ascii=False)
     behavior_json = json.dumps(behavior.to_dict(), ensure_ascii=False)
@@ -147,10 +152,21 @@ def rebind_observation_oracle(
     )
     safe_json_dump(report.to_dict(), str(Path(output_dir) / f"oracle_round_{round_id}_observation.json"))
     prompt_report = _prompt_report(report)
+    contrastive_observation = contrastive_context or {}
+    if not enable_contrastive_observation:
+        contrastive_observation = {}
+    if contrastive_observation:
+        safe_json_dump(
+            contrastive_observation,
+            str(Path(output_dir) / "contrastive_observation.json"),
+        )
     rebind_prompt = OBSERVATION_ORACLE_REBIND_PROMPT.format(
         behavior_json=behavior_json,
         protocol_json=protocol_json,
         observation_json=json.dumps(prompt_report, ensure_ascii=False),
+        contrastive_observation_json=json.dumps(
+            _compact_prompt_value(contrastive_observation), ensure_ascii=False
+        ),
         candidate_code=candidate.code,
         execution_log=truncate_text(execution_log, MAX_ORACLE_EXECUTION_LOG),
     )

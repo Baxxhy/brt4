@@ -9,7 +9,10 @@ import os
 import re
 import shlex
 import subprocess
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10 compatibility.
+    tomllib = None
 from pathlib import Path
 from typing import Any
 
@@ -137,7 +140,7 @@ def env_lock_path(env_name: str, suffix: str) -> Path:
 
 def _build_dependency_command(repo_path: str) -> str:
     pyproject = Path(repo_path) / "pyproject.toml"
-    if not pyproject.exists():
+    if not pyproject.exists() or tomllib is None:
         return ""
     try:
         data = tomllib.loads(pyproject.read_text(encoding="utf-8"))

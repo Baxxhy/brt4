@@ -120,6 +120,17 @@ def wait_for_git_locks(repo_dir: str, timeout: int = 600) -> dict[str, Any]:
         time.sleep(2)
 
 
+def parse_bool(value: str | bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"expected true/false, got {value!r}")
+
+
 def git_reset_to(repo_dir: str, commit: str, clean: bool = True) -> dict[str, Any]:
     pre_wait = wait_for_git_locks(repo_dir)
     if pre_wait.get("timeout"):
@@ -382,6 +393,33 @@ def test_command(repo: str, version: str, rel_file: str, selector: str) -> str:
     raise ValueError(f"unsupported project: {repo} version={version}")
 
 
+def trace_test_command(command: str, coverage_dir: str) -> str:
+    """Wrap a normal formal test command with Python trace coverage collection."""
+
+    trace_prefix = (
+        f"python -m trace --count -C {shlex.quote(coverage_dir)} "
+        "--ignore-dir \"$CONDA_PREFIX\" --ignore-dir /root/miniconda3"
+    )
+    env_parts: list[str] = []
+    raw_parts = shlex.split(command)
+    parts = list(raw_parts)
+    while parts and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", parts[0]):
+        env_parts.append(parts.pop(0))
+    env_prefix = " ".join(shlex.quote(part) for part in env_parts)
+    env_prefix = (env_prefix + " ") if env_prefix else ""
+    if len(parts) >= 3 and parts[0] in {"python", "python3"} and parts[1] == "-m":
+        module = parts[2]
+        args = " ".join(shlex.quote(part) for part in parts[3:])
+        return f"{env_prefix}{trace_prefix} --module {shlex.quote(module)} {args}".strip()
+    if parts and parts[0] in {"pytest", "py.test"}:
+        args = " ".join(shlex.quote(part) for part in parts[1:])
+        return f"{env_prefix}{trace_prefix} --module pytest {args}".strip()
+    if parts and parts[0] == "unittest":
+        args = " ".join(shlex.quote(part) for part in parts[1:])
+        return f"{env_prefix}{trace_prefix} --module unittest {args}".strip()
+    return f"{env_prefix}{trace_prefix} {command}".strip()
+
+
 def setup_command(repo: str, version: str) -> str:
     project = repo.split("/")[-1]
     # In this workspace the environments were already created by the author-style
@@ -489,6 +527,136 @@ def patch_requires_rebuild(patch_text: str) -> bool:
     return False
 
 
+def patch_target_lines(patch_text: str) -> dict[str, list[int]]:
+    """Return post-patch line numbers introduced or modified by a true patch."""
+
+    targets: dict[str, set[int]] = {}
+    current_file = ""
+    new_line: int | None = None
+    for line in patch_text.splitlines():
+        if line.startswith("+++ "):
+            path = line[4:].strip()
+            if path == "/dev/null":
+                current_file = ""
+                new_line = None
+                continue
+            current_file = path[2:] if path.startswith("b/") else path
+            targets.setdefault(current_file, set())
+            continue
+        if line.startswith("@@"):
+            match = re.search(r"\+(\d+)(?:,(\d+))?", line)
+            new_line = int(match.group(1)) if match else None
+            continue
+        if not current_file or new_line is None:
+            continue
+        if line.startswith("+") and not line.startswith("+++"):
+            targets.setdefault(current_file, set()).add(new_line)
+            new_line += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            continue
+        else:
+            new_line += 1
+    return {
+        path: sorted(lines)
+        for path, lines in targets.items()
+        if lines and Path(path).suffix == ".py"
+    }
+
+
+def _cover_file_matches_target(cover_file: Path, coverage_dir: Path, target: str) -> bool:
+    rel = cover_file.relative_to(coverage_dir).as_posix()
+    target = target.replace("\\", "/")
+    candidates = [target + ".cover"]
+    if target.endswith(".py"):
+        candidates.append(target[:-3] + ".cover")
+    return any(rel.endswith(candidate) for candidate in candidates)
+
+
+def parse_patch_coverage(
+    coverage_dir: Path,
+    target_lines: dict[str, list[int]],
+) -> dict[str, Any]:
+    covered: dict[str, list[int]] = {}
+    coverage_files = list(coverage_dir.rglob("*.cover")) if coverage_dir.is_dir() else []
+    for target, lines in target_lines.items():
+        line_set = set(lines)
+        hits: set[int] = set()
+        matching_files = [
+            path
+            for path in coverage_files
+            if _cover_file_matches_target(path, coverage_dir, target)
+        ]
+        for cover_file in matching_files:
+            try:
+                cover_lines = cover_file.read_text(
+                    encoding="utf-8", errors="replace"
+                ).splitlines()
+            except OSError:
+                continue
+            for index, text in enumerate(cover_lines, start=1):
+                if index in line_set and re.match(r"\s*\d+:", text):
+                    hits.add(index)
+        covered[target] = sorted(hits)
+    target_count = sum(len(lines) for lines in target_lines.values())
+    covered_count = sum(len(lines) for lines in covered.values())
+    return {
+        "status": "OK" if coverage_dir.is_dir() else "MISSING_COVERAGE_DIR",
+        "target_lines_by_file": target_lines,
+        "covered_lines_by_file": covered,
+        "target_line_count": target_count,
+        "covered_line_count": covered_count,
+        "patch_covered": bool(target_count and covered_count),
+        "patch_line_coverage": covered_count / target_count if target_count else 0.0,
+        "coverage_files_found": len(coverage_files),
+    }
+
+
+def collect_patch_coverage(
+    issue: dict[str, Any],
+    command: str,
+    repo_dir: str,
+    env_name: str,
+    pythonpath: str,
+    timeout: int,
+) -> dict[str, Any]:
+    patch_text = str(issue.get("patch") or "")
+    target_lines = patch_target_lines(patch_text)
+    if not target_lines:
+        return {
+            "status": "NO_PATCH_TARGET_LINES",
+            "target_lines_by_file": {},
+            "covered_lines_by_file": {},
+            "target_line_count": 0,
+            "covered_line_count": 0,
+            "patch_covered": False,
+            "patch_line_coverage": 0.0,
+            "coverage_files_found": 0,
+        }
+    coverage_dir = Path(repo_dir) / ".brt_patch_coverage" / sanitize_instance_id(
+        str(issue["instance_id"])
+    )
+    if coverage_dir.exists():
+        shutil.rmtree(coverage_dir)
+    coverage_dir.mkdir(parents=True, exist_ok=True)
+    traced_command = trace_test_command(command, str(coverage_dir))
+    full_command = (
+        f"{conda_activate_cmd(env_name)} && export PYTHONPATH={pythonpath}:$PYTHONPATH "
+        f"&& {traced_command}"
+    )
+    try:
+        run = run_shell(full_command, repo_dir, timeout)
+        coverage = parse_patch_coverage(coverage_dir, target_lines)
+    finally:
+        shutil.rmtree(coverage_dir, ignore_errors=True)
+    coverage["command"] = traced_command
+    coverage["run"] = run
+    if run.get("timeout"):
+        coverage["status"] = "TIMEOUT"
+    elif run.get("returncode") not in {0, None} and coverage["status"] == "OK":
+        coverage["status"] = "COVERAGE_RUN_FAILED"
+    return coverage
+
+
 def evaluate_one(
     issue: dict[str, Any],
     generated_dir: str,
@@ -499,6 +667,7 @@ def evaluate_one(
     eval_worktree_root: str = "",
     eval_clone_root: str = "",
     cleanup_isolated_worktree: bool = True,
+    compute_patch_coverage: bool = False,
 ) -> dict[str, Any]:
     instance_id = issue["instance_id"]
     final_path = Path(generated_dir) / instance_id / "final_test.py"
@@ -629,6 +798,15 @@ def evaluate_one(
         fixed_run = run_shell(full_command, repo_dir, timeout)
         result["fixed_run"] = fixed_run
         result["fixed"] = classify_run(fixed_run)
+        if compute_patch_coverage:
+            result["patch_coverage"] = collect_patch_coverage(
+                issue,
+                command,
+                repo_dir,
+                env_name,
+                pythonpath,
+                timeout,
+            )
         result["success"] = bool(result["buggy"]["failed"] and not result["fixed"]["failed"])
         if result["success"]:
             result["status"] = "F2P_SUCCESS"
@@ -747,6 +925,7 @@ def run_bucket(
             args.eval_worktree_root,
             args.eval_clone_root or str(Path(args.output_dir) / "eval_clones"),
             not args.keep_eval_worktrees,
+            args.compute_patch_coverage,
         )
         results[iid] = res
         update_failfast_state(
@@ -801,6 +980,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--keep_eval_worktrees",
         action="store_true",
         help="Keep isolated formal-eval clones/worktrees for debugging instead of removing them after each instance.",
+    )
+    parser.add_argument(
+        "--compute_patch_coverage",
+        type=parse_bool,
+        default=False,
+        help="Run an additional fixed-side trace pass and report true patch line coverage.",
     )
     return parser
 
@@ -911,17 +1096,44 @@ def main() -> None:
     success = sum(1 for r in merged.values() if r.get("success"))
     by_status: dict[str, int] = {}
     by_env_error_category: dict[str, int] = {}
+    patch_cov_applicable = 0
+    patch_cov_instances = 0
+    patch_cov_target_lines = 0
+    patch_cov_covered_lines = 0
+    patch_cov_by_status: dict[str, int] = {}
     for r in merged.values():
         by_status[r.get("status", "UNKNOWN")] = by_status.get(r.get("status", "UNKNOWN"), 0) + 1
         category = result_env_category(r)
         if category:
             by_env_error_category[category] = by_env_error_category.get(category, 0) + 1
+        patch_cov = r.get("patch_coverage") if isinstance(r.get("patch_coverage"), dict) else {}
+        if patch_cov:
+            cov_status = str(patch_cov.get("status") or "UNKNOWN")
+            patch_cov_by_status[cov_status] = patch_cov_by_status.get(cov_status, 0) + 1
+            target_lines = int(patch_cov.get("target_line_count") or 0)
+            covered_lines = int(patch_cov.get("covered_line_count") or 0)
+            patch_cov_target_lines += target_lines
+            patch_cov_covered_lines += covered_lines
+            if target_lines:
+                patch_cov_applicable += 1
+                if patch_cov.get("patch_covered"):
+                    patch_cov_instances += 1
     metrics = {
         "total_instances": total,
         "f2p_success": success,
         "f2p_fail": total - success,
         "f2p_at_1": success / total if total else 0,
         "f2p_at_1_percent": round(success / total * 100, 4) if total else 0,
+        "patch_cov_enabled": args.compute_patch_coverage,
+        "patch_cov_applicable": patch_cov_applicable,
+        "patch_cov_success": patch_cov_instances,
+        "patch_cov_at_1": patch_cov_instances / patch_cov_applicable if patch_cov_applicable else 0,
+        "patch_cov_at_1_percent": round(patch_cov_instances / patch_cov_applicable * 100, 4) if patch_cov_applicable else 0,
+        "patch_cov_target_lines": patch_cov_target_lines,
+        "patch_cov_covered_lines": patch_cov_covered_lines,
+        "patch_line_coverage": patch_cov_covered_lines / patch_cov_target_lines if patch_cov_target_lines else 0,
+        "patch_line_coverage_percent": round(patch_cov_covered_lines / patch_cov_target_lines * 100, 4) if patch_cov_target_lines else 0,
+        "patch_cov_by_status": patch_cov_by_status,
         "by_status": by_status,
         "by_env_error_category": by_env_error_category,
         "invalid_environment": bool(failfast_state.get("invalid_environment")),
