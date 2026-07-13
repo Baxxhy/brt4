@@ -28,6 +28,10 @@ REQUIRED_FIELDS = [
     "trigger_ablation_rules",
     "trace_targets",
     "public_observation_schema",
+    "trigger_contract",
+    "failure_contract",
+    "expected_contract",
+    "localization_contract",
     "uncertainties",
 ]
 
@@ -52,10 +56,102 @@ def behavior_from_dict(instance_id: str, data: dict[str, Any]) -> BehaviorTarget
             normalized[key] = []
     if not isinstance(normalized.get("public_observation_schema"), list):
         normalized["public_observation_schema"] = []
-    for key in ["trigger_condition", "error_symptom", "expected_behavior"]:
+    for key in [
+        "trigger_condition",
+        "error_symptom",
+        "expected_behavior",
+        "trigger_contract",
+        "failure_contract",
+        "expected_contract",
+        "localization_contract",
+    ]:
         if not isinstance(normalized.get(key), dict):
             normalized[key] = {}
+    normalized = _induce_contracts(normalized)
     return BehaviorTarget(instance_id=instance_id, raw=data, **normalized)
+
+
+def _induce_contracts(data: dict[str, Any]) -> dict[str, Any]:
+    """Map legacy BehaviorTarget evidence into executable contracts.
+
+    The mapping only copies existing evidence. It deliberately leaves unsupported
+    contract slots empty so old behavior caches remain usable without inventing
+    new issue facts.
+    """
+
+    trigger = data.get("trigger_contract") or {}
+    if not trigger:
+        trigger_condition = data.get("trigger_condition") or {}
+        factors = data.get("essential_trigger_factors") or []
+        trigger = {
+            "required_conditions": [trigger_condition]
+            if trigger_condition.get("text")
+            else [],
+            "target_apis": list(data.get("target_apis") or []),
+            "call_sequence": [
+                item for item in factors if item.get("factor_type") == "call_sequence"
+            ],
+            "state_constraints": [
+                item
+                for item in factors
+                if item.get("factor_type") in {"state", "configuration", "lifecycle"}
+            ],
+            "boundary_conditions": [
+                item
+                for item in factors
+                if item.get("factor_type") in {"boundary", "input_shape"}
+            ],
+        }
+    failure = data.get("failure_contract") or {}
+    if not failure:
+        symptom = data.get("error_symptom") or {}
+        symptom_type = str(symptom.get("symptom_type") or "").strip()
+        failure = {
+            "buggy_symptom": symptom,
+            "allowed_failure_types": [symptom_type] if symptom_type else [],
+            "forbidden_side_failures": [
+                "setup_error",
+                "collect_error",
+                "syntax_error",
+                "environment_error",
+            ],
+        }
+    expected = data.get("expected_contract") or {}
+    if not expected:
+        expected = {
+            "expected_behavior": data.get("expected_behavior") or {},
+            "public_observation_targets": list(
+                data.get("public_observation_schema") or []
+            ),
+            "preferred_oracle_families": [
+                str(item.get("preferred_assertion_style") or "")
+                for item in data.get("assertion_hints") or []
+                if item.get("preferred_assertion_style")
+            ],
+        }
+    localization = data.get("localization_contract") or {}
+    if not localization:
+        locations = data.get("suspected_bug_locations") or []
+        localization = {
+            "suspected_files": list(
+                dict.fromkeys(
+                    str(item.get("path") or "") for item in locations if item.get("path")
+                )
+            ),
+            "suspected_functions": list(
+                dict.fromkeys(
+                    str(item.get("object") or "")
+                    for item in locations
+                    if item.get("object")
+                )
+            ),
+            "trace_targets": list(data.get("trace_targets") or []),
+        }
+    data["trigger_contract"] = trigger
+    data["failure_contract"] = failure
+    data["expected_contract"] = expected
+    data["localization_contract"] = localization
+    return data
 
 
 def save_enhanced_issue_copy(behavior: BehaviorTarget, output_dir: str) -> None:
@@ -101,6 +197,18 @@ def save_enhanced_issue_copy(behavior: BehaviorTarget, output_dir: str) -> None:
         "",
         "public_observation_schema:",
         json_dumps_for_text(behavior.public_observation_schema),
+        "",
+        "trigger_contract:",
+        json_dumps_for_text(behavior.trigger_contract),
+        "",
+        "failure_contract:",
+        json_dumps_for_text(behavior.failure_contract),
+        "",
+        "expected_contract:",
+        json_dumps_for_text(behavior.expected_contract),
+        "",
+        "localization_contract:",
+        json_dumps_for_text(behavior.localization_contract),
         "",
         "uncertainties:",
         json_dumps_for_text(behavior.uncertainties),

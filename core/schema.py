@@ -69,8 +69,88 @@ class BehaviorTarget(JsonMixin):
     trigger_ablation_rules: list[dict[str, Any]] = field(default_factory=list)
     trace_targets: list[dict[str, Any]] = field(default_factory=list)
     public_observation_schema: list[str] = field(default_factory=list)
+    trigger_contract: dict[str, Any] = field(default_factory=dict)
+    failure_contract: dict[str, Any] = field(default_factory=dict)
+    expected_contract: dict[str, Any] = field(default_factory=dict)
+    localization_contract: dict[str, Any] = field(default_factory=dict)
     uncertainties: list[str] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class TestSegments(JsonMixin):
+    instance_id: str = ""
+    scaffold_nodes: list[dict[str, Any]] = field(default_factory=list)
+    trigger_nodes: list[dict[str, Any]] = field(default_factory=list)
+    oracle_nodes: list[dict[str, Any]] = field(default_factory=list)
+    scaffold_hash: str = ""
+    trigger_hash: str = ""
+    oracle_hash: str = ""
+    target_call_locations: list[dict[str, Any]] = field(default_factory=list)
+    observation_candidates: list[dict[str, Any]] = field(default_factory=list)
+    segment_confidence: dict[str, float] = field(
+        default_factory=lambda: {"scaffold": 0.0, "trigger": 0.0, "oracle": 0.0}
+    )
+    test_entry_count: int = 0
+    parse_error: str = ""
+
+
+@dataclass
+class StructuredObservation(JsonMixin):
+    instance_id: str = ""
+    observation_id: str = ""
+    exception_type: str | None = None
+    warning_types: list[str] = field(default_factory=list)
+    return_type: str = ""
+    return_repr_short: str = ""
+    length: int | None = None
+    shape: list[int | str] | None = None
+    dtype: str | None = None
+    public_attrs: dict[str, Any] = field(default_factory=dict)
+    serialization_tokens: list[str] = field(default_factory=list)
+    render_tokens: list[str] = field(default_factory=list)
+    sql_tokens: list[str] = field(default_factory=list)
+    ordering: list[str] = field(default_factory=list)
+    log_tokens: list[str] = field(default_factory=list)
+    source: str = ""
+    status: str = "UNKNOWN"
+    target_expression: str = ""
+    fallback_reason: str = ""
+
+
+@dataclass
+class CandidateArchiveEntry(JsonMixin):
+    candidate_id: str = ""
+    code_hash: str = ""
+    normalized_ast_hash: str = ""
+    behavior_signature: str = ""
+    segment_hashes: dict[str, str] = field(default_factory=dict)
+    origin: str = "UNKNOWN"
+    parent_candidate_id: str = ""
+    seed_id: str = ""
+    round: int = 0
+    search_action: str = ""
+    code_path: str = ""
+    buggy_execution: dict[str, Any] = field(default_factory=dict)
+    verifier_decision: dict[str, Any] = field(default_factory=dict)
+    target_evidence: dict[str, Any] = field(default_factory=dict)
+    oracle_risk: dict[str, Any] = field(default_factory=dict)
+    surrogate_result: dict[str, Any] = field(default_factory=dict)
+    novelty: float = 1.0
+    duplicate_status: str = "UNIQUE"
+    duplicate_of: str = ""
+    duplicate_redirected_from: str = ""
+    observation_id: str = ""
+    executed: bool = False
+
+
+@dataclass
+class AdaptiveSearchDecision(JsonMixin):
+    action: str = "stop"
+    search_action: str = ""
+    reason: str = ""
+    evidence: dict[str, Any] = field(default_factory=dict)
+    abstain: bool = False
 
 
 @dataclass
@@ -156,6 +236,9 @@ class CounterfactualPlan(JsonMixin):
     max_ast_edits: int = 1
     abstain: bool = False
     abstain_reason: str = ""
+    source_anchor: dict[str, Any] = field(default_factory=dict)
+    positive_ast_pattern: str = ""
+    negative_ast_pattern: str = ""
 
 
 @dataclass
@@ -171,10 +254,18 @@ class NegativeControlMetadata(JsonMixin):
     test_entry_preserved: bool = True
     validation_reasons: list[str] = field(default_factory=list)
     ast_edit_count: int = 0
+    semantic_edits: list[dict[str, Any]] = field(default_factory=list)
+    semantic_edit_count: int = 0
+    raw_changed_node_count: int = 0
     max_ast_edits: int = 1
     retry_count: int = 0
     cache_key: str = ""
     generation_method: str = ""
+    imports_preserved: bool = True
+    protocol_preserved: bool = True
+    fixtures_preserved: bool = True
+    decorators_preserved: bool = True
+    trigger_only_changed: bool = True
 
 
 @dataclass
@@ -210,7 +301,10 @@ class CounterfactualSurrogateRun(JsonMixin):
     patch_valid: bool = False
     positive_result: dict[str, Any] = field(default_factory=dict)
     negative_result: dict[str, Any] = field(default_factory=dict)
+    positive_executed: bool = False
+    negative_executed: bool = False
     negative_skip_reason: str = ""
+    paired_execution_complete: bool = False
 
 
 @dataclass
@@ -283,6 +377,7 @@ class CandidateTest(JsonMixin):
     response_path: str = ""
     status: str = "CREATED"
     notes: str = ""
+    lineage: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -312,6 +407,13 @@ class CandidateCheckpoint(JsonMixin):
     selection_changed_by_counterfactual: bool = False
     ranking_changed_in_shadow: bool = False
     ranking_change_reason: str = ""
+    lineage: dict[str, Any] = field(default_factory=dict)
+    repair_aware_would_select: bool = False
+    candidate_id: str = ""
+    archive_entry: dict[str, Any] = field(default_factory=dict)
+    selector_v2_rank: list[int] = field(default_factory=list)
+    selector_v2_reason: str = ""
+    selector_v2_selected: bool = False
     selected: bool = False
 
 
@@ -430,8 +532,29 @@ class FinalResult(JsonMixin):
     enable_negative_control: bool = False
     max_negative_control_attempts: int = 1
     max_negative_control_ast_edits: int = 1
+    enable_negative_control_llm_fallback: bool = True
+    max_negative_control_llm_attempts: int = 1
     enable_runtime_target_reachability: bool = False
     enable_contrastive_observation_oracle: bool = False
+    enable_counterfactual_repair_branch: bool = False
+    max_counterfactual_trigger_repairs: int = 1
+    max_counterfactual_oracle_repairs: int = 1
+    counterfactual_repair_requires_valid_negative: bool = True
     min_valid_surrogate_patches_for_consensus: int = 2
     surrogate_consensus_threshold: float = 0.67
     counterfactual_evidence_mode: str = "soft"
+    method_name: str = "P0"
+    enable_adaptive_typed_search: bool = False
+    enable_structured_observation_extractor: bool = False
+    enable_minimal_oracle_search: bool = False
+    enable_trigger_search: bool = False
+    enable_duplicate_aware_archive: bool = False
+    enable_optional_recomposition: bool = False
+    enable_selector_v2: bool = False
+    max_extra_unique_candidates: int = 3
+    max_trigger_search_candidates: int = 2
+    max_minimal_oracle_candidates: int = 2
+    max_protocol_repair_candidates: int = 1
+    max_recomposition_candidates: int = 1
+    candidate_archive_summary: dict[str, Any] = field(default_factory=dict)
+    adaptive_search_summary: dict[str, Any] = field(default_factory=dict)

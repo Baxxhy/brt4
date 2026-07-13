@@ -138,6 +138,28 @@
 	    "shape",
 	    "dtype"
 	  ],
+	  "trigger_contract": {{
+	    "required_conditions": [],
+	    "target_apis": [],
+	    "call_sequence": [],
+	    "state_constraints": [],
+	    "boundary_conditions": []
+	  }},
+	  "failure_contract": {{
+	    "buggy_symptom": {{}},
+	    "allowed_failure_types": [],
+	    "forbidden_side_failures": ["setup_error", "collect_error", "syntax_error", "environment_error"]
+	  }},
+	  "expected_contract": {{
+	    "expected_behavior": {{}},
+	    "public_observation_targets": [],
+	    "preferred_oracle_families": []
+	  }},
+	  "localization_contract": {{
+	    "suspected_files": [],
+	    "suspected_functions": [],
+	    "trace_targets": []
+	  }},
 	  "uncertainties": [
 	    "当前仍然不确定、需要后续通过运行相似测试或插桩观测确认的信息。"
 	  ]
@@ -157,5 +179,7 @@
 	10. 若 Issue 没给出精确完整字符串，只提取稳定片段、类型或关系，不猜测完整 patched 输出；
 	11. essential_trigger_factors 和 trigger_ablation_rules 只填写有证据且可最小消融的因素；
 	    如果没有可靠负向对照形式，填写空数组或空字符串，不能为了完整而编造；
-	12. trace_targets 只填写源码或 target_apis 能支持的目标函数/类/文件；
-	13. 输出必须能被 Python 的 json.loads 直接解析。
+		12. trace_targets 只填写源码或 target_apis 能支持的目标函数/类/文件；
+		13. 四个 contract 必须严格由已有字段中的证据归纳，不能补写未被 Issue、retrieved code 或 retrieved test 支持的条件；
+		14. trigger_contract 要能直接约束 Trigger Search；expected_contract 只描述公开可观察的修复后行为；
+		15. 输出必须能被 Python 的 json.loads 直接解析。

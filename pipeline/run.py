@@ -13,6 +13,11 @@ from pathlib import Path
 
 from ..core.config import (
     DEFAULT_COUNTERFACTUAL_SHADOW_MODE,
+    DEFAULT_ENABLE_ADAPTIVE_TYPED_SEARCH,
+    DEFAULT_ENABLE_BIDIRECTIONAL_COUNTERFACTUAL_VALIDATION,
+    DEFAULT_ENABLE_CONTRASTIVE_OBSERVATION_ORACLE,
+    DEFAULT_ENABLE_NEGATIVE_CONTROL,
+    DEFAULT_MAX_EXTRA_UNIQUE_CANDIDATES,
     DEFAULT_MAX_FEEDBACK_ROUNDS,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MAX_WORKERS,
@@ -78,12 +83,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable_observation_oracle", type=_parse_bool, default=True)
     parser.add_argument("--enable_strict_semantic_verifier", type=_parse_bool, default=True)
     parser.add_argument("--counterfactual_shadow_mode", type=_parse_bool, default=DEFAULT_COUNTERFACTUAL_SHADOW_MODE)
-    parser.add_argument("--enable_bidirectional_counterfactual_validation", type=_parse_bool, default=True)
-    parser.add_argument("--enable_negative_control", type=_parse_bool, default=True)
+    parser.add_argument("--enable_bidirectional_counterfactual_validation", type=_parse_bool, default=DEFAULT_ENABLE_BIDIRECTIONAL_COUNTERFACTUAL_VALIDATION)
+    parser.add_argument("--enable_negative_control", type=_parse_bool, default=DEFAULT_ENABLE_NEGATIVE_CONTROL)
     parser.add_argument("--max_negative_control_attempts", type=int, default=1)
     parser.add_argument("--max_negative_control_ast_edits", type=int, default=1)
     parser.add_argument("--enable_runtime_target_reachability", type=_parse_bool, default=True)
-    parser.add_argument("--enable_contrastive_observation_oracle", type=_parse_bool, default=True)
+    parser.add_argument("--enable_contrastive_observation_oracle", type=_parse_bool, default=DEFAULT_ENABLE_CONTRASTIVE_OBSERVATION_ORACLE)
+    parser.add_argument("--enable_counterfactual_repair_branch", type=_parse_bool, default=False)
     parser.add_argument("--min_valid_surrogate_patches_for_consensus", type=int, default=2)
     parser.add_argument("--surrogate_consensus_threshold", type=float, default=0.67)
     parser.add_argument(
@@ -91,6 +97,18 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["soft", "strict"],
         default="soft",
     )
+    parser.add_argument("--enable_adaptive_typed_search", type=_parse_bool, default=DEFAULT_ENABLE_ADAPTIVE_TYPED_SEARCH)
+    parser.add_argument("--enable_structured_observation_extractor", type=_parse_bool, default=True)
+    parser.add_argument("--enable_minimal_oracle_search", type=_parse_bool, default=True)
+    parser.add_argument("--enable_trigger_search", type=_parse_bool, default=True)
+    parser.add_argument("--enable_duplicate_aware_archive", type=_parse_bool, default=True)
+    parser.add_argument("--enable_optional_recomposition", type=_parse_bool, default=True)
+    parser.add_argument("--enable_selector_v2", type=_parse_bool, default=True)
+    parser.add_argument("--max_extra_unique_candidates", type=int, default=DEFAULT_MAX_EXTRA_UNIQUE_CANDIDATES)
+    parser.add_argument("--max_trigger_search_candidates", type=int, default=2)
+    parser.add_argument("--max_minimal_oracle_candidates", type=int, default=2)
+    parser.add_argument("--max_protocol_repair_candidates", type=int, default=1)
+    parser.add_argument("--max_recomposition_candidates", type=int, default=1)
     return parser
 
 
@@ -197,6 +215,18 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
                 min_valid_surrogate_patches_for_consensus=args.min_valid_surrogate_patches_for_consensus,
                 surrogate_consensus_threshold=args.surrogate_consensus_threshold,
                 counterfactual_evidence_mode=args.counterfactual_evidence_mode,
+                enable_adaptive_typed_search=args.enable_adaptive_typed_search,
+                enable_structured_observation_extractor=args.enable_structured_observation_extractor,
+                enable_minimal_oracle_search=args.enable_minimal_oracle_search,
+                enable_trigger_search=args.enable_trigger_search,
+                enable_duplicate_aware_archive=args.enable_duplicate_aware_archive,
+                enable_optional_recomposition=args.enable_optional_recomposition,
+                enable_selector_v2=args.enable_selector_v2,
+                max_extra_unique_candidates=args.max_extra_unique_candidates,
+                max_trigger_search_candidates=args.max_trigger_search_candidates,
+                max_minimal_oracle_candidates=args.max_minimal_oracle_candidates,
+                max_protocol_repair_candidates=args.max_protocol_repair_candidates,
+                max_recomposition_candidates=args.max_recomposition_candidates,
             )
         return {"instance_id": instance_id, "status": result.status, "summary": result.to_dict()}
     except Exception as exc:  # noqa: BLE001
@@ -217,9 +247,18 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
             "max_negative_control_ast_edits": args.max_negative_control_ast_edits,
             "enable_runtime_target_reachability": args.enable_runtime_target_reachability,
             "enable_contrastive_observation_oracle": args.enable_contrastive_observation_oracle,
+            "enable_counterfactual_repair_branch": args.enable_counterfactual_repair_branch,
             "min_valid_surrogate_patches_for_consensus": args.min_valid_surrogate_patches_for_consensus,
             "surrogate_consensus_threshold": args.surrogate_consensus_threshold,
             "counterfactual_evidence_mode": args.counterfactual_evidence_mode,
+            "enable_adaptive_typed_search": args.enable_adaptive_typed_search,
+            "enable_structured_observation_extractor": args.enable_structured_observation_extractor,
+            "enable_minimal_oracle_search": args.enable_minimal_oracle_search,
+            "enable_trigger_search": args.enable_trigger_search,
+            "enable_duplicate_aware_archive": args.enable_duplicate_aware_archive,
+            "enable_optional_recomposition": args.enable_optional_recomposition,
+            "enable_selector_v2": args.enable_selector_v2,
+            "max_extra_unique_candidates": args.max_extra_unique_candidates,
             "selected_seed_file": "",
             "selected_seed_name": "",
             "seed_fallback_used": False,
@@ -309,9 +348,23 @@ def main() -> None:
             "max_negative_control_ast_edits": args.max_negative_control_ast_edits,
             "enable_runtime_target_reachability": args.enable_runtime_target_reachability,
             "enable_contrastive_observation_oracle": args.enable_contrastive_observation_oracle,
+            "enable_counterfactual_repair_branch": args.enable_counterfactual_repair_branch,
             "min_valid_surrogate_patches_for_consensus": args.min_valid_surrogate_patches_for_consensus,
             "surrogate_consensus_threshold": args.surrogate_consensus_threshold,
             "counterfactual_evidence_mode": args.counterfactual_evidence_mode,
+            "method_name": "ATS-BRT" if args.enable_adaptive_typed_search else "P0",
+            "enable_adaptive_typed_search": args.enable_adaptive_typed_search,
+            "enable_structured_observation_extractor": args.enable_structured_observation_extractor,
+            "enable_minimal_oracle_search": args.enable_minimal_oracle_search,
+            "enable_trigger_search": args.enable_trigger_search,
+            "enable_duplicate_aware_archive": args.enable_duplicate_aware_archive,
+            "enable_optional_recomposition": args.enable_optional_recomposition,
+            "enable_selector_v2": args.enable_selector_v2,
+            "max_extra_unique_candidates": args.max_extra_unique_candidates,
+            "max_trigger_search_candidates": args.max_trigger_search_candidates,
+            "max_minimal_oracle_candidates": args.max_minimal_oracle_candidates,
+            "max_protocol_repair_candidates": args.max_protocol_repair_candidates,
+            "max_recomposition_candidates": args.max_recomposition_candidates,
         },
     }
     safe_json_dump(summary, str(Path(args.output_dir) / "summary.json"))

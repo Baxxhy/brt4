@@ -363,6 +363,21 @@ def generate_candidate(
         candidate_repo_path=rel_path,
         prompt_path=prompt_path,
         response_path=response_path,
+        lineage={
+            "origin": "generation",
+            "parent_candidate_id": "",
+            "seed_id": host.seed_test_name or host.host_file or "",
+            "generation_round": round_id,
+            "repair_round": 0,
+            "round": round_id,
+            "search_action": "initial_generation",
+            "duplicate_redirected_from": "",
+            "segment_hashes": {},
+            "observation_id": "",
+            "observation_context_used": "none",
+            "counterfactual_evidence_id": "",
+            "negative_control_id": "",
+        },
     )
     if write_to_repo:
         write_candidate_to_repo(candidate, buggy_repo)
@@ -389,6 +404,8 @@ def repair_candidate(
     buggy_repo: str = "",
     protocol: ProtocolRecovery | None = None,
     mutation_plan: MutationPlan | None = None,
+    search_context: dict[str, Any] | None = None,
+    origin_override: str = "",
 ) -> CandidateTest:
     feedback_json = json.dumps(verifier_feedback or {}, ensure_ascii=False)
     source_context = format_effective_source_context(
@@ -432,6 +449,12 @@ def repair_candidate(
     if mutation_plan is not None:
         user_prompt += "\n\n本轮校验后的 mutation plan：" + json.dumps(mutation_plan.to_dict(), ensure_ascii=False)
         user_prompt += "\n只执行 plan 中的小变异，不能修改 oracle。"
+    if search_context:
+        user_prompt += (
+            "\n\n【ATS-BRT 类型化搜索约束】\n"
+            + json.dumps(search_context, ensure_ascii=False)
+            + "\n必须保持 frozen segment 的 AST 语义不变；不得借本轮动作重写其他段。"
+        )
     prompt_path = str(Path(output_dir) / "prompts" / f"repair_prompt_round_{round_id}.txt")
     response_path = str(Path(output_dir) / "responses" / f"repair_response_round_{round_id}.txt")
     write_text(prompt_path, system + "\n\n" + user_prompt)
@@ -515,6 +538,33 @@ def repair_candidate(
         candidate_repo_path=candidate.candidate_repo_path,
         prompt_path=prompt_path,
         response_path=response_path,
+        lineage={
+            "origin": origin_override or (
+                "repair_setup"
+                if focus == "setup"
+                else "repair_oracle"
+                if focus == "oracle"
+                else "repair_trigger"
+            ),
+            "parent_candidate_id": str(
+                (candidate.lineage or {}).get("candidate_id") or candidate.round_id
+            ),
+            "seed_id": str((candidate.lineage or {}).get("seed_id") or ""),
+            "generation_round": round_id,
+            "repair_round": round_id,
+            "round": round_id,
+            "search_action": str((search_context or {}).get("variant") or ""),
+            "duplicate_redirected_from": str(
+                (search_context or {}).get("duplicate_redirected_from") or ""
+            ),
+            "segment_hashes": dict((search_context or {}).get("segment_hashes") or {}),
+            "observation_id": str((search_context or {}).get("observation_id") or ""),
+            "observation_context_used": str(
+                (candidate.lineage or {}).get("observation_context_used") or "none"
+            ),
+            "counterfactual_evidence_id": "",
+            "negative_control_id": "",
+        },
     )
     write_text(new_candidate.candidate_file_path, code)
     new_candidate.pytest_nodeid = new_candidate.candidate_repo_path

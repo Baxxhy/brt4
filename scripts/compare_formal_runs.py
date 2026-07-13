@@ -265,8 +265,12 @@ def main() -> int:
             "counterfactual_eval_dir": str(cf_eval_dir),
             "legacy_metrics": str(legacy_eval_dir / "metrics.json"),
             "counterfactual_metrics": str(cf_eval_dir / "metrics.json"),
+            "legacy_metrics_dataset_total": str(legacy_eval_dir / "metrics_dataset_total.json"),
+            "counterfactual_metrics_dataset_total": str(cf_eval_dir / "metrics_dataset_total.json"),
             "legacy_merged": str(legacy_eval_dir / "merged_results.json"),
             "counterfactual_merged": str(cf_eval_dir / "merged_results.json"),
+            "legacy_merged_with_missing": str(legacy_eval_dir / "merged_results_with_missing.json"),
+            "counterfactual_merged_with_missing": str(cf_eval_dir / "merged_results_with_missing.json"),
         },
     }
     output_path.write_text(

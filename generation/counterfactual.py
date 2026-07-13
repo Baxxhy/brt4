@@ -24,7 +24,8 @@ from ..core.schema import (
     ProtocolRecovery,
     TargetReachability,
 )
-from ..core.utils import ensure_dir, safe_json_dump, write_text
+from ..core.prompts import NEGATIVE_CONTROL_SYSTEM_PROMPT, NEGATIVE_CONTROL_USER_PROMPT
+from ..core.utils import clean_code_block, ensure_dir, safe_json_dump, truncate_text, write_text
 from ..retrieval.icore_runtime import first_test_selector, icore_test_command
 
 
@@ -156,6 +157,19 @@ def build_counterfactual_plan(
             ),
             preserve_target_api=bool(selected_rule.get("preserve_target_api", True)),
             max_ast_edits=int(selected_rule.get("max_ast_edits") or max_ast_edits),
+            source_anchor=dict(
+                (selected_rule.get("source_anchor") or (selected_factor or {}).get("source_anchor") or {})
+            ),
+            positive_ast_pattern=str(
+                selected_rule.get("positive_ast_pattern")
+                or (selected_factor or {}).get("positive_ast_pattern")
+                or ""
+            ),
+            negative_ast_pattern=str(
+                selected_rule.get("negative_ast_pattern")
+                or (selected_factor or {}).get("negative_ast_pattern")
+                or ""
+            ),
         )
     plan.save_json(str(Path(output_dir) / "counterfactual_plan.json"))
     return plan
@@ -191,6 +205,97 @@ def _changed_ast_nodes(positive_code: str, negative_code: str) -> list[str]:
         changed.extend(positive_nodes[i1:i2])
         changed.extend(negative_nodes[j1:j2])
     return list(dict.fromkeys(changed))[:40]
+
+
+def _normalized_ast_dump(code: str) -> str:
+    try:
+        return ast.dump(ast.parse(code), include_attributes=False)
+    except SyntaxError:
+        return ""
+
+
+def _semantic_edit_type(operation: str, positive: str = "", negative: str = "") -> str:
+    normalized = str(operation or "").upper()
+    mapping = {
+        "OPERATOR_FLIP": "OPERATOR_REPLACE",
+        "ARG_VALUE_REPLACE": "ARGUMENT_REPLACE",
+        "CALL_REMOVAL": "CALL_SEQUENCE_ABLATION",
+        "BOUNDARY_NORMALIZE": "BOUNDARY_NORMALIZE",
+        "STATE_RESET": "STATE_RESET",
+        "CONFIG_RESET": "CONFIG_RESET",
+    }
+    if normalized in mapping:
+        return mapping[normalized]
+    if normalized in {
+        "OPERATOR_REMOVE",
+        "OPERATOR_REPLACE",
+        "ARGUMENT_REPLACE",
+        "ARGUMENT_REMOVE",
+        "ARGUMENT_INSERT",
+        "BOOLEAN_FLIP",
+        "CALL_SEQUENCE_ABLATION",
+        "LIFECYCLE_ABLATION",
+        "INPUT_SHAPE_NORMALIZE",
+        "OTHER_TRIGGER_ABLATION",
+    }:
+        return normalized
+    if positive.startswith("~") and negative == positive[1:]:
+        return "OPERATOR_REMOVE"
+    if positive in {"True", "False"} and negative in {"True", "False"}:
+        return "BOOLEAN_FLIP"
+    return "OTHER_TRIGGER_ABLATION"
+
+
+def _semantic_edits_from_transform(
+    plan: CounterfactualPlan,
+    positive: str,
+    negative: str,
+    changed_nodes: list[str],
+    generation_method: str = "",
+) -> list[dict[str, Any]]:
+    if not changed_nodes:
+        return []
+    return [
+        {
+            "edit_type": _semantic_edit_type(
+                plan.negative_control_operation, positive, negative
+            ),
+            "before": truncate_text(positive, 400),
+            "after": truncate_text(negative, 400),
+            "anchor": json.dumps(plan.source_anchor or {}, ensure_ascii=False),
+            "count": 1,
+            "generation_method": generation_method,
+        }
+    ]
+
+
+def _body_without_assertions_fingerprint(tree: ast.AST) -> str:
+    clone = ast.parse(ast.unparse(tree) if hasattr(ast, "unparse") else "")
+    for node in ast.walk(clone):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            new_body: list[ast.stmt] = []
+            for child in node.body:
+                if isinstance(child, ast.Assert):
+                    continue
+                if isinstance(child, ast.Expr) and isinstance(child.value, ast.Call):
+                    func_dump = ast.dump(child.value.func, include_attributes=False).lower()
+                    if "assert" in func_dump or "raises" in func_dump:
+                        continue
+                new_body.append(child)
+            node.body = new_body or [ast.Pass()]
+    return ast.dump(clone, include_attributes=False)
+
+
+def _oracle_preserved(positive_tree: ast.AST, negative_tree: ast.AST) -> bool:
+    return _assert_fingerprint(positive_tree) == _assert_fingerprint(negative_tree)
+
+
+def _protocol_preserved(positive_tree: ast.AST, negative_tree: ast.AST) -> bool:
+    return (
+        _import_fingerprint(positive_tree) == _import_fingerprint(negative_tree)
+        and _decorator_fingerprint(positive_tree) == _decorator_fingerprint(negative_tree)
+        and _signature_fingerprint(positive_tree) == _signature_fingerprint(negative_tree)
+    )
 
 
 def _import_fingerprint(tree: ast.AST) -> list[str]:
@@ -346,6 +451,145 @@ def _token_aware_replace(code: str, positive: str, negative: str) -> tuple[str, 
         return code, ""
 
 
+def _regex_unique_replace(code: str, pattern: str, replacement: str) -> tuple[str, str]:
+    matches = list(re.finditer(pattern, code))
+    if len(matches) != 1:
+        return code, ""
+    match = matches[0]
+    start, end = match.span()
+    try:
+        replacement_text = match.expand(replacement)
+    except re.error:
+        replacement_text = replacement
+    return code[:start] + replacement_text + code[end:], "AST_ANCHORED_REGEX_REPLACE"
+
+
+def _apply_ast_anchor_transform(
+    code: str,
+    plan: CounterfactualPlan,
+    positive: str,
+    negative: str,
+) -> tuple[str, str]:
+    anchor = plan.source_anchor or {}
+    operation = _semantic_edit_type(plan.negative_control_operation, positive, negative)
+    if positive and negative and positive in code and code.count(positive) == 1:
+        return code.replace(positive, negative, 1), "AST_ANCHOR_EXACT_REPLACE"
+    callee = str(anchor.get("callee") or "").strip()
+    argument_name = str(anchor.get("argument_name") or "").strip()
+    literal = str(anchor.get("literal_value") or "").strip()
+    if operation == "OPERATOR_REMOVE" and positive.startswith("~"):
+        return _regex_unique_replace(
+            code,
+            rf"~\s*({re.escape(positive[1:].strip())})",
+            negative or positive[1:].strip(),
+        )
+    if operation == "BOOLEAN_FLIP" and argument_name:
+        return _regex_unique_replace(
+            code,
+            rf"({re.escape(argument_name)}\s*=\s*)(True|False)",
+            rf"\g<1>{'False' if literal == 'True' or positive.endswith('True') else 'True'}",
+        )
+    if operation in {"ARGUMENT_REPLACE", "CONFIG_RESET", "STATE_RESET", "BOUNDARY_NORMALIZE"} and argument_name and negative:
+        negative_value = negative.split("=", 1)[-1].strip() if "=" in negative else negative
+        return _regex_unique_replace(
+            code,
+            rf"({re.escape(argument_name)}\s*=\s*)[^,\)\n]+",
+            rf"\g<1>{negative_value}",
+        )
+    if operation == "ARGUMENT_REMOVE" and argument_name:
+        return _regex_unique_replace(
+            code,
+            rf",?\s*{re.escape(argument_name)}\s*=\s*[^,\)\n]+",
+            "",
+        )
+    if operation in {"CALL_SEQUENCE_ABLATION", "LIFECYCLE_ABLATION"} and callee:
+        return _regex_unique_replace(
+            code,
+            rf"(?m)^\s*.*\b{re.escape(callee)}\s*\([^\\n]*\)\s*$\n?",
+            "",
+        )
+    return code, ""
+
+
+def _apply_pattern_transform(
+    code: str,
+    plan: CounterfactualPlan,
+    positive: str,
+    negative: str,
+) -> tuple[str, str]:
+    positive_pattern = plan.positive_ast_pattern.strip()
+    negative_pattern = plan.negative_ast_pattern.strip()
+    if positive_pattern and negative_pattern:
+        normalized = _normalized_ast_dump(positive_pattern)
+        if normalized and _normalized_ast_dump(positive) == normalized:
+            return _regex_unique_replace(code, re.escape(positive), negative)
+    if positive and negative:
+        escaped = re.escape(positive)
+        return _regex_unique_replace(code, escaped, negative)
+    return code, ""
+
+
+def _deterministic_negative_transform(
+    code: str,
+    plan: CounterfactualPlan,
+    positive: str,
+    negative: str,
+) -> tuple[str, str, int]:
+    for transform in (
+        lambda: _apply_ast_anchor_transform(code, plan, positive, negative),
+        lambda: _apply_pattern_transform(code, plan, positive, negative),
+    ):
+        transformed, method = transform()
+        if method and transformed != code:
+            return transformed, method, 1
+    if positive and negative:
+        occurrences = code.count(positive)
+        if occurrences == 1:
+            return code.replace(positive, negative, 1), "EXACT_TEXT_REPLACE", occurrences
+        token_code, token_method = _token_aware_replace(code, positive, negative)
+        if token_method and token_code != code:
+            return token_code, token_method, 1
+        return "", "", occurrences
+    return "", "", 0
+
+
+def _llm_negative_control_fallback(
+    behavior: BehaviorTarget,
+    plan: CounterfactualPlan,
+    candidate: CandidateTest,
+    output_path: Path,
+    llm_client: Any | None,
+    protocol: ProtocolRecovery | None,
+    execution_log: str,
+    max_attempts: int,
+) -> tuple[str, str]:
+    if llm_client is None or max_attempts <= 0:
+        return "", ""
+    behavior_json = json.dumps(behavior.to_dict(), ensure_ascii=False)
+    protocol_json = json.dumps(protocol.to_dict() if protocol else {}, ensure_ascii=False)
+    plan_json = json.dumps(plan.to_dict(), ensure_ascii=False)
+    prompt = NEGATIVE_CONTROL_USER_PROMPT.format(
+        behavior_json=behavior_json,
+        protocol_json=protocol_json,
+        counterfactual_plan_json=plan_json,
+        candidate_code=candidate.code,
+    )
+    prompt += (
+        "\n\n当前 buggy execution / failure signature：\n"
+        + truncate_text(execution_log, 12000)
+        + "\n\n必须只输出完整 negative-control Python 文件。"
+    )
+    write_text(str(output_path / "negative_control_llm_prompt.txt"), NEGATIVE_CONTROL_SYSTEM_PROMPT + "\n\n" + prompt)
+    for attempt in range(max_attempts):
+        response = llm_client.chat(NEGATIVE_CONTROL_SYSTEM_PROMPT, prompt)
+        response_path = output_path / f"negative_control_llm_response_{attempt}.txt"
+        write_text(str(response_path), response)
+        code = clean_code_block(response).strip()
+        if code:
+            return code + "\n", "LLM_FALLBACK"
+    return "", ""
+
+
 def validate_negative_control_structure(
     behavior: BehaviorTarget,
     positive_code: str,
@@ -354,17 +598,22 @@ def validate_negative_control_structure(
 ) -> NegativeControlMetadata:
     selected_factor_id = plan.selected_ablation_factor
     changed_nodes = _changed_ast_nodes(positive_code, negative_code)
-    semantic_edit_count = 0 if not changed_nodes else max(1, (len(changed_nodes) + 1) // 2)
+    raw_changed_node_count = len(changed_nodes)
     metadata = NegativeControlMetadata(
         instance_id=behavior.instance_id,
         selected_factor_id=selected_factor_id,
         changed_ast_nodes=changed_nodes,
-        ast_edit_count=semantic_edit_count,
+        ast_edit_count=raw_changed_node_count,
+        raw_changed_node_count=raw_changed_node_count,
         max_ast_edits=plan.max_ast_edits,
     )
     if not negative_code.strip():
         metadata.status = "INVALID"
         metadata.validation_reasons.append("negative control code is empty")
+        return metadata
+    if positive_code.strip() == negative_code.strip():
+        metadata.status = "INVALID"
+        metadata.validation_reasons.append("negative control did not change the trigger slice")
         return metadata
     try:
         positive_tree = ast.parse(positive_code)
@@ -374,6 +623,18 @@ def validate_negative_control_structure(
         metadata.validation_reasons.append(f"negative control syntax error: {exc}")
         return metadata
     target_names = _target_names(behavior)
+    positive_form = ""
+    negative_form = ""
+    for item in list(behavior.trigger_ablation_rules) + list(behavior.essential_trigger_factors):
+        if isinstance(item, dict) and _factor_id(item) == selected_factor_id:
+            positive_form = str(item.get("positive_form") or "").strip()
+            negative_form = str(item.get("negative_control_form") or "").strip()
+            break
+    semantic_edits = _semantic_edits_from_transform(
+        plan, positive_form, negative_form, changed_nodes
+    )
+    metadata.semantic_edits = semantic_edits
+    metadata.semantic_edit_count = sum(int(item.get("count") or 0) for item in semantic_edits)
     metadata.test_entry_preserved = (
         _test_entry_fingerprint(positive_tree) == _test_entry_fingerprint(negative_tree)
     )
@@ -382,11 +643,16 @@ def validate_negative_control_structure(
         or _count_target_occurrences(negative_code, target_names)
         >= max(1, _count_target_occurrences(positive_code, target_names))
     )
-    metadata.oracle_preserved = _assert_fingerprint(positive_tree) == _assert_fingerprint(negative_tree)
-    metadata.setup_preserved = (
-        _import_fingerprint(positive_tree) == _import_fingerprint(negative_tree)
-        and _decorator_fingerprint(positive_tree) == _decorator_fingerprint(negative_tree)
-        and _signature_fingerprint(positive_tree) == _signature_fingerprint(negative_tree)
+    metadata.oracle_preserved = _oracle_preserved(positive_tree, negative_tree)
+    metadata.imports_preserved = _import_fingerprint(positive_tree) == _import_fingerprint(negative_tree)
+    metadata.decorators_preserved = _decorator_fingerprint(positive_tree) == _decorator_fingerprint(negative_tree)
+    metadata.fixtures_preserved = True
+    metadata.setup_preserved = _protocol_preserved(positive_tree, negative_tree)
+    metadata.protocol_preserved = metadata.setup_preserved
+    metadata.trigger_only_changed = (
+        metadata.oracle_preserved
+        and metadata.setup_preserved
+        and metadata.test_entry_preserved
     )
     metadata.frozen_region_changed = not (
         metadata.oracle_preserved and metadata.setup_preserved
@@ -399,9 +665,9 @@ def validate_negative_control_structure(
         metadata.validation_reasons.append("imports, decorators, class context, or test signature changed")
     if not metadata.test_entry_preserved:
         metadata.validation_reasons.append("test entry structure changed")
-    if semantic_edit_count > max(1, plan.max_ast_edits):
+    if metadata.semantic_edit_count > max(1, plan.max_ast_edits):
         metadata.validation_reasons.append(
-            f"AST edit count {semantic_edit_count} exceeds max_ast_edits={plan.max_ast_edits}"
+            f"semantic edit count {metadata.semantic_edit_count} exceeds max_ast_edits={plan.max_ast_edits}"
         )
     metadata.validation_reasons.extend(_has_banned_constructs(negative_tree, target_names))
     metadata.status = "VALID" if not metadata.validation_reasons else "INVALID"
@@ -415,6 +681,12 @@ def generate_negative_control(
     output_dir: str,
     repo: str,
     version: str,
+    *,
+    llm_client: Any | None = None,
+    protocol: ProtocolRecovery | None = None,
+    execution_log: str = "",
+    enable_llm_fallback: bool = True,
+    max_llm_attempts: int = 1,
 ) -> tuple[CandidateTest | None, NegativeControlMetadata]:
     """Create a one-slice negative-control test without modifying final_test.py."""
 
@@ -452,44 +724,50 @@ def generate_negative_control(
         )
     positive = str(rule.get("positive_form") or "").strip()
     negative = str(rule.get("negative_control_form") or "").strip()
-    occurrences = candidate.code.count(positive) if positive else 0
-    generation_method = "EXACT_TEXT_REPLACE"
-    if positive and negative and occurrences == 0:
-        token_code, token_method = _token_aware_replace(candidate.code, positive, negative)
-        if token_method:
-            negative_code = token_code
-            generation_method = token_method
-            occurrences = 1
-        else:
-            negative_code = ""
-    else:
-        negative_code = candidate.code.replace(positive, negative, 1) if occurrences == 1 else ""
+    negative_code, generation_method, occurrences = _deterministic_negative_transform(
+        candidate.code, plan, positive, negative
+    )
+    used_llm = False
     if not positive or not negative or occurrences != 1 or not negative_code:
-        reason = (
-            "ablation forms are missing"
-            if not positive or not negative
-            else (
-                "positive_form did not have a safe exact or token-aware match; "
-                f"found {occurrences}; LLM fallback is unavailable in static/deterministic mode"
+        negative_code, generation_method = _llm_negative_control_fallback(
+            behavior,
+            plan,
+            candidate,
+            output_path,
+            llm_client if enable_llm_fallback else None,
+            protocol,
+            execution_log,
+            max_llm_attempts,
+        )
+        used_llm = bool(negative_code)
+        if not negative_code:
+            reason = (
+                "ablation forms are missing"
+                if not positive or not negative
+                else (
+                    "positive_form did not have a safe AST anchor, pattern, token-aware, "
+                    f"or exact match; found {occurrences}; LLM fallback failed or unavailable"
+                )
             )
-        )
-        metadata = NegativeControlMetadata(
-            instance_id=behavior.instance_id,
-            status="ABSTAIN",
-            selected_factor_id=plan.selected_ablation_factor,
-            validation_reasons=[reason],
-            max_ast_edits=plan.max_ast_edits,
-            cache_key=cache_key,
-            generation_method="ABSTAIN_LLM_FALLBACK_UNAVAILABLE",
-        )
-        metadata.save_json(str(output_path / "negative_control_metadata.json"))
-        return None, metadata
+            metadata = NegativeControlMetadata(
+                instance_id=behavior.instance_id,
+                status="ABSTAIN",
+                selected_factor_id=plan.selected_ablation_factor,
+                validation_reasons=[reason],
+                max_ast_edits=plan.max_ast_edits,
+                cache_key=cache_key,
+                generation_method="ABSTAIN_LLM_FALLBACK_FAILED",
+                retry_count=max(0, max_llm_attempts if enable_llm_fallback else 0),
+            )
+            metadata.save_json(str(output_path / "negative_control_metadata.json"))
+            return None, metadata
     write_text(str(output_path / "negative_control_test.py"), negative_code)
     metadata = validate_negative_control_structure(
         behavior, candidate.code, negative_code, plan
     )
     metadata.cache_key = cache_key
     metadata.generation_method = generation_method
+    metadata.retry_count = 1 if used_llm else 0
     metadata.save_json(str(output_path / "negative_control_metadata.json"))
     if metadata.status != "VALID":
         return None, metadata
@@ -684,6 +962,21 @@ def _usable_surrogate_execution(execution: dict[str, Any]) -> bool:
     return bool(execution) and status not in NON_EXECUTABLE_STATUSES
 
 
+def _execution_was_run(execution: dict[str, Any]) -> bool:
+    return bool(
+        isinstance(execution, dict)
+        and execution
+        and (
+            "command" in execution
+            or "returncode" in execution
+            or "return_code" in execution
+            or "stdout" in execution
+            or "stderr" in execution
+            or "status" in execution
+        )
+    )
+
+
 def _execution_dict_pass(execution: dict[str, Any]) -> bool:
     return int(execution.get("returncode") or execution.get("return_code") or 0) == 0
 
@@ -712,13 +1005,25 @@ def _surrogate_runs(dual: DualVersionResult | None) -> list[dict[str, Any]]:
             and _usable_surrogate_execution(execution)
             and str(attempt.get("status") or "") == "APPLIED"
         )
+        positive_executed = _execution_was_run(execution if isinstance(execution, dict) else {})
+        negative_executed = _execution_was_run(
+            negative_execution if isinstance(negative_execution, dict) else {}
+        )
         runs.append(
             {
                 "patch_id": str(attempt.get("round_id") if isinstance(attempt, dict) else ""),
                 "patch_valid": patch_valid,
                 "positive_result": execution if isinstance(execution, dict) else {},
                 "negative_result": negative_execution if isinstance(negative_execution, dict) else {},
+                "positive_executed": bool(attempt.get("positive_executed", positive_executed)),
+                "negative_executed": bool(attempt.get("negative_executed", negative_executed)),
                 "negative_skip_reason": str(attempt.get("negative_skip_reason") or ""),
+                "paired_execution_complete": bool(
+                    attempt.get(
+                        "paired_execution_complete",
+                        positive_executed and negative_executed,
+                    )
+                ),
             }
         )
     return runs
@@ -844,6 +1149,14 @@ def build_counterfactual_evidence(
         for run in evidence.surrogate_runs
         if run.get("patch_valid")
     ]
+    paired_runs = [
+        run
+        for run in valid_runs
+        if run.get("positive_executed")
+        and run.get("negative_executed")
+        and _execution_was_run(run.get("positive_result") or {})
+        and _execution_was_run(run.get("negative_result") or {})
+    ]
     pass_runs = [
         run
         for run in valid_runs
@@ -917,32 +1230,84 @@ def build_counterfactual_evidence(
         }
     trigger_status = str(evidence.trigger_necessity.get("status") or "UNKNOWN")
     repair_status = str(evidence.repair_sufficiency.get("status") or "UNKNOWN")
-    if trigger_status == "SUPPORTED" and repair_status == "SUPPORTED":
+    paired_positive_pass = [
+        run for run in paired_runs if _execution_dict_pass(run.get("positive_result") or {})
+    ]
+    paired_negative_stable: list[dict[str, Any]] = []
+    paired_conflicts: list[dict[str, Any]] = []
+    for run in paired_runs:
+        positive_result = run.get("positive_result") or {}
+        negative_result = run.get("negative_result") or {}
+        negative_status = str(negative_result.get("status") or negative_result.get("outcome") or "")
+        if _is_non_executable_status(negative_status):
+            paired_conflicts.append(run)
+            continue
+        if _execution_dict_pass(negative_result):
+            paired_negative_stable.append(run)
+            continue
+        comparison = compare_failure_signatures(
+            _execution_dict_signature(positive_result),
+            _execution_dict_signature(negative_result),
+        )
+        if comparison == "SAME" and not _execution_dict_pass(positive_result):
+            paired_conflicts.append(run)
+        else:
+            paired_negative_stable.append(run)
+    if len(paired_runs) < max(1, min_valid_surrogate_patches):
         evidence.oracle_stability = {
-            "status": "STABLE",
-            "score": 1.0,
-            "reason": "positive/negative contrast and surrogate repairs agree",
+            "status": "UNKNOWN",
+            "score": 0.0,
+            "valid_paired_patch_ids": [str(run.get("patch_id") or "") for run in paired_runs],
+            "positive_pass_count": len(paired_positive_pass),
+            "negative_stable_count": len(paired_negative_stable),
+            "conflicting_patch_ids": [str(run.get("patch_id") or "") for run in paired_conflicts],
+            "reason": "not enough valid paired surrogate executions for oracle stability",
         }
+    else:
+        positive_ratio = len(paired_positive_pass) / len(paired_runs)
+        negative_ratio = len(paired_negative_stable) / len(paired_runs)
+        if (
+            positive_ratio >= surrogate_consensus_threshold
+            and negative_ratio >= surrogate_consensus_threshold
+            and not paired_conflicts
+        ):
+            evidence.oracle_stability = {
+                "status": "STABLE",
+                "score": min(positive_ratio, negative_ratio),
+                "valid_paired_patch_ids": [str(run.get("patch_id") or "") for run in paired_runs],
+                "positive_pass_count": len(paired_positive_pass),
+                "negative_stable_count": len(paired_negative_stable),
+                "conflicting_patch_ids": [],
+                "reason": "positive and negative outcomes are stable across paired surrogate repairs",
+            }
+        else:
+            evidence.oracle_stability = {
+                "status": "UNSTABLE",
+                "score": min(positive_ratio, negative_ratio),
+                "valid_paired_patch_ids": [str(run.get("patch_id") or "") for run in paired_runs],
+                "positive_pass_count": len(paired_positive_pass),
+                "negative_stable_count": len(paired_negative_stable),
+                "conflicting_patch_ids": [str(run.get("patch_id") or "") for run in paired_conflicts],
+                "reason": "paired surrogate repairs give conflicting positive/negative oracle evidence",
+            }
+    oracle_status = str(evidence.oracle_stability.get("status") or "UNKNOWN")
+    if trigger_status == "SUPPORTED" and repair_status == "SUPPORTED":
         evidence.bidirectional_support = {
             "status": "STRONG",
             "reason": "test-side trigger ablation and program-side surrogate repair both support the candidate",
         }
     elif "SUPPORTED" in {trigger_status, repair_status} or "WEAK" in {trigger_status, repair_status}:
-        evidence.oracle_stability = {
-            "status": "UNKNOWN",
-            "score": 0.4,
-            "reason": "only partial counterfactual evidence is available",
-        }
         evidence.bidirectional_support = {
             "status": "PARTIAL",
             "reason": "one side of the counterfactual evidence supports the candidate",
         }
     elif trigger_status == "UNSUPPORTED" and repair_status == "UNSUPPORTED":
-        evidence.oracle_stability = {
-            "status": "UNSTABLE",
-            "score": 0.0,
-            "reason": "negative control and surrogate repair evidence do not support the oracle",
-        }
+        if oracle_status == "UNKNOWN":
+            evidence.oracle_stability = {
+                "status": "UNSTABLE",
+                "score": 0.0,
+                "reason": "negative control and surrogate repair evidence do not support the oracle",
+            }
         evidence.bidirectional_support = {
             "status": "NONE",
             "reason": "neither test-side nor program-side counterfactual evidence supports the candidate",
@@ -967,6 +1332,12 @@ def counterfactual_summary(
     counterfactual_would_select_candidate_id: str = "",
 ) -> dict[str, Any]:
     repair = evidence.repair_sufficiency if evidence else {}
+    surrogate_runs = evidence.surrogate_runs if evidence else []
+    paired_runs = [
+        run for run in surrogate_runs
+        if isinstance(run, dict) and run.get("paired_execution_complete")
+    ]
+    oracle_stability = evidence.oracle_stability if evidence else {}
     return {
         "enabled": enabled,
         "shadow_mode": shadow_mode,
@@ -988,6 +1359,25 @@ def counterfactual_summary(
             (repair or {}).get("status")
             if evidence
             else "UNKNOWN"
+        ),
+        "oracle_stability": (
+            (oracle_stability or {}).get("status")
+            if evidence
+            else "UNKNOWN"
+        ),
+        "positive_surrogate_executed_count": sum(
+            1 for run in surrogate_runs if isinstance(run, dict) and run.get("positive_executed")
+        ),
+        "negative_surrogate_executed_count": sum(
+            1 for run in surrogate_runs if isinstance(run, dict) and run.get("negative_executed")
+        ),
+        "paired_surrogate_execution_count": len(paired_runs),
+        "complete_2x2": bool(
+            evidence
+            and evidence.positive_buggy
+            and evidence.negative_buggy
+            and evidence.negative_buggy.get("outcome") != "UNKNOWN"
+            and paired_runs
         ),
         "bidirectional_support": (
             (evidence.bidirectional_support or {}).get("status")

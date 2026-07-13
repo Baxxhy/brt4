@@ -276,12 +276,12 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    if summary["missing_generated"]:
-        print(json.dumps(summary, ensure_ascii=False, indent=2))
-        return 1 if args.require_complete else 0
     if args.touch_done:
         (run_dir / "legacy_export.done").write_text("", encoding="utf-8")
         (run_dir / "counterfactual_export.done").write_text("", encoding="utf-8")
+    if summary["missing_generated"]:
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 1 if args.require_complete else 0
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 

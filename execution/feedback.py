@@ -25,6 +25,17 @@ from ..context.host_context import build_host_context, rank_related_tests, selec
 from ..context.protocol_recovery import audit_recovered_protocol, recover_test_protocol
 from ..mutation.seed_mutator import build_mutation_plan
 from ..generation.observation_oracle import rebind_observation_oracle
+from ..generation.archive import CandidateArchive
+from ..generation.adaptive_search import (
+    SearchBudgets,
+    decide_search_action,
+    recompose_candidate,
+    search_prompt_context,
+    select_checkpoint_v2,
+    validate_typed_transformation,
+)
+from ..generation.segmenter import segment_test, transplant_typed_segment
+from ..generation.structured_observation import collect_structured_observation
 from ..generation.counterfactual import (
     build_counterfactual_evidence,
     build_counterfactual_plan,
@@ -47,6 +58,7 @@ from ..generation.oracle import run_observation_probe, synthesize_oracle
 from ..execution.patch_utils import run_surrogate_patch_loop
 from ..core.schema import (
     CandidateCheckpoint,
+    CandidateTest,
     DualVersionResult,
     ExecutionResult,
     FinalResult,
@@ -289,6 +301,24 @@ def _counterfactual_checkpoint_order_key(checkpoint: CandidateCheckpoint) -> tup
     )
 
 
+REPAIR_AWARE_ONLY_ORIGINS = {
+    "contrastive_observation_oracle",
+    "counterfactual_trigger_repair",
+    "counterfactual_oracle_repair",
+}
+
+
+def _checkpoint_origin(checkpoint: CandidateCheckpoint | dict[str, Any]) -> str:
+    lineage = checkpoint.lineage if isinstance(checkpoint, CandidateCheckpoint) else checkpoint.get("lineage")
+    if isinstance(lineage, dict):
+        return str(lineage.get("origin") or "UNKNOWN")
+    return "UNKNOWN"
+
+
+def _is_repair_aware_only(checkpoint: CandidateCheckpoint | dict[str, Any]) -> bool:
+    return _checkpoint_origin(checkpoint) in REPAIR_AWARE_ONLY_ORIGINS
+
+
 def _legacy_checkpoint_order_key(checkpoint: CandidateCheckpoint) -> tuple[int, int]:
     return (
         int(checkpoint.legacy_score or checkpoint.selector_score_after_risk or checkpoint.score),
@@ -394,6 +424,8 @@ def _save_checkpoint(
     counterfactual_summary_data: dict[str, Any] | None = None,
     protocol_valid: bool = True,
     counterfactual_shadow_mode: bool = True,
+    lineage: dict[str, Any] | None = None,
+    archive_entry: dict[str, Any] | None = None,
 ) -> CandidateCheckpoint:
     checkpoint_dir = ensure_dir(Path(output_dir) / "checkpoints")
     code_path = str(Path(checkpoint_dir) / f"candidate_attempt_{attempt_id}.py")
@@ -441,6 +473,20 @@ def _save_checkpoint(
         counterfactual_evidence_rank=evidence_rank,
         counterfactual_evidence=counterfactual_evidence or {},
         counterfactual_summary=counterfactual_summary_data or {},
+        lineage=lineage or getattr(candidate, "lineage", {}) or {
+            "origin": "UNKNOWN",
+            "parent_candidate_id": "",
+            "seed_id": "",
+            "generation_round": attempt_id,
+            "repair_round": 0,
+            "observation_context_used": "none",
+            "counterfactual_evidence_id": "",
+            "negative_control_id": "",
+        },
+        candidate_id=str(
+            (getattr(candidate, "lineage", {}) or {}).get("candidate_id") or attempt_id
+        ),
+        archive_entry=archive_entry or {},
     )
     checkpoint.save_json(
         str(Path(checkpoint_dir) / f"candidate_attempt_{attempt_id}.json")
@@ -819,19 +865,32 @@ def run_instance_pipeline(
     enable_observation_oracle: bool = True,
     enable_strict_semantic_verifier: bool = True,
     counterfactual_shadow_mode: bool = True,
-    enable_bidirectional_counterfactual_validation: bool = True,
-    enable_negative_control: bool = True,
+    enable_bidirectional_counterfactual_validation: bool = False,
+    enable_negative_control: bool = False,
     max_negative_control_attempts: int = 1,
     max_negative_control_ast_edits: int = 1,
     enable_runtime_target_reachability: bool = True,
-    enable_contrastive_observation_oracle: bool = True,
+    enable_contrastive_observation_oracle: bool = False,
     min_valid_surrogate_patches_for_consensus: int = 2,
     surrogate_consensus_threshold: float = 0.67,
     counterfactual_evidence_mode: str = "soft",
+    enable_adaptive_typed_search: bool = True,
+    enable_structured_observation_extractor: bool = True,
+    enable_minimal_oracle_search: bool = True,
+    enable_trigger_search: bool = True,
+    enable_duplicate_aware_archive: bool = True,
+    enable_optional_recomposition: bool = True,
+    enable_selector_v2: bool = True,
+    max_extra_unique_candidates: int = 3,
+    max_trigger_search_candidates: int = 2,
+    max_minimal_oracle_candidates: int = 2,
+    max_protocol_repair_candidates: int = 1,
+    max_recomposition_candidates: int = 1,
     _adaptive_disabled: bool = False,
     _forced_seed_index: int | None = None,
     _prepared_repo_path: str = "",
     _prepare_meta: dict[str, Any] | None = None,
+    _shared_archive_path: str = "",
 ) -> FinalResult:
     ensure_dir(output_dir)
     ensure_dir(Path(output_dir) / "prompts")
@@ -880,6 +939,18 @@ def run_instance_pipeline(
                     min_valid_surrogate_patches_for_consensus,
                     surrogate_consensus_threshold,
                     counterfactual_evidence_mode,
+                    enable_adaptive_typed_search,
+                    enable_structured_observation_extractor,
+                    enable_minimal_oracle_search,
+                    enable_trigger_search,
+                    enable_duplicate_aware_archive,
+                    enable_optional_recomposition,
+                    enable_selector_v2,
+                    max_extra_unique_candidates,
+                    max_trigger_search_candidates,
+                    max_minimal_oracle_candidates,
+                    max_protocol_repair_candidates,
+                    max_recomposition_candidates,
                     _adaptive_disabled=True,
                     _forced_seed_index=None,
                 )
@@ -931,14 +1002,19 @@ def run_instance_pipeline(
                     return result
             seed_root = Path(output_dir) / "seed_candidates"
             ensure_dir(seed_root)
+            shared_archive_path = str(Path(output_dir) / "candidate_archive.json")
+            remaining_extra_budget = max(0, max_extra_unique_candidates)
             attempts: list[dict[str, Any]] = []
             switch_reasons: list[str] = []
-            best: tuple[int, int, int, Path, dict[str, Any], dict[str, Any]] | None = None
+            best: tuple[
+                tuple[int, ...], Path, dict[str, Any], dict[str, Any]
+            ] | None = None
             for seed_index, seed in enumerate(seeds_to_try):
                 seed_dir = seed_root / f"seed_{seed_index}"
                 ensure_dir(seed_dir)
                 behavior.save_json(str(seed_dir / "behavior_target.json"))
                 seed_context = copy.deepcopy(context)
+                assigned_extra_budget = remaining_extra_budget
                 result = run_instance_pipeline(
                     seed_context,
                     llm_client,
@@ -968,10 +1044,23 @@ def run_instance_pipeline(
                     min_valid_surrogate_patches_for_consensus,
                     surrogate_consensus_threshold,
                     counterfactual_evidence_mode,
+                    enable_adaptive_typed_search,
+                    enable_structured_observation_extractor,
+                    enable_minimal_oracle_search,
+                    enable_trigger_search,
+                    enable_duplicate_aware_archive,
+                    enable_optional_recomposition,
+                    enable_selector_v2,
+                    assigned_extra_budget,
+                    max_trigger_search_candidates,
+                    max_minimal_oracle_candidates,
+                    max_protocol_repair_candidates,
+                    max_recomposition_candidates,
                     _adaptive_disabled=True,
                     _forced_seed_index=seed_index,
                     _prepared_repo_path=prepared_repo_path,
                     _prepare_meta=prepared_meta,
+                    _shared_archive_path=shared_archive_path,
                 )
                 summary_path = seed_dir / "summary.json"
                 try:
@@ -980,6 +1069,27 @@ def run_instance_pipeline(
                     summary = result.to_dict()
                 checkpoint = _best_checkpoint_from_summary(seed_dir)
                 score = _seed_result_score(summary, checkpoint)
+                archive_summary = summary.get("candidate_archive_summary")
+                unique_by_origin = (
+                    archive_summary.get("unique_by_origin")
+                    if isinstance(archive_summary, dict)
+                    else {}
+                )
+                ats_origins = {
+                    "protocol_repair",
+                    "trigger_search",
+                    "minimal_oracle_conservative",
+                    "minimal_oracle_public",
+                    "recomposition",
+                }
+                total_ats_unique = sum(
+                    int((unique_by_origin or {}).get(origin) or 0)
+                    for origin in ats_origins
+                )
+                previously_used = max(0, max_extra_unique_candidates - remaining_extra_budget)
+                extra_unique_used = max(0, total_ats_unique - previously_used)
+                extra_unique_used = min(remaining_extra_budget, extra_unique_used)
+                remaining_extra_budget -= extra_unique_used
                 attempt = {
                     "seed_index": seed_index,
                     "seed_file": seed.file,
@@ -993,11 +1103,24 @@ def run_instance_pipeline(
                     "surrogate_status": (summary.get("dual_version_result") or {}).get("status")
                     if isinstance(summary.get("dual_version_result"), dict)
                     else "",
+                    "selector_v2_rank": checkpoint.get("selector_v2_rank") or [],
+                    "adaptive_search_summary": summary.get("adaptive_search_summary") or {},
+                    "extra_unique_budget_assigned": assigned_extra_budget,
+                    "extra_unique_used": extra_unique_used,
+                    "extra_unique_budget_remaining": remaining_extra_budget,
                 }
                 attempts.append(attempt)
-                order_key = (score, -seed_index, -int(checkpoint.get("round_id") or 0))
-                if best is None or order_key > (best[0], best[1], best[2]):
-                    best = (order_key[0], order_key[1], order_key[2], seed_dir, summary, checkpoint)
+                selector_rank = tuple(
+                    int(value) for value in (checkpoint.get("selector_v2_rank") or [])
+                )
+                order_key = (
+                    (1,) + selector_rank + (score, -seed_index, -int(checkpoint.get("round_id") or 0))
+                    if enable_selector_v2 and selector_rank
+                    else (0, score, -seed_index, -int(checkpoint.get("round_id") or 0))
+                )
+                attempts[-1]["instance_selector_order_key"] = list(order_key)
+                if best is None or order_key > best[0]:
+                    best = (order_key, seed_dir, summary, checkpoint)
                 try_next, reason = _should_try_next_seed(
                     summary, checkpoint, seed_index < len(seeds_to_try) - 1
                 )
@@ -1008,7 +1131,7 @@ def run_instance_pipeline(
                     continue
                 break
             assert best is not None
-            _, _, _, selected_dir, selected_summary, selected_checkpoint = best
+            _, selected_dir, selected_summary, selected_checkpoint = best
             selected_seed_index = int(selected_dir.name.rsplit("_", 1)[-1])
             for name in (
                 "final_test.py",
@@ -1016,6 +1139,11 @@ def run_instance_pipeline(
                 "host_context.json",
                 "protocol_recovery.json",
                 "candidate_ranking.json",
+                "candidate_archive.json",
+                "adaptive_search_trace.json",
+                "structured_observations.json",
+                "unique_candidate_summary.json",
+                "selector_v2_ranking.json",
                 "dual_version_result.json",
                 "counterfactual_summary.json",
                 "counterfactual",
@@ -1024,6 +1152,28 @@ def run_instance_pipeline(
                 "worktree",
             ):
                 _copy_if_exists(selected_dir, Path(output_dir), name)
+            try:
+                aggregate_archive_summary = json.loads(
+                    (Path(output_dir) / "unique_candidate_summary.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+            except (OSError, json.JSONDecodeError):
+                aggregate_archive_summary = selected_summary.get(
+                    "candidate_archive_summary"
+                ) or {}
+            aggregate_branch_counts = {
+                "protocol_repair": 0,
+                "trigger_search": 0,
+                "minimal_oracle_search": 0,
+                "optional_recomposition": 0,
+            }
+            for attempt in attempts:
+                adaptive_summary = attempt.get("adaptive_search_summary") or {}
+                for action, count in (adaptive_summary.get("branch_counts") or {}).items():
+                    aggregate_branch_counts[action] = (
+                        aggregate_branch_counts.get(action, 0) + int(count or 0)
+                    )
             top_final = Path(output_dir) / "final_test.py"
             selected_summary.update(
                 {
@@ -1045,9 +1195,33 @@ def run_instance_pipeline(
                     "counterfactual_summary": selected_summary.get("counterfactual_summary")
                     or selected_checkpoint.get("counterfactual_summary")
                     or {},
+                    "candidate_archive_summary": aggregate_archive_summary,
+                    "adaptive_search_summary": {
+                        "branch_counts": aggregate_branch_counts,
+                        "seed_attempts": len(attempts),
+                        "max_extra_unique_candidates_per_instance": max_extra_unique_candidates,
+                        "remaining_extra_unique_budget": remaining_extra_budget,
+                    },
                 }
             )
             safe_json_dump(attempts, str(Path(output_dir) / "seed_attempts_summary.json"))
+            root_ranking_path = Path(output_dir) / "candidate_ranking.json"
+            try:
+                root_ranking = json.loads(root_ranking_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                root_ranking = {}
+            root_ranking.update(
+                {
+                    "instance_selector_version": "selector_v2",
+                    "selected_seed_index": selected_seed_index,
+                    "selected_candidate_id": selected_checkpoint.get("candidate_id") or "",
+                    "seed_rankings": attempts,
+                    "max_extra_unique_candidates_per_instance": max_extra_unique_candidates,
+                    "remaining_extra_unique_budget": remaining_extra_budget,
+                    "counterfactual_fields_used_by_selector_v2": False,
+                }
+            )
+            safe_json_dump(root_ranking, str(root_ranking_path))
             safe_json_dump(
                 {
                     "selected_seed_index": selected_seed_index,
@@ -1077,6 +1251,21 @@ def run_instance_pipeline(
                 final_oracle_risk=selected_summary.get("final_oracle_risk") or {},
                 final_surrogate_risk=selected_summary.get("final_surrogate_risk") or {},
                 counterfactual_summary=selected_summary.get("counterfactual_summary") or {},
+                method_name=str(selected_summary.get("method_name") or "ATS-BRT"),
+                enable_adaptive_typed_search=enable_adaptive_typed_search,
+                enable_structured_observation_extractor=enable_structured_observation_extractor,
+                enable_minimal_oracle_search=enable_minimal_oracle_search,
+                enable_trigger_search=enable_trigger_search,
+                enable_duplicate_aware_archive=enable_duplicate_aware_archive,
+                enable_optional_recomposition=enable_optional_recomposition,
+                enable_selector_v2=enable_selector_v2,
+                max_extra_unique_candidates=max_extra_unique_candidates,
+                max_trigger_search_candidates=max_trigger_search_candidates,
+                max_minimal_oracle_candidates=max_minimal_oracle_candidates,
+                max_protocol_repair_candidates=max_protocol_repair_candidates,
+                max_recomposition_candidates=max_recomposition_candidates,
+                candidate_archive_summary=selected_summary.get("candidate_archive_summary") or {},
+                adaptive_search_summary=selected_summary.get("adaptive_search_summary") or {},
                 enable_bidirectional_counterfactual_validation=enable_bidirectional_counterfactual_validation,
                 counterfactual_shadow_mode=counterfactual_shadow_mode,
                 enable_negative_control=enable_negative_control,
@@ -1224,6 +1413,67 @@ def run_instance_pipeline(
         )
         write_text(str(Path(output_dir) / "mutation_round_0_test.py"), candidate.code)
         _refresh_candidate_command(context, candidate)
+        archive = (
+            CandidateArchive(
+                context.instance_id,
+                output_dir,
+                shared_archive_path=_shared_archive_path,
+            )
+            if enable_duplicate_aware_archive or enable_adaptive_typed_search or enable_selector_v2
+            else None
+        )
+        candidate_history: list[CandidateTest] = []
+        adaptive_search_trace: list[dict[str, Any]] = []
+        branch_counts = {
+            "protocol_repair": 0,
+            "trigger_search": 0,
+            "minimal_oracle_search": 0,
+            "optional_recomposition": 0,
+        }
+        search_budgets = SearchBudgets(
+            extra_unique=max(0, max_extra_unique_candidates),
+            protocol=max(0, max_protocol_repair_candidates),
+            trigger=max(0, max_trigger_search_candidates),
+            oracle=max(0, max_minimal_oracle_candidates),
+            recomposition=max(0, max_recomposition_candidates),
+        )
+
+        def archive_candidate(current: CandidateTest) -> tuple[Any, Any]:
+            segments = segment_test(current.code, behavior, context.instance_id)
+            safe_json_dump(
+                segments.to_dict(),
+                str(Path(output_dir) / f"segments_round_{current.round_id}.json"),
+            )
+            current.lineage = dict(current.lineage or {})
+            current.lineage["segment_hashes"] = {
+                "scaffold": segments.scaffold_hash,
+                "trigger": segments.trigger_hash,
+                "oracle": segments.oracle_hash,
+            }
+            entry = None
+            if archive is not None:
+                candidate_id = str(current.lineage.get("candidate_id") or "")
+                entry = next(
+                    (item for item in reversed(archive.entries) if item.candidate_id == candidate_id),
+                    None,
+                )
+                if entry is None:
+                    entry = archive.register(current, segments)
+            if not any(
+                str((item.lineage or {}).get("candidate_id") or "")
+                == str(current.lineage.get("candidate_id") or "")
+                for item in candidate_history
+            ):
+                candidate_history.append(copy.deepcopy(current))
+            return segments, entry
+
+        def execution_from_archive(data: dict[str, Any]) -> ExecutionResult:
+            fields = ExecutionResult.__dataclass_fields__
+            return ExecutionResult(
+                **{key: value for key, value in data.items() if key in fields}
+            )
+
+        current_segments, current_archive_entry = archive_candidate(candidate)
         if generate_only:
             final_code = candidate.code
             write_text(str(Path(output_dir) / "final_test.py"), final_code)
@@ -1264,10 +1514,48 @@ def run_instance_pipeline(
 
         env_rounds_used = 0
         for env_round in range(env_budget):
-            execution = run_command_in_conda(candidate.command, context.buggy_repo_path, conda_env, timeout, no_conda, behavior, context.instance_id)
+            current_segments, current_archive_entry = archive_candidate(candidate)
+            reused_duplicate = bool(
+                current_archive_entry is not None
+                and current_archive_entry.duplicate_status == "CODE_DUPLICATE"
+                and archive is not None
+            )
+            duplicate_source = (
+                next(
+                    (
+                        item
+                        for item in archive.entries
+                        if item.candidate_id == current_archive_entry.duplicate_of
+                        and item.executed
+                    ),
+                    None,
+                )
+                if reused_duplicate and archive is not None
+                else None
+            )
+            if duplicate_source is not None:
+                execution = execution_from_archive(duplicate_source.buggy_execution)
+                archive.record_redirect(
+                    current_archive_entry,
+                    "protocol_repair",
+                    "exact AST duplicate reused prior execution during environment qualification",
+                )
+            else:
+                execution = run_command_in_conda(candidate.command, context.buggy_repo_path, conda_env, timeout, no_conda, behavior, context.instance_id)
             safe_json_dump(execution.to_dict(), str(Path(output_dir) / f"env_execution_round_{env_round}.json"))
             write_text(str(Path(output_dir) / "logs" / f"env_execution_round_{env_round}.log"), execution.stdout + "\n" + execution.stderr)
             env_rounds_used = env_round + 1
+            if archive is not None and current_archive_entry is not None:
+                archive.finalize(
+                    current_archive_entry.candidate_id,
+                    candidate.code,
+                    current_segments,
+                    execution.to_dict(),
+                    {},
+                    {},
+                    {},
+                    {},
+                )
             if execution.status not in {"SETUP_ERROR", "SYNTAX_ERROR", "COLLECT_ERROR"}:
                 break
             if execution.status == "SETUP_ERROR" and _recover_declared_dependency(
@@ -1340,13 +1628,29 @@ def run_instance_pipeline(
             result.save_json(str(Path(output_dir) / "summary.json"))
             return result
         else:
+            if archive is not None:
+                search_budgets.starting_unique = archive.unique_count
             brt_attempt = 0
             semantic_repairs_used = 0
             late_setup_repairs_used = 0
             # Round 0 is the initial BRT. Environment qualification already
             # has its own budget above and must not expand this checkpoint loop.
-            max_brt_attempts = 1 + max(0, brt_budget)
+            max_brt_attempts = (
+                1 + max(0, max_extra_unique_candidates) + 4
+                if enable_adaptive_typed_search
+                else 1 + max(0, brt_budget)
+            )
+            unique_budget_limit = (
+                search_budgets.starting_unique
+                + max(0, max_extra_unique_candidates)
+            )
             checkpoints: list[CandidateCheckpoint] = []
+            checkpoint_candidates: list[CandidateTest] = []
+            checkpoint_executions: list[ExecutionResult] = []
+            checkpoint_decisions: list[VerifierDecision] = []
+            checkpoint_duals: list[DualVersionResult | None] = []
+            checkpoint_observations: list[Any] = []
+            checkpoint_strict_results: list[Any] = []
             best_key: tuple[int, ...] | None = None
             best_index = -1
             best_candidate = None
@@ -1357,7 +1661,327 @@ def run_instance_pipeline(
             best_strict_result = None
             best_counterfactual_summary: dict[str, Any] = {}
             best_counterfactual_evidence: dict[str, Any] = {}
+            consecutive_nonunique_searches = 0
+            consecutive_behavior_duplicates = 0
+
+            def generate_adaptive_candidate(
+                search_decision: Any,
+                parent: CandidateTest,
+                parent_execution: ExecutionResult,
+                next_round: int,
+                duplicate_redirected_from: str = "",
+            ) -> tuple[CandidateTest | None, dict[str, Any]]:
+                action = str(search_decision.action or "stop")
+                variant = str(search_decision.search_action or "")
+                before_segments = segment_test(parent.code, behavior, context.instance_id)
+                search_context = search_prompt_context(
+                    action, variant, behavior, before_segments.to_dict()
+                )
+                search_context["duplicate_redirected_from"] = duplicate_redirected_from
+                new_candidate: CandidateTest | None = None
+                local_observation = None
+                if action == "protocol_repair":
+                    new_candidate = repair_candidate(
+                        context.instance_id,
+                        behavior,
+                        host,
+                        parent,
+                        parent_execution,
+                        llm_client,
+                        output_dir,
+                        next_round,
+                        "setup",
+                        context.retrieved_code,
+                        verifier_feedback=search_decision.to_dict(),
+                        buggy_repo=context.buggy_repo_path,
+                        protocol=protocol,
+                        search_context=search_context,
+                        origin_override="protocol_repair",
+                    )
+                elif action == "trigger_search" and enable_trigger_search:
+                    plan = build_mutation_plan(
+                        context.instance_id,
+                        next_round,
+                        behavior,
+                        host,
+                        protocol,
+                        llm_client,
+                        output_dir,
+                        parent_execution.stdout + "\n" + parent_execution.stderr,
+                        search_decision.to_dict(),
+                    ) if enable_seed_mutation else None
+                    if plan is not None:
+                        mutation_plans.append(plan)
+                    new_candidate = repair_candidate(
+                        context.instance_id,
+                        behavior,
+                        host,
+                        parent,
+                        parent_execution,
+                        llm_client,
+                        output_dir,
+                        next_round,
+                        "trigger",
+                        context.retrieved_code,
+                        verifier_feedback=search_decision.to_dict(),
+                        buggy_repo=context.buggy_repo_path,
+                        protocol=protocol,
+                        mutation_plan=plan,
+                        search_context=search_context,
+                        origin_override="trigger_search",
+                    )
+                elif action == "minimal_oracle_search" and enable_minimal_oracle_search:
+                    if enable_structured_observation_extractor:
+                        local_observation = collect_structured_observation(
+                            behavior,
+                            parent,
+                            output_dir,
+                            context.buggy_repo_path,
+                            conda_env,
+                            timeout,
+                            no_conda,
+                            context.repo,
+                            str(context.metadata.get("version") or ""),
+                        )
+                        search_context["observation_id"] = local_observation.observation_id
+                    if local_observation is not None and local_observation.status == "COLLECTED":
+                        new_candidate = repair_candidate(
+                            context.instance_id,
+                            behavior,
+                            host,
+                            parent,
+                            parent_execution,
+                            llm_client,
+                            output_dir,
+                            next_round,
+                            "oracle",
+                            context.retrieved_code,
+                            json.dumps(local_observation.to_dict(), ensure_ascii=False),
+                            search_decision.to_dict(),
+                            context.buggy_repo_path,
+                            protocol,
+                            search_context=search_context,
+                            origin_override=(
+                                "minimal_oracle_conservative"
+                                if variant == "conservative"
+                                else "minimal_oracle_public"
+                            ),
+                        )
+                    else:
+                        new_candidate, fallback_report, _ = rebind_observation_oracle(
+                            behavior,
+                            protocol,
+                            parent,
+                            parent_execution.stdout + "\n" + parent_execution.stderr,
+                            llm_client,
+                            output_dir,
+                            context.buggy_repo_path,
+                            conda_env,
+                            timeout,
+                            no_conda,
+                            context.repo,
+                            str(context.metadata.get("version") or ""),
+                            next_round,
+                            contrastive_context=None,
+                            enable_contrastive_observation=False,
+                        )
+                        new_candidate.lineage = dict(new_candidate.lineage or {})
+                        new_candidate.lineage.update(
+                            {
+                                "origin": (
+                                    "minimal_oracle_conservative"
+                                    if variant == "conservative"
+                                    else "minimal_oracle_public"
+                                ),
+                                "search_action": variant,
+                                "observation_id": str(
+                                    getattr(local_observation, "observation_id", "")
+                                ),
+                                "observation_context_used": "llm_probe_fallback",
+                            }
+                        )
+                elif action == "optional_recomposition" and enable_optional_recomposition and archive is not None:
+                    new_candidate, recomposition_meta = recompose_candidate(
+                        behavior,
+                        candidate_history,
+                        archive.unique_entries(),
+                        next_round,
+                    )
+                    safe_json_dump(
+                        recomposition_meta,
+                        str(Path(output_dir) / f"recomposition_round_{next_round}.json"),
+                    )
+                    if new_candidate is not None:
+                        write_text(new_candidate.candidate_file_path, new_candidate.code)
+                if new_candidate is None:
+                    return None, {
+                        "valid": False,
+                        "action": action,
+                        "reason": "search action disabled or abstained",
+                    }
+                if action == "optional_recomposition":
+                    after_segments = segment_test(
+                        new_candidate.code, behavior, context.instance_id
+                    )
+                    validation = {
+                        "valid": (
+                            not after_segments.parse_error
+                            and after_segments.test_entry_count == 1
+                            and bool(after_segments.target_call_locations)
+                        ),
+                        "action": action,
+                        "target_api_preserved": bool(
+                            after_segments.target_call_locations
+                        ),
+                    }
+                else:
+                    validation = validate_typed_transformation(
+                        parent.code, new_candidate.code, behavior, action
+                    )
+                    if not validation.get("valid"):
+                        proposal_code = new_candidate.code
+                        write_text(
+                            str(
+                                Path(output_dir)
+                                / f"candidate_round_{next_round}_proposal.py"
+                            ),
+                            proposal_code,
+                        )
+                        transplanted_code, transplant_report = transplant_typed_segment(
+                            parent.code,
+                            proposal_code,
+                            behavior,
+                            action,
+                        )
+                        validation["initial_validation"] = dict(validation)
+                        validation["transplant"] = transplant_report
+                        if transplanted_code is not None:
+                            transplanted_validation = validate_typed_transformation(
+                                parent.code,
+                                transplanted_code,
+                                behavior,
+                                action,
+                            )
+                            transplanted_validation["initial_validation"] = validation[
+                                "initial_validation"
+                            ]
+                            transplanted_validation["transplant"] = transplant_report
+                            transplanted_validation["transplant_applied"] = True
+                            validation = transplanted_validation
+                            if validation.get("valid"):
+                                new_candidate.code = transplanted_code
+                                new_candidate.lineage = dict(
+                                    new_candidate.lineage or {}
+                                )
+                                new_candidate.lineage["typed_transplant_applied"] = True
+                validation["search_action"] = variant
+                safe_json_dump(
+                    validation,
+                    str(Path(output_dir) / f"typed_validation_round_{next_round}.json"),
+                )
+                if not validation.get("valid"):
+                    write_text(parent.candidate_file_path, parent.code)
+                    return None, validation
+                new_candidate.round_id = next_round
+                new_candidate.lineage = dict(new_candidate.lineage or {})
+                new_candidate.lineage["duplicate_redirected_from"] = duplicate_redirected_from
+                write_text(new_candidate.candidate_file_path, new_candidate.code)
+                write_text(
+                    str(Path(output_dir) / f"candidate_round_{next_round}.py"),
+                    new_candidate.code,
+                )
+                _refresh_candidate_command(context, new_candidate)
+                return new_candidate, validation
+
             while brt_attempt < max_brt_attempts:
+                current_segments, current_archive_entry = archive_candidate(candidate)
+                duplicate_source = None
+                if (
+                    archive is not None
+                    and current_archive_entry is not None
+                    and current_archive_entry.duplicate_status == "CODE_DUPLICATE"
+                ):
+                    duplicate_source = next(
+                        (
+                            item
+                            for item in archive.entries
+                            if item.candidate_id == current_archive_entry.duplicate_of
+                            and item.executed
+                        ),
+                        None,
+                    )
+                if duplicate_source is not None and enable_adaptive_typed_search:
+                    duplicate_decision = decide_search_action(
+                        duplicate_source.buggy_execution,
+                        duplicate_source.verifier_decision,
+                        str(
+                            duplicate_source.target_evidence.get("target_hit")
+                            or "unknown"
+                        ),
+                        duplicate_source.oracle_risk,
+                        duplicate_source.surrogate_result,
+                        branch_counts,
+                        archive,
+                        search_budgets,
+                        duplicate=True,
+                        allow_recomposition=enable_optional_recomposition,
+                    )
+                    trace_item = duplicate_decision.to_dict()
+                    trace_item.update(
+                        {
+                            "round": brt_attempt,
+                            "candidate_id": current_archive_entry.candidate_id,
+                            "duplicate_of": duplicate_source.candidate_id,
+                        }
+                    )
+                    adaptive_search_trace.append(trace_item)
+                    safe_json_dump(
+                        adaptive_search_trace,
+                        str(Path(output_dir) / "adaptive_search_trace.json"),
+                    )
+                    if duplicate_decision.action == "stop":
+                        break
+                    branch_counts[duplicate_decision.action] += 1
+                    archive.record_redirect(
+                        current_archive_entry,
+                        duplicate_decision.action,
+                        duplicate_decision.reason,
+                    )
+                    next_round = max(candidate.round_id + 1, brt_attempt + 1)
+                    parent_execution = execution_from_archive(
+                        duplicate_source.buggy_execution
+                    )
+                    redirected, validation = generate_adaptive_candidate(
+                        duplicate_decision,
+                        candidate,
+                        parent_execution,
+                        next_round,
+                        duplicate_source.candidate_id,
+                    )
+                    trace_item["transformation_validation"] = validation
+                    safe_json_dump(
+                        adaptive_search_trace,
+                        str(Path(output_dir) / "adaptive_search_trace.json"),
+                    )
+                    if redirected is not None:
+                        candidate = redirected
+                        consecutive_nonunique_searches = 0
+                    else:
+                        consecutive_nonunique_searches += 1
+                        trace_item["consecutive_nonunique_searches"] = (
+                            consecutive_nonunique_searches
+                        )
+                        if consecutive_nonunique_searches >= 2:
+                            trace_item["early_stop"] = (
+                                "two consecutive searches produced no unique candidate"
+                            )
+                            safe_json_dump(
+                                adaptive_search_trace,
+                                str(Path(output_dir) / "adaptive_search_trace.json"),
+                            )
+                            break
+                    brt_attempt += 1
+                    continue
                 if brt_attempt > 0 or execution is None:
                     execution = run_command_in_conda(candidate.command, context.buggy_repo_path, conda_env, timeout, no_conda, behavior, context.instance_id)
                 safe_json_dump(execution.to_dict(), str(Path(output_dir) / f"execution_round_{brt_attempt}.json"))
@@ -1558,8 +2182,49 @@ def run_instance_pipeline(
                     counterfactual_summary_data=cf_summary,
                     protocol_valid=not bool(protocol and protocol.protocol_risks),
                     counterfactual_shadow_mode=counterfactual_shadow_mode,
+                    lineage=candidate.lineage,
+                    archive_entry=(
+                        current_archive_entry.to_dict()
+                        if current_archive_entry is not None
+                        else {}
+                    ),
                 )
+                finalized_entry = None
+                if archive is not None and current_archive_entry is not None:
+                    finalized_entry = archive.finalize(
+                        current_archive_entry.candidate_id,
+                        candidate.code,
+                        current_segments,
+                        execution.to_dict(),
+                        decision.to_dict(),
+                        reachability.to_dict() if reachability is not None else {},
+                        checkpoint.oracle_risk,
+                        candidate_dual.to_dict() if candidate_dual is not None else {},
+                    )
+                    if finalized_entry is not None:
+                        checkpoint.archive_entry = finalized_entry.to_dict()
+                        checkpoint.candidate_id = finalized_entry.candidate_id
+                        checkpoint.save_json(
+                            str(
+                                Path(output_dir)
+                                / "checkpoints"
+                                / f"candidate_attempt_{brt_attempt}.json"
+                            )
+                        )
+                if (
+                    finalized_entry is not None
+                    and finalized_entry.duplicate_status == "BEHAVIOR_DUPLICATE"
+                ):
+                    consecutive_behavior_duplicates += 1
+                else:
+                    consecutive_behavior_duplicates = 0
                 checkpoints.append(checkpoint)
+                checkpoint_candidates.append(copy.deepcopy(candidate))
+                checkpoint_executions.append(copy.deepcopy(execution))
+                checkpoint_decisions.append(copy.deepcopy(decision))
+                checkpoint_duals.append(copy.deepcopy(candidate_dual))
+                checkpoint_observations.append(copy.deepcopy(observation))
+                checkpoint_strict_results.append(copy.deepcopy(strict_result))
                 checkpoint_key = (
                     _legacy_checkpoint_order_key(checkpoint)
                     if counterfactual_shadow_mode
@@ -1576,6 +2241,132 @@ def run_instance_pipeline(
                     best_strict_result = copy.deepcopy(strict_result)
                     best_counterfactual_summary = copy.deepcopy(cf_summary)
                     best_counterfactual_evidence = copy.deepcopy(cf_evidence or {})
+                if enable_adaptive_typed_search and archive is not None:
+                    if consecutive_behavior_duplicates >= 2:
+                        adaptive_search_trace.append(
+                            {
+                                "action": "stop",
+                                "search_action": "",
+                                "reason": (
+                                    "two consecutive candidates had duplicate "
+                                    "behavior signatures"
+                                ),
+                                "round": brt_attempt,
+                                "candidate_id": checkpoint.candidate_id,
+                                "early_stop": "consecutive_behavior_duplicates",
+                                "consecutive_behavior_duplicates": (
+                                    consecutive_behavior_duplicates
+                                ),
+                            }
+                        )
+                        safe_json_dump(
+                            adaptive_search_trace,
+                            str(Path(output_dir) / "adaptive_search_trace.json"),
+                        )
+                        break
+                    if archive.unique_count >= unique_budget_limit:
+                        search_decision = decide_search_action(
+                            execution.to_dict(),
+                            decision.to_dict(),
+                            runtime_target_hit,
+                            checkpoint.oracle_risk,
+                            candidate_dual.to_dict() if candidate_dual else {},
+                            branch_counts,
+                            archive,
+                            search_budgets,
+                            duplicate=bool(
+                                finalized_entry is not None
+                                and finalized_entry.duplicate_status
+                                == "BEHAVIOR_DUPLICATE"
+                            ),
+                            allow_recomposition=enable_optional_recomposition,
+                        )
+                        search_decision.action = "stop"
+                        search_decision.search_action = ""
+                        search_decision.reason = "per-instance unique candidate budget exhausted"
+                    else:
+                        search_decision = decide_search_action(
+                            execution.to_dict(),
+                            decision.to_dict(),
+                            runtime_target_hit,
+                            checkpoint.oracle_risk,
+                            candidate_dual.to_dict() if candidate_dual else {},
+                            branch_counts,
+                            archive,
+                            search_budgets,
+                            duplicate=bool(
+                                finalized_entry is not None
+                                and finalized_entry.duplicate_status
+                                == "BEHAVIOR_DUPLICATE"
+                            ),
+                            allow_recomposition=enable_optional_recomposition,
+                        )
+                    if search_decision.action == "trigger_search" and not enable_trigger_search:
+                        search_decision.action = "stop"
+                        search_decision.reason = "trigger search is disabled"
+                    if search_decision.action == "minimal_oracle_search" and not enable_minimal_oracle_search:
+                        search_decision.action = "stop"
+                        search_decision.reason = "minimal oracle search is disabled"
+                    if search_decision.action == "optional_recomposition" and not enable_optional_recomposition:
+                        search_decision.action = "stop"
+                        search_decision.reason = "optional recomposition is disabled"
+                    trace_item = search_decision.to_dict()
+                    trace_item.update(
+                        {
+                            "round": brt_attempt,
+                            "candidate_id": checkpoint.candidate_id,
+                            "archive_unique_count": archive.unique_count,
+                            "unique_budget_limit": unique_budget_limit,
+                        }
+                    )
+                    adaptive_search_trace.append(trace_item)
+                    safe_json_dump(
+                        adaptive_search_trace,
+                        str(Path(output_dir) / "adaptive_search_trace.json"),
+                    )
+                    if search_decision.action == "stop":
+                        break
+                    branch_counts[search_decision.action] += 1
+                    next_round = max(candidate.round_id + 1, brt_attempt + 1)
+                    searched_candidate, validation = generate_adaptive_candidate(
+                        search_decision,
+                        candidate,
+                        execution,
+                        next_round,
+                    )
+                    trace_item["transformation_validation"] = validation
+                    safe_json_dump(
+                        adaptive_search_trace,
+                        str(Path(output_dir) / "adaptive_search_trace.json"),
+                    )
+                    if searched_candidate is None:
+                        consecutive_nonunique_searches += 1
+                        trace_item["consecutive_nonunique_searches"] = (
+                            consecutive_nonunique_searches
+                        )
+                        if consecutive_nonunique_searches >= 2:
+                            trace_item["early_stop"] = (
+                                "two consecutive searches produced no unique candidate"
+                            )
+                            safe_json_dump(
+                                adaptive_search_trace,
+                                str(Path(output_dir) / "adaptive_search_trace.json"),
+                            )
+                            break
+                        # Feed the unchanged code through archive dedup on the next
+                        # iteration so the controller redirects to another branch.
+                        candidate = copy.deepcopy(candidate)
+                        candidate.round_id = next_round
+                        candidate.lineage = dict(candidate.lineage or {})
+                        candidate.lineage.pop("candidate_id", None)
+                        candidate.lineage["origin"] = "duplicate_redirect"
+                        candidate.lineage["search_action"] = search_decision.search_action
+                        candidate.lineage["duplicate_redirected_from"] = checkpoint.candidate_id
+                    else:
+                        candidate = searched_candidate
+                        consecutive_nonunique_searches = 0
+                    brt_attempt += 1
+                    continue
                 if decision.decision == "accept":
                     if (
                         validation_mode != "surrogate_patch"
@@ -1735,6 +2526,35 @@ def run_instance_pipeline(
                         if item.ranking_changed_in_shadow
                         else ""
                     )
+                selector_v2_summary: dict[str, Any] = {
+                    "selector_version": "disabled",
+                    "rankings": [],
+                }
+                if enable_selector_v2 and archive is not None:
+                    selected_index, selector_v2_summary = select_checkpoint_v2(
+                        checkpoints, archive
+                    )
+                    if selected_index >= 0:
+                        best_index = selected_index
+                        candidate = copy.deepcopy(checkpoint_candidates[best_index])
+                        execution = copy.deepcopy(checkpoint_executions[best_index])
+                        decision = copy.deepcopy(checkpoint_decisions[best_index])
+                        dual = copy.deepcopy(checkpoint_duals[best_index])
+                        observation = copy.deepcopy(checkpoint_observations[best_index])
+                        strict_result = copy.deepcopy(checkpoint_strict_results[best_index])
+                        best_candidate = copy.deepcopy(candidate)
+                        best_execution = copy.deepcopy(execution)
+                        best_decision = copy.deepcopy(decision)
+                        best_dual = copy.deepcopy(dual)
+                        best_observation = copy.deepcopy(observation)
+                        best_strict_result = copy.deepcopy(strict_result)
+                        final_code = candidate.code
+                        write_text(candidate.candidate_file_path, candidate.code)
+                        _refresh_candidate_command(context, candidate)
+                    safe_json_dump(
+                        selector_v2_summary,
+                        str(Path(output_dir) / "selector_v2_ranking.json"),
+                    )
                 best_counterfactual_summary = dict(best_counterfactual_summary or {})
                 best_counterfactual_summary.update(
                     {
@@ -1763,6 +2583,9 @@ def run_instance_pipeline(
                 safe_json_dump(
                     {
                         "selection_policy": (
+                            "ATS-BRT uses generation-only Selector V2; no 2x2 field participates in ranking"
+                            if enable_selector_v2
+                            else (
                             "shadow mode uses the legacy P0 selector for final choice; "
                             "counterfactual evidence rank is recorded as would-select evidence"
                             if counterfactual_shadow_mode
@@ -1770,6 +2593,7 @@ def run_instance_pipeline(
                                 "legacy risk-adjusted score remains the base score; "
                                 "counterfactual evidence rank adds soft tie-breaking/bonus "
                                 "without penalizing UNKNOWN or ABSTAIN negative controls"
+                            )
                             )
                         ),
                         "counterfactual_shadow_mode": counterfactual_shadow_mode,
@@ -1789,6 +2613,12 @@ def run_instance_pipeline(
                         ),
                         "selected_reason": checkpoints[best_index].reason,
                         "selected_evidence_rank": checkpoints[best_index].evidence_rank,
+                        "selector_v2": selector_v2_summary,
+                        "selector_v2_selected_candidate_id": checkpoints[best_index].candidate_id,
+                        "selector_v2_changed_from_legacy": (
+                            checkpoints[best_index].round_id != legacy_best.round_id
+                        ),
+                        "counterfactual_fields_used_by_selector_v2": False,
                         "checkpoints": [item.to_dict() for item in checkpoints],
                     },
                     str(Path(output_dir) / "candidate_ranking.json"),
@@ -1920,6 +2750,25 @@ def run_instance_pipeline(
             min_valid_surrogate_patches_for_consensus=min_valid_surrogate_patches_for_consensus,
             surrogate_consensus_threshold=surrogate_consensus_threshold,
             counterfactual_evidence_mode=counterfactual_evidence_mode,
+            method_name="ATS-BRT" if enable_adaptive_typed_search else "P0",
+            enable_adaptive_typed_search=enable_adaptive_typed_search,
+            enable_structured_observation_extractor=enable_structured_observation_extractor,
+            enable_minimal_oracle_search=enable_minimal_oracle_search,
+            enable_trigger_search=enable_trigger_search,
+            enable_duplicate_aware_archive=enable_duplicate_aware_archive,
+            enable_optional_recomposition=enable_optional_recomposition,
+            enable_selector_v2=enable_selector_v2,
+            max_extra_unique_candidates=max_extra_unique_candidates,
+            max_trigger_search_candidates=max_trigger_search_candidates,
+            max_minimal_oracle_candidates=max_minimal_oracle_candidates,
+            max_protocol_repair_candidates=max_protocol_repair_candidates,
+            max_recomposition_candidates=max_recomposition_candidates,
+            candidate_archive_summary=archive.summary() if archive is not None else {},
+            adaptive_search_summary={
+                "branch_counts": branch_counts,
+                "trace_steps": len(adaptive_search_trace),
+                "unique_budget_limit": unique_budget_limit,
+            },
         )
         result.save_json(str(Path(output_dir) / "summary.json"))
         return result
@@ -1939,6 +2788,15 @@ def run_instance_pipeline(
             "enable_runtime_target_reachability": enable_runtime_target_reachability,
             "enable_contrastive_observation_oracle": enable_contrastive_observation_oracle,
             "counterfactual_evidence_mode": counterfactual_evidence_mode,
+            "method_name": "ATS-BRT" if enable_adaptive_typed_search else "P0",
+            "enable_adaptive_typed_search": enable_adaptive_typed_search,
+            "enable_structured_observation_extractor": enable_structured_observation_extractor,
+            "enable_minimal_oracle_search": enable_minimal_oracle_search,
+            "enable_trigger_search": enable_trigger_search,
+            "enable_duplicate_aware_archive": enable_duplicate_aware_archive,
+            "enable_optional_recomposition": enable_optional_recomposition,
+            "enable_selector_v2": enable_selector_v2,
+            "max_extra_unique_candidates": max_extra_unique_candidates,
             "selected_seed_file": "",
             "selected_seed_name": "",
             "seed_fallback_used": False,

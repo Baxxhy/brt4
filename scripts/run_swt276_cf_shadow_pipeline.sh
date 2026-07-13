@@ -66,27 +66,54 @@ touch "$RUN_DIR/issue_rewrite.done"
 
 export BRT4_BEHAVIOR_CACHE_DIR="$ISSUE_REWRITE_DIR${BRT4_BEHAVIOR_CACHE_DIR:+:$BRT4_BEHAVIOR_CACHE_DIR}"
 
-RUN_NAME="$RUN_NAME" \
-RUN_DIR="$RUN_DIR" \
-WORKERS="$WORKERS" \
-SEED_WORKERS="$SEED_WORKERS" \
-MODEL="$MODEL" \
-RESUME=true \
-INSTANCES_PATH="$INSTANCES_PATH" \
-CODE_RETRIEVAL_PATH="$CODE_RETRIEVAL_PATH" \
-TEST_RETRIEVAL_PATH="$TEST_RETRIEVAL_PATH" \
-REPO_ROOT_BASE="$REPO_ROOT_BASE" \
-COUNTERFACTUAL_SHADOW_MODE=true \
-ENABLE_BIDIRECTIONAL_COUNTERFACTUAL_VALIDATION=true \
-ENABLE_NEGATIVE_CONTROL=true \
-MAX_NEGATIVE_CONTROL_ATTEMPTS=1 \
-MAX_NEGATIVE_CONTROL_AST_EDITS=1 \
-ENABLE_RUNTIME_TARGET_REACHABILITY=true \
-ENABLE_CONTRASTIVE_OBSERVATION_ORACLE=true \
-MIN_VALID_SURROGATE_PATCHES_FOR_CONSENSUS=2 \
-SURROGATE_CONSENSUS_THRESHOLD=0.67 \
-COUNTERFACTUAL_EVIDENCE_MODE=soft \
-bash "$PROJECT_ROOT/scripts/run_generate.sh" 2>&1 | tee -a "$pipeline_log"
+run_generation_pass() {
+  local pass_name="$1"
+  echo "generation_pass=$pass_name started_at=$(date '+%Y-%m-%d %H:%M:%S')" | tee -a "$pipeline_log"
+  RUN_NAME="$RUN_NAME" \
+  RUN_DIR="$RUN_DIR" \
+  WORKERS="$WORKERS" \
+  SEED_WORKERS="$SEED_WORKERS" \
+  MODEL="$MODEL" \
+  RESUME=true \
+  INSTANCES_PATH="$INSTANCES_PATH" \
+  CODE_RETRIEVAL_PATH="$CODE_RETRIEVAL_PATH" \
+  TEST_RETRIEVAL_PATH="$TEST_RETRIEVAL_PATH" \
+  REPO_ROOT_BASE="$REPO_ROOT_BASE" \
+  COUNTERFACTUAL_SHADOW_MODE=true \
+  ENABLE_BIDIRECTIONAL_COUNTERFACTUAL_VALIDATION=true \
+  ENABLE_NEGATIVE_CONTROL=true \
+  MAX_NEGATIVE_CONTROL_ATTEMPTS=1 \
+  MAX_NEGATIVE_CONTROL_AST_EDITS=1 \
+  ENABLE_RUNTIME_TARGET_REACHABILITY=true \
+  ENABLE_CONTRASTIVE_OBSERVATION_ORACLE=true \
+  MIN_VALID_SURROGATE_PATCHES_FOR_CONSENSUS=2 \
+  SURROGATE_CONSENSUS_THRESHOLD=0.67 \
+  COUNTERFACTUAL_EVIDENCE_MODE=soft \
+  bash "$PROJECT_ROOT/scripts/run_generate.sh" 2>&1 | tee -a "$pipeline_log"
+  echo "generation_pass=$pass_name finished_at=$(date '+%Y-%m-%d %H:%M:%S')" | tee -a "$pipeline_log"
+}
+
+run_generation_pass "initial"
+
+if ! python "$PROJECT_ROOT/scripts/check_generation_completeness.py" \
+  --instances_path "$INSTANCES_PATH" \
+  --generation_dir "$RUN_DIR/generation" \
+  --summary_path "$RUN_DIR/generation_completeness_initial.json" \
+  --fail_incomplete true \
+  2>&1 | tee "$RUN_DIR/logs/generation_completeness_initial.log"; then
+  echo "generation incomplete after initial pass; retrying once with --resume" | tee -a "$pipeline_log"
+  run_generation_pass "retry_1"
+  if ! python "$PROJECT_ROOT/scripts/check_generation_completeness.py" \
+    --instances_path "$INSTANCES_PATH" \
+    --generation_dir "$RUN_DIR/generation" \
+    --summary_path "$RUN_DIR/generation_completeness_after_retry.json" \
+    --fail_incomplete true \
+    2>&1 | tee "$RUN_DIR/logs/generation_completeness_after_retry.log"; then
+    echo "generation still incomplete after retry; formal eval will count missing tests as failures" | tee -a "$pipeline_log"
+  fi
+else
+  cp "$RUN_DIR/generation_completeness_initial.json" "$RUN_DIR/generation_completeness_after_retry.json"
+fi
 
 python "$PROJECT_ROOT/scripts/summarize_model_calls.py" \
   --run_dir "$RUN_DIR" \
@@ -96,7 +123,7 @@ python "$PROJECT_ROOT/scripts/summarize_model_calls.py" \
 python "$PROJECT_ROOT/scripts/export_counterfactual_selection.py" \
   --run_dir "$RUN_DIR" \
   --instances_path "$INSTANCES_PATH" \
-  --require_complete true \
+  --require_complete false \
   --touch_done true \
   2>&1 | tee "$RUN_DIR/logs/export.log"
 
@@ -111,6 +138,7 @@ python "$PROJECT_ROOT/scripts/run_formal_eval_after_generation.py" \
   --log_path "$RUN_DIR/logs/formal_legacy_276.log" \
   --summary_path "$RUN_DIR/evaluation/formal_legacy_276_summary.json" \
   --compute_patch_coverage true \
+  --missing_generated_policy count_as_fail \
   2>&1 | tee "$RUN_DIR/logs/formal_legacy_driver.log"
 touch "$RUN_DIR/evaluation_legacy.done"
 
@@ -125,6 +153,7 @@ python "$PROJECT_ROOT/scripts/run_formal_eval_after_generation.py" \
   --log_path "$RUN_DIR/logs/formal_counterfactual_276.log" \
   --summary_path "$RUN_DIR/evaluation/formal_counterfactual_276_summary.json" \
   --compute_patch_coverage true \
+  --missing_generated_policy count_as_fail \
   2>&1 | tee "$RUN_DIR/logs/formal_counterfactual_driver.log"
 touch "$RUN_DIR/evaluation_counterfactual.done"
 

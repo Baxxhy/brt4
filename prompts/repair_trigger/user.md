@@ -39,3 +39,6 @@ Verifier 反馈：{verifier_feedback}
 	    真实触发 Issue 的输入、状态、配置、operator 或调用顺序。
 	14. 若负向对照 abstain/unknown，不要把候选降到最低质量；回到 BehaviorTarget 和源码证据
 	    修复 trigger。
+	15. ATS-BRT 的 trigger_search 必须保持 scaffold hash 和 oracle hash 不变。contract_complete 分支补齐
+	    trigger_contract 中缺失的必要条件；path_diverse 分支选择另一个仍有源码依据的公开 API 路径。
+	16. 禁止为了触发失败修改 assertion、fixture、decorator、测试框架或 runner；返回代码会进行 AST 分段校验。

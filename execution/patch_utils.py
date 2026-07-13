@@ -349,6 +349,9 @@ def run_surrogate_patch_loop(
                 "reason": str(exc),
                 "execution": {},
                 "negative_execution": {},
+                "positive_executed": False,
+                "negative_executed": False,
+                "paired_execution_complete": False,
                 "negative_skip_reason": "surrogate patch generation failed",
             }
             attempts.append(attempt)
@@ -366,6 +369,9 @@ def run_surrogate_patch_loop(
             attempt = patch_candidate.to_dict()
             attempt["execution"] = {}
             attempt["negative_execution"] = {}
+            attempt["positive_executed"] = False
+            attempt["negative_executed"] = False
+            attempt["paired_execution_complete"] = False
             attempt["negative_skip_reason"] = "surrogate patch duplicate; no repo execution"
             attempts.append(attempt)
             safe_json_dump(
@@ -391,6 +397,11 @@ def run_surrogate_patch_loop(
         attempt["negative_execution"] = (
             negative_execution.to_dict() if negative_execution else {}
         )
+        attempt["positive_executed"] = execution is not None
+        attempt["negative_executed"] = negative_execution is not None
+        attempt["paired_execution_complete"] = (
+            execution is not None and negative_execution is not None
+        )
         if negative_execution is None:
             if negative_candidate is None:
                 attempt["negative_skip_reason"] = "negative control unavailable or invalid"
@@ -398,6 +409,8 @@ def run_surrogate_patch_loop(
                 attempt["negative_skip_reason"] = "surrogate patch was not executable"
             else:
                 attempt["negative_skip_reason"] = "negative execution not run"
+        else:
+            attempt["negative_skip_reason"] = ""
         attempts.append(attempt)
         safe_json_dump(
             attempt,

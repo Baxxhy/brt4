@@ -20,3 +20,7 @@ Verifier 反馈：{verifier_feedback}
 	AssertionError、或 oracle_stability=UNSTABLE，优先使用公开行为的对比观察重新绑定 oracle。
 	不要修改 setup、trigger 或 target API；不要把负向对照写入最终测试。若对比观察不可用，
 	回退到当前 buggy-only Observation Oracle。
+	ATS-BRT minimal_oracle_search 只能使用 expected_contract 和 structured observation 选择公开原子谓词。
+	conservative 分支优先异常类型、类型、shape、长度或最小关系；public_invariant 分支优先公开状态、
+	token、warning、ordering 或 serialization property。禁止把 buggy observation 直接当 expected value，
+	禁止完整 repr/SQL/错误文本，最多保留两个核心断言；返回代码会校验 scaffold/trigger hash 不变。

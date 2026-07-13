@@ -28,6 +28,7 @@ TMPDIR=${TMPDIR:-"$RUN_DIR/tmp/formal_eval"}
 export TMPDIR
 USE_GENERATED_WORKTREES=${USE_GENERATED_WORKTREES:-false}
 COMPUTE_PATCH_COVERAGE=${COMPUTE_PATCH_COVERAGE:-true}
+MISSING_GENERATED_POLICY=${MISSING_GENERATED_POLICY:-count_as_fail}
 
 mkdir -p "$EVALUATION_DIR" "$RUN_DIR/logs" "$TMPDIR"
 cmd=(
@@ -42,6 +43,7 @@ cmd=(
   --timeout "$TIMEOUT"
   --eval_completed_only "$EVAL_COMPLETED_ONLY"
   --compute_patch_coverage "$COMPUTE_PATCH_COVERAGE"
+  --missing_generated_policy "$MISSING_GENERATED_POLICY"
 )
 if [[ "$RESUME" == "true" || "$RESUME" == "1" || "$RESUME" == "yes" ]]; then
   cmd+=(--resume)

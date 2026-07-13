@@ -192,5 +192,25 @@ def rebind_observation_oracle(
         command=candidate.command,
         prompt_path=str(Path(output_dir) / "prompts" / f"oracle_rebind_round_{round_id}.txt"),
         response_path=str(Path(output_dir) / "responses" / f"oracle_rebind_round_{round_id}.txt"),
+        lineage={
+            "origin": (
+                "contrastive_observation_oracle"
+                if contrastive_observation
+                else "buggy_observation_oracle"
+            ),
+            "parent_candidate_id": str(candidate.round_id),
+            "seed_id": str((candidate.lineage or {}).get("seed_id") or ""),
+            "generation_round": round_id,
+            "repair_round": round_id,
+            "observation_context_used": (
+                "contrastive" if contrastive_observation else "buggy_only"
+            ),
+            "counterfactual_evidence_id": str(
+                (contrastive_observation.get("counterfactual_evidence") or {}).get("instance_id")
+                if isinstance(contrastive_observation, dict)
+                else ""
+            ),
+            "negative_control_id": "",
+        },
     )
     return new_candidate, report, _oracle_type(rebuilt)

@@ -110,11 +110,23 @@ def ensure_icore_environment(
                 "returncode": 0,
             }
         script = spec.env_script.replace(spec.env_name, env_name)
+        script = _pin_python_before_conda_env_create(script)
         script = script.replace(
             "source ~/miniconda3/bin/activate", f"source {CONDA_SH}"
         )
+        safe_env_name = re.sub(r"[^A-Za-z0-9_.-]", "_", env_name)
+        requirements_path = Path(cwd) / (
+            f".brt4_requirements_{safe_env_name}.txt"
+        )
+        for shared_path in (
+            "$HOME/requirements.txt",
+            "${HOME}/requirements.txt",
+            "~/requirements.txt",
+            "/root/requirements.txt",
+        ):
+            script = script.replace(shared_path, str(requirements_path))
         script = script.replace(
-            "rm /root/requirements.txt", "rm -f /root/requirements.txt"
+            f"rm {requirements_path}", f"rm -f {requirements_path}"
         )
         script_path = Path(cwd) / "brt3_icore_env_setup.sh"
         script_path.write_text(script, encoding="utf-8")
@@ -128,6 +140,47 @@ def ensure_icore_environment(
             }
         )
         return result
+
+
+def _pin_python_before_conda_env_create(script: str) -> str:
+    """Move a post-create Python pin into an embedded environment.yml.
+
+    Some iCoRe setup scripts create an unpinned environment first and only then
+    install the requested Python version. Current conda can resolve packages for
+    a newer Python that cannot later be downgraded. Pinning in the heredoc keeps
+    the environment solve internally consistent without changing repository
+    source or the requested Python version.
+    """
+
+    if "conda env create" not in script:
+        return script
+    match = re.search(
+        r"conda install\s+python=([0-9]+(?:\.[0-9]+)?)\s+-y", script
+    )
+    if match is None:
+        return script
+    version = match.group(1)
+    dependency_pattern = rf"(?m)^\s*-\s*python(?:\s*=\s*{re.escape(version)})?\s*$"
+    if not re.search(dependency_pattern, script):
+        script = re.sub(
+            r"(?m)^dependencies:\s*$",
+            f"dependencies:\n  - python={version}",
+            script,
+            count=1,
+        )
+    script = re.sub(
+        rf"\s*&&\s*conda install\s+python={re.escape(version)}\s+-y",
+        "",
+        script,
+        count=1,
+    )
+    script = re.sub(
+        rf"(?m)^\s*conda install\s+python={re.escape(version)}\s+-y\s*$",
+        ": # Python version pinned in environment.yml",
+        script,
+        count=1,
+    )
+    return script
 
 
 def env_lock_path(env_name: str, suffix: str) -> Path:
