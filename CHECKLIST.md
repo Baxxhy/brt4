@@ -31,10 +31,10 @@
 
 ## Main Run
 
-- [ ] real run launched
-- [ ] monitoring cadence started
-- [ ] health signals confirmed
-- [ ] major runtime deviations reflected in `PLAN.md`
+- [x] real run launched
+- [x] monitoring cadence started
+- [x] health signals confirmed
+- [x] major runtime deviations reflected in `PLAN.md` (none observed at launch)
 
 ## Validation
 

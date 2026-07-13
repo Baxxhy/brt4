@@ -63,7 +63,7 @@
 ## 7. Checklist Link
 
 - checklist path: `CHECKLIST.md`
-- next unchecked item: launch and monitor the clean SWT-Lite 276 main run.
+- next unchecked item: validate the complete 276-instance generation and formal metrics after the background pipeline finishes.
 
 ## 8. Revision Log
 
@@ -75,3 +75,4 @@
 | 2026-07-14 02:44 CST | Shared the duplicate archive and extra-candidate budget across all seeds | per-seed archives could repeat the same candidate and exceed the instance-level budget | duplicate execution is reusable across seeds and ATS extras remain capped at three per instance |
 | 2026-07-14 02:55 CST | Isolated environment requirement files and pinned Python before the first conda solve | concurrent workers raced on a shared requirements file and an unpinned Matplotlib solve selected Python 3.14 | worker setup is isolated and legacy Python constraints are applied before dependency resolution |
 | 2026-07-14 03:13 CST | Added a consecutive behavior-duplicate stop and completed the final guard smoke | behavior-equivalent candidates could consume branch attempts after AST deduplication | the guard stopped after the second behavior duplicate and retained one final test entry |
+| 2026-07-14 03:16 CST | Launched clean SWT-Lite 276 run `run_swtlite276_ats_brt_20260714_031602` | implementation, static checks, and smoke gates passed | first six behavior-contract rewrites completed successfully; generation and formal evaluation remain chained in tmux |
