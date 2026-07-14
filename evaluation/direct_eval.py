@@ -11,6 +11,7 @@ import argparse
 import ast
 import json
 import os
+import pickle
 import re
 import shlex
 import shutil
@@ -269,6 +270,216 @@ def test_command(repo: str, version: str, rel_file: str, selector: str) -> str:
             return f"PYTHONWARNINGS='ignore::UserWarning,ignore::SyntaxWarning' bin/test -C {rel_file} -k {test_name}"
         return f"PYTHONWARNINGS='ignore::UserWarning,ignore::SyntaxWarning' bin/test -C {rel_file}"
     raise ValueError(f"unsupported project: {repo} version={version}")
+
+
+def trace_test_command(
+    command: str,
+    coverage_dir: str,
+) -> str:
+    """Wrap a repository-native test command with stdlib trace collection."""
+
+    output_dir = Path(coverage_dir)
+    counts_file = output_dir / "trace_counts.dat"
+    trace_parts = [
+        "python",
+        "-m",
+        "trace",
+        "--count",
+        "--file",
+        str(counts_file),
+    ]
+    # CPython trace only persists --file counts when it also emits a report.
+    # Keep reports under the evaluation artifact directory, never in the repo.
+    trace_parts.extend(["--coverdir", str(output_dir / "cover")])
+    trace_prefix = " ".join(shlex.quote(part) for part in trace_parts)
+    trace_prefix += ' --ignore-dir "${CONDA_PREFIX:-/root/miniconda3}:/root/miniconda3"'
+    parts = shlex.split(command)
+    env_parts: list[str] = []
+    while parts and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", parts[0]):
+        env_parts.append(parts.pop(0))
+    env_prefix = " ".join(shlex.quote(part) for part in env_parts)
+    if env_prefix:
+        env_prefix += " "
+    if len(parts) >= 3 and parts[0] in {"python", "python3"} and parts[1] == "-m":
+        module = parts[2]
+        args = " ".join(shlex.quote(part) for part in parts[3:])
+        return f"{env_prefix}{trace_prefix} --module {shlex.quote(module)} {args}".strip()
+    if len(parts) >= 2 and parts[0] in {"python", "python3"}:
+        args = " ".join(shlex.quote(part) for part in parts[1:])
+        return f"{env_prefix}{trace_prefix} {args}".strip()
+    if parts and parts[0] in {"pytest", "py.test"}:
+        args = " ".join(shlex.quote(part) for part in parts[1:])
+        return f"{env_prefix}{trace_prefix} --module pytest {args}".strip()
+    if parts and parts[0] == "unittest":
+        args = " ".join(shlex.quote(part) for part in parts[1:])
+        return f"{env_prefix}{trace_prefix} --module unittest {args}".strip()
+    return f"{env_prefix}{trace_prefix} {' '.join(shlex.quote(part) for part in parts)}".strip()
+
+
+def patch_target_lines(patch_text: str) -> dict[str, list[int]]:
+    """Extract post-patch Python line numbers added or replaced by a patch."""
+
+    targets: dict[str, set[int]] = {}
+    current_file = ""
+    new_line: int | None = None
+    for line in patch_text.splitlines():
+        if line.startswith("+++ "):
+            raw_path = line[4:].strip().split("\t", 1)[0]
+            if raw_path == "/dev/null":
+                current_file = ""
+                new_line = None
+                continue
+            current_file = raw_path[2:] if raw_path.startswith("b/") else raw_path
+            targets.setdefault(current_file, set())
+            continue
+        if line.startswith("@@"):
+            match = re.search(r"\+(\d+)(?:,(\d+))?", line)
+            new_line = int(match.group(1)) if match else None
+            continue
+        if not current_file or new_line is None:
+            continue
+        if line.startswith("+") and not line.startswith("+++"):
+            targets[current_file].add(new_line)
+            new_line += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            continue
+        else:
+            new_line += 1
+    return {
+        path: sorted(lines)
+        for path, lines in targets.items()
+        if lines and Path(path).suffix == ".py"
+    }
+
+
+def _cover_file_matches_target(cover_file: Path, coverage_dir: Path, target: str) -> bool:
+    """Match both regular-package and namespace-package trace report layouts."""
+
+    rel = cover_file.relative_to(coverage_dir).as_posix()
+    if rel.startswith("cover/"):
+        rel = rel[len("cover/") :]
+    if rel.endswith(".cover"):
+        rel = rel[: -len(".cover")]
+    target_stem = target.replace("\\", "/")
+    if target_stem.endswith(".py"):
+        target_stem = target_stem[:-3]
+    target_variants = {target_stem, target_stem.replace("/", ".")}
+    for prefix in ("src/", "lib/"):
+        if target_stem.startswith(prefix):
+            stripped = target_stem[len(prefix) :]
+            target_variants.update({stripped, stripped.replace("/", ".")})
+    rel_variants = {rel, rel.replace("/", ".")}
+    return any(
+        actual == expected or actual.endswith("/" + expected) or actual.endswith("." + expected)
+        for actual in rel_variants
+        for expected in target_variants
+    )
+
+
+def _read_trace_counts(counts_file: Path) -> tuple[dict[tuple[str, int], int], str]:
+    if not counts_file.is_file():
+        return {}, "trace counts file was not produced"
+    try:
+        with counts_file.open("rb") as handle:
+            payload = pickle.load(handle)  # noqa: S301 - locally generated trace artifact.
+    except Exception as exc:  # noqa: BLE001
+        return {}, f"unable to parse trace counts: {exc}"
+    counts = payload[0] if isinstance(payload, tuple) and payload else payload
+    if not isinstance(counts, dict):
+        return {}, f"unexpected trace counts payload: {type(counts).__name__}"
+    normalized: dict[tuple[str, int], int] = {}
+    for key, value in counts.items():
+        if (
+            isinstance(key, tuple)
+            and len(key) == 2
+            and isinstance(key[0], str)
+            and isinstance(key[1], int)
+        ):
+            normalized[(key[0], key[1])] = int(value or 0)
+    return normalized, ""
+
+
+def parse_patch_coverage(
+    coverage_dir: Path,
+    target_lines: dict[str, list[int]],
+    repo_dir: str = "",
+) -> dict[str, Any]:
+    """Parse trace counts first and annotated .cover files as a fallback."""
+
+    covered: dict[str, list[int]] = {path: [] for path in target_lines}
+    matched_sources: dict[str, list[str]] = {path: [] for path in target_lines}
+    counts, counts_error = _read_trace_counts(coverage_dir / "trace_counts.dat")
+    repo_root = Path(repo_dir).resolve() if repo_dir else None
+    for target, lines in target_lines.items():
+        expected = (repo_root / target).resolve() if repo_root else None
+        hits: set[int] = set()
+        sources: set[str] = set()
+        for (source, line_number), count in counts.items():
+            if source.startswith("<"):
+                continue
+            source_path = Path(source).resolve()
+            path_match = expected is not None and source_path == expected
+            if not path_match and repo_root is not None:
+                try:
+                    path_match = source_path.relative_to(repo_root).as_posix() == target
+                except ValueError:
+                    path_match = False
+            if not path_match:
+                continue
+            sources.add(str(source_path))
+            if count > 0 and line_number in set(lines):
+                hits.add(line_number)
+        covered[target] = sorted(hits)
+        matched_sources[target] = sorted(sources)
+
+    cover_root = coverage_dir / "cover"
+    coverage_files = list(cover_root.rglob("*.cover")) if cover_root.is_dir() else []
+    for target, lines in target_lines.items():
+        if matched_sources[target]:
+            continue
+        matching_files = [
+            path for path in coverage_files if _cover_file_matches_target(path, cover_root, target)
+        ]
+        hits = set(covered[target])
+        for cover_file in matching_files:
+            matched_sources[target].append(str(cover_file))
+            try:
+                rows = cover_file.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            for index, text in enumerate(rows, start=1):
+                if index in set(lines) and re.match(r"\s*\d+:", text):
+                    hits.add(index)
+        covered[target] = sorted(hits)
+
+    target_count = sum(len(lines) for lines in target_lines.values())
+    covered_count = sum(len(lines) for lines in covered.values())
+    matched_count = sum(bool(paths) for paths in matched_sources.values())
+    if not target_lines:
+        status = "NO_TARGET_LINES"
+        failure_reason = "golden patch has no added or replaced Python target lines"
+    elif not counts and not coverage_files:
+        status = "PARSE_FAILED"
+        failure_reason = counts_error or "no trace artifacts were produced"
+    elif matched_count == 0:
+        status = "PATH_MATCH_FAILED"
+        failure_reason = "trace artifacts exist but no executed source path matches a patch target"
+    else:
+        status = "SUCCESS"
+        failure_reason = ""
+    return {
+        "coverage_status": status,
+        "failure_reason": failure_reason,
+        "target_lines_by_file": target_lines,
+        "covered_lines_by_file": covered,
+        "matched_sources_by_file": matched_sources,
+        "target_line_count": target_count,
+        "covered_line_count": covered_count,
+        "patch_coverage": covered_count / target_count if target_count else 0.0,
+        "coverage_files_found": len(coverage_files),
+        "trace_count_entries": len(counts),
+        "trace_counts_error": counts_error,
+    }
 
 
 def setup_command(repo: str, version: str) -> str:

@@ -50,6 +50,11 @@ def write_export(export_dir: Path, records: list[dict[str, Any]]) -> str:
         destination = export_dir / record["instance_id"]
         destination.mkdir()
         shutil.copy2(source, destination / "final_test.py")
+        generation_instance = Path(str(record.get("generation_instance_dir") or ""))
+        for metadata_name in ("host_context.json", "summary.json"):
+            metadata_path = generation_instance / metadata_name
+            if metadata_path.is_file():
+                shutil.copy2(metadata_path, destination / metadata_name)
         worktree = Path(str(record.get("worktree_path") or ""))
         if worktree.is_dir():
             (destination / "worktree").symlink_to(worktree, target_is_directory=True)
@@ -108,6 +113,7 @@ def main() -> int:
                 "fallback_reason": "",
                 "code_hash": legacy.code_hash,
                 "worktree_path": str(generation_dir / instance_id / "worktree"),
+                "generation_instance_dir": str(generation_dir / instance_id),
             }
         )
         if args.enable_selector_v2_posthoc:
@@ -135,6 +141,7 @@ def main() -> int:
                 "candidate_count_unique": len(candidates),
                 "ranked_candidates": [item.manifest_record() for item in ranked],
                 "worktree_path": str(generation_dir / instance_id / "worktree"),
+                "generation_instance_dir": str(generation_dir / instance_id),
             }
         )
 

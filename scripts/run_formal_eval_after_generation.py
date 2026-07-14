@@ -50,22 +50,20 @@ def main() -> int:
     print(f"已生成 {len(completed)}/{len(rows)}，未完成 {len(missing)}")
     if missing:
         print("未完成实例:", ", ".join(missing[:50]))
-    if not completed:
+    if not completed and args.eval_completed_only:
         return 1
-    if missing and not args.eval_completed_only:
-        print("未全部生成，正式评测未启动。")
-        return 1
+    evaluation_rows = completed if args.eval_completed_only else rows
     if args.patch_file:
-        if len(completed) != 1:
+        if len(evaluation_rows) != 1:
             print("--patch_file 只支持单 instance；批量请使用包含 patch 的 dataset 或 SWE-bench 数据加载。", file=sys.stderr)
             return 2
-        completed[0]["patch"] = Path(args.patch_file).read_text(encoding="utf-8")
+        evaluation_rows[0]["patch"] = Path(args.patch_file).read_text(encoding="utf-8")
     formal_dir = Path(args.evaluation_dir).resolve() if args.evaluation_dir else outputs / "formal_eval"
     formal_dir.mkdir(parents=True, exist_ok=True)
     log_path = Path(args.log_path).resolve() if args.log_path else ROOT / "brt4/logs/formal_eval.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8", delete=False) as handle:
-        json.dump(completed, handle, ensure_ascii=False)
+        json.dump(evaluation_rows, handle, ensure_ascii=False)
         filtered_path = handle.name
     command = [
         sys.executable, "-m", "brt4.direct_eval",
@@ -77,7 +75,7 @@ def main() -> int:
         "--timeout", str(args.timeout),
         "--use_generated_worktrees",
     ]
-    if not args.patch_file and not all(row.get("patch") for row in completed):
+    if not args.patch_file and not all(row.get("patch") for row in evaluation_rows):
         command.append("--use_swebench_lite")
     if args.resume:
         command.append("--resume")
@@ -114,6 +112,7 @@ def main() -> int:
     summary = {
         "returncode": returncode,
         "completed": len(completed),
+        "dataset_total": len(rows),
         "missing": missing,
         "metrics": metrics,
         "formal_categories": normalized,
