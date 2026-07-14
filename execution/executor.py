@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import subprocess
@@ -9,6 +10,11 @@ import time
 from pathlib import Path
 
 from ..core.schema import BehaviorTarget, ExecutionResult
+
+
+CONDA_SH = os.environ.get(
+    "BRT3_CONDA_SH", "/root/miniconda3/etc/profile.d/conda.sh"
+)
 
 
 def _pythonpath_export(cwd: str) -> str:
@@ -151,7 +157,7 @@ def run_command_in_conda(
         shell_cmd = f"bash -lc {shlex.quote(pythonpath + ' && ' + command)}"
     else:
         activated = (
-            "source /root/miniconda3/etc/profile.d/conda.sh && "
+            f"source {shlex.quote(CONDA_SH)} && "
             f"conda activate {shlex.quote(conda_env)} && "
             f"{pythonpath} && "
             f"{command}"
@@ -188,7 +194,7 @@ def run_command_in_conda(
         fallback = (
             f"{pythonpath} && {command}"
             if no_conda or not conda_env
-            else f"source ~/miniconda3/etc/profile.d/conda.sh && conda activate {shlex.quote(conda_env)} && {pythonpath} && {command}"
+            else f"source {shlex.quote(CONDA_SH)} && conda activate {shlex.quote(conda_env)} && {pythonpath} && {command}"
         )
         proc = subprocess.run(
             ["bash", "-lc", fallback],
